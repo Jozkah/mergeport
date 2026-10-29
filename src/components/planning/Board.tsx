@@ -7,7 +7,7 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCorners, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { Ban, Hourglass, CalendarDays, GripVertical } from "@/components/ui/icons";
+import { Ban, Hourglass, CalendarDays, GripVertical, ListChecks } from "@/components/ui/icons";
 import { useToast } from "@/components/ui/ToastProvider";
 import { Metric } from "@/components/ui/Metric";
 import { SMOOTH_OUT_GSAP, seconds, useReducedMotion } from "@/lib/motion";
@@ -31,6 +31,7 @@ function CardBody({ c, move, handle }: { c: CardView; move?: React.ReactNode; ha
       {c.labels.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1">{c.labels.slice(0, 3).map((l) => <LabelChip key={l.name} {...l} />)}</div>}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]">
         {c.due && <span className={`inline-flex items-center gap-1 tnum ${c.overdue ? "text-blocked" : "text-ink-3"}`}><CalendarDays size={12} aria-hidden />{c.overdue ? "Overdue " : "Due "}{c.dueLabel}</span>}
+        {c.checklist.total > 0 && <span className={`inline-flex items-center gap-1 tnum ${c.checklist.done === c.checklist.total ? "text-ok" : "text-ink-3"}`}><ListChecks size={12} aria-hidden /><span className="sr-only">Checklist </span>{c.checklist.done}/{c.checklist.total}</span>}
         {c.assignee && <span className="text-ink-3">@{c.assignee}</span>}
         {c.waitingOn && <span className="inline-flex items-center gap-1 text-waiting" title={c.waitingSince ?? undefined}><Hourglass size={12} aria-hidden />Waiting on {c.waitingOn}</span>}
         {c.blockedBy > 0 && <span className="inline-flex items-center gap-1 text-blocked"><Ban size={12} aria-hidden />Blocked by {c.blockedBy}{c.hiddenBlockers > 0 ? ` (${c.hiddenBlockers} not visible to you)` : ""}</span>}

@@ -411,17 +411,17 @@ describe("revoked access and rate limits", () => {
     expect(JSON.parse(server.files("olive", common.repoName)[`entities/card/${seed.card.id}.json`]).data.title).toBe("queued during limit");
   });
 
-  it("polling backs off while nothing changes, resets on change, and caps at ten minutes", async () => {
+  it("polling backs off while nothing changes, resets on change, and caps at two minutes", async () => {
     const { olive, common } = await teamOfTwo();
     await olive.engine.syncSpace(common);
     const intervals: number[] = [];
     for (let i = 0; i < 40; i++) {
-      clock.advance(11 * 60_000);
+      clock.advance(3 * 60_000);
       await olive.engine.tick();
       intervals.push((await olive.db.space.findFirstOrThrow()).pollIntervalMs);
     }
     expect(intervals[0]).toBe(30_000);
-    expect(Math.max(...intervals)).toBe(10 * 60_000);
+    expect(Math.max(...intervals)).toBe(2 * 60_000);
     expect(intervals.every((v, i) => i === 0 || v >= intervals[i - 1])).toBe(true);
   });
 });

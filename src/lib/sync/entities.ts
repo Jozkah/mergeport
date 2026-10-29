@@ -224,6 +224,27 @@ const taskcomment: EntityDef = {
   },
 };
 
+// ---------- task checklist items (one file per item) ----------
+
+const checkitem: EntityDef = {
+  type: "checkitem",
+  order: 5,
+  async list(db) {
+    const rows = await db.taskCheckItem.findMany({ where: { item: { project: { spaceId: { not: null } } } }, include: { item: { include: { project: true } } } });
+    return rows.map((c) => ({ id: c.id, spaceId: c.item.project.spaceId, data: { itemId: c.itemId, text: c.text, done: c.done, position: c.position, doneByLogin: c.doneByLogin, doneAt: iso(c.doneAt), createdAt: iso(c.createdAt) } }));
+  },
+  async apply(db, _ctx, id, data) {
+    if (!data) {
+      await db.taskCheckItem.deleteMany({ where: { id } });
+      return;
+    }
+    const item = await db.planningItem.findUnique({ where: { id: String(data.itemId) }, select: { id: true } });
+    if (!item) return false; // the card has not been applied yet; the next pull retries
+    const f = { itemId: item.id, text: String(data.text), done: !!data.done, position: Number(data.position ?? 0), doneByLogin: (data.doneByLogin as string | null) ?? null, doneAt: toDate(data.doneAt), createdAt: toDate(data.createdAt) ?? new Date() };
+    await db.taskCheckItem.upsert({ where: { id }, create: { id, ...f }, update: f });
+  },
+};
+
 // ---------- review routing ----------
 
 const rule: EntityDef = {
@@ -358,7 +379,7 @@ const waiting: EntityDef = {
   },
 };
 
-export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, card, taskcomment, rule, waitrule, forkmap, triage, waiting];
+export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, card, taskcomment, checkitem, rule, waitrule, forkmap, triage, waiting];
 export const entityDef = (type: string) => ENTITY_TYPES.find((t) => t.type === type);
 export const entityPath = (type: string, id: string) => `entities/${type}/${id}.json`;
 export const parseEntityPath = (path: string): { type: string; id: string } | null => {

@@ -1,3 +1,4 @@
+import { checklistProgress } from "./tasks";
 import type { Db } from "@/lib/db";
 import { repoWhere, type Viewer } from "@/lib/authz/viewer";
 import { isOverdue, todayIn } from "@/lib/domain/planning";
@@ -6,6 +7,7 @@ import { planningWhere, asLabels } from "./queries";
 
 export type CardView = {
   id: string;
+  checklist: { done: number; total: number };
   columnKey: string;
   position: number;
   version: number;
@@ -49,12 +51,14 @@ export async function planningBoard(db: Db, v: Viewer, projectId: string, now = 
     (await db.planningItem.findMany({ where: await planningWhere(db, v, projectId), select: { id: true } })).map((i) => i.id),
   );
   const today = todayIn(v.timezone, now);
+  const progress = await checklistProgress(db, items.map((i) => i.id));
 
   const cards: CardView[] = items.map((i) => {
     const unfinished = i.blockedBy.filter((l) => l.from.column.key !== "done");
     const w = i.waiting[0];
     return {
       id: i.id,
+      checklist: progress.get(i.id) ?? { done: 0, total: 0 },
       columnKey: i.column.key,
       position: i.position,
       version: i.version,

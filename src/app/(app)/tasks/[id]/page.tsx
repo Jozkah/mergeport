@@ -9,7 +9,8 @@ import { formatDateOnly, formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Select } from "@/components/ui/Select";
 import { Avatar, LabelChip, PageHeader, Panel, Time } from "@/components/ui/primitives";
-import { ArrowLeft, CalendarDays, ExternalLink, Flag, MessageSquare, Pencil, Trash2 } from "@/components/ui/icons";
+import { ArrowLeft, CalendarDays, ExternalLink, Flag, ListChecks, MessageSquare, Pencil, Trash2 } from "@/components/ui/icons";
+import { Checklist } from "@/components/tasks/Checklist";
 import { TaskFields } from "@/components/tasks/TaskFields";
 import { addCommentAction, deleteCommentAction, deleteTaskAction, editCommentAction, updateTaskAction } from "@/app/task-actions";
 
@@ -25,7 +26,8 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
     if (e instanceof NotFoundError) notFound();
     throw e;
   }
-  const { task, full, comments, columns } = data;
+  const { task, full, comments, columns, checklist } = data;
+  const openItems = checklist.filter((c) => !c.done).length;
   const people = await assigneeCandidates(db, viewer, task.projectId);
   const today = todayIn(viewer.timezone);
   const overdue = isOverdue(task.dueDate, task.column.key, today);
@@ -73,6 +75,10 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
                 </details>
               )}
             </div>
+          </Panel>
+
+          <Panel title={`Checklist${checklist.length ? ` (${checklist.filter((c) => c.done).length}/${checklist.length})` : ""}`} icon={ListChecks}>
+            <Checklist taskId={task.id} items={checklist.map((c) => ({ id: c.id, text: c.text, done: c.done, doneByLogin: c.doneByLogin }))} />
           </Panel>
 
           <Panel title={`Discussion${comments.some((c) => c.kind === "COMMENT") ? ` (${comments.filter((c) => c.kind === "COMMENT").length})` : ""}`} icon={MessageSquare}>
@@ -149,6 +155,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
               <div className="flex flex-col gap-3">
                 <div><label className="label" htmlFor="s-status">Status</label>
                   <Select id="s-status" name="status" className="select" defaultValue={task.column.key}>{columns.map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}</Select></div>
+                {openItems > 0 && <label className="flex items-start gap-2 text-[12.5px] text-ink-2"><input type="checkbox" name="tickOpen" className="mt-0.5" /> <span>If I move this to Done, also check the {openItems} open checklist item{openItems === 1 ? "" : "s"}.</span></label>}
                 <TaskFields people={people} me={viewer.login} values={{ assignee: task.assigneeLogin ?? "", priority: task.priority, due: dueValue, labels: labels.join(", ") }} />
               </div>
             </ActionForm>

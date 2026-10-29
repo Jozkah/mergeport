@@ -18,7 +18,7 @@ import { CoordinationStore, HeadMovedError, type Head } from "./store";
  */
 
 export const MANIFEST_SCHEMA = 1;
-export const MAX_POLL_MS = 10 * 60_000;
+export const MAX_POLL_MS = 2 * 60_000; // an idle space is still checked at least this often, so a teammate's edit never waits long
 export const REVOKED_RECHECK_MS = 10 * 60_000;
 
 export type SpaceState = "synced" | "pending" | "syncing" | "offline" | "conflict" | "revoked" | "rate-limited" | "schema" | "read-only";

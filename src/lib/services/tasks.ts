@@ -17,7 +17,7 @@ const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 export const TASK_LABEL_MAX = 12;
 
 export type TaskScope = "mine" | "by-me" | "unassigned" | "all";
-export type TaskFilter = { scope?: TaskScope; projectId?: string; status?: "open" | "done" | "all"; column?: string; label?: string; q?: string; assignee?: string };
+export type TaskFilter = { scope?: TaskScope; projectId?: string; status?: "open" | "done" | "all"; column?: string; label?: string; q?: string; assignee?: string; openItems?: boolean };
 
 export const cleanLogin = (raw: string | null | undefined): string | null => {
   const v = (raw ?? "").trim().replace(/^@/, "");
@@ -37,7 +37,7 @@ export const cleanLabels = (raw: string[] | string | undefined): string[] => {
   return out;
 };
 
-async function loadTask(db: Db, v: Viewer, id: string) {
+export async function loadTask(db: Db, v: Viewer, id: string) {
   const where = await planningWhere(db, v);
   const task = await db.planningItem.findFirst({ where: { AND: [where, { id }] }, include: { column: true, project: true } });
   if (!task) throw new NotFoundError();
@@ -51,6 +51,7 @@ export async function listTasks(db: Db, v: Viewer, f: TaskFilter = {}) {
   else if (f.scope === "by-me") and.push({ assignedByLogin: { equals: me }, NOT: { assigneeLogin: { equals: me } } });
   else if (f.scope === "unassigned") and.push({ assigneeLogin: null });
   if (f.assignee) and.push({ assigneeLogin: f.assignee });
+  if (f.openItems) and.push({ checklist: { some: { done: false } } });
   if (f.column) and.push({ column: { key: f.column } });
   else if ((f.status ?? "open") === "open") and.push({ column: { key: { not: "done" } } });
   else if (f.status === "done") and.push({ column: { key: "done" } });
@@ -62,8 +63,11 @@ export async function listTasks(db: Db, v: Viewer, f: TaskFilter = {}) {
     orderBy: [{ updatedAt: "desc" }],
     take: 500,
   });
+  const progress = await checklistProgress(db, rows.map((r) => r.id));
   const label = f.label?.toLowerCase();
-  return rows.filter((r) => !label || (r.labels as string[]).some((l) => l.toLowerCase() === label));
+  return rows
+    .filter((r) => !label || (r.labels as string[]).some((l) => l.toLowerCase() === label))
+    .map((r) => ({ ...r, checklist: progress.get(r.id) ?? { done: 0, total: 0 } }));
 }
 
 export async function taskCounts(db: Db, v: Viewer) {
@@ -125,7 +129,7 @@ export async function createTask(
   return task;
 }
 
-export type TaskPatch = { title?: string; description?: string | null; assigneeLogin?: string | null; priority?: number; dueDate?: Date | null; labels?: string[] | string; columnKey?: string };
+export type TaskPatch = { tickOpenItems?: boolean; title?: string; description?: string | null; assigneeLogin?: string | null; priority?: number; dueDate?: Date | null; labels?: string[] | string; columnKey?: string };
 
 const PRIORITY = ["No priority", "Low", "Medium", "High", "Urgent"];
 export const priorityName = (p: number) => PRIORITY[Math.max(0, Math.min(PRIORITY.length - 1, p))] ?? "No priority";
@@ -185,6 +189,10 @@ export async function updateTask(db: Db, v: Viewer, id: string, patch: TaskPatch
     data.position = positionBetween(last?.position ?? null, null);
     said.push(`moved this to ${col.name}`);
   }
+  if (patch.tickOpenItems && (patch.columnKey ?? t.column.key) === "done") {
+    const open = await db.taskCheckItem.updateMany({ where: { itemId: id, done: false }, data: { done: true, doneByLogin: v.login, doneAt: new Date() } });
+    if (open.count) said.push(`checked the remaining ${open.count} checklist item${open.count === 1 ? "" : "s"}`);
+  }
   if (Object.keys(data).length === 1 && said.length === 0) return t; // nothing changed
   const updated = await db.planningItem.update({ where: { id }, data });
   for (const s of said) await event(db, id, v.login, s);
@@ -199,7 +207,8 @@ export async function getTask(db: Db, v: Viewer, id: string) {
     db.planningColumn.findMany({ where: { projectId: t.projectId }, orderBy: { position: "asc" } }),
     db.planningItem.findUniqueOrThrow({ where: { id }, include: { workItem: { include: { repository: { select: { fullName: true, htmlUrl: true } } } }, milestone: true, blockedBy: { include: { from: { select: { id: true, title: true } } } }, blocks: { include: { to: { select: { id: true, title: true } } } } } }),
   ]);
-  return { task: t, full, comments, columns };
+  const checklist = await db.taskCheckItem.findMany({ where: { itemId: id }, orderBy: [{ position: "asc" }, { createdAt: "asc" }] });
+  return { task: t, full, comments, columns, checklist };
 }
 
 export async function addComment(db: Db, v: Viewer, taskId: string, body: string) {
@@ -241,4 +250,18 @@ export async function deleteTask(db: Db, v: Viewer, id: string) {
   if (!v.isAdmin && t.authorLogin?.toLowerCase() !== v.login.toLowerCase() && t.createdById !== v.memberId) throw new ForbiddenError("Only the author or an administrator can delete a task");
   await db.planningItem.delete({ where: { id } });
   await audit(db, v, "task.delete", { type: "PlanningItem", id });
+}
+
+/** done/total per task, for badges on lists and the board. */
+export async function checklistProgress(db: Db, ids: string[]): Promise<Map<string, { done: number; total: number }>> {
+  const out = new Map<string, { done: number; total: number }>();
+  if (!ids.length) return out;
+  const rows = await db.taskCheckItem.groupBy({ by: ["itemId", "done"], where: { itemId: { in: ids } }, _count: { _all: true } });
+  for (const r of rows) {
+    const e = out.get(r.itemId) ?? { done: 0, total: 0 };
+    e.total += r._count._all;
+    if (r.done) e.done += r._count._all;
+    out.set(r.itemId, e);
+  }
+  return out;
 }

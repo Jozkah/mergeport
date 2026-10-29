@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { addComment, assigneeCandidates, createTask, deleteComment, editComment, getTask, listTasks, taskCounts, updateTask } from "@/lib/services/tasks";
+import { addCheckItems, checklistProgress, deleteCheckItem, editCheckItem, moveCheckItem, setCheckItemDone } from "@/lib/services/checklist";
 import { freshSeed } from "./helpers";
 
 let S: Awaited<ReturnType<typeof freshSeed>>;
@@ -89,5 +90,51 @@ describe("comments", () => {
     expect((await getTask(db, a, t.id)).comments.filter((x) => x.kind === "COMMENT")).toHaveLength(0);
     const ev = (await getTask(db, a, t.id)).comments[0];
     await expect(deleteComment(db, a, ev.id)).rejects.toBeInstanceOf(ForbiddenError); // system lines are permanent
+  });
+});
+
+describe("checklist", () => {
+  it("adds items from pasted lines, ticks them, and reports progress", async () => {
+    const { db, a, ids } = S;
+    const t = await createTask(db, a, { projectId: ids.projects.atlas.id, title: "release" });
+    const made = await addCheckItems(db, a, t.id, "- [ ] write migration\n- [x] bump version\n\n* tag it\nplain line");
+    expect(made.map((m) => [m.text, m.done])).toEqual([["write migration", false], ["bump version", true], ["tag it", false], ["plain line", false]]);
+    expect((await checklistProgress(db, [t.id])).get(t.id)).toEqual({ done: 1, total: 4 });
+    await setCheckItemDone(db, a, made[0].id, true);
+    await setCheckItemDone(db, a, made[2].id, true);
+    expect((await checklistProgress(db, [t.id])).get(t.id)).toEqual({ done: 3, total: 4 });
+    // a run of ticks is one history line
+    const events = (await getTask(db, a, t.id)).comments.map((c) => c.body);
+    expect(events.filter((b) => b.startsWith("checked"))).toEqual(["checked 2 checklist items"]);
+  });
+
+  it("limits length and count, and hides items of tasks you cannot see", async () => {
+    const { db, a, b, ids } = S;
+    const t = await createTask(db, a, { projectId: ids.projects.atlas.id, title: "x" });
+    await expect(addCheckItems(db, a, t.id, "y".repeat(201))).rejects.toBeInstanceOf(ValidationError);
+    await expect(addCheckItems(db, a, t.id, "   ")).rejects.toBeInstanceOf(ValidationError);
+    await addCheckItems(db, a, t.id, Array.from({ length: 100 }, (_, i) => `item ${i}`).join("\n"));
+    await expect(addCheckItems(db, a, t.id, "one more")).rejects.toThrow(/at most 100/);
+    const first = (await getTask(db, a, t.id)).checklist[0];
+    if (!(await listTasks(db, b, { scope: "all" })).some((x) => x.id === t.id)) {
+      await expect(setCheckItemDone(db, b, first.id, true)).rejects.toBeInstanceOf(NotFoundError);
+      await expect(deleteCheckItem(db, b, first.id)).rejects.toBeInstanceOf(NotFoundError);
+    }
+  });
+
+  it("reorders, edits, deletes, and can tick the rest when the task is moved to Done", async () => {
+    const { db, a, ids } = S;
+    const t = await createTask(db, a, { projectId: ids.projects.atlas.id, title: "order" });
+    const [i1, i2, i3] = await addCheckItems(db, a, t.id, "one\ntwo\nthree");
+    await moveCheckItem(db, a, i3.id, null);
+    await moveCheckItem(db, a, i1.id, i2.id);
+    expect((await getTask(db, a, t.id)).checklist.map((c) => c.text)).toEqual(["three", "two", "one"]);
+    await editCheckItem(db, a, i2.id, "  second  ");
+    await deleteCheckItem(db, a, i3.id);
+    await updateTask(db, a, t.id, { columnKey: "done", tickOpenItems: true });
+    const after = await getTask(db, a, t.id);
+    expect(after.checklist.map((c) => [c.text, c.done])).toEqual([["second", true], ["one", true]]);
+    expect(after.comments.some((c) => /checked the remaining 2/.test(c.body))).toBe(true);
+    expect((await listTasks(db, a, { status: "all", openItems: true })).some((x) => x.id === t.id)).toBe(false);
   });
 });

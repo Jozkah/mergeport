@@ -521,9 +521,26 @@ model PlanningItem {
   blockedBy PlanningLink[]       @relation("LinkTo")
   waiting   WaitingRecord[]
   comments  TaskComment[]
+  checklist TaskCheckItem[]
 
   @@index([projectId, columnId])
   @@index([assigneeLogin])
+}
+
+/// One checkbox on a task. One row (and one synced file) per item, so two people ticking different items never conflict.
+model TaskCheckItem {
+  id          String    @id @default(cuid())
+  itemId      String
+  text        String
+  done        Boolean   @default(false)
+  position    Float
+  doneByLogin String?
+  doneAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  item PlanningItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, position])
 }
 
 /// A comment on a task, or a short system line ("assigned to alice"). One row per entry so two people never edit the same file.

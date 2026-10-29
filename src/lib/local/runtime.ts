@@ -79,3 +79,23 @@ export const resetRuntime = () => {
   state.engine = undefined;
   state.team = undefined;
 };
+
+/**
+ * Sends local edits to the team spaces soon after they are made, instead of waiting for the next poll. Called after every
+ * successful action; a burst of edits becomes one cycle a moment later. It never blocks the action and never throws.
+ */
+const soon: { timer?: ReturnType<typeof setTimeout> } = {};
+export function syncSoon(delayMs = 1200) {
+  if (process.env.VITEST || soon.timer) return;
+  soon.timer = setTimeout(async () => {
+    soon.timer = undefined;
+    try {
+      const engine = await getEngine();
+      if (!engine) return;
+      for (const space of await db.space.findMany({ where: { access: "OK" } })) await engine.syncSpace(space).catch(() => {});
+    } catch {
+      // the regular poll will retry
+    }
+  }, delayMs);
+  soon.timer.unref?.();
+}
