@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
 import { repoWhere } from "@/lib/authz/viewer";
+import { inbox } from "@/lib/services/inbox";
 import { attentionFor } from "@/lib/services/request-cache";
 import { planningWhere, unreadNotificationCount } from "@/lib/services/queries";
 import { formatInstant } from "@/lib/format";
@@ -40,6 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     waiting: q.waitingExternal.length,
     changes: q.changesRequested.length,
     blocked: q.blocked.length,
+    inbox: (await inbox(db, viewer, { queues: q })).unread,
     tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login.toLowerCase(), column: { key: { not: "done" } } }] } }),
   };
   const last = lastSync._max.lastSyncedAt;

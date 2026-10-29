@@ -6,7 +6,7 @@ export type Section = "overview" | "attention" | "tasks" | "work" | "planning" |
 
 export function sectionFor(path: string): Section {
   const p = path.split("?")[0];
-  if (p.startsWith("/attention")) return "attention";
+  if (p.startsWith("/attention") || p.startsWith("/inbox")) return "attention";
   if (p.startsWith("/tasks")) return "tasks";
   if (p.startsWith("/pull-requests") || p.startsWith("/issues")) return "work";
   if (p.startsWith("/planning")) return "planning";

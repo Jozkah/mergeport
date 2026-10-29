@@ -166,6 +166,9 @@ export class SyncEngine {
       if (space.headSha === null || this.permissionsStale(space, PERMISSION_RECHECK_MS)) space = await this.refreshPermissions(space, store);
       if (space.access !== "OK") return { changed: false, applied: 0 };
       head = await store.head(space.branch, space.etag);
+      // An unchanged head normally means nothing to do. But entities that were deferred (their source item was not here yet) may be
+      // applicable now that source sync has caught up, so read once more without the conditional header.
+      if (head === null && space.deferredCount > 0) head = await store.head(space.branch, null);
     } catch (e) {
       await this.handleError(space, e, "read");
       return { changed: false, applied: 0 };
@@ -221,6 +224,7 @@ export class SyncEngine {
 
     const ctx = await this.ctx(space);
     let applied = 0;
+    let deferred = 0;
     const skipped: string[] = [];
     for (const def of ENTITY_TYPES) {
       const local = await this.localMap(def, ctx.commonSpaceId);
@@ -240,13 +244,14 @@ export class SyncEngine {
         // overwritten, moved or deleted by a file (or tombstone) arriving from here.
         const row = local.get(f.id);
         if (row?.spaceId && row.spaceId !== space.id) continue;
-        let r: { applied: boolean; data: Data | null };
+        let r: { applied: boolean; data: Data | null; deferred?: boolean };
         try {
           r = await this.reconcile(ctx, def, parsed, f.sha, row?.data ?? null);
         } catch (e) {
           skipped.push(`${f.type}/${f.id}: ${e instanceof Error ? e.message : "could not be applied"}`);
           continue;
         }
+        if (r.deferred) deferred++;
         if (r.applied) {
           applied++;
           if (r.data) appliedHere.push({ id: f.id, data: r.data });
@@ -266,14 +271,14 @@ export class SyncEngine {
     }
 
     await this.refreshRole();
-    await this.db.space.update({ where: { id: space.id }, data: { headSha: head.sha, etag: head.etag, lastPolledAt: now, lastChangedAt: now, unchangedPolls: 0, lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity file(s): ${skipped[0]}` : null, rateLimitedUntil: null } });
+    await this.db.space.update({ where: { id: space.id }, data: { headSha: head.sha, etag: head.etag, lastPolledAt: now, lastChangedAt: now, unchangedPolls: 0, deferredCount: deferred, lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity file(s): ${skipped[0]}` : null, rateLimitedUntil: null } });
     await this.schedule({ ...space, headSha: head.sha, etag: head.etag }, "changed");
     if (applied) this.emit(space.id, "pulled");
     return { changed: true, applied };
   }
 
   /** One entity: apply remote, merge with local edits, or record a conflict. */
-  private async reconcile(ctx: Ctx, def: EntityDef, file: EntityFile, sha: string, local: Data | null): Promise<{ applied: boolean; data: Data | null }> {
+  private async reconcile(ctx: Ctx, def: EntityDef, file: EntityFile, sha: string, local: Data | null): Promise<{ applied: boolean; data: Data | null; deferred?: boolean }> {
     const spaceId = ctx.space.id;
     const key = { spaceId_type_entityId: { spaceId, type: def.type, entityId: file.id } };
     const se = await this.db.syncEntity.findUnique({ where: key });
@@ -309,7 +314,7 @@ export class SyncEngine {
 
     if (!localChanged) {
       const ok = await def.apply(this.db, ctx, file.id, remoteData, file.version);
-      if (ok === false) return { applied: false, data: null };
+      if (ok === false) return { applied: false, data: null, deferred: true };
       await record(remoteData);
       return { applied: true, data: remoteData };
     }

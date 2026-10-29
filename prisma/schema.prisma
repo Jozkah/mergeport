@@ -860,6 +860,8 @@ model Space {
   nextPollAt     DateTime?
   lastError      String?
   rateLimitedUntil DateTime?
+  /// Entities seen but not applicable yet (a referenced source item is not synchronised here). While above zero, an unchanged head is re-read.
+  deferredCount  Int         @default(0)
   createdAt      DateTime    @default(now())
 
   entities  SyncEntity[]
@@ -936,4 +938,19 @@ model TeamConfig {
   commonSpaceId String?
   pollSeconds   Int      @default(30)
   updatedAt     DateTime @updatedAt
+}
+
+/// Personal inbox state per item. Never synchronised: what you have read, finished or snoozed is yours alone.
+/// Each marker stores the "version" of the item it was set against; a newer version (a new review request, commit or comment) reopens it.
+model InboxState {
+  userId        String
+  subjectType   String // "work-item"
+  subjectId     String
+  readVersion   String?
+  doneVersion   String?
+  snoozeUntil   DateTime?
+  snoozeVersion String?
+  updatedAt     DateTime  @default(now()) @updatedAt
+
+  @@id([userId, subjectType, subjectId])
 }

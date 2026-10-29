@@ -12,6 +12,7 @@ import type { ThemePreference } from "@/lib/theme";
 
 const LABELS: Record<string, string> = {
   attention: "My attention",
+  inbox: "Inbox",
   "pull-requests": "Pull requests",
   issues: "Issues",
   planning: "Planning",

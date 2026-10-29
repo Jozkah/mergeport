@@ -30,7 +30,7 @@ Compatibility: B07 lower-cases assignee spelling (display spelling is not kept).
 | Question | Status | Finding |
 | --- | --- | --- |
 | Browser PR cache when head changes | fixed in source, not browser-verified | `PrTabs` keys its cached responses by `?v=<head>:<base>`; `WorkItemDetail` supplies it. Needs a rendered check while a head changes |
-| Deferred coordination entities after a 304 | confirmed by reading, not fixed | `reconcile` returns without recording the entity when `apply` returns false, and `pullSpace` returns early on a 304, so a deferred card/comment waits for the next head change. Needs a test, then a durable "deferred" marker that forces a re-pull |
+| Deferred coordination entities after a 304 | fixed | Confirmed: an entity whose source repository was not synchronised yet waited for the next head change. `Space.deferredCount` (migration `20261101110000`) makes an unchanged head get re-read while entities are deferred. Test fails without the fix: `tests/deferred-sync.test.ts` |
 | Shared GitHub quota / scheduler starvation | not investigated | |
 | Invitation permissions, personal vs organisation | not investigated (needs a real, approved account) | |
 | Crash recovery around SENT outbox operations | not investigated | |
@@ -41,7 +41,7 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 
 | # | Idea | Status |
 | --- | --- | --- |
-| 1 | Actionable inbox | not started |
+| 1 | Actionable inbox | done (personal done / unread / snooze, reopens on a new commit, comment or review request; `/inbox`, sidebar count; `tests/inbox.test.ts`; checked in the rendered demo, dark and light). Not done: reopening on a new check result is deliberately excluded; no mobile-width pass; Activity events are not yet inbox inputs |
 | 2 | Staged waiting | not started |
 | 3 | PR readiness panel | not started |
 | 4 | Shared views | not started |
@@ -74,8 +74,12 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 | 31 | Command palette | not started |
 | 32 | UI refinement | not started |
 
+## Phase 2 progress
+
+Idea 1 only. Ideas 2-8 not started. The inbox is built on the existing Attention queues (no second source of truth) and its state table `InboxState` is personal and never synced.
+
 ## Suggested order for the next session
 
-1. Deferred-entity retry (write the failing test first), then crash recovery around SENT operations.
-2. Phase 2 starting with idea 1 (inbox), because 2, 3, 6 and 8 build on its per-event "handled version" record. Add the personal-state table (never synced) before any UI.
+1. Idea 2 (staged waiting), then 3 (readiness panel) and 6 (since I last looked), which can reuse the inbox `itemVersion` fingerprint.
+2. Crash recovery around SENT outbox operations; quota/scheduler investigation.
 3. Idea 17's event capture can be added early and cheaply so history accumulates while other work proceeds.
