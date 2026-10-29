@@ -260,7 +260,8 @@ export class SyncEngine {
         // The op at a cursor this far back is not known here; the hub skips the position check when it is not given one.
         cursorOp = cursor === start ? space.hubCursorOp : "";
       }
-    } else if (replaced && (replaced.rolledBack > 0 || replaced.kept > 0)) {
+    } else if (replaced && (replaced.rolledBack > 0 || (restored === "certain" && replaced.kept > 0))) {
+      // Unsent edits alone are not a loss; after a mere restart (suspected) they are not worth a notice.
       await this.db.hubRestore.create({ data: { spaceId: space.id, rolledBack: replaced.rolledBack, kept: replaced.kept, detail: replaced.detail as Prisma.InputJsonValue } });
       this.emit(space.id, "state");
     }

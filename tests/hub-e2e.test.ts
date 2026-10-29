@@ -382,6 +382,30 @@ describe("hub restored from a backup", () => {
     expect(await alice.db.hubRestore.count()).toBe(0);
   });
 
+  it("repeated ordinary restarts, with edits, offline clients and unsent edits in between, never produce a restore record", async () => {
+    await seedBoard();
+    const port = Number(new URL(hub.url).port);
+    const dataDir = hub.dataDir;
+    for (let i = 1; i <= 5; i++) {
+      // olive edits and sends; alice is behind (offline) for the restart, and holds an unsent edit on a different card on odd rounds
+      await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: `Olive-${i}` } });
+      await olive.engine.syncSpace(await olive.space("common"));
+      if (i % 2) {
+        await alice.db.planningItem.update({ where: { id: "c2" }, data: { title: `Alice-${i}` } });
+        await alice.engine.capture();
+      }
+      await hub.close();
+      hub = await startTestHub({ dataDir, port });
+      await resync(alice);
+      await resync(olive);
+      expect(await title(alice, "c1")).toBe(`Olive-${i}`);
+      if (i % 2) await vi.waitFor(async () => expect(await title(olive, "c2")).toBe(`Alice-${i}`), { timeout: 3000 });
+      expect(await olive.db.hubRestore.count(), `olive after restart ${i}`).toBe(0);
+      expect(await alice.db.hubRestore.count(), `alice after restart ${i}`).toBe(0);
+      expect(await alice.db.syncConflict.count()).toBe(0);
+    }
+  });
+
   it("a restore that loses nothing local leaves no record, and an ordinary prune is not treated as a restore", async () => {
     await seedBoard();
     const backup = await backupHub();
