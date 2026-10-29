@@ -61,6 +61,10 @@ Pull requests open on **Conversation**, **Files changed** and **Commits** tabs t
 
 Repositories the team shares are matched to your own GitHub access; a repository you cannot read shows up as shared but unavailable to you.
 
+### Workspaces and connecting to a server
+
+The top bar has a workspace switcher. Each workspace (GitHub, or a team server) is a separate local profile, so data never mixes. To use a team server, choose **Connect to a server** on the sign-in card, enter its address and approve the GitHub code it shows. Mergeport must be signed in to `gh` as that same GitHub account. Switching restarts the app in place and shows a short "switching" overlay. See `docs/architecture.md`.
+
 ## Commands
 
 | Command | What it does |

@@ -73,6 +73,52 @@ The common space is `mergeport-<team>-workspace`; a restricted space is `mergepo
 
 **Source access** is separate: seeing a shared repository does not give a teammate its issues. Where a person cannot read the source repository the UI says "Source repository access required".
 
+## Workspaces and hub profiles
+
+A **profile** is one SQLite file for one `(host, GitHub account id, backend)`. `backend` is `github` or `hub-<fingerprint>`, where the fingerprint is the first 16 hex chars of SHA-256 over the normalized hub origin (`src/lib/local/backends.ts`; `http://` only for loopback). GitHub profiles keep their old folder name (`<host>-<accountId>`); a hub profile adds `-<backend>`. Two backends therefore never share a database, cache or outbox.
+
+Two small registry files live in the Mergeport home (`src/lib/local/registry.ts`, atomic temp-file-then-rename writes). Neither holds tokens or sessions.
+
+- `active.json`: `{ host, accountId, backend }`, the profile the launcher opens next.
+- `hubs.json`: known servers, `{ origin, teamName, lastSignedInAs, addedAt }[]`, used by the switcher.
+
+**Supervisor and control channel** (`src/lib/local/supervisor.ts`, driven by `scripts/start-local.ts`). The launcher owns the app child process. It listens on a loopback control port protected by a random secret header; the app gets the address and secret through its environment. Switching is fire-and-poll:
+
+1. The app POSTs `/switch` `{ backend }` to the control channel. The supervisor first checks `resolveTarget`; a failure there is a 409 and nothing is killed. Otherwise it generates the one-time token and replies **202** `{ launchUrl, previousBootId }`, waits `killDelayMs` (default 400) so the response reaches the browser, kills the old child, then starts the new one. A different switch already running is also 409. `/api/local/switch` maps every launcher refusal to 409.
+2. A boot failure AFTER the 202 has no HTTP error. The supervisor restores the previous child, so the browser sees a new `bootId` with a different backend and the overlay returns to `/`. If no child can be started at all, the overlay times out after 60 s with a banner. The launcher logs the failure through the supervisor's `switch-failed` event and exits when no child is left. If the old child cannot be killed (kill times out), the supervisor keeps its handle and refuses further switches ("The previous workspace did not stop") rather than start a second child.
+3. The launcher, not the app, writes `active.json` in its `onSwitched` callback once the new child is up. Because that happens after the switch, `currentBackend()` and the switcher prefer `MERGEPORT_BACKEND` (set by the launcher for every child, including the first) and fall back to `active.json` only when it is unset (no launcher).
+4. `SwitchingOverlay` (a portal over the current page, not a separate `/switching` route) polls `GET /api/local/ready`, which returns `{ bootId, backend }`. A new `bootId` with the target backend navigates to `launchUrl` (the new app consumes that one-time launch link); a new `bootId` with another backend returns to `/`. With `previousBootId` null, the first success before any error counts as the old process and a success after an error as the new one. While the old process is gone the poll simply fails and retries; after 60 s the overlay shows the timeout banner.
+
+**Connect to a server** (sign-in card, `src/lib/hub/connect.ts`). Enter the hub address; the app normalizes it and checks `GET /health`, then runs the hub's GitHub device flow (user code and verification URL shown, polled until approved; cancel stops the poll). The hub returns a session token and the member's numeric GitHub id. `completeConnect` requires `gh` to be signed in as that **same numeric id** (and host), otherwise creates nothing. On success it creates the profile database, stores the session through the session port, marks the profile, upserts `hubs.json`, writes `active.json`, and the UI switches to it.
+
+**Hub Team page.** In a hub profile `/team` is served by `HubTeamService` over a hub admin port: members with roles (owner, admin, member, reader), invite, role change, remove, and space membership including restricted spaces. A 401 from the hub asks to sign in again, a 403 says access was removed or refused, and connection state (live, reconnecting, offline, pending edits) comes from the link-status port. Authority is always the hub's answer; a cached "denied" is re-checked and cleared after mutations.
+
+**Backend isolation.** `assertBackendMatch(config, space)` (`src/lib/local/backend-guard.ts`) refuses to open a `GITHUB` space in a hub profile and the reverse.
+
+### Plan 2 integration checklist
+
+Hub UI was built against ports so it works before the hub client and sync land. When plan 2 merges:
+
+- [ ] Replace `src/lib/hub/ports-stub.ts`. `hubSessionPort` (currently clear-text `hub-session.json` and `hub-profile.json` beside the db) becomes the encrypted `HubSession` table plus key file.
+- [ ] `hubLinkStatus` returns the real `HubLink` state instead of the stub.
+- [ ] `httpHubAdmin` may reuse the `HubClient` transport (auth, timeouts, error mapping to `HubUnauthorized`, `HubForbidden`, `HubRequestError`).
+- [ ] `currentBackend()` in `src/lib/local/workspaces.ts` reads `TeamConfig.backend` and `TeamConfig.hubOrigin`.
+- [ ] `markProfile` writes the `TeamConfig` columns instead of `hub-profile.json`.
+- [ ] Call `assertBackendMatch` from the `SyncEngine` wherever a space is synced.
+- [ ] Check the assumed `GET /admin/spaces` shape, `{ spaces: [{ id, kind, name, members: [{ githubId, canWrite }] }] }` (`parseAdminSpaces` in `ports-stub.ts`), against the real hub; adjust only that parser.
+- [ ] Keep both writers of `active.json`: `completeConnect` writes it on connect, the launcher writes it again on switch success.
+
+### Manual verification (spec) not yet run
+
+None of these has been run. Only automated tests with a fake hub exist (`tests/fake-hub.ts`, `tests/profile-switch.test.ts`).
+
+- [ ] Hub behind Caddy with real TLS
+- [ ] Two real GitHub accounts (owner and teammate)
+- [ ] Invite the second account
+- [ ] Second account joins
+- [ ] Edit on one side, see it on the other
+- [ ] Remove the member and confirm access ends
+
 ## Sync
 
 Each person's database holds the working copy. `SyncEngine` (`src/lib/sync/engine.ts`) reconciles it with each space:
