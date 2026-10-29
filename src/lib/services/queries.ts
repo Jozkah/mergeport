@@ -8,6 +8,7 @@ import { resolveRule, type RuleRow } from "@/lib/domain/rules";
 import { applyWaitingRules, matchingWaitingRules, type WaitingRuleRow } from "@/lib/domain/waiting-rules";
 import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { indexNeedle } from "@/lib/domain/text-index";
+import { deriveStages, type StageEntry } from "@/lib/domain/stages";
 
 /**
  * Every query here starts from the viewer's repository filter. Counts, charts, search and
@@ -55,6 +56,7 @@ async function loadRuleContext(db: Db, v: Viewer) {
     includeDrafts: r.includeDrafts,
     waitingOn: (r.waitingOn as unknown as Reviewer[]) ?? [],
     reason: r.reason,
+    stage: r.stage,
     enabled: r.enabled,
   }));
   // Unfinished planning blockers per GitHub item. Hidden blockers count too (the count discloses nothing about them).
@@ -75,6 +77,10 @@ export type DerivedItem = {
   derivation: ReviewDerivation;
   ruleConflict: string | null;
   manualWaiting: PrRow["waiting"];
+  /** Hand-off stages (internal review, external review, maintainer merge, upstream release), in order, each with its owner and age. */
+  stages: StageEntry[];
+  /** Unfinished planning blockers counted for this item (hidden ones included). */
+  dependencyBlockers: number;
 };
 
 function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<typeof loadRuleContext>>, contextProjectId?: string | null): DerivedItem {
@@ -110,7 +116,8 @@ function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<type
   };
   const matched = matchingWaitingRules(rc.waitingRows, { repositoryId: row.repositoryId, ownerLogin: row.repository.owner.login, projectIds: rc.projectsByRepo.get(row.repositoryId) ?? [], labels, authorLogin: row.authorLogin, type: row.type, draft: row.draft });
   const derivation = applyWaitingRules(deriveReview(input, v.login), input, matched, v.login);
-  return { item: row, derivation, ruleConflict: res.kind === "conflict" ? res.message : null, manualWaiting };
+  const stages = deriveStages({ derivation, input, matched, manual: row.waiting.map((w) => ({ stage: w.stage, reviewerKind: w.reviewerKind, reviewerRef: w.reviewerRef, reason: w.reason, startedAt: w.startedAt, status: w.status, source: w.source })), now });
+  return { item: row, derivation, ruleConflict: res.kind === "conflict" ? res.message : null, manualWaiting, stages, dependencyBlockers: input.blockedByDependencies ?? 0 };
 }
 
 const prInclude = { repository: { include: { owner: true } }, comments: true, reviewRequests: true, waiting: true } as const;

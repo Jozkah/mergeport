@@ -71,3 +71,19 @@ describe("actionable inbox", () => {
     await expect(markDone(db, a, ids.items.web9.id + "-nope")).rejects.toThrow(/not in your inbox/);
   });
 });
+
+describe("stages through the services", () => {
+  it("a stage rule and a manual stage record reach the derived item and survive manual-waiting creation", async () => {
+    const { db, admin, ids } = S;
+    const { attention } = await import("@/lib/services/queries");
+    const { requestManualReview } = await import("@/lib/services/planning");
+    await db.waitingRule.create({ data: { workspaceId: admin.workspaceId, scope: "WORKSPACE", itemType: "PULL_REQUEST", waitingOn: [{ kind: "EXTERNAL_ROLE", ref: "maintainer" }], reason: "maintainer merges", stage: "MAINTAINER_MERGE" } });
+    await requestManualReview(db, admin, { workItemId: ids.items.web9.id, reviewerKind: "EXTERNAL_ROLE", reviewerRef: "upstream", reason: "1.4 release", stage: "UPSTREAM_RELEASE" });
+    await requestManualReview(db, admin, { workItemId: ids.items.web9.id, reviewerKind: "USER", reviewerRef: "x", reason: "bogus stage is dropped", stage: "nonsense" });
+    const q = await attention(db, admin);
+    const all = [...q.waitingExternal, ...q.needsTeamReview, ...q.needsMyReview, ...q.manualWaiting, ...q.blocked, ...q.changesRequested];
+    const web9 = all.find((d) => d.item.id === ids.items.web9.id)!;
+    expect(web9.stages.map((s) => s.stage)).toEqual(expect.arrayContaining(["MAINTAINER_MERGE", "UPSTREAM_RELEASE"]));
+    expect((await db.waitingRecord.findMany({ where: { workItemId: ids.items.web9.id } })).map((r) => r.stage).sort()).toEqual(["", "UPSTREAM_RELEASE"]);
+  });
+});

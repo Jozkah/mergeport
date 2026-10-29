@@ -5,6 +5,7 @@ import { run, type ActionResult } from "@/lib/action-result";
 import { requireViewer } from "@/lib/auth/current";
 import { db } from "@/lib/db";
 import { markAllRead, markDone, markRead, reopen, snooze } from "@/lib/services/inbox";
+import { markSeen } from "@/lib/services/seen";
 
 type Op = "read" | "done" | "reopen" | "snooze-4h" | "snooze-tomorrow" | "snooze-week";
 
@@ -33,6 +34,17 @@ export async function inboxReadAllAction(): Promise<ActionResult> {
     const { viewer } = await requireViewer();
     await markAllRead(db, viewer);
     revalidatePath("/inbox");
+    return { ok: true };
+  });
+}
+
+/** Acknowledge what changed on an item: personal, local, and never a review decision. */
+export async function markSeenAction(itemId: string): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireViewer();
+    await markSeen(db, viewer, itemId);
+    revalidatePath(`/pull-requests/${itemId}`);
+    revalidatePath(`/issues/${itemId}`);
     return { ok: true };
   });
 }

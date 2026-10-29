@@ -6,6 +6,7 @@ import { notifyChange } from "@/lib/local/runtime";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { STAGE_KEYS } from "@/lib/domain/stages";
 import { run, type ActionResult } from "@/lib/action-result";
 import { requireAdminViewer, requireViewer } from "@/lib/auth/current";
 import { NotFoundError, ValidationError } from "@/lib/errors";
@@ -241,6 +242,7 @@ export async function manualWaitingAction(fd: FormData): Promise<ActionResult> {
       reviewerKind: z.enum(["USER", "EXTERNAL_ROLE"]).parse(str(fd, "kind")),
       reviewerRef: str(fd, "ref"),
       reason: str(fd, "reason"),
+      stage: str(fd, "stage"),
     });
     revalidatePath("/attention");
     return { ok: true, message: "Marked as waiting. This is a dashboard record; nothing was posted to GitHub." };
@@ -373,7 +375,7 @@ export async function saveWaitingRuleAction(fd: FormData): Promise<ActionResult>
     if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a project");
     if (scope === "OWNER" && !ownerLogin) throw new ValidationError("Enter the GitHub owner");
     const t = str(fd, "itemType");
-    const rule = await db.waitingRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, itemType: t === "ISSUE" || t === "ANY" ? t : "PULL_REQUEST", labels: csv(str(fd, "labels")), authors: csv(str(fd, "authors")).map((a) => a.replace(/^@/, "")), includeDrafts: str(fd, "includeDrafts") === "on", waitingOn, reason } });
+    const rule = await db.waitingRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, itemType: t === "ISSUE" || t === "ANY" ? t : "PULL_REQUEST", labels: csv(str(fd, "labels")), authors: csv(str(fd, "authors")).map((a) => a.replace(/^@/, "")), includeDrafts: str(fd, "includeDrafts") === "on", waitingOn, reason, stage: STAGE_KEYS.includes(str(fd, "stage")) ? str(fd, "stage") : "" } });
     await audit(db, viewer, "waitingRule.create", { type: "WaitingRule", id: rule.id });
     revalidatePath("/admin/rules");
     revalidatePath("/attention");

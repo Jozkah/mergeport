@@ -2,6 +2,7 @@ import type { Db } from "@/lib/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { repoWhere, requireProject, requireRepo, requireWorkItem, type Viewer } from "@/lib/authz/viewer";
 import { checkVersion, computeProgress, positionBetween, wouldCreateCycle, type PlanItem } from "@/lib/domain/planning";
+import { STAGE_KEYS, type StageKey } from "@/lib/domain/stages";
 import { audit } from "./audit";
 import { planningWhere } from "./queries";
 
@@ -153,7 +154,7 @@ export async function milestoneProgress(db: Db, v: Viewer, milestoneId: string) 
 
 // ---------- manual waiting (non-PR items) ----------
 
-export async function requestManualReview(db: Db, v: Viewer, input: { planningItemId?: string; workItemId?: string; reviewerKind: "USER" | "EXTERNAL_ROLE"; reviewerRef: string; reason: string }) {
+export async function requestManualReview(db: Db, v: Viewer, input: { planningItemId?: string; workItemId?: string; reviewerKind: "USER" | "EXTERNAL_ROLE"; reviewerRef: string; reason: string; stage?: string }) {
   if (!input.planningItemId === !input.workItemId) throw new ValidationError("Choose exactly one item");
   if (!input.reason.trim()) throw new ValidationError("Say why this is waiting");
   if (input.planningItemId) {
@@ -163,7 +164,7 @@ export async function requestManualReview(db: Db, v: Viewer, input: { planningIt
     await requireWorkItem(db, v, input.workItemId!, "manageWork");
   }
   const rec = await db.waitingRecord.create({
-    data: { workspaceId: v.workspaceId, planningItemId: input.planningItemId, workItemId: input.workItemId, source: "MANUAL", reviewerKind: input.reviewerKind, reviewerRef: input.reviewerRef, reason: input.reason.trim() },
+    data: { workspaceId: v.workspaceId, planningItemId: input.planningItemId, workItemId: input.workItemId, source: "MANUAL", reviewerKind: input.reviewerKind, reviewerRef: input.reviewerRef, reason: input.reason.trim(), stage: STAGE_KEYS.includes(input.stage as StageKey) ? input.stage! : "" },
   });
   await audit(db, v, "waiting.request", { type: "WaitingRecord", id: rec.id });
   return rec;

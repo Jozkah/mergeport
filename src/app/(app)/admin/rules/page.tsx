@@ -9,6 +9,7 @@ import { Route } from "@/components/ui/icons";
 import { asStrings } from "@/lib/services/queries";
 import { deleteRuleAction, deleteWaitingRuleAction, saveRuleAction, saveWaitingRuleAction, toggleWaitingRuleAction } from "@/app/actions";
 import { Clock } from "@/components/ui/icons";
+import { STAGES, stageLabel } from "@/lib/domain/stages";
 
 export const metadata = { title: "Who reviews what" };
 
@@ -69,7 +70,7 @@ export default async function Rules() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2"><SimplePill tone={r.enabled ? "needs" : "unknown"}>{SCOPE[r.scope]}</SimplePill><span className="text-[13px] font-medium">{r.repository?.fullName ?? r.project?.name ?? r.ownerLogin ?? "Everything"}</span>{!r.enabled && <span className="text-[12px] text-ink-3">off</span>}</div>
                     <p className="mt-1 text-[13px]">{r.reason}</p>
-                    <p className="mt-1 text-[12.5px] text-ink-3">Waits on {(r.waitingOn as unknown as Reviewer[]).map((x) => x.ref).join(", ")} · {r.itemType === "ANY" ? "pull requests and issues" : r.itemType === "ISSUE" ? "issues" : "pull requests"}{asStrings(r.authors).length ? ` opened by ${asStrings(r.authors).join(", ")}` : " opened by anyone"}{asStrings(r.labels).length ? ` · labelled ${asStrings(r.labels).join(", ")}` : ""}{r.includeDrafts ? " · drafts included" : ""}</p>
+                    <p className="mt-1 text-[12.5px] text-ink-3">{r.stage ? `${stageLabel(r.stage)} · ` : ""}Waits on {(r.waitingOn as unknown as Reviewer[]).map((x) => x.ref).join(", ")} · {r.itemType === "ANY" ? "pull requests and issues" : r.itemType === "ISSUE" ? "issues" : "pull requests"}{asStrings(r.authors).length ? ` opened by ${asStrings(r.authors).join(", ")}` : " opened by anyone"}{asStrings(r.labels).length ? ` · labelled ${asStrings(r.labels).join(", ")}` : ""}{r.includeDrafts ? " · drafts included" : ""}</p>
                   </div>
                   <div className="flex gap-2">
                     <ActionForm action={toggleWaitingRuleAction} submitLabel={r.enabled ? "Turn off" : "Turn on"} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={r.id} /></ActionForm>
@@ -108,6 +109,7 @@ export default async function Rules() {
                 <div><label className="label" htmlFor="w-type">Items</label><Select id="w-type" name="itemType" className="select"><option value="PULL_REQUEST">Pull requests</option><option value="ISSUE">Issues</option><option value="ANY">Both</option></Select></div>
                 <div><label className="label" htmlFor="w-kind">Who</label><Select id="w-kind" name="kind" className="select"><option value="">GitHub user / team</option><option value="EXTERNAL_ROLE">External role</option></Select></div>
               </div>
+              <div><label className="label" htmlFor="w-stage">Stage</label><Select id="w-stage" name="stage" className="select"><option value="">Infer from who it waits on</option>{STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</Select></div>
               <div><label className="label" htmlFor="w-authors">Only when opened by (empty = anyone)</label><input id="w-authors" name="authors" className="input" placeholder="login1, login2" /></div>
               <div><label className="label" htmlFor="w-labels">Only when labelled (empty = any)</label><input id="w-labels" name="labels" className="input" /></div>
               <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" name="includeDrafts" /> Include draft pull requests</label>

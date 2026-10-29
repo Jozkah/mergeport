@@ -282,7 +282,7 @@ const waitrule: EntityDef = {
     return rows.map((r) => ({
       id: r.id,
       spaceId: r.scope === "REPOSITORY" ? (r.repository?.spaceId ?? null) : r.scope === "PROJECT" ? (r.project?.spaceId ?? null) : commonSpaceId,
-      data: { scope: r.scope, repoGithubId: r.repository?.githubId.toString() ?? null, projectId: r.projectId, ownerLogin: r.ownerLogin, itemType: r.itemType, labels: r.labels, authors: r.authors, includeDrafts: r.includeDrafts, waitingOn: r.waitingOn, reason: r.reason, enabled: r.enabled },
+      data: { scope: r.scope, repoGithubId: r.repository?.githubId.toString() ?? null, projectId: r.projectId, ownerLogin: r.ownerLogin, itemType: r.itemType, labels: r.labels, authors: r.authors, includeDrafts: r.includeDrafts, waitingOn: r.waitingOn, reason: r.reason, stage: r.stage, enabled: r.enabled },
     }));
   },
   async apply(db, ctx, id, data) {
@@ -294,7 +294,7 @@ const waitrule: EntityDef = {
     const f = {
       scope: data.scope as "REPOSITORY" | "OWNER" | "PROJECT" | "WORKSPACE", repositoryId: r?.id ?? null, projectId: (data.projectId as string | null) ?? null, ownerLogin: (data.ownerLogin as string | null) ?? null,
       itemType: String(data.itemType ?? "PULL_REQUEST"), labels: (data.labels ?? []) as Prisma.InputJsonValue, authors: (data.authors ?? []) as Prisma.InputJsonValue, includeDrafts: !!data.includeDrafts,
-      waitingOn: (data.waitingOn ?? []) as Prisma.InputJsonValue, reason: String(data.reason), enabled: !!data.enabled,
+      waitingOn: (data.waitingOn ?? []) as Prisma.InputJsonValue, reason: String(data.reason), stage: String(data.stage ?? ""), enabled: !!data.enabled,
     };
     await db.waitingRule.upsert({ where: { id }, create: { id, workspaceId: ctx.workspaceId, ...f }, update: f });
   },
@@ -355,7 +355,7 @@ const waiting: EntityDef = {
         id: w.id, spaceId,
         data: {
           workRepoGithubId: w.workItem?.repository.githubId.toString() ?? null, workNumber: w.workItem?.number ?? null, cardId: w.planningItemId,
-          reviewerKind: w.reviewerKind, reviewerRef: w.reviewerRef, reason: w.reason, status: w.status, startedAt: iso(w.startedAt), clearedAt: iso(w.clearedAt), clearReason: w.clearReason,
+          reviewerKind: w.reviewerKind, reviewerRef: w.reviewerRef, reason: w.reason, stage: w.stage, status: w.status, startedAt: iso(w.startedAt), clearedAt: iso(w.clearedAt), clearReason: w.clearReason,
         },
       });
     }
@@ -372,7 +372,7 @@ const waiting: EntityDef = {
     if (!wi && !card) return false;
     const f = {
       workspaceId: ctx.workspaceId, workItemId: wi?.id ?? null, planningItemId: card?.id ?? null, source: "MANUAL" as const, reviewerKind: data.reviewerKind as "USER" | "TEAM" | "EXTERNAL_ROLE",
-      reviewerRef: String(data.reviewerRef), reason: String(data.reason), status: data.status as "PENDING" | "SATISFIED" | "CANCELLED" | "STALE", startedAt: new Date(String(data.startedAt)),
+      reviewerRef: String(data.reviewerRef), reason: String(data.reason), stage: String(data.stage ?? ""), status: data.status as "PENDING" | "SATISFIED" | "CANCELLED" | "STALE", startedAt: new Date(String(data.startedAt)),
       clearedAt: toDate(data.clearedAt), clearReason: (data.clearReason as string | null) ?? null,
     };
     await db.waitingRecord.upsert({ where: { id }, create: { id, ...f }, update: f });

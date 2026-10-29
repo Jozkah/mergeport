@@ -423,6 +423,8 @@ model WaitingRule {
   includeDrafts Boolean   @default(false)
   waitingOn     Json // [{kind:USER|TEAM|EXTERNAL_ROLE, ref}]
   reason        String
+  /// INTERNAL_REVIEW | EXTERNAL_REVIEW | MAINTAINER_MERGE | UPSTREAM_RELEASE, or empty to infer from who is waited on.
+  stage         String    @default("")
   enabled       Boolean   @default(true)
   createdAt     DateTime  @default(now())
 
@@ -464,6 +466,7 @@ model WaitingRecord {
   reviewerKind   ReviewerKind
   reviewerRef    String
   reason         String
+  stage          String        @default("")
   status         WaitingStatus @default(PENDING)
   startedAt      DateTime      @default(now())
   clearedAt      DateTime?
@@ -953,4 +956,14 @@ model InboxState {
   updatedAt     DateTime  @default(now()) @updatedAt
 
   @@id([userId, subjectType, subjectId])
+}
+
+/// What a person last looked at on an item, to show "since you last looked". Personal and never synchronised.
+model SeenState {
+  userId     String
+  workItemId String
+  snapshot   Json
+  seenAt     DateTime @default(now()) @updatedAt
+
+  @@id([userId, workItemId])
 }

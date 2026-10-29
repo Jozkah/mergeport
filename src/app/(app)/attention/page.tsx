@@ -7,6 +7,7 @@ import { formatDuration, formatInstant } from "@/lib/format";
 import { listTasks } from "@/lib/services/tasks";
 import { EmptyState, Mono, PageHeader, Panel, Segmented, StatusPill, Time, Avatar } from "@/components/ui/primitives";
 import { BellRing, Hourglass, ListChecks } from "@/components/ui/icons";
+import { StageList } from "@/components/review/StageList";
 import { itemHref } from "@/components/work/WorkTable";
 
 export const metadata = { title: "My attention" };
@@ -42,6 +43,7 @@ function Row({ d, tz, now, queue }: { d: DerivedItem; tz: string; now: Date; que
         {first && <span className="inline-flex items-center gap-1 text-ink-2"><Hourglass size={12} aria-hidden />{queue === "changes" ? "Changes asked by" : "Waiting on"} <Avatar login={first.actor.ref} size={14} /><span className="font-medium">{first.actor.display ?? first.actor.ref}</span>{pending.length > 1 && <span className="text-ink-3">+{pending.length - 1}</span>}</span>}
         {d.ruleConflict && <span className="text-waiting">Rule conflict</span>}
       </div>
+      {d.stages.length > 0 && <StageList stages={d.stages} compact />}
       <details className="group text-[12px] text-ink-3">
         <summary className="inline-flex cursor-pointer list-none items-center gap-1 hover:text-ink-2 [&::-webkit-details-marker]:hidden"><span className="underline decoration-dotted underline-offset-2">Why</span></summary>
         <div className="mt-1.5 flex flex-col gap-1 border-l border-line pl-3">

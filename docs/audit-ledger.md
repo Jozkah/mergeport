@@ -42,11 +42,11 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 | # | Idea | Status |
 | --- | --- | --- |
 | 1 | Actionable inbox | done (personal done / unread / snooze, reopens on a new commit, comment or review request; `/inbox`, sidebar count; `tests/inbox.test.ts`; checked in the rendered demo, dark and light). Not done: reopening on a new check result is deliberately excluded; no mobile-width pass; Activity events are not yet inbox inputs |
-| 2 | Staged waiting | not started |
-| 3 | PR readiness panel | not started |
+| 2 | Staged waiting | done (stage on waiting rules and manual records: internal review, external review, maintainer merge, upstream release; derived with owner, reason, age and next action; approval does not satisfy a maintainer-merge stage; shown on attention rows and PR detail; `tests/domain/stages.test.ts`, `tests/inbox.test.ts`; checked in the rendered demo). Not done: stages are not yet a filter/queue of their own; older clients drop `stage` if they edit and re-push a rule (no entity schema bump) |
+| 3 | PR readiness panel | done ("Ready to merge?" on PR detail: head, reviews, stale approvals, checks, conflicts, planning dependencies, discussions; each row labelled GitHub fact / dashboard advice / not known; next responsible person; `tests/domain/readiness.test.ts`; rendered check). Not done: unresolved review threads are shown as "unknown" because resolution is not synchronised; required-vs-optional checks are not read (labelled as such) |
 | 4 | Shared views | not started |
 | 5 | Persistent scope | not started |
-| 6 | Since I last looked | not started |
+| 6 | Since I last looked | done for PR/issue detail (personal baseline on first look, lists new commits, comments from others, reviewer decisions, checks, conflicts, state, title until "Mark as seen"; `tests/seen.test.ts`; rendered check). Not done: no per-file "changed files" detail, not shown in lists or Inbox rows |
 | 7 | Review capacity | not started |
 | 8 | Notification preferences | not started |
 | 9 | Named boards, WIP limits | not started |
@@ -76,10 +76,10 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 
 ## Phase 2 progress
 
-Idea 1 only. Ideas 2-8 not started. The inbox is built on the existing Attention queues (no second source of truth) and its state table `InboxState` is personal and never synced.
+Ideas 1, 2, 3 and 6 done. Ideas 4, 5, 7, 8 not started. The inbox is built on the existing Attention queues (no second source of truth) and its state table `InboxState` is personal and never synced.
 
 ## Suggested order for the next session
 
-1. Idea 2 (staged waiting), then 3 (readiness panel) and 6 (since I last looked), which can reuse the inbox `itemVersion` fingerprint.
+1. Finish Phase 2: 4 (shared views), 5 (persistent scope), 7 (review capacity), 8 (notification preferences).
 2. Crash recovery around SENT outbox operations; quota/scheduler investigation.
 3. Idea 17's event capture can be added early and cheaply so history accumulates while other work proceeds.
