@@ -10,7 +10,7 @@ import { asStrings } from "@/lib/services/queries";
 import { deleteRuleAction, deleteWaitingRuleAction, saveRuleAction, saveWaitingRuleAction, toggleWaitingRuleAction } from "@/app/actions";
 import { Clock } from "@/components/ui/icons";
 
-export const metadata = { title: "Review routing" };
+export const metadata = { title: "Who reviews what" };
 
 export default async function Rules() {
   const { viewer } = await requireAdminViewer();
@@ -35,7 +35,7 @@ export default async function Rules() {
 
   return (
     <>
-      <PageHeader title="Review routing" subtitle="Say who must review which work. Precedence: repository override, then project rule, then owner default, then workspace default. Labels route attention; they never grant permission." />
+      <PageHeader title="Who reviews what" subtitle="Say who must review which work. Precedence: repository override, then project rule, then owner default, then workspace default. Labels route attention; they never grant permission." />
       {conflicts.length > 0 && (
         <div className="mb-4"><Banner tone="warn" title="Rule conflicts">{conflicts.map((c) => c.fullName).join(", ")} {conflicts.length === 1 ? "is" : "are"} in several projects with different review rules. Add a repository override, or reviewers will see a conflict instead of a guess.</Banner></div>
       )}

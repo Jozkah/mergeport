@@ -62,6 +62,7 @@ export {
   RefreshCw,
   Route,
   Search,
+  Ellipsis,
   Send,
   Settings,
   ShieldCheck,

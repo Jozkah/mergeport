@@ -97,7 +97,7 @@ export default async function Attention({ searchParams }: { searchParams: Promis
       <div className="mb-4"><Segmented label="Queues" items={QUEUES.map((x) => ({ href: `/attention?queue=${x.key}`, label: x.label, active: x.key === active, count: lists[x.key].length }))} /></div>
       <Panel title={meta.label} icon={BellRing} id="queue">
         <p className="border-b border-line px-4 py-2.5 text-[12.5px] text-ink-3">{meta.help}</p>
-        {rows.length === 0 ? <EmptyState icon={BellRing} title="Nothing here">This queue is empty for the repositories you can see.</EmptyState> : <Grouped rows={rows} tz={viewer.timezone} now={now} queue={active} />}
+        {rows.length === 0 ? <EmptyState icon={BellRing} title="You are all caught up" action={<Link href="/pull-requests" className="btn">See all pull requests</Link>}>Nothing is in this list for the repositories you can see. When someone asks for your review, it shows up here.</EmptyState> : <Grouped rows={rows} tz={viewer.timezone} now={now} queue={active} />}
       </Panel>
 
       {myTasks.length > 0 && (

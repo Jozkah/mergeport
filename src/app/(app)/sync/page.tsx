@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -95,7 +96,7 @@ export default async function SyncPage() {
       )}
 
       <Panel title="Spaces" icon={RefreshCw} id="spaces">
-        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet">Spaces appear after you create or join a team.</EmptyState> : (
+        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet" action={<Link href="/team" className="btn btn-primary">Set up a team</Link>}>You work alone right now, so everything stays on this computer. Create or join a team to share projects and tasks.</EmptyState> : (
           <ul>
             {states.map(([s, st]) => (
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 text-[13px] last:border-b-0">

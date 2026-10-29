@@ -12,6 +12,8 @@ import { itemHref } from "@/components/work/WorkTable";
 import { OpenedChart } from "@/components/work/OpenedChart";
 import { Metric as AnimatedNumber } from "@/components/ui/Metric";
 import { todayIn } from "@/lib/domain/planning";
+import { GettingStarted } from "@/components/onboarding/GettingStarted";
+import { gettingStarted } from "@/lib/services/getting-started";
 
 export const metadata = { title: "Overview" };
 
@@ -39,6 +41,7 @@ export default async function Overview() {
   const behind = forks.filter((m) => (m.comparisons[0]?.behindBy ?? 0) > 0);
   const repoCount = await db.repository.count({ where: repoWhere(viewer) });
   const none = o.openIssues + o.openPrs === 0 && q.needsMyReview.length === 0;
+  const steps = await gettingStarted(db, viewer);
 
   return (
     <>
@@ -46,6 +49,8 @@ export default async function Overview() {
         <h1 className="text-[24px] font-medium leading-8 tracking-[-0.01em]">Hello, {user.name?.split(" ")[0] ?? user.login}</h1>
         <p className="mt-1 text-[13px] text-ink-3">What needs you, and what is waiting on someone else, across the repositories you can see.</p>
       </div>
+
+      <GettingStarted steps={steps} />
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Metric href="/attention?queue=needs-me" title="Needs my review" icon={BellRing} value={o.needsMyReview} note="Pull requests expecting you" tone="needs" />

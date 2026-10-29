@@ -15,7 +15,7 @@ import { Banner, EmptyState, Mono, PageHeader, Panel, SimplePill, Time } from "@
 import { ArrowRight, Eye, GitFork, GitCompare, RefreshCw } from "@/components/ui/icons";
 import { mapForkAction, refreshForkAction, syncForkBranchAction } from "@/app/actions";
 
-export const metadata = { title: "Forks & upstream" };
+export const metadata = { title: "Forks" };
 
 const STATUS = {
   identical: { tone: "ok", label: "Identical" },
@@ -52,7 +52,7 @@ export default async function Forks() {
 
   return (
     <>
-      <PageHeader title="Forks & upstream" subtitle="Commit divergence, upstream pull requests and upstream issues are separate questions with separate evidence." />
+      <PageHeader title="Forks" subtitle="Commit divergence, upstream pull requests and upstream issues are separate questions with separate evidence." />
       {unmappedForks > 0 && <div className="mb-4"><Banner title={`${unmappedForks} fork${unmappedForks === 1 ? "" : "s"} without a mapped upstream you can see`}>Upstream content is only shown when the upstream repository is also shared with you.</Banner></div>}
 
       {mappings.length === 0 ? (

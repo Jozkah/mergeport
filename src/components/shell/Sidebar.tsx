@@ -7,7 +7,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useId, useState, type ComponentType, type SVGProps } from "react";
 import * as D from "@radix-ui/react-dialog";
-import { Activity, BellRing, ChevronDown, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Kanban, Layers, ListChecks, LayoutDashboard, PanelLeft, RefreshCw, Route, Search, Settings, Users, X } from "@/components/ui/icons";
+import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Kanban, Layers, ListChecks, LayoutDashboard, PanelLeft, RefreshCw, Route, Search, Settings, Users, X } from "@/components/ui/icons";
 import { Collapse } from "@/components/ui/Collapse";
 import { Metric } from "@/components/ui/Metric";
 
@@ -49,17 +49,18 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
   ];
   const source: Item[] = [
     { href: "/repositories", label: "Repositories", icon: FolderGit2 },
-    { href: "/forks", label: "Forks & upstream", icon: GitFork },
-    { href: "/branches", label: "Branches & worktrees", icon: GitBranch },
+    { href: "/forks", label: "Forks", icon: GitFork },
+    { href: "/branches", label: "Branches", icon: GitBranch },
   ];
   const team: Item[] = [
     { href: "/team", label: "Team", icon: Users },
-    { href: "/sync", label: "Sync", icon: RefreshCw },
+    { href: "/sync", label: "Sync status", icon: RefreshCw },
+    { href: "/help", label: "Help", icon: CircleHelp },
   ];
   const admin: Item[] = isAdmin
     ? [
         { href: "/admin/projects", label: "Projects", icon: Layers },
-        { href: "/admin/rules", label: "Review routing", icon: Route },
+        { href: "/admin/rules", label: "Who reviews what", icon: Route },
       ]
     : [];
   return { main, source, team, admin };

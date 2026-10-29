@@ -10,7 +10,7 @@ import { Banner, EmptyState, Mono, PageHeader, Panel, SimplePill, Time } from "@
 import { GitBranch, Laptop, Lock } from "@/components/ui/icons";
 import { mapRootAction, scanRootAction, unmapRootAction } from "@/app/actions";
 
-export const metadata = { title: "Branches & worktrees" };
+export const metadata = { title: "Branches" };
 export const dynamic = "force-dynamic";
 
 export default async function Branches({ searchParams }: { searchParams: Promise<{ all?: string }> }) {
@@ -32,7 +32,7 @@ export default async function Branches({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <PageHeader title="Branches & worktrees" subtitle="Remote branches come from GitHub. Local worktrees are read from folders you choose on this computer. Each list says which it is and how old it is." />
+      <PageHeader title="Branches" subtitle="Remote branches come from GitHub. Local worktrees are read from folders you choose on this computer. Each list says which it is and how old it is." />
       <div className="mb-5"><Banner title="Read-only and private to this computer">Mergeport reads branch names, paths and counts of changed files with a fixed set of read-only git commands. It never reads file contents or diffs, never runs hooks or scripts from a repository, and never writes worktree data to a shared repository. There are no create, remove, reset or checkout controls.</Banner></div>
 
       <div className="fit-grid" style={{ "--fit-min": "720px" } as React.CSSProperties}>
@@ -98,7 +98,7 @@ export default async function Branches({ searchParams }: { searchParams: Promise
             </Panel>
           );
         })}
-        {repos.length === 0 && <Panel title="Branches" icon={GitBranch}><EmptyState icon={GitBranch} title="No repositories to show" /></Panel>}
+        {repos.length === 0 && <Panel title="Branches" icon={GitBranch}><EmptyState icon={GitBranch} title="No repositories to show" action={<Link href="/repositories/connect" className="btn btn-primary">Connect repositories</Link>}>Connect a repository and its branches appear here.</EmptyState></Panel>}
       </div>
       {ordered.length > shown.length && <p className="mt-4 text-[13px] text-ink-3">Showing {shown.length} of {ordered.length} repositories (those with a local folder first). <Link className="underline" href="/branches?all=1">Show all</Link></p>}
       {showAll && ordered.length > LIMIT && <p className="mt-4 text-[13px] text-ink-3"><Link className="underline" href="/branches">Show fewer</Link></p>}
