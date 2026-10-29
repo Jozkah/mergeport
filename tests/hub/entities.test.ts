@@ -144,3 +144,12 @@ describe("pruning", () => {
     expect(JSON.parse(row.cursor_json)).toEqual({ common: "2" });
   });
 });
+
+describe("entity_event op index", () => {
+  it("dupEvent's lookup is answered by the (space_id, type, entity_id, op_id) index, not a scan", async () => {
+    expect(hub.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'entity_event_op'").get()).toEqual({ name: "entity_event_op" });
+    const plan = hub.db.prepare("EXPLAIN QUERY PLAN SELECT 1 FROM entity_event WHERE space_id = ? AND type = ? AND entity_id = ? AND op_id = ? LIMIT 1").all("common", "task", "t1", "op") as { detail: string }[];
+    expect(plan.map((p) => p.detail).join(" ")).toContain("USING COVERING INDEX entity_event_op");
+  });
+});
+
