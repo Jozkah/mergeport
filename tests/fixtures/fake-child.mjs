@@ -11,7 +11,7 @@ const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   if (req.method === "GET" && url.pathname === "/api/local/ready") {
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ bootId }));
+    res.end(JSON.stringify({ bootId, backend: process.env.MERGEPORT_BACKEND ?? "github" }));
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/local/launch") {
