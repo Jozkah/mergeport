@@ -16,17 +16,20 @@ type Started = { launchUrl: string; bootId: string };
 
 const BACKEND_RE = /^(github|hub-[0-9a-f]{16})$/;
 const SECRET_HEADER = "x-mergeport-control";
+const NOT_RESTORED = "Could not start the other workspace, and the previous one could not be restored";
 const RESTORED = "Could not start the other workspace; the previous one was restored";
 
 /** The target cannot be opened; answered as 409 on the control channel. */
 class TargetUnavailableError extends Error {}
+/** A different switch is already running; answered as 409 too. */
+class SwitchBusyError extends Error {}
 
 type Running = { spec: ChildSpec; handle: ChildHandle; expectedExit: boolean };
 
 /** Owns the one app child process. A switch kills it and starts another, so two children never share the port. */
 export class Supervisor {
   private current: Running | null = null;
-  private inflight: Promise<Started> | null = null;
+  private inflight: { key: string; promise: Promise<Started> } | null = null;
   private control: Server | null = null;
   private stopping = new AbortController();
   private listeners: Array<(code: number | null) => void> = [];
@@ -39,11 +42,11 @@ export class Supervisor {
   }
 
   start(initial: { dbFile: string }): Promise<Started> {
-    return this.serialized(async () => this.boot({ dbFile: initial.dbFile, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo }));
+    return this.serialized("start", async () => this.boot({ dbFile: initial.dbFile, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo }));
   }
 
   switchTo(req: { backend: Backend }): Promise<Started> {
-    return this.serialized(async () => {
+    return this.serialized(req.backend, async () => {
       let target: { dbFile: string };
       try {
         target = await this.deps.resolveTarget(req);
@@ -53,10 +56,17 @@ export class Supervisor {
       const previous = this.current?.spec ?? null;
       await this.killCurrent();
       try {
-        return await this.boot({ dbFile: target.dbFile, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo });
+        return await this.boot({ dbFile: target.dbFile, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo }, true);
       } catch {
         await this.killCurrent();
-        if (previous && !this.stopping.signal.aborted) await this.boot(previous).catch(() => undefined);
+        if (previous && !this.stopping.signal.aborted) {
+          try {
+            await this.boot(previous, true);
+          } catch {
+            await this.killCurrent();
+            throw new Error(NOT_RESTORED);
+          }
+        }
         throw new Error(RESTORED);
       }
     });
@@ -64,7 +74,7 @@ export class Supervisor {
 
   async stop(): Promise<void> {
     this.stopping.abort();
-    await this.inflight?.catch(() => undefined);
+    await this.inflight?.promise.catch(() => undefined);
     await this.killCurrent();
     const control = this.control;
     this.control = null;
@@ -73,6 +83,7 @@ export class Supervisor {
 
   /** Loopback-only HTTP endpoint the app child calls to ask for a switch. */
   listenControl(): Promise<{ url: string; secret: string }> {
+    if (this.control) return Promise.reject(new Error("Control channel already listening"));
     const secret = randomBytes(24).toString("hex");
     const server = createServer((req, res) => {
       const reply = (status: number, body: unknown) => {
@@ -83,16 +94,22 @@ export class Supervisor {
       if (req.method !== "POST" || req.url !== "/switch") return reply(404, { error: "Not found" });
       if (!sameSecret(req.headers[SECRET_HEADER], secret)) return reply(401, { error: "Unauthorized" });
       let raw = "";
+      let tooBig = false;
       req.on("data", (c: Buffer) => {
+        if (tooBig) return;
         raw += c;
-        if (raw.length > 4096) req.destroy();
+        if (raw.length > 4096) {
+          tooBig = true;
+          reply(413, { error: "Request too large" });
+        }
       });
       req.on("end", () => {
+        if (tooBig) return;
         const backend = parseBackend(raw);
         if (!backend) return reply(400, { error: "Bad request" });
         this.switchTo({ backend }).then(
           (r) => reply(200, { launchUrl: r.launchUrl }),
-          (e) => (e instanceof TargetUnavailableError ? reply(409, { error: e.message }) : reply(500, { error: e instanceof Error ? e.message : "Switch failed" })),
+          (e) => (e instanceof TargetUnavailableError || e instanceof SwitchBusyError ? reply(409, { error: e.message }) : reply(500, { error: e instanceof Error ? e.message : "Switch failed" })),
         );
       });
     });
@@ -107,18 +124,22 @@ export class Supervisor {
     });
   }
 
-  /** One operation at a time; a caller arriving mid-flight gets the same promise. */
-  private serialized(fn: () => Promise<Started>): Promise<Started> {
-    if (this.inflight) return this.inflight;
-    const p = fn().finally(() => {
-      if (this.inflight === p) this.inflight = null;
+  /** One operation at a time; the same request arriving mid-flight shares its promise, a different one is refused. */
+  private serialized(key: string, fn: () => Promise<Started>): Promise<Started> {
+    if (this.inflight) {
+      if (this.inflight.key === key) return this.inflight.promise;
+      return Promise.reject(new SwitchBusyError("Another workspace switch is in progress"));
+    }
+    const promise = fn().finally(() => {
+      if (this.inflight?.promise === promise) this.inflight = null;
     });
-    this.inflight = p;
-    return p;
+    this.inflight = { key, promise };
+    return promise;
   }
 
-  private async boot(spec: ChildSpec): Promise<Started> {
-    const run: Running = { spec, handle: this.deps.spawnChild(spec), expectedExit: false };
+  /** `quiet`: a switch is handling this boot, so a child dying before it is ready is not reported as "child-exit". */
+  private async boot(spec: ChildSpec, quiet = false): Promise<Started> {
+    const run: Running = { spec, handle: this.deps.spawnChild(spec), expectedExit: quiet };
     this.current = run;
     // Aborting on exit lets waitReady fail fast when the child dies while booting.
     const boot = new AbortController();
@@ -131,6 +152,7 @@ export class Supervisor {
     });
     try {
       const bootId = await this.deps.waitReady(spec.port, boot.signal);
+      run.expectedExit = false;
       return { launchUrl: `http://127.0.0.1:${spec.port}/api/local/launch?token=${spec.token}`, bootId };
     } finally {
       this.stopping.signal.removeEventListener("abort", abort);

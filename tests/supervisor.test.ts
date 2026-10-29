@@ -102,6 +102,50 @@ describe("Supervisor", () => {
     expect(f.maxLive()).toBe(1);
   });
 
+  it("refuses a different switch mid-flight and leaves spawns unchanged", async () => {
+    const f = makeDeps();
+    const s = sup(f.deps);
+    await s.start({ dbFile: "/db/a" });
+    const first = s.switchTo({ backend: HUB });
+    await expect(s.switchTo({ backend: "github" })).rejects.toThrow("Another workspace switch is in progress");
+    await first;
+    expect(f.spawned).toHaveLength(2);
+  });
+
+  it("refuses start() while a switch is in flight", async () => {
+    const f = makeDeps();
+    const s = sup(f.deps);
+    await s.start({ dbFile: "/db/a" });
+    const first = s.switchTo({ backend: HUB });
+    await expect(s.start({ dbFile: "/db/x" })).rejects.toThrow("Another workspace switch is in progress");
+    await first;
+    expect(f.spawned).toHaveLength(2);
+  });
+
+  it("reports when the previous child cannot be restored either", async () => {
+    const f = makeDeps({ failReadyFor: () => f.spawned.length >= 2 });
+    const s = sup(f.deps);
+    await s.start({ dbFile: "/db/a" });
+    await expect(s.switchTo({ backend: HUB })).rejects.toThrow("Could not start the other workspace, and the previous one could not be restored");
+    expect(f.spawned).toHaveLength(3);
+    expect(f.maxLive()).toBe(1);
+    expect(f.events[f.events.length - 1]).toBe("kill:/db/a");
+  });
+
+  it("does not emit child-exit for a child dying during a switch's boot", async () => {
+    const f = makeDeps({ failReadyFor: (spec) => spec.dbFile === `/db/${HUB}` });
+    const s = sup(f.deps);
+    const codes: Array<number | null> = [];
+    s.on("child-exit", (c) => codes.push(c));
+    await s.start({ dbFile: "/db/a" });
+    f.deps.waitReady = async () => {
+      f.exits[f.exits.length - 1](1);
+      throw new Error("died");
+    };
+    await expect(s.switchTo({ backend: HUB })).rejects.toThrow();
+    expect(codes).toEqual([]);
+  });
+
   it("emits child-exit for an unexpected exit and does not respawn", async () => {
     const f = makeDeps();
     const s = sup(f.deps);
@@ -165,6 +209,35 @@ describe("control channel", () => {
     const res = await post(url, { backend: HUB }, secret);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ launchUrl: `http://127.0.0.1:4100/api/local/launch?token=${f.spawned[1].token}` });
+  });
+
+  it("answers 413 for an oversized body", async () => {
+    const { url, secret } = await control();
+    expect((await post(url, JSON.stringify({ backend: HUB, pad: "x".repeat(5000) }), secret)).status).toBe(413);
+  });
+
+  it("answers 409 for a different switch mid-flight", async () => {
+    const { f, url, secret } = await control();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const ready = f.deps.waitReady;
+    f.deps.waitReady = async (...args) => {
+      await gate;
+      return ready(...args);
+    };
+    const first = post(url, { backend: HUB }, secret);
+    await new Promise((r) => setTimeout(r, 30));
+    const second = await post(url, { backend: "github" }, secret);
+    expect(second.status).toBe(409);
+    release();
+    expect((await first).status).toBe(200);
+  });
+
+  it("refuses a second listenControl", async () => {
+    const f = makeDeps();
+    const s = sup(f.deps);
+    await s.listenControl();
+    await expect(s.listenControl()).rejects.toThrow();
   });
 
   it("ControlClient switches and surfaces errors", async () => {
