@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, Space } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { GithubError } from "@/lib/github/port";
-import type { Backend, HubClient } from "@/lib/hub/types";
+import { HubError, type Backend, type EntityEvent, type HubClient } from "@/lib/hub/types";
 import { mapLimit } from "@/lib/util";
 import { ENTITY_SCHEMA, ENTITY_TYPES, entityDef, entityPath, parseEntityPath, type Ctx, type EntityDef, type Listed } from "./entities";
 import { same, threeWayMerge, type Data } from "./merge";
@@ -172,8 +172,132 @@ export class SyncEngine {
   }
 
   private async pullHub(space0: Space): Promise<{ changed: boolean; applied: number }> {
-    this.backendOf(space0); // throws when no hub client is configured; the transport is filled in by a later task
-    return { changed: false, applied: 0 };
+    const backend = this.backendOf(space0);
+    if (backend.kind !== "hub") throw new Error("Not a hub space");
+    const client = backend.client;
+    const space = space0;
+    const start = space.hubCursor;
+    // The cursor is a position in THIS hub's history. A hub that answers with an older position (restored from a backup, rebuilt)
+    // or that no longer holds our position (pruned) cannot be followed by events: start over from a full snapshot.
+    let since = start;
+    let cursor = start;
+    const events: EntityEvent[] = [];
+    let snapshot: { seq: bigint; entities: EntityFile[] } | null = null;
+    try {
+      for (;;) {
+        const r = await client.pull(space.hubSpaceId, since);
+        if (r === "gone" || r.seq < since) {
+          snapshot = await client.snapshot(space.hubSpaceId);
+          cursor = snapshot.seq;
+          break;
+        }
+        events.push(...r.events);
+        const last = r.events[r.events.length - 1];
+        if (r.more && last) {
+          since = last.seq;
+          cursor = last.seq;
+          continue;
+        }
+        cursor = r.seq;
+        break;
+      }
+    } catch (e) {
+      await this.handleHubError(space, e, "read");
+      return { changed: false, applied: 0 };
+    }
+
+    // Only the newest event per entity matters; the hub's version is the whole state.
+    let items: { file: EntityFile; seq: bigint }[];
+    if (snapshot) {
+      const seq = snapshot.seq;
+      items = snapshot.entities.filter((f) => !!entityDef(f.type)).map((file) => ({ file, seq }));
+    } else {
+      const latest = new Map<string, { file: EntityFile; seq: bigint }>();
+      for (const ev of events) {
+        if (!entityDef(ev.type)) continue; // unknown types are ignored (and never rewritten)
+        const prev = latest.get(`${ev.type}/${ev.id}`);
+        if (!prev || ev.seq > prev.seq) latest.set(`${ev.type}/${ev.id}`, { file: ev, seq: ev.seq });
+      }
+      items = [...latest.values()];
+    }
+    let vanished: { type: string; entityId: string; baseVersion: number }[] = [];
+    if (snapshot) {
+      const present = new Set(snapshot.entities.map((f) => `${f.type}/${f.id}`));
+      vanished = (await this.db.syncEntity.findMany({ where: { spaceId: space.id, deleted: false } })).filter((s) => !!entityDef(s.type) && !present.has(`${s.type}/${s.entityId}`));
+    }
+
+    const ctx = await this.ctx(space);
+    const { applied, skipped, failedSeq } = await this.applyHubEntities(ctx, items, vanished);
+    if (failedSeq !== null) {
+      // The cursor stays before the first entity that could not be applied, so the next pull retries it.
+      if (snapshot) cursor = start;
+      else if (failedSeq - 1n < cursor) cursor = failedSeq - 1n < start ? start : failedSeq - 1n;
+    }
+
+    const now = this.now();
+    const moved = cursor !== start;
+    await this.db.space.update({
+      where: { id: space.id },
+      data: {
+        hubCursor: cursor, lastPolledAt: now, ...(applied || moved ? { lastChangedAt: now, unchangedPolls: 0 } : {}),
+        access: space.access === "REVOKED" ? "OK" : space.access, rateLimitedUntil: null,
+        lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity(ies): ${skipped[0]}` : null,
+      },
+    });
+    await this.schedule({ ...space, access: "OK", unchangedPolls: applied || moved ? 0 : space.unchangedPolls }, applied || moved ? "changed" : "unchanged");
+    if (applied) this.emit(space.id, "pulled");
+    return { changed: applied > 0 || moved, applied };
+  }
+
+  /** The per-entity apply loop for hub events and snapshots: same guards as a GitHub pull, in ENTITY_TYPES order. */
+  private async applyHubEntities(ctx: Ctx, items: { file: EntityFile; seq: bigint }[], vanished: { type: string; entityId: string; baseVersion: number }[]) {
+    const space = ctx.space;
+    let applied = 0;
+    const skipped: string[] = [];
+    let failedSeq: bigint | null = null;
+    const fail = (seq: bigint, msg: string) => {
+      skipped.push(msg);
+      if (failedSeq === null || seq < failedSeq) failedSeq = seq;
+    };
+    for (const def of ENTITY_TYPES) {
+      const local = await this.localMap(def, ctx.commonSpaceId);
+      const appliedHere: { id: string; data: Data }[] = [];
+      for (const { file, seq } of items.filter((i) => i.file.type === def.type)) {
+        const name = `${file.type}/${file.id}`;
+        if (file.schema > ENTITY_SCHEMA) {
+          skipped.push(`${name}: needs a newer Mergeport`);
+          await this.blockEntity(space.id, def.type, file.id, String(seq), file.version);
+          continue;
+        }
+        // An entity this person has placed in ANOTHER space is not overwritten, moved or deleted from here.
+        const row = local.get(file.id);
+        if (row?.spaceId && row.spaceId !== space.id) continue;
+        try {
+          const r = await this.reconcile(ctx, def, file, String(seq), row?.data ?? null);
+          if (r.applied) {
+            applied++;
+            if (r.data) appliedHere.push({ id: file.id, data: r.data });
+          } else {
+            // Not recorded: a prerequisite entity is not there yet. Hold the cursor so it is retried.
+            const se = await this.db.syncEntity.findUnique({ where: { spaceId_type_entityId: { spaceId: space.id, type: def.type, entityId: file.id } } });
+            if (!se || se.baseVersion !== file.version) fail(seq, `${name}: waiting for a related entity`);
+          }
+        } catch (e) {
+          fail(seq, `${name}: ${e instanceof Error ? e.message : "could not be applied"}`);
+        }
+      }
+      for (const v of vanished.filter((s) => s.type === def.type)) {
+        const owner = local.get(v.entityId);
+        if (owner?.spaceId && owner.spaceId !== space.id) continue;
+        const hasLocalEdits = (await this.db.outboxOp.count({ where: { spaceId: space.id, entityType: def.type, entityId: v.entityId, status: { in: ["PENDING", "SENT"] } } })) > 0;
+        if (hasLocalEdits) continue;
+        await def.apply(this.db, ctx, v.entityId, null, v.baseVersion);
+        await this.db.syncEntity.update({ where: { spaceId_type_entityId: { spaceId: space.id, type: def.type, entityId: v.entityId } }, data: { deleted: true, remoteSha: null } });
+        applied++;
+      }
+      if (def.post && appliedHere.length) await def.post(this.db, ctx, appliedHere);
+    }
+    return { applied, skipped, failedSeq: failedSeq as bigint | null };
   }
 
   private async pullGithub(space0: Space): Promise<{ changed: boolean; applied: number }> {
@@ -540,7 +664,7 @@ export class SyncEngine {
 
   private async schedule(space: Space, outcome: "changed" | "unchanged" | "error", retryAfterMs?: number): Promise<void> {
     const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
-    const base = Math.max(15, team?.pollSeconds ?? 30) * 1000;
+    const base = space.backend === "HUB" ? (this.d.hubLive?.() ? MAX_POLL_MS : 60_000) : Math.max(15, team?.pollSeconds ?? 30) * 1000;
     let interval: number;
     let unchanged = space.unchangedPolls;
     if (outcome === "changed") {
@@ -595,13 +719,41 @@ export class SyncEngine {
     this.emit(space.id, "state");
   }
 
+  private async handleHubError(space: Space, e: unknown, phase: "read" | "write"): Promise<void> {
+    if (!(e instanceof HubError)) {
+      await this.db.space.update({ where: { id: space.id }, data: { lastError: e instanceof Error ? e.message : String(e) } });
+      return;
+    }
+    const now = this.now();
+    if (e.kind === "network") {
+      await this.schedule(space, "error");
+      await this.db.space.update({ where: { id: space.id }, data: { lastError: "offline" } });
+    } else if (e.kind === "auth") {
+      await this.schedule(space, "error");
+      await this.db.space.update({ where: { id: space.id }, data: { lastError: "Sign in to the server again" } });
+    } else if (e.kind === "not-found" || (e.kind === "forbidden" && phase === "read")) {
+      await this.revokeSpace(space.id, "Access to this space was removed");
+    } else if (e.kind === "forbidden") {
+      // Lost write permission but maybe still readable: fall back to read-only and keep the edits for a person to decide on.
+      await this.db.space.update({ where: { id: space.id }, data: { canWrite: false, lastError: "You no longer have write access to this space." } });
+      await this.db.outboxOp.updateMany({ where: { spaceId: space.id, status: { in: ["PENDING", "SENT"] } }, data: { status: "QUARANTINED", error: "Write access was removed" } });
+    } else if (e.kind === "rate-limited") {
+      const until = new Date(now.getTime() + (e.retryAfterSeconds ?? 60) * 1000);
+      await this.db.space.update({ where: { id: space.id }, data: { rateLimitedUntil: until, lastError: "The server asked to slow down. Edits stay queued locally.", nextPollAt: until } });
+    } else {
+      await this.schedule(space, "error");
+      await this.db.space.update({ where: { id: space.id }, data: { lastError: e.message } });
+    }
+    this.emit(space.id, "state");
+  }
+
   /**
    * Stop reads and writes, quarantine unsent edits (kept, not deleted), and remove cached copies of the space's data
    * from this machine. This cannot erase Git history or anything a person downloaded outside the app.
    */
   async revokeSpace(spaceId: string, why: string): Promise<void> {
     const space = await this.db.space.findUniqueOrThrow({ where: { id: spaceId } });
-    await this.db.space.update({ where: { id: spaceId }, data: { access: "REVOKED", canWrite: false, canAdmin: false, lastError: why, headSha: null, etag: null, nextPollAt: new Date(this.now().getTime() + REVOKED_RECHECK_MS) } });
+    await this.db.space.update({ where: { id: spaceId }, data: { access: "REVOKED", canWrite: false, canAdmin: false, lastError: why, headSha: null, etag: null, hubCursor: 0n, nextPollAt: new Date(this.now().getTime() + REVOKED_RECHECK_MS) } });
     await this.db.outboxOp.updateMany({ where: { spaceId, status: { in: ["PENDING", "SENT", "CONFLICT"] } }, data: { status: "QUARANTINED", error: why } });
     if (space.canAdmin) {
       // An admin created this data on this computer. A repository that was renamed, deleted or hidden must never erase their

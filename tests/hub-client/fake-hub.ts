@@ -39,6 +39,8 @@ export class FakeHub {
   private conns = new Set<Socket>();
   private port = 0;
   private failures = 0;
+  private failKind: "network" | "auth" | "forbidden" | "not-found" | "rate-limited" | "unknown" = "network";
+  private revoked = new Set<string>();
   private dropNext = false;
   private pending = new Map<string, { seq: bigint; timer: NodeJS.Timeout }>();
 
@@ -54,8 +56,40 @@ export class FakeHub {
   setSchema(n: number) {
     this.schema = n;
   }
-  failNext(n: number, _kind: "network") {
+  failNext(n: number, kind: "network" | "auth" | "forbidden" | "not-found" | "rate-limited" | "unknown" = "network") {
     this.failures = n;
+    this.failKind = kind;
+  }
+  /** The member's token stops working: every request answers 401. */
+  revokeToken(githubId: string) {
+    this.revoked.add(githubId);
+  }
+  setRole(githubId: string, role: string) {
+    const m = this.members.get(githubId);
+    if (m) m.role = role;
+  }
+  /** Simulates a restored or rebuilt hub: its sequence goes back to `seq` and no history is kept. */
+  resetSeq(spaceId: string, seq = 0n) {
+    const s = this.spaces.get(spaceId)!;
+    s.seq = seq;
+    s.events = [];
+    s.minSeq = 0n;
+  }
+  /** Writes an entity as if a member had pushed it (any type, schema or data), producing one event. */
+  inject(spaceId: string, e: { type: string; id: string; data?: Record<string, unknown>; schema?: number; deleted?: boolean; opId?: string }): EntityJson {
+    const s = this.spaces.get(spaceId)!;
+    const key = `${e.type}/${e.id}`;
+    const cur = s.entities.get(key);
+    s.seq += 1n;
+    const opId = e.opId ?? `inj-${spaceId}-${s.seq}`;
+    const next: EntityJson = { schema: e.schema ?? 1, type: e.type, id: e.id, version: (cur?.version ?? 0) + 1, deleted: !!e.deleted, appliedOps: [...(cur?.appliedOps ?? []), opId].slice(-50), updatedAt: new Date().toISOString(), updatedBy: { id: "0", login: "injected" }, data: e.deleted ? {} : (e.data ?? {}) };
+    s.entities.set(key, next);
+    s.events.push({ seq: s.seq, opId, entity: next });
+    return next;
+  }
+  /** Removes an entity from the current state without leaving a tombstone event (history pruning). */
+  dropEntity(spaceId: string, type: string, id: string) {
+    this.spaces.get(spaceId)?.entities.delete(`${type}/${id}`);
   }
   dropNextResponse() {
     this.dropNext = true;
@@ -100,7 +134,8 @@ export class FakeHub {
   }
 
   private byToken(token: string | null) {
-    return token?.startsWith("tok-") ? (this.members.get(token.slice(4)) ?? null) : null;
+    const id = token?.startsWith("tok-") ? token.slice(4) : null;
+    return id && !this.revoked.has(id) ? (this.members.get(id) ?? null) : null;
   }
   private canRead(m: Member | null, s: Space) {
     return !!m && m.status === "ACTIVE" && (s.kind === "COMMON" || s.members.has(m.githubId));
@@ -147,7 +182,10 @@ export class FakeHub {
     const url = new URL(req.url ?? "/", "http://x");
     if (this.failures > 0) {
       this.failures--;
-      return req.socket.destroy();
+      if (this.failKind === "network") return req.socket.destroy();
+      const code = { auth: 401, forbidden: 403, "not-found": 404, "rate-limited": 429, unknown: 500 }[this.failKind];
+      res.writeHead(code, { "content-type": "application/json", ...(code === 429 ? { "retry-after": "30" } : {}) });
+      return res.end("{}");
     }
     if (url.pathname === "/health") return send(200, { ok: true, team: { name: "Team" }, schema: this.schema, publicUrl: this.publicUrl ?? this.origin(), githubHost: this.githubHost });
     const m = this.byToken(/^Bearer (.+)$/i.exec(req.headers.authorization ?? "")?.[1] ?? null);
@@ -185,7 +223,7 @@ export class FakeHub {
     send(200, { results, seq: String(s.seq) });
   }
 
-  private origin() {
+  origin() {
     return `http://127.0.0.1:${this.port}`;
   }
   async listen(): Promise<{ url: string }> {
