@@ -9,6 +9,7 @@ import { applyWaitingRules, matchingWaitingRules, type WaitingRuleRow } from "@/
 import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { indexNeedle } from "@/lib/domain/text-index";
 import { deriveStages, type StageEntry } from "@/lib/domain/stages";
+import { blockerFinished } from "@/lib/domain/deps";
 
 /**
  * Every query here starts from the viewer's repository filter. Counts, charts, search and
@@ -62,11 +63,15 @@ async function loadRuleContext(db: Db, v: Viewer) {
   // Unfinished planning blockers per GitHub item. Hidden blockers count too (the count discloses nothing about them).
   // Policy: a blocker only holds back the item in the project where the link lives, so a project-scoped view counts that project's links only.
   const blockerLinks = await db.planningLink.findMany({
-    where: { from: { column: { key: { not: "done" } } }, to: { workItemId: { not: null }, project: { workspaceId: v.workspaceId } } },
-    select: { to: { select: { workItemId: true, projectId: true } } },
+    where: { kind: "blocks", to: { workItemId: { not: null }, project: { workspaceId: v.workspaceId } } },
+    select: { from: { select: { column: { select: { key: true } }, workItem: { select: { type: true, state: true } } } }, to: { select: { workItemId: true, projectId: true } } },
   });
   const blockers = new Map<string, { projectId: string }[]>();
-  for (const l of blockerLinks) (blockers.get(l.to.workItemId!) ?? blockers.set(l.to.workItemId!, []).get(l.to.workItemId!)!).push({ projectId: l.to.projectId });
+  for (const l of blockerLinks) {
+    // A closed, unmerged pull request did not deliver what it blocked on, so it keeps blocking.
+    if (blockerFinished({ columnKey: l.from.column.key, workType: l.from.workItem?.type ?? null, workState: l.from.workItem?.state ?? null })) continue;
+    (blockers.get(l.to.workItemId!) ?? blockers.set(l.to.workItemId!, []).get(l.to.workItemId!)!).push({ projectId: l.to.projectId });
+  }
   return { ruleRows, waitingRows, internalLogins, projectsByRepo, blockers };
 }
 

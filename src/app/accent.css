@@ -47,7 +47,7 @@
 
 /* Page: panel headings, frames and empty states take the section's hue. */
 main[data-section] .panel {
-  background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--sec) 9%, transparent) 0 1px, transparent 1px 7px);
+  background-image: none;
   border-color: color-mix(in srgb, var(--sec) 16%, var(--color-line));
 }
 main[data-section] .panel-head h2 svg {

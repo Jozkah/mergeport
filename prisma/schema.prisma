@@ -264,9 +264,15 @@ model Project {
   slug        String
   description String?
   spaceId     String? // null = local only
+  /// off | suggest. Suggestions never move anything by themselves and never write to GitHub.
+  automation  String   @default("off")
   createdAt   DateTime @default(now())
 
   workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  boards       PlanBoard[]
+  epics        Epic[]
+  iterations   Iteration[]
+  events       PlanEvent[]
   repositories ProjectRepository[]
   members      ProjectMember[]
   columns      PlanningColumn[]
@@ -511,6 +517,8 @@ model PlanningItem {
   priority     Int      @default(0)
   dueDate      DateTime?
   milestoneId  String?
+  epicId       String?
+  iterationId  String?
   createdById  String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -528,6 +536,8 @@ model PlanningItem {
 
   @@index([projectId, columnId])
   @@index([assigneeLogin])
+  @@index([epicId])
+  @@index([iterationId])
 }
 
 /// Immutable GitHub answers keyed by commit (diffs, file contents, commit lists), so reopening a pull request or a file costs
@@ -574,8 +584,10 @@ model TaskComment {
 }
 
 model PlanningLink {
-  fromId String // blocker
+  fromId String // blocker (or the first item of a related / duplicate pair)
   toId   String // blocked
+  /// blocks | related | duplicates. Only "blocks" holds work back and is cycle-checked.
+  kind   String @default("blocks")
 
   from PlanningItem @relation("LinkFrom", fields: [fromId], references: [id], onDelete: Cascade)
   to   PlanningItem @relation("LinkTo", fields: [toId], references: [id], onDelete: Cascade)
@@ -593,6 +605,10 @@ model DashboardMilestone {
   startDate   DateTime?
   targetDate  DateTime?
   status      String    @default("OPEN")
+  /// Work finished is not the same as released: shipping is recorded separately, with an optional tag and link.
+  releaseTag  String?
+  releaseUrl  String?
+  shippedAt   DateTime?
   createdAt   DateTime  @default(now())
 
   workspace Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -990,4 +1006,75 @@ model NotificationPref {
   userId    String   @id
   prefs     Json
   updatedAt DateTime @default(now()) @updatedAt
+}
+
+/// A named view of a project's cards: which columns, in what order, with what labels and optional work-in-progress limits.
+/// Boards never copy cards; they show the same planning items. WIP limits are advice (a column over its limit is flagged, not locked).
+model PlanBoard {
+  id        String   @id @default(cuid())
+  projectId String
+  name      String
+  template  String   @default("")
+  /// [{ key, name?, wip? }] where key is a column key of the project.
+  columns   Json
+  /// none | repository | assignee | milestone | epic
+  groupBy   String   @default("none")
+  density   String   @default("comfortable")
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+/// A shallow parent of cards (and linked GitHub issues): one level, no epics inside epics.
+model Epic {
+  id          String    @id @default(cuid())
+  projectId   String
+  title       String
+  description String?
+  ownerLogin  String?
+  startDate   DateTime?
+  targetDate  DateTime?
+  status      String    @default("OPEN") // OPEN | DONE
+  decisions   String?
+  createdAt   DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+/// A short timebox. A milestone is the delivery goal; an iteration is the cycle currently funding part of it.
+model Iteration {
+  id        String    @id @default(cuid())
+  projectId String
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  closedAt  DateTime?
+  createdAt DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+/// Append-only planning history (created, moved, milestone/iteration/epic changes, carry-overs). Analytics read only this table.
+model PlanEvent {
+  id         String   @id @default(cuid())
+  projectId  String
+  itemId     String
+  kind       String
+  fromKey    String?
+  toKey      String?
+  refId      String?
+  actorLogin String?
+  at         DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, at])
+  @@index([itemId])
 }

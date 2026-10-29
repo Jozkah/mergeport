@@ -1,9 +1,10 @@
 import { processStartedAt } from "@/lib/local/boot";
-import { Suspense } from "react";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { readScope, scopeKey } from "@/lib/scope";
+import { Suspense } from "react";
+import { TaskDrawer } from "@/components/planning/TaskDrawer";
 import { DesktopNotifier } from "@/components/shell/DesktopNotifier";
 import { ScopePicker } from "@/components/shell/ScopePicker";
 import { inbox } from "@/lib/services/inbox";
@@ -101,6 +102,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="flex min-w-0 flex-1 flex-col">
         <Suspense fallback={<div className="h-14" />}>
           <DesktopNotifier />
+          <Suspense fallback={null}><TaskDrawer /></Suspense>
           <Topbar scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "mismatch" && (

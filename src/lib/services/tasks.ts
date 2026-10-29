@@ -4,6 +4,7 @@ import { requireProject, type Viewer } from "@/lib/authz/viewer";
 import { positionBetween } from "@/lib/domain/planning";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { audit } from "./audit";
+import { recordColumnChange } from "./plan-events";
 import { createCard, listDependencies } from "./planning";
 import { planningWhere } from "./queries";
 
@@ -138,6 +139,8 @@ export async function updateTask(db: Db, v: Viewer, id: string, patch: TaskPatch
   const t = await loadTask(db, v, id);
   const data: Prisma.PlanningItemUpdateInput = { version: { increment: 1 } };
   const said: string[] = [];
+  let movedFrom: string | null = null;
+  let movedTo: string | null = null;
   if (patch.title !== undefined && !t.workItemId) {
     const title = patch.title.trim();
     if (!title) throw new ValidationError("Give the task a title");
@@ -188,6 +191,8 @@ export async function updateTask(db: Db, v: Viewer, id: string, patch: TaskPatch
     data.column = { connect: { id: col.id } };
     data.position = positionBetween(last?.position ?? null, null);
     said.push(`moved this to ${col.name}`);
+    movedFrom = t.column.key;
+    movedTo = col.key;
   }
   if (patch.tickOpenItems && (patch.columnKey ?? t.column.key) === "done") {
     const open = await db.taskCheckItem.updateMany({ where: { itemId: id, done: false }, data: { done: true, doneByLogin: v.login, doneAt: new Date() } });
@@ -196,6 +201,7 @@ export async function updateTask(db: Db, v: Viewer, id: string, patch: TaskPatch
   if (Object.keys(data).length === 1 && said.length === 0) return t; // nothing changed
   const updated = await db.planningItem.update({ where: { id }, data });
   for (const s of said) await event(db, id, v.login, s);
+  if (movedFrom && movedTo) await recordColumnChange(db, { projectId: t.projectId, itemId: id, from: movedFrom, to: movedTo, actorLogin: v.login });
   await audit(db, v, "task.update", { type: "PlanningItem", id });
   return updated;
 }

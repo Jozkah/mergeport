@@ -141,13 +141,13 @@ describe("planning scope", () => {
     const { db, admin, b, ids } = S;
     await addDependency(db, admin, ids.cards.cApiPr.id, ids.cards.cWeb.id); // hidden blocks visible
     const first = await getTask(db, b, ids.cards.cWeb.id);
-    expect(first.dependencies.filter((d) => d.opaque)).toEqual([{ direction: "blocked-by", opaque: true }]);
+    expect(first.dependencies.filter((d) => d.opaque)).toEqual([{ direction: "blocked-by", kind: "blocks", opaque: true }]);
     expect(leaks(first, ids.cards.cApiPr.id)).toBe(false);
     expect(leaks(first, "token refresh")).toBe(false);
     await db.planningLink.deleteMany({ where: { fromId: ids.cards.cApiPr.id, toId: ids.cards.cWeb.id } });
     await addDependency(db, admin, ids.cards.cWeb.id, ids.cards.cApiPr2.id); // visible blocks hidden
     const second = await getTask(db, b, ids.cards.cWeb.id);
-    expect(second.dependencies.filter((d) => d.opaque)).toEqual([{ direction: "blocks", opaque: true }]);
+    expect(second.dependencies.filter((d) => d.opaque)).toEqual([{ direction: "blocks", kind: "blocks", opaque: true }]);
     expect(leaks(second, ids.cards.cApiPr2.id)).toBe(false);
   });
 

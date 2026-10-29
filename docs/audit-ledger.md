@@ -49,16 +49,16 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 | 6 | Since I last looked | done for PR/issue detail (personal baseline on first look, lists new commits, comments from others, reviewer decisions, checks, conflicts, state, title until "Mark as seen"; `tests/seen.test.ts`; rendered check). Not done: no per-file "changed files" detail, not shown in lists or Inbox rows |
 | 7 | Review capacity | done (`/capacity`: queued reviews and oldest wait per member, availability windows and configured backups as shared synced entity `availability`, suggestion only, no reassignment or notification; `tests/capacity.test.ts`; rendered check). Not done: capacity ignores team-review routing (only named users) |
 | 8 | Notification preferences | done (Settings: per-event in-app and desktop, quiet hours across midnight in the person's time zone; new "changes requested" notification; grouped on Activity; desktop pop-ups only while the app is open and only if the browser allowed them; `tests/notify.test.ts`). Not done: desktop pop-ups were not exercised in a real browser, and only two event kinds exist |
-| 9 | Named boards, WIP limits | not started |
-| 10 | Swimlanes | not started |
-| 11 | Epics | not started |
-| 12 | Release readiness | not started |
-| 13 | Iterations | not started |
-| 14 | Dependency map | not started |
-| 15 | Planning automation | not started |
-| 16 | Templates, promotion | not started |
-| 17 | Delivery analytics (start recording events first) | not started |
-| 18 | Detail drawer | not started |
+| 9 | Named boards, WIP limits | done (`PlanBoard`: columns subset/order/labels per project column, four templates, WIP limits as flagged advice; synced entity `board`; `tests/planning3.test.ts`, `tests/domain/planning3.test.ts`; rendered check). Not done: boards cannot add new column keys beyond the six project columns |
+| 10 | Swimlanes | done (group by repository, assignee, milestone or epic; same cards, one board per lane; compact/comfortable density). Not done: dragging between lanes does not change the lane value; quick filters beyond saved views |
+| 11 | Epics | done (one level, owner, dates, decisions, progress over visible children with hidden count; synced entity `epic`; Epics view). Not done: epics are not shown in the task detail page yet (only in cards, lanes and the Epics view) |
+| 12 | Release readiness | done (Release view: unfinished, failing CI, blocked, pending decisions; work finished and shipped are separate; admin records tag and https link). Not done: no GitHub Releases are read, shipped is recorded by hand (unverified against real GitHub) |
+| 13 | Iterations | done (non-overlapping timeboxes, explicit carry-over on close with recorded events; synced entity `iteration`). Not done: no per-iteration burndown (analytics only from recorded events) |
+| 14 | Dependency map | done (kinds blocks/related/duplicates; cross-project within one audience; workspace-wide cycle check; layered SVG map, critical blockers, hidden ends as anonymous markers; closed-unmerged PR keeps blocking in planning, attention and release readiness). Not done: map has no pan/zoom or filters |
+| 15 | Planning automation | done (per-project off/suggest; merged PR or closed issue previews a move to Done; applying moves the local card only; a PR closed unmerged is never suggested). Not done: only one rule exists |
+| 16 | Templates, promotion | done (bug, feature, review, release templates with checklists; promote a task: destination choice, exact preview, one issue created as the person, same record linked, never twice; tested against the fake port). Not done: promotion not exercised against real GitHub |
+| 17 | Delivery analytics | done (append-only `PlanEvent` recorded on create, move, milestone, epic, iteration, carry-over; synced entity `planevent`; cycle time, aging WIP, review wait from real review facts, scope added; says since when recording began and what is left out). Not done: events before this release do not exist, so history starts at upgrade |
+| 18 | Detail drawer | done (`?card=<id>` side drawer from board cards and the Tasks list; keeps filters, scroll and focus; same authorization as the task page; comment and checklist quick actions; open-full-page link). Not done: not wired into PR/issue lists or Attention rows |
 | 19 | CODEOWNERS routing | not started |
 | 20 | Draft review batches | not started |
 | 21 | Review version compare | not started |
@@ -76,10 +76,10 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 
 ## Phase 2 progress
 
-Phase 2 complete (ideas 1-8). The inbox is built on the existing Attention queues (no second source of truth) and its state table `InboxState` is personal and never synced.
+Phase 2 complete (ideas 1-8). Phase 3 complete (ideas 9-18). The inbox is built on the existing Attention queues (no second source of truth) and its state table `InboxState` is personal and never synced.
 
 ## Suggested order for the next session
 
-1. Phase 3 (ideas 9-18).
+1. Phase 4 (ideas 19-26).
 2. Crash recovery around SENT outbox operations; quota/scheduler investigation.
 3. Idea 17's event capture can be added early and cheaply so history accumulates while other work proceeds.

@@ -11,14 +11,16 @@ import { Select } from "@/components/ui/Select";
 import { Avatar, LabelChip, PageHeader, Panel, Time } from "@/components/ui/primitives";
 import { ArrowLeft, CalendarDays, ExternalLink, Flag, ListChecks, MessageSquare, Pencil, Trash2 } from "@/components/ui/icons";
 import { Checklist } from "@/components/tasks/Checklist";
+import { PromotePanel } from "@/components/tasks/TemplatePanels";
 import { TaskFields } from "@/components/tasks/TaskFields";
 import { addCommentAction, deleteCommentAction, deleteTaskAction, editCommentAction, updateTaskAction } from "@/app/task-actions";
 
 export const metadata = { title: "Task" };
 
-export default async function TaskPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function TaskPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ promote?: string }> }) {
   const { viewer } = await requireViewer();
   const { id } = await params;
+  const { promote } = await searchParams;
   let data: Awaited<ReturnType<typeof getTask>>;
   try {
     data = await getTask(db, viewer, id);
@@ -157,6 +159,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
             </div>
           </Panel>
 
+          <PromotePanel db={db} viewer={viewer} taskId={task.id} linked={!!task.workItemId} promoteTo={promote} />
           <Panel title="Change">
             <ActionForm action={updateTaskAction} submitLabel="Save changes" pendingLabel="Saving…" resetOnSuccess={false} className="p-4">
               <input type="hidden" name="id" value={task.id} />

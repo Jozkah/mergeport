@@ -15,21 +15,24 @@ import { LabelChip, Mono } from "@/components/ui/primitives";
 import { moveCardAction } from "@/app/actions";
 import { positionBetween } from "@/lib/domain/planning";
 import type { CardView } from "@/lib/services/planning-view";
+import { OpenCardLink } from "@/components/planning/TaskDrawer";
+import { WipBadge } from "@/components/planning/WipBadge";
 
-type Col = { id: string; key: string; name: string };
+type Col = { id: string; key: string; name: string; /** Work-in-progress limit and the count across every lane (advice: flagged, never enforced). */ wip?: number | null; total?: number };
 
-function CardBody({ c, move, handle }: { c: CardView; move?: React.ReactNode; handle?: React.ReactNode }) {
+function CardBody({ c, move, handle, compact }: { c: CardView; move?: React.ReactNode; handle?: React.ReactNode; compact?: boolean }) {
   return (
     <div className="relative rounded-[10px] border border-line bg-surface p-3 text-[13px] shadow-hair">
       {handle}
-      <p className={`font-medium leading-[1.35] [overflow-wrap:anywhere] ${handle ? "pr-6" : ""}`}>{c.href ? <a href={c.href} className="hover:underline">{c.title}</a> : c.title}</p>
+      <p className={`font-medium leading-[1.35] [overflow-wrap:anywhere] ${handle ? "pr-6" : ""}`}><OpenCardLink id={c.id} href={c.taskHref} className="hover:underline">{c.title}</OpenCardLink></p>
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-3">
         {c.isDraft ? <span>Internal task</span> : <Mono title={c.repoFullName ?? ""}>{c.repoFullName}#{c.number}</Mono>}
         {c.priority > 0 && <span className="tnum">P{c.priority}</span>}
         {c.milestoneName && <span className="truncate" title={c.milestoneName}>{c.milestoneName}</span>}
+        {c.epicTitle && <span className="truncate" title={`Epic: ${c.epicTitle}`}>◆ {c.epicTitle}</span>}
       </div>
-      {c.labels.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1">{c.labels.slice(0, 3).map((l) => <LabelChip key={l.name} {...l} />)}</div>}
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]">
+      {!compact && c.labels.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1">{c.labels.slice(0, 3).map((l) => <LabelChip key={l.name} {...l} />)}</div>}
+      <div className={`${compact ? "mt-1" : "mt-2"} flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]`}>
         {c.due && <span className={`inline-flex items-center gap-1 tnum ${c.overdue ? "text-blocked" : "text-ink-3"}`}><CalendarDays size={12} aria-hidden />{c.overdue ? "Overdue " : "Due "}{c.dueLabel}</span>}
         {c.checklist.total > 0 && <span className={`inline-flex items-center gap-1 tnum ${c.checklist.done === c.checklist.total ? "text-ok" : "text-ink-3"}`}><ListChecks size={12} aria-hidden /><span className="sr-only">Checklist </span>{c.checklist.done}/{c.checklist.total}</span>}
         {c.assignee && <span className="text-ink-3">@{c.assignee}</span>}
@@ -44,7 +47,7 @@ function CardBody({ c, move, handle }: { c: CardView; move?: React.ReactNode; ha
 type Fx = { enter: Set<string>; ring: Set<string>; ghosts: { card: CardView; key: string; index: number }[] };
 const NO_FX: Fx = { enter: new Set(), ring: new Set(), ghosts: [] };
 
-function SortableCard({ c, cols, onMove, disabled, fx }: { c: CardView; cols: Col[]; onMove: (id: string, key: string) => void; disabled: boolean; fx: Fx }) {
+function SortableCard({ c, cols, onMove, disabled, fx, compact }: { c: CardView; cols: Col[]; onMove: (id: string, key: string) => void; disabled: boolean; fx: Fx; compact?: boolean }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: c.id, disabled: !c.canMove || disabled, data: { columnKey: c.columnKey } });
   return (
     <li ref={setNodeRef} data-flip-id={c.id} data-col={c.columnKey} style={{ transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined, transition: transition ?? undefined, opacity: isDragging ? 0.4 : 1 }}>
@@ -52,6 +55,7 @@ function SortableCard({ c, cols, onMove, disabled, fx }: { c: CardView; cols: Co
       <div onPointerDown={c.canMove ? (listeners?.onPointerDown as React.PointerEventHandler<HTMLDivElement> | undefined) : undefined} className={`${c.canMove ? "cursor-grab active:cursor-grabbing" : ""} ${fx.enter.has(c.id) ? "card-enter" : ""} ${fx.ring.has(c.id) ? "card-landed" : ""}`}>
         <CardBody
           c={c}
+          compact={compact}
           handle={
             c.canMove ? (
               <button ref={setActivatorNodeRef} type="button" {...attributes} {...listeners} className="btn btn-quiet btn-icon absolute right-1 top-1 !h-7 !w-7 cursor-grab touch-none" aria-label={`Drag “${c.title}” with the keyboard: press Space to lift, arrow keys to move, Space to drop`}>
@@ -79,18 +83,18 @@ function SortableCard({ c, cols, onMove, disabled, fx }: { c: CardView; cols: Co
 
 const COLUMN_PAGE = 40;
 
-function Column({ col, cards: allCards, cols, onMove, busy, fx }: { col: Col; cards: CardView[]; cols: Col[]; onMove: (id: string, key: string) => void; busy: boolean; fx: Fx }) {
+function Column({ col, cards: allCards, cols, onMove, busy, fx, compact }: { col: Col; cards: CardView[]; cols: Col[]; onMove: (id: string, key: string) => void; busy: boolean; fx: Fx; compact?: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: "col:" + col.key });
   const [limit, setLimit] = useState(COLUMN_PAGE);
   const cards = allCards.slice(0, limit); // a long column renders in pages; the count in the header is the real one
   return (
     <section aria-labelledby={`col-${col.key}`} className="flex min-h-0 max-h-[calc(100dvh-19rem)] min-w-[236px] flex-1 basis-[236px] flex-col rounded-[12px] border border-line bg-canvas p-2">
-      <h3 id={`col-${col.key}`} className="mb-2 flex items-center justify-between px-1.5 text-[13px] font-medium text-ink-2"><span className="inline-flex items-center gap-2"><span className="col-dot" data-col={col.key} aria-hidden />{col.name}</span><span className="rounded-full bg-muted px-2 text-[11.5px] leading-5"><Metric value={allCards.length} /></span></h3>
+      <h3 id={`col-${col.key}`} className="mb-2 flex items-center justify-between px-1.5 text-[13px] font-medium text-ink-2"><span className="inline-flex items-center gap-2"><span className="col-dot" data-col={col.key} aria-hidden />{col.name}</span><span className="inline-flex items-center gap-1.5">{col.wip ? <WipBadge count={col.total ?? allCards.length} limit={col.wip} /> : null}<span className="rounded-full bg-muted px-2 text-[11.5px] leading-5"><Metric value={allCards.length} /></span></span></h3>
       <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <ul ref={setNodeRef} className={`flex min-h-16 flex-1 flex-col gap-2 overflow-y-auto rounded-[8px] p-1 transition-colors duration-[var(--duration-feedback)] ${isOver ? "bg-muted" : ""}`}>
           {(() => {
             // A card that left (a teammate removed it) lingers for one short exit, in its old place, so the list does not jump.
-            const rows: React.ReactNode[] = cards.map((c) => <SortableCard key={c.id} c={c} cols={cols} onMove={onMove} disabled={busy} fx={fx} />);
+            const rows: React.ReactNode[] = cards.map((c) => <SortableCard key={c.id} c={c} cols={cols} onMove={onMove} disabled={busy} fx={fx} compact={compact} />);
             for (const g of fx.ghosts.filter((x) => x.key === col.key)) rows.splice(Math.min(g.index, rows.length), 0, <li key={"ghost-" + g.card.id} aria-hidden inert className="card-ghost"><div><CardBody c={g.card} /></div></li>);
             return rows;
           })()}
@@ -106,7 +110,7 @@ function Column({ col, cards: allCards, cols, onMove, busy, fx }: { col: Col; ca
  * Board with optimistic moves. Every move is sent with the card's version; a conflict or failure rolls the card
  * back to where it was and tells the person. Keyboard: the per-card "Move to" select, or dnd-kit's keyboard drag.
  */
-export function Board({ columns, initial }: { columns: Col[]; initial: CardView[] }) {
+export function Board({ columns, initial, compact = false }: { columns: Col[]; initial: CardView[]; compact?: boolean }) {
   const router = useRouter();
   const [cards, setCards] = useState(initial);
   const { show: say } = useToast();
@@ -292,7 +296,7 @@ export function Board({ columns, initial }: { columns: Col[]; initial: CardView[
         {/* The board scrolls inside its own region; it never widens the page. */}
         <div className="relative max-w-full overflow-x-auto pb-3" tabIndex={0} role="region" aria-label="Planning board (scrolls horizontally; each column scrolls vertically)">
           <div ref={content} className="flex min-h-[16rem] min-w-max gap-3 xl:min-w-full">
-            {columns.map((col) => <Column key={col.key} col={col} cols={columns} cards={byCol(col.key)} onMove={(id, key) => { refocus.current = id; commit(id, key, null); }} busy={pending} fx={fx} />)}
+            {columns.map((col) => <Column key={col.key} col={col} cols={columns} cards={byCol(col.key)} onMove={(id, key) => { refocus.current = id; commit(id, key, null); }} busy={pending} fx={fx}  compact={compact} />)}
           </div>
         </div>
         <DragOverlay dropAnimation={reduce ? null : { duration: seconds("--duration-fast", 0.25) * 1000, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }}>{active ? <div className="w-[256px] rotate-0"><CardBody c={active} /></div> : null}</DragOverlay>

@@ -68,7 +68,7 @@
 }
 
 :root {
-  --stripe: repeating-linear-gradient(135deg, rgb(0 0 0 / 0.022) 0 1px, transparent 1px 7px);
+  --stripe: none;
 }
 
 /* ---------- Themes ----------
@@ -125,7 +125,7 @@
   --shadow-hair: 0 4px 14px 0 rgb(0 0 0 / 0.35);
   --shadow-nav: 0 4px 7px 0 rgb(0 0 0 / 0.3);
   --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 6px rgb(0 0 0 / 0.4);
-  --stripe: repeating-linear-gradient(135deg, rgb(255 255 255 / 0.028) 0 1px, transparent 1px 7px);
+  --stripe: none;
   --bar-ghost-a: #2a3037;
   --bar-ghost-b: rgb(42 48 55 / .6);
   --bar-on-a: #e7e9ec;
@@ -176,7 +176,7 @@
       --shadow-hair: 0 4px 14px 0 rgb(0 0 0 / 0.35);
       --shadow-nav: 0 4px 7px 0 rgb(0 0 0 / 0.3);
       --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 6px rgb(0 0 0 / 0.4);
-      --stripe: repeating-linear-gradient(135deg, rgb(255 255 255 / 0.028) 0 1px, transparent 1px 7px);
+      --stripe: none;
       --bar-ghost-a: #2a3037;
       --bar-ghost-b: rgb(42 48 55 / .6);
       --bar-on-a: #e7e9ec;

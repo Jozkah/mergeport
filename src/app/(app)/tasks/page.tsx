@@ -1,3 +1,5 @@
+import { TemplateButton } from "@/components/tasks/TemplatePanels";
+import { OpenCardLink } from "@/components/planning/TaskDrawer";
 import Link from "next/link";
 import { readScope } from "@/lib/scope";
 import { ScopeNote } from "@/components/shell/ScopeNote";
@@ -51,7 +53,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
       <PageHeader
         title="Tasks"
         subtitle="Create a task, give it to someone, and talk about it. Tasks are the same cards as on the planning board and sync to everyone in the project's team."
-        actions={projects.length > 0 ? <NewTask projects={projects.map((p) => ({ id: p.id, name: p.name }))} peopleByProject={peopleByProject} me={viewer.login} defaultProjectId={project?.id ?? projects[0].id} /> : undefined}
+        actions={projects.length > 0 ? <><TemplateButton projects={projects.map((p) => ({ id: p.id, name: p.name }))} /><NewTask projects={projects.map((p) => ({ id: p.id, name: p.name }))} peopleByProject={peopleByProject} me={viewer.login} defaultProjectId={project?.id ?? projects[0].id} /></> : undefined}
       />
       <ScopeNote scope={workScope} />
       <ViewBar scope="tasks" views={await listViews(db, viewer, "tasks")} />
@@ -78,7 +80,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
               const overdue = isOverdue(t.dueDate, t.column.key, today);
               return (
                 <li key={t.id} data-ctx={ctx([{ label: "Copy task title", copy: t.title }])}>
-                  <Link href={`/tasks/${t.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-hover">
+                  <OpenCardLink id={t.id} href={`/tasks/${t.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-hover">
                     <span className="mt-0.5 shrink-0 text-ink-3" aria-hidden><ListChecks size={16} /></span>
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -101,7 +103,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
                     ) : (
                       <span className="shrink-0 text-[12.5px] text-ink-3">Unassigned</span>
                     )}
-                  </Link>
+                  </OpenCardLink>
                 </li>
               );
             })}
