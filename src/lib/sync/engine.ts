@@ -176,6 +176,8 @@ export class SyncEngine {
     if (backend.kind !== "hub") throw new Error("Not a hub space");
     const client = backend.client;
     const space = space0;
+    // A revoked space is reopened by syncHubSpaces (the hub's member list), never by a pull that happens to succeed.
+    if (space.access === "REVOKED") return { changed: false, applied: 0 };
     const start = space.hubCursor;
     // The cursor is a position in THIS hub's history. A hub that answers with an older position (restored from a backup, rebuilt)
     // or that no longer holds our position (pruned) cannot be followed by events: start over from a full snapshot.
@@ -186,8 +188,10 @@ export class SyncEngine {
     try {
       for (;;) {
         const r = await client.pull(space.hubSpaceId, since);
+        if (await this.revokedMeanwhile(space.id)) return { changed: false, applied: 0 };
         if (r === "gone" || r.seq < since) {
           snapshot = await client.snapshot(space.hubSpaceId);
+          if (await this.revokedMeanwhile(space.id)) return { changed: false, applied: 0 };
           cursor = snapshot.seq;
           break;
         }
@@ -240,11 +244,11 @@ export class SyncEngine {
       where: { id: space.id },
       data: {
         hubCursor: cursor, lastPolledAt: now, ...(applied || moved ? { lastChangedAt: now, unchangedPolls: 0 } : {}),
-        access: space.access === "REVOKED" ? "OK" : space.access, rateLimitedUntil: null,
+        rateLimitedUntil: null,
         lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity(ies): ${skipped[0]}` : null,
       },
     });
-    await this.schedule({ ...space, access: "OK", unchangedPolls: applied || moved ? 0 : space.unchangedPolls }, applied || moved ? "changed" : "unchanged");
+    await this.schedule({ ...space, unchangedPolls: applied || moved ? 0 : space.unchangedPolls }, applied || moved ? "changed" : "unchanged");
     if (applied) this.emit(space.id, "pulled");
     return { changed: applied > 0 || moved, applied };
   }
@@ -565,6 +569,9 @@ export class SyncEngine {
         await this.handleHubError(space, e, "write");
         return { sent };
       }
+      // Access removed while the request was in flight: revokeSpace already quarantined these operations and dropped the
+      // space's rows; recording the hub's answers now would re-create them on a space this person can no longer see.
+      if (await this.revokedMeanwhile(space.id)) return { sent };
       let rewritten = false;
       try {
       const byId = new Map(results.results.map((r) => [r.opId, r]));
@@ -588,7 +595,7 @@ export class SyncEngine {
           await this.db.outboxOp.deleteMany({ where: { id: op.id } });
           touched = true;
         } else {
-          await this.db.outboxOp.updateMany({ where: { id: op.id }, data: { status: "PENDING" } });
+          await this.db.outboxOp.updateMany({ where: { id: op.id, status: "SENT" }, data: { status: "PENDING" } });
           const def = entityDef(op.entityType);
           const current = r.current;
           if (!def) continue;
@@ -804,6 +811,12 @@ export class SyncEngine {
       await this.db.space.update({ where: { id: space.id }, data: { lastError: "Your GitHub sign-in (gh) is no longer valid. Run gh auth login." } });
     } else await this.schedule(space, "error");
     this.emit(space.id, "state");
+  }
+
+  /** True when the space lost access (revokeSpace ran) since the caller last read it: a pull or push in flight must stop. */
+  private async revokedMeanwhile(spaceId: string): Promise<boolean> {
+    const s = await this.db.space.findUnique({ where: { id: spaceId }, select: { access: true } });
+    return !s || s.access === "REVOKED";
   }
 
   private async handleHubError(space: Space, e: unknown, phase: "read" | "write"): Promise<void> {
