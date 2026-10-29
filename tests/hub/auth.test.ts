@@ -13,14 +13,16 @@ afterEach(async () => {
   await hub.close();
 });
 
+type Started = { deviceCode: string; userCode: string; pollSecret: string };
 async function start() {
-  return (await hub.api()("POST", "/auth/device/start")).body as { deviceCode: string; userCode: string };
+  return (await hub.api()("POST", "/auth/device/start")).body as Started;
 }
+const pollOf = (s: Started) => hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode, pollSecret: s.pollSecret });
 /** Full sign-in for an already-added fake user; returns the poll result. */
 async function signIn(id: bigint) {
   const s = await start();
   hub.github.authorize(s.userCode, id);
-  return hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode });
+  return pollOf(s);
 }
 
 describe("device-flow sign-in", () => {
@@ -35,16 +37,17 @@ describe("device-flow sign-in", () => {
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ interval: 5, expiresIn: 900 });
     expect(r.body.deviceCode).toBeTruthy();
+    expect(r.body.pollSecret).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(r.body.userCode).toMatch(/-/);
     expect(r.body.verificationUri).toContain("/login/device");
   });
 
   it("first sign-in bootstraps the owner and names the team", async () => {
     hub.github.addUser({ id: 101n, login: "olive" });
-    const start = (await hub.api()("POST", "/auth/device/start")).body;
-    expect((await hub.api()("POST", "/auth/device/poll", { deviceCode: start.deviceCode })).status).toBe(202);
+    const start = (await hub.api()("POST", "/auth/device/start")).body as Started;
+    expect((await pollOf(start)).status).toBe(202);
     hub.github.authorize(start.userCode, 101n);
-    const r = await hub.api()("POST", "/auth/device/poll", { deviceCode: start.deviceCode });
+    const r = await pollOf(start);
     expect(r.status).toBe(200);
     expect(r.body.member).toMatchObject({ githubId: "101", login: "olive", role: "OWNER", status: "ACTIVE" });
     expect(r.body.team.name).toBe("olive's team");
@@ -122,13 +125,13 @@ describe("device-flow sign-in", () => {
   it("denied and expired device codes", async () => {
     const d = await start();
     hub.github.deny(d.userCode);
-    const denied = await hub.api()("POST", "/auth/device/poll", { deviceCode: d.deviceCode });
+    const denied = await pollOf(d);
     expect(denied.status).toBe(403);
     expect(denied.body).toEqual({ reason: "denied" });
 
     const e = await start();
     hub.github.expire(e.userCode);
-    const expired = await hub.api()("POST", "/auth/device/poll", { deviceCode: e.deviceCode });
+    const expired = await pollOf(e);
     expect(expired.status).toBe(410);
     expect(expired.body).toEqual({ error: "expired" });
   });
@@ -148,8 +151,46 @@ describe("device-flow sign-in", () => {
     expect((await hub.api(token)("GET", "/me")).status).toBe(401);
   });
 
-  it("poll rejects a missing deviceCode with 400", async () => {
+  it("poll rejects a missing deviceCode or pollSecret with 400", async () => {
+    const s = await start();
     expect((await hub.api()("POST", "/auth/device/poll", {})).status).toBe(400);
+    expect((await hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode })).status).toBe(400);
+    expect((await hub.api()("POST", "/auth/device/poll", { pollSecret: s.pollSecret })).status).toBe(400);
+  });
+
+  it("the device code alone never collects a session: wrong secret, unknown code and an expired flow are 404", async () => {
+    hub.github.addUser({ id: 101n, login: "olive" });
+    const s = await start();
+    hub.github.authorize(s.userCode, 101n);
+    const wrong = await hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode, pollSecret: "x".repeat(43) });
+    expect(wrong.status).toBe(404);
+    expect(JSON.stringify(wrong.body)).not.toContain("session");
+    expect((await hub.api()("POST", "/auth/device/poll", { deviceCode: "nope", pollSecret: s.pollSecret })).status).toBe(404);
+    expect(hub.github.requests.filter((r) => r.path === "/login/oauth/access_token")).toHaveLength(0);
+    expect((await pollOf(s)).status).toBe(200);
+    expect((await pollOf(s)).status).toBe(404); // a finished flow is forgotten
+    const late = await start();
+    clock += 901_000; // past expiresIn
+    expect((await pollOf(late)).status).toBe(404);
+  });
+
+  it("GitHub's slow_down is passed on as 202 slowDown", async () => {
+    const s = await start();
+    hub.github.slowDown(s.userCode);
+    const r = await pollOf(s);
+    expect(r.status).toBe(202);
+    expect(r.body).toEqual({ pending: true, slowDown: true });
+    expect((await pollOf(s)).status).toBe(202); // the flow is still alive
+  });
+
+  it("31st poll per IP per minute is 429", async () => {
+    const s = await start();
+    for (let i = 0; i < 30; i++) expect((await pollOf(s)).status).toBe(202);
+    const r = await pollOf(s);
+    expect(r.status).toBe(429);
+    expect(r.headers.get("retry-after")).toMatch(/^\d+$/);
+    clock += 60_001;
+    expect((await pollOf(s)).status).toBe(202);
   });
 });
 
@@ -226,7 +267,7 @@ describe("request log", () => {
     hub.github.addUser({ id: 7n, login: "olive" });
     const s = await start();
     hub.github.authorize(s.userCode, 7n);
-    const r = await hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode });
+    const r = await pollOf(s);
     const token = r.body.session as string;
     await hub.api(token)("GET", "/me?secretq=sneaky");
     const ghToken = [...hub.github.tokens.keys()][0];
@@ -235,6 +276,7 @@ describe("request log", () => {
     expect(all).not.toContain(ghToken);
     expect(all).not.toContain(s.userCode);
     expect(all).not.toContain(s.deviceCode);
+    expect(all).not.toContain(s.pollSecret);
     expect(all).not.toContain("sneaky");
     const line = hub.logs.map((l) => JSON.parse(l)).find((l) => l.msg === "request" && l.path === "/me");
     expect(line).toMatchObject({ method: "GET", path: "/me", status: 200, member: "7" });

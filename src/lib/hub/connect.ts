@@ -8,9 +8,9 @@ import type { HubSessionPort } from "@/lib/hub/ports";
 
 /** Client side of the hub's health check and device sign-in. Error messages never carry codes or session tokens. */
 
-export type DeviceStart = { deviceCode: string; userCode: string; verificationUri: string; interval: number; expiresIn: number };
+export type DeviceStart = { deviceCode: string; pollSecret: string; userCode: string; verificationUri: string; interval: number; expiresIn: number };
 export type DevicePoll =
-  | { status: "pending" }
+  | { status: "pending"; slowDown?: true }
   | { status: "ok"; session: string; member: { githubId: string; login: string }; team: { name: string } }
   | { status: "refused"; reason: "not-invited" | "removed" }
   | { status: "expired" };
@@ -59,15 +59,20 @@ export class HubAuth {
     const res = await this.post(o, "/auth/device/start", {});
     if (!res.ok) throw new ValidationError("The server could not start sign-in.");
     const j = (await res.json().catch(() => null)) as Partial<DeviceStart> | null;
-    if (!j || typeof j.deviceCode !== "string" || typeof j.userCode !== "string" || typeof j.verificationUri !== "string") throw new ValidationError("The server sent an unexpected sign-in reply.");
-    return { deviceCode: j.deviceCode, userCode: j.userCode, verificationUri: j.verificationUri, interval: Number(j.interval) || 5, expiresIn: Number(j.expiresIn) || 600 };
+    if (!j || typeof j.deviceCode !== "string" || typeof j.pollSecret !== "string" || typeof j.userCode !== "string" || typeof j.verificationUri !== "string") throw new ValidationError("The server sent an unexpected sign-in reply.");
+    return { deviceCode: j.deviceCode, pollSecret: j.pollSecret, userCode: j.userCode, verificationUri: j.verificationUri, interval: Number(j.interval) || 5, expiresIn: Number(j.expiresIn) || 600 };
   }
 
-  async poll(origin: string, deviceCode: string): Promise<DevicePoll> {
+  /** `slowDown` on a pending answer: GitHub asked for a longer interval; the caller adds 5 s before polling again. */
+  async poll(origin: string, deviceCode: string, pollSecret: string): Promise<DevicePoll> {
     const o = normalizeHubOrigin(origin);
-    const res = await this.post(o, "/auth/device/poll", { deviceCode });
-    if (res.status === 202) return { status: "pending" };
-    if (res.status === 410) return { status: "expired" };
+    const res = await this.post(o, "/auth/device/poll", { deviceCode, pollSecret });
+    if (res.status === 202) {
+      const j = (await res.json().catch(() => null)) as { slowDown?: unknown } | null;
+      return j?.slowDown === true ? { status: "pending", slowDown: true } : { status: "pending" };
+    }
+    // 404: the server no longer knows this flow (restarted, finished elsewhere, or the secret did not match): start again.
+    if (res.status === 410 || res.status === 404) return { status: "expired" };
     if (res.status === 403) {
       const j = (await res.json().catch(() => null)) as { reason?: unknown } | null;
       return { status: "refused", reason: j?.reason === "removed" ? "removed" : "not-invited" };

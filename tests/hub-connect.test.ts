@@ -9,7 +9,7 @@ import { hubBackendId } from "@/lib/local/backends";
 import { profileDbPath } from "@/lib/local/profile";
 import { readActive, readHubs } from "@/lib/local/registry";
 import type { GhStatus } from "@/lib/github/gh";
-import { startFakeHub } from "./fake-hub";
+import { FAKE_DEVICE_CODE, FAKE_POLL_SECRET, startFakeHub } from "./fake-hub";
 
 const hubs: { stop(): Promise<void> }[] = [];
 const dirs: string[] = [];
@@ -67,21 +67,30 @@ describe("HubAuth device flow", () => {
     const h = await hub();
     const s = await new HubAuth().start(h.origin);
     expect(s.userCode).toBe("ABCD-1234");
-    expect(s.deviceCode).toBeTruthy();
+    expect(s.deviceCode).toBe(FAKE_DEVICE_CODE);
+    expect(s.pollSecret).toBe(FAKE_POLL_SECRET);
   });
-  it("polls pending twice then ok", async () => {
+  it("polls pending twice then ok, sending the device code with its poll secret", async () => {
     const h = await hub({ pollsBeforeOk: 2, githubId: "7", login: "mona" });
     const a = new HubAuth();
-    expect(await a.poll(h.origin, "d")).toEqual({ status: "pending" });
-    expect(await a.poll(h.origin, "d")).toEqual({ status: "pending" });
-    const ok = await a.poll(h.origin, "d");
+    expect(await a.poll(h.origin, FAKE_DEVICE_CODE, FAKE_POLL_SECRET)).toEqual({ status: "pending" });
+    expect(await a.poll(h.origin, FAKE_DEVICE_CODE, FAKE_POLL_SECRET)).toEqual({ status: "pending" });
+    const ok = await a.poll(h.origin, FAKE_DEVICE_CODE, FAKE_POLL_SECRET);
     expect(ok).toMatchObject({ status: "ok", member: { githubId: "7", login: "mona" }, team: { name: "Fake Team" } });
+    expect(h.requests.filter((r) => r.path === "/auth/device/poll").map((r) => r.body)).toEqual(Array(3).fill({ deviceCode: FAKE_DEVICE_CODE, pollSecret: FAKE_POLL_SECRET }));
+  });
+  it("passes slowDown on, and a wrong poll secret (404) reads as expired", async () => {
+    const h = await hub({ slowDownPolls: 1, pollsBeforeOk: 1 });
+    const a = new HubAuth();
+    expect(await a.poll(h.origin, FAKE_DEVICE_CODE, FAKE_POLL_SECRET)).toEqual({ status: "pending", slowDown: true });
+    expect(await a.poll(h.origin, FAKE_DEVICE_CODE, FAKE_POLL_SECRET)).toEqual({ status: "pending" });
+    expect(await a.poll(h.origin, FAKE_DEVICE_CODE, "wrong")).toEqual({ status: "expired" });
   });
   it("maps refusals and expiry", async () => {
     const a = new HubAuth();
-    expect(await a.poll((await hub({ invited: false })).origin, "d")).toEqual({ status: "refused", reason: "not-invited" });
-    expect(await a.poll((await hub({ removed: true })).origin, "d")).toEqual({ status: "refused", reason: "removed" });
-    expect(await a.poll((await hub({ expired: true })).origin, "d")).toEqual({ status: "expired" });
+    expect(await a.poll((await hub({ invited: false })).origin, FAKE_DEVICE_CODE, FAKE_POLL_SECRET)).toEqual({ status: "refused", reason: "not-invited" });
+    expect(await a.poll((await hub({ removed: true })).origin, FAKE_DEVICE_CODE, FAKE_POLL_SECRET)).toEqual({ status: "refused", reason: "removed" });
+    expect(await a.poll((await hub({ expired: true })).origin, FAKE_DEVICE_CODE, FAKE_POLL_SECRET)).toEqual({ status: "expired" });
   });
 });
 

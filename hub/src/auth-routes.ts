@@ -1,3 +1,4 @@
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import { bootstrapOrAdmit, createSession, getMember, requireSession, revokeSession, toMember, type Member } from "./auth";
@@ -24,17 +25,40 @@ export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
+const sha256 = (s: string) => createHash("sha256").update(s).digest();
+
 export function authRoutes(): Route<HubContext>[] {
+  /**
+   * Device flows this hub started, keyed by GitHub's device code. Only the caller that started a flow holds its poll
+   * secret, so a device code seen on the wire (a log, a shoulder) is not enough to collect the session. Kept in memory:
+   * a restart ends the flows, and the person starts again.
+   */
+  const flows = new Map<string, { secretHash: Buffer; expiresAt: number }>();
+  const sweep = (now: number) => {
+    for (const [k, f] of flows) if (f.expiresAt <= now) flows.delete(k);
+  };
   return [
     route<HubContext>("POST", "/auth/device/start", async (ctx, req, res) => {
       const taken = ctx.limiter.take(`device:${clientIp(req, ctx.config.trustProxy)}`, 10, 60_000);
       if (!taken.ok) throw new HttpError(429, "rate limited", { "retry-after": String(taken.retryAfterSec) });
-      json(res, 200, await startDeviceFlow(ctx.config));
+      const started = await startDeviceFlow(ctx.config);
+      const pollSecret = randomBytes(32).toString("base64url");
+      sweep(ctx.now());
+      flows.set(started.deviceCode, { secretHash: sha256(pollSecret), expiresAt: ctx.now() + started.expiresIn * 1000 });
+      json(res, 200, { ...started, pollSecret });
     }),
     route<HubContext>("POST", "/auth/device/poll", async (ctx, req, res) => {
-      const { deviceCode } = await readJson(req, z.object({ deviceCode: z.string().min(1).max(256) }));
+      const taken = ctx.limiter.take(`device-poll:${clientIp(req, ctx.config.trustProxy)}`, 30, 60_000);
+      if (!taken.ok) throw new HttpError(429, "rate limited", { "retry-after": String(taken.retryAfterSec) });
+      const { deviceCode, pollSecret } = await readJson(req, z.object({ deviceCode: z.string().min(1).max(256), pollSecret: z.string().min(1).max(256) }));
+      sweep(ctx.now());
+      const flow = flows.get(deviceCode);
+      // Unknown code and wrong secret are the same answer: nothing confirms that a device code exists.
+      if (!flow || !timingSafeEqual(flow.secretHash, sha256(pollSecret))) throw new HttpError(404, "unknown device code");
       const polled = await pollDeviceFlow(ctx.config, deviceCode);
-      if (polled.kind === "pending" || polled.kind === "slow_down") return json(res, 202, { pending: true });
+      if (polled.kind === "pending") return json(res, 202, { pending: true });
+      if (polled.kind === "slow_down") return json(res, 202, { pending: true, slowDown: true });
+      flows.delete(deviceCode);
       if (polled.kind === "expired") return json(res, 410, { error: "expired" });
       if (polled.kind === "denied") return json(res, 403, { reason: "denied" });
       // The GitHub access token is used for this one lookup, then dropped.

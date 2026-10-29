@@ -10,7 +10,7 @@ import { createLogger } from "../../hub/src/log";
 import { createHub } from "../../hub/src/server";
 
 export type FakeUser = { id: bigint; login: string; name?: string; avatarUrl?: string };
-type DeviceGrant = { deviceCode: string; userCode: string; state: "pending" | "approved" | "denied" | "expired"; userId?: bigint; token?: string };
+type DeviceGrant = { deviceCode: string; userCode: string; state: "pending" | "slow_down" | "approved" | "denied" | "expired"; userId?: bigint; token?: string };
 
 /** Stand-in for github.com device flow + api.github.com/user. Reusable by auth tests. */
 export class FakeGitHubOAuth {
@@ -51,6 +51,10 @@ export class FakeGitHubOAuth {
   expire(userCode: string): void {
     this.byUserCode(userCode).state = "expired";
   }
+  /** GitHub asks the poller to back off (it keeps answering slow_down until the grant changes state). */
+  slowDown(userCode: string): void {
+    this.byUserCode(userCode).state = "slow_down";
+  }
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const chunks: Buffer[] = [];
@@ -85,6 +89,7 @@ export class FakeGitHubOAuth {
       const g = this.grants.find((x) => x.deviceCode === body.device_code);
       if (!g) return send(200, { error: "bad_verification_code" });
       if (g.state === "pending") return send(200, { error: "authorization_pending" });
+      if (g.state === "slow_down") return send(200, { error: "slow_down" });
       if (g.state === "denied") return send(200, { error: "access_denied" });
       if (g.state === "expired") return send(200, { error: "expired_token" });
       g.token ??= `gho_${randomBytes(16).toString("hex")}`;
@@ -167,9 +172,9 @@ export async function startTestHub(o: { now?: () => number; dataDir?: string; tr
 /** Adds the fake GitHub user (if absent) and completes a device-flow sign-in; returns the session token. */
 export async function signInAs(hub: TestHub, id: bigint, login: string): Promise<string> {
   if (!hub.github.users.has(id)) hub.github.addUser({ id, login });
-  const s = (await hub.api()("POST", "/auth/device/start")).body as { deviceCode: string; userCode: string };
+  const s = (await hub.api()("POST", "/auth/device/start")).body as { deviceCode: string; userCode: string; pollSecret: string };
   hub.github.authorize(s.userCode, id);
-  const r = await hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode });
+  const r = await hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode, pollSecret: s.pollSecret });
   if (r.status !== 200) throw new Error(`sign-in of ${login} failed: ${r.status} ${JSON.stringify(r.body)}`);
   return r.body.session as string;
 }

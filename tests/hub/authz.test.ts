@@ -111,7 +111,7 @@ describe("removing members", () => {
     expect((await hub.api(t.mia)("GET", "/me")).status).toBe(401);
     const s = (await hub.api()("POST", "/auth/device/start")).body;
     hub.github.authorize(s.userCode, 2n);
-    const again = await hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode });
+    const again = await hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode, pollSecret: s.pollSecret });
     expect(again.status).toBe(403);
     expect(again.body).toEqual({ reason: "removed" });
   });

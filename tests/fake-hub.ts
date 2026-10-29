@@ -13,6 +13,8 @@ export type FakeHubOpts = {
   removed?: boolean;
   expired?: boolean;
   pollsBeforeOk?: number;
+  /** The first N polls answer 202 with slowDown: true (before pollsBeforeOk's plain pending answers). */
+  slowDownPolls?: number;
   githubId?: string;
   login?: string;
   verificationUri?: string;
@@ -25,6 +27,8 @@ export type FakeHubOpts = {
 };
 export type FakeMember = { githubId: string; login: string; name?: string | null; avatarUrl?: string | null; role: "OWNER" | "ADMIN" | "MEMBER" | "READER"; status?: "INVITED" | "ACTIVE" | "REMOVED" };
 export const FAKE_SESSION = "session-token-secret";
+export const FAKE_DEVICE_CODE = "dev-code-secret";
+export const FAKE_POLL_SECRET = "poll-secret-secret";
 export type FakeHubRequest = { method: string; path: string; body: unknown };
 
 export async function startFakeHub(opts: FakeHubOpts = {}) {
@@ -53,12 +57,15 @@ export async function startFakeHub(opts: FakeHubOpts = {}) {
       const p = (req.url ?? "").split("?")[0];
       requests.push({ method: req.method ?? "", path: p, body });
       if (req.method === "GET" && p === "/health") return send(res, 200, { ok: true, team: team === null ? null : { name: team }, schema: 1, publicUrl: opts.publicUrl ?? origin, githubHost: opts.githubHost ?? "github.com" });
-      if (req.method === "POST" && p === "/auth/device/start") return send(res, 200, { deviceCode: "dev-code-secret", userCode: "ABCD-1234", verificationUri: opts.verificationUri ?? `${origin}/device`, interval: 1, expiresIn: 600 });
+      if (req.method === "POST" && p === "/auth/device/start") return send(res, 200, { deviceCode: FAKE_DEVICE_CODE, pollSecret: FAKE_POLL_SECRET, userCode: "ABCD-1234", verificationUri: opts.verificationUri ?? `${origin}/device`, interval: 1, expiresIn: 600 });
       if (req.method === "POST" && p === "/auth/device/poll") {
+        const b = (body ?? {}) as { deviceCode?: unknown; pollSecret?: unknown };
+        if (b.deviceCode !== FAKE_DEVICE_CODE || b.pollSecret !== FAKE_POLL_SECRET) return send(res, 404, { error: "unknown device code" });
         if (opts.expired) return send(res, 410);
         if (opts.removed) return send(res, 403, { reason: "removed" });
         if (opts.invited === false) return send(res, 403, { reason: "not-invited" });
-        if (polls++ < (opts.pollsBeforeOk ?? 0)) return send(res, 202);
+        if (polls < (opts.slowDownPolls ?? 0)) return polls++, send(res, 202, { pending: true, slowDown: true });
+        if (polls++ < (opts.slowDownPolls ?? 0) + (opts.pollsBeforeOk ?? 0)) return send(res, 202, { pending: true });
         return send(res, 200, { session: FAKE_SESSION, member: { githubId: opts.githubId ?? "1", login: opts.login ?? "octocat" }, team: { name: team ?? "" } });
       }
       const needsAuth = p === "/me" || p === "/auth/logout" || p.startsWith("/admin/");

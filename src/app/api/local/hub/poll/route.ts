@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { HubAuth, completeConnect } from "@/lib/hub/connect";
 import { failure, guardConnect, readBody } from "@/lib/hub/connect-route";
+import { deviceFlow, forgetDeviceFlow } from "@/lib/hub/device-flows";
 import { hubSessionPort } from "@/lib/hub/ports-impl";
 import { currentGhStatus } from "@/lib/local/identity";
 import { mergeportHome } from "@/lib/local/profile";
@@ -14,10 +15,15 @@ import { requestSwitch } from "@/lib/local/switch-client";
 export async function POST(req: Request) {
   const refused = guardConnect(req);
   if (refused) return refused;
-  const { url, deviceCode } = await readBody(req);
-  if (typeof url !== "string" || typeof deviceCode !== "string" || !deviceCode) return NextResponse.json({ status: "error", error: "bad-request" }, { status: 400 });
+  const { pollId } = await readBody(req);
+  if (typeof pollId !== "string" || !pollId) return NextResponse.json({ status: "error", error: "bad-request" }, { status: 400 });
+  const flow = deviceFlow(pollId);
+  if (!flow) return NextResponse.json({ status: "error", error: "bad-request" }, { status: 400 });
+  const url = flow.origin;
   try {
-    const r = await new HubAuth().poll(url, deviceCode);
+    const r = await new HubAuth().poll(url, flow.deviceCode, flow.pollSecret);
+    if (r.status === "pending") return NextResponse.json(r);
+    forgetDeviceFlow(pollId);
     if (r.status !== "ok") return NextResponse.json(r);
     const e = env();
     const done = await completeConnect({

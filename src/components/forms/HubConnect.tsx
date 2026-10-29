@@ -10,7 +10,7 @@ type Switch = { launchUrl: string; previousBootId: string | null; expectedBacken
 type Step =
   | { s: "url" }
   | { s: "checked"; origin: string; teamName: string | null }
-  | { s: "code"; origin: string; userCode: string; verificationUri: string; interval: number; deviceCode: string }
+  | { s: "code"; origin: string; userCode: string; verificationUri: string; interval: number; pollId: string }
   | { s: "switching"; sw: Switch };
 
 const POLL_ERRORS: Record<string, string> = {
@@ -21,7 +21,9 @@ const POLL_ERRORS: Record<string, string> = {
   "bad-request": "Something went wrong. Start again.",
 };
 
-type PollReply = { status: string; reason?: string; error?: string; message?: string; switch?: Switch };
+type PollReply = { status: string; slowDown?: boolean; reason?: string; error?: string; message?: string; switch?: Switch };
+/** GitHub's slow_down: every poll must wait this much longer from then on. */
+const SLOW_DOWN_MS = 5000;
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`/api/local/hub/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
@@ -64,8 +66,8 @@ export function HubConnect() {
     setBusy(true);
     setErr(null);
     try {
-      const r = await post<{ ok: true; userCode: string; verificationUri: string; interval: number; deviceCode: string } | { ok: false; error: string }>("start", { url: origin });
-      if (r.ok) setStep({ s: "code", origin, userCode: r.userCode, verificationUri: r.verificationUri, interval: r.interval, deviceCode: r.deviceCode });
+      const r = await post<{ ok: true; userCode: string; verificationUri: string; interval: number; pollId: string } | { ok: false; error: string }>("start", { url: origin });
+      if (r.ok) setStep({ s: "code", origin, userCode: r.userCode, verificationUri: r.verificationUri, interval: r.interval, pollId: r.pollId });
       else setErr(r.error);
     } catch {
       setErr("Could not start sign-in.");
@@ -76,14 +78,18 @@ export function HubConnect() {
   const codeStep = step.s === "code" ? step : null;
   useEffect(() => {
     if (!codeStep) return;
-    const { origin, deviceCode } = codeStep;
+    const { pollId } = codeStep;
     const ac = new AbortController();
+    let intervalMs = Math.max(1, codeStep.interval) * 1000;
     void runPollLoop({
-      poll: (signal) => post<PollReply>("poll", { url: origin, deviceCode }, signal),
-      intervalMs: Math.max(1, codeStep.interval) * 1000,
+      poll: (signal) => post<PollReply>("poll", { pollId }, signal),
+      intervalMs: () => intervalMs,
       signal: ac.signal,
       onResult: (r) => {
-        if (r.status === "pending") return false;
+        if (r.status === "pending") {
+          if (r.slowDown) intervalMs += SLOW_DOWN_MS;
+          return false;
+        }
         if (r.status === "ok" && r.switch) setStep({ s: "switching", sw: r.switch });
         else if (r.status === "refused") reset(r.reason === "removed" ? "You were removed from that server. Ask its owner to invite you again." : "That GitHub account is not invited to this server. Ask its owner to invite you.");
         else if (r.status === "expired") reset("The code expired. Start again.");
