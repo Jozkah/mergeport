@@ -1,0 +1,802 @@
+// Mergeport schema.
+// Concepts kept separate on purpose: Workspace, Project (app concept), GithubOwner (GitHub account),
+// Repository (GitHub repo), Member (dashboard member), RepositoryGrant, GithubConnection.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MemberRole {
+  ADMIN
+  MEMBER
+}
+
+enum MemberStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum OwnerType {
+  USER
+  ORGANIZATION
+  UNKNOWN
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+  INTERNAL
+  UNKNOWN
+}
+
+enum TrackingStatus {
+  ACTIVE
+  DISCONNECTED
+  REMOVED
+}
+
+enum ConnectionKind {
+  USER_AUTH // GitHub App user-to-server token
+  INSTALLATION // GitHub App installation (background sync)
+  PUBLIC_TOKEN // optional token used for public data only
+}
+
+enum ConnectionStatus {
+  OK
+  NEEDS_AUTH
+  ORG_APPROVAL_REQUIRED
+  SSO_REQUIRED
+  REVOKED
+  ERROR
+}
+
+enum WorkItemType {
+  ISSUE
+  PULL_REQUEST
+}
+
+enum WorkItemState {
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum ChecksState {
+  NONE
+  PENDING
+  SUCCESS
+  FAILURE
+  UNKNOWN
+}
+
+enum MergeableState {
+  MERGEABLE
+  CONFLICTING
+  UNKNOWN
+}
+
+enum CommentKind {
+  ISSUE_COMMENT
+  REVIEW_COMMENT
+  REVIEW
+  EVENT
+}
+
+enum ReviewState {
+  APPROVED
+  CHANGES_REQUESTED
+  COMMENTED
+  DISMISSED
+  PENDING
+}
+
+enum RuleScope {
+  REPOSITORY
+  OWNER
+  PROJECT
+  WORKSPACE
+}
+
+enum ApprovalSemantics {
+  ANY
+  ALL
+}
+
+enum ReviewerKind {
+  USER
+  TEAM
+  EXTERNAL_ROLE
+}
+
+enum WaitingStatus {
+  PENDING
+  SATISFIED
+  CANCELLED
+  STALE
+}
+
+enum WaitingSource {
+  RULE
+  MANUAL
+}
+
+enum ProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum UpstreamEvidence {
+  ANCESTRY_EXACT
+  PATCH_EQUIVALENT_POSSIBLE
+  MANUAL_ACK
+  NOT_DETECTED
+  UNKNOWN
+}
+
+enum TriageStatus {
+  UNTRIAGED
+  WATCHING
+  RELEVANT
+  ADDRESSED
+  IGNORED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  members       Member[]
+  projects      Project[]
+  repositories  Repository[]
+  invitations   Invitation[]
+  reviewRules   ReviewRule[]
+  milestones    DashboardMilestone[]
+  proposals     RepoProposal[]
+  audit         AuditLog[]
+  notifications Notification[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  githubId  BigInt   @unique
+  login     String
+  name      String?
+  avatarUrl String?
+  timezone  String   @default("UTC")
+  isDemo    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  members       Member[]
+  sessions      Session[]
+  connections   GithubConnection[]
+  devices       Device[]
+  savedFilters  SavedFilter[]
+  notifications Notification[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  csrfToken String
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Member {
+  id          String       @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        MemberRole   @default(MEMBER)
+  status      MemberStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  revokedAt   DateTime?
+
+  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grants          RepositoryGrant[]
+  projects        ProjectMember[]
+  planningCreated PlanningItem[]      @relation("PlanningCreatedBy")
+  ownedMilestones DashboardMilestone[]
+  proposals       RepoProposal[]      @relation("ProposedBy")
+
+  @@unique([workspaceId, userId])
+}
+
+model Invitation {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  tokenHash        String    @unique
+  githubId         BigInt // immutable account id the invite is bound to
+  githubLogin      String // label only
+  role             MemberRole @default(MEMBER)
+  expiresAt        DateTime
+  usedAt           DateTime?
+  revokedAt        DateTime?
+  createdById      String
+  acceptedByUserId String?
+  createdAt        DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model GithubConnection {
+  id             String           @id @default(cuid())
+  userId         String?
+  kind           ConnectionKind
+  installationId BigInt?
+  ownerLogin     String?
+  ownerGithubId  BigInt?
+  encryptedToken String?
+  encryptedRefreshToken String?
+  grantedScopes  String           @default("")
+  status         ConnectionStatus @default(OK)
+  statusDetail   String?
+  expiresAt      DateTime?
+  lastCheckedAt  DateTime?
+  createdAt      DateTime         @default(now())
+
+  user         User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repositories Repository[]
+
+  @@index([userId])
+  @@index([installationId])
+}
+
+model GithubOwner {
+  id        String    @id @default(cuid())
+  githubId  BigInt    @unique
+  login     String
+  type      OwnerType @default(UNKNOWN)
+  avatarUrl String?
+  synthetic Boolean   @default(false)
+
+  repositories Repository[]
+}
+
+model Repository {
+  id             String         @id @default(cuid())
+  workspaceId    String
+  githubId       BigInt
+  ownerId        String
+  name           String
+  fullName       String
+  htmlUrl        String
+  description    String?
+  visibility     Visibility     @default(UNKNOWN)
+  isFork         Boolean        @default(false)
+  parentGithubId BigInt?
+  parentFullName String?
+  defaultBranch  String?
+  archived       Boolean        @default(false)
+  permissions    Json? // permissions of the credential that last saw it
+  trackingStatus TrackingStatus @default(ACTIVE)
+  statusDetail   String?
+  connectionId   String?
+  isDemo         Boolean        @default(false)
+  lastSyncedAt   DateTime?
+  syncError      String?
+  rateLimited    Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner       GithubOwner        @relation(fields: [ownerId], references: [id])
+  connection  GithubConnection?  @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  projects    ProjectRepository[]
+  grants      RepositoryGrant[]
+  workItems   WorkItem[]
+  branches    Branch[]
+  reviewRules ReviewRule[]
+  milestoneLinks MilestoneRepoLink[]
+  forkMappings   ForkMapping[] @relation("ForkSide")
+  upstreamOf     ForkMapping[] @relation("UpstreamSide")
+  snapshots      WorktreeSnapshot[]
+  deviceMappings DeviceRepoMapping[]
+
+  @@unique([workspaceId, githubId])
+  @@index([workspaceId, trackingStatus])
+}
+
+model RepoProposal {
+  id               String         @id @default(cuid())
+  workspaceId      String
+  proposedById     String
+  githubId         BigInt
+  fullName         String
+  visibility       Visibility
+  ownerType        OwnerType
+  ownerLogin       String
+  isFork           Boolean        @default(false)
+  shareConsent     Boolean        @default(false)
+  status           ProposalStatus @default(PENDING)
+  decidedById      String?
+  decidedAt        DateTime?
+  createdAt        DateTime       @default(now())
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  proposedBy Member    @relation("ProposedBy", fields: [proposedById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  slug        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  repositories ProjectRepository[]
+  members      ProjectMember[]
+  columns      PlanningColumn[]
+  items        PlanningItem[]
+  milestones   DashboardMilestone[]
+  reviewRules  ReviewRule[]
+
+  @@unique([workspaceId, slug])
+}
+
+model ProjectRepository {
+  projectId    String
+  repositoryId String
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, repositoryId])
+}
+
+model ProjectMember {
+  projectId String
+  memberId  String
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  member  Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, memberId])
+}
+
+model RepositoryGrant {
+  id           String    @id @default(cuid())
+  memberId     String
+  repositoryId String
+  canManageWork Boolean  @default(false)
+  canReview    Boolean   @default(false)
+  grantedById  String
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+
+  member     Member     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, repositoryId])
+  @@index([repositoryId])
+}
+
+model WorkItem {
+  id             String         @id @default(cuid())
+  repositoryId   String
+  githubId       BigInt
+  number         Int
+  type           WorkItemType
+  title          String
+  body           String?
+  state          WorkItemState  @default(OPEN)
+  draft          Boolean        @default(false)
+  authorLogin    String?
+  authorGithubId BigInt?
+  authorAvatar   String?
+  labels         Json           @default("[]") // [{name,color}]
+  assignees      Json           @default("[]") // [login]
+  milestoneNumber Int?
+  milestoneTitle String?
+  htmlUrl        String
+  headSha        String?
+  headRef        String?
+  baseRef        String?
+  mergeable      MergeableState @default(UNKNOWN)
+  checksState    ChecksState    @default(NONE)
+  additions      Int?
+  deletions      Int?
+  changedFiles   Int?
+  createdAtGh    DateTime
+  updatedAtGh    DateTime // source-of-truth timestamp used to reject stale writes
+  closedAtGh     DateTime?
+  mergedAtGh     DateTime?
+  syncedAt       DateTime       @default(now())
+
+  repository      Repository        @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  comments        WorkItemComment[]
+  reviewRequests  ReviewRequest[]
+  waiting         WaitingRecord[]
+  planningItems   PlanningItem[]
+
+  @@unique([repositoryId, number])
+  @@unique([repositoryId, githubId])
+  @@index([repositoryId, state, type])
+}
+
+model WorkItemComment {
+  id         String      @id @default(cuid())
+  workItemId String
+  githubId   BigInt
+  kind       CommentKind
+  authorLogin String?
+  body       String?
+  reviewState ReviewState?
+  commitSha  String?
+  path       String?
+  line       Int?
+  threadKey  String?
+  createdAtGh DateTime
+  updatedAtGh DateTime
+
+  workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  @@unique([workItemId, kind, githubId])
+  @@index([workItemId, createdAtGh])
+}
+
+model ReviewRequest {
+  id           String       @id @default(cuid())
+  workItemId   String
+  kind         ReviewerKind
+  reviewerRef  String // login or team slug
+  requestedAt  DateTime
+  removedAt    DateTime?
+
+  workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  @@index([workItemId])
+}
+
+model Branch {
+  id           String   @id @default(cuid())
+  repositoryId String
+  name         String
+  sha          String
+  isDefault    Boolean  @default(false)
+  fetchedAt    DateTime @default(now())
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, name])
+}
+
+model ReviewRule {
+  id          String            @id @default(cuid())
+  workspaceId String
+  scope       RuleScope
+  repositoryId String?
+  ownerLogin  String?
+  projectId   String?
+  labels      String[]
+  reviewers   Json // [{kind:USER|TEAM|EXTERNAL_ROLE, ref, display?}]
+  semantics   ApprovalSemantics @default(ANY)
+  reason      String
+  enabled     Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  repository Repository? @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  project    Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, scope])
+}
+
+model WaitingRecord {
+  id             String        @id @default(cuid())
+  workspaceId    String
+  workItemId     String?
+  planningItemId String?
+  source         WaitingSource
+  ruleId         String?
+  reviewerKind   ReviewerKind
+  reviewerRef    String
+  reason         String
+  status         WaitingStatus @default(PENDING)
+  startedAt      DateTime      @default(now())
+  clearedAt      DateTime?
+  clearedById    String?
+  clearReason    String?
+
+  workItem     WorkItem?     @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  planningItem PlanningItem? @relation(fields: [planningItemId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([workItemId])
+}
+
+model PlanningColumn {
+  id        String @id @default(cuid())
+  projectId String
+  key       String
+  name      String
+  position  Int
+
+  project Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items   PlanningItem[]
+
+  @@unique([projectId, key])
+}
+
+model PlanningItem {
+  id           String   @id @default(cuid())
+  projectId    String
+  columnId     String
+  position     Float
+  version      Int      @default(1) // optimistic concurrency
+  title        String // used when workItemId is null (internal draft task)
+  description  String?
+  workItemId   String? // GitHub issue/PR link; inherits repository restrictions
+  assigneeLogin String?
+  priority     Int      @default(0)
+  dueDate      DateTime? @db.Date
+  milestoneId  String?
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  column    PlanningColumn       @relation(fields: [columnId], references: [id])
+  workItem  WorkItem?            @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  milestone DashboardMilestone?  @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  createdBy Member               @relation("PlanningCreatedBy", fields: [createdById], references: [id])
+  blocks    PlanningLink[]       @relation("LinkFrom")
+  blockedBy PlanningLink[]       @relation("LinkTo")
+  waiting   WaitingRecord[]
+
+  @@index([projectId, columnId])
+}
+
+model PlanningLink {
+  fromId String // blocker
+  toId   String // blocked
+
+  from PlanningItem @relation("LinkFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to   PlanningItem @relation("LinkTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@id([fromId, toId])
+}
+
+model DashboardMilestone {
+  id          String    @id @default(cuid())
+  workspaceId String
+  projectId   String?
+  name        String
+  description String?
+  ownerId     String?
+  startDate   DateTime? @db.Date
+  targetDate  DateTime? @db.Date
+  status      String    @default("OPEN")
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  owner     Member?             @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  items     PlanningItem[]
+  repoLinks MilestoneRepoLink[]
+}
+
+model MilestoneRepoLink {
+  milestoneId     String
+  repositoryId    String
+  githubMilestoneNumber Int
+
+  milestone  DashboardMilestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  repository Repository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([milestoneId, repositoryId])
+}
+
+model ForkMapping {
+  id             String  @id @default(cuid())
+  forkRepoId     String
+  upstreamRepoId String
+  forkBranch     String
+  upstreamBranch String
+
+  fork     Repository @relation("ForkSide", fields: [forkRepoId], references: [id], onDelete: Cascade)
+  upstream Repository @relation("UpstreamSide", fields: [upstreamRepoId], references: [id], onDelete: Cascade)
+  comparisons ForkComparison[]
+  upstreamPrs UpstreamPrState[]
+  triage      UpstreamIssueTriage[]
+
+  @@unique([forkRepoId, upstreamRepoId, forkBranch, upstreamBranch])
+}
+
+model ForkComparison {
+  id         String   @id @default(cuid())
+  mappingId  String
+  status     String // identical | ahead | behind | diverged | unrelated | unknown | error
+  aheadBy    Int?
+  behindBy   Int?
+  baseSha    String? // upstream tip at compare time
+  headSha    String? // fork tip at compare time
+  truncated  Boolean  @default(false)
+  error      String?
+  comparedAt DateTime @default(now())
+
+  mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@index([mappingId, comparedAt])
+}
+
+model UpstreamPrState {
+  id          String           @id @default(cuid())
+  mappingId   String
+  number      Int
+  title       String
+  state       String // open | merged | closed
+  htmlUrl     String
+  mergeSha    String?
+  mergedAtGh  DateTime?
+  evidence    UpstreamEvidence @default(UNKNOWN)
+  evidenceNote String?
+  ackedById   String?
+
+  mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@unique([mappingId, number])
+}
+
+model UpstreamIssueTriage {
+  id           String       @id @default(cuid())
+  mappingId    String
+  issueNumber  Int
+  title        String
+  htmlUrl      String
+  status       TriageStatus @default(UNTRIAGED)
+  linkedWorkItemId String?
+  note         String?
+  decidedById  String?
+  updatedAt    DateTime     @updatedAt
+
+  mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@unique([mappingId, issueNumber])
+}
+
+model Device {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  tokenHash  String    @unique
+  pairingHash String?  @unique
+  pairingExpiresAt DateTime?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime?
+  revokedAt  DateTime?
+
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roots     DeviceRepoMapping[]
+  snapshots WorktreeSnapshot[]
+}
+
+model DeviceRepoMapping {
+  id           String @id @default(cuid())
+  deviceId     String
+  repositoryId String
+
+  device     Device     @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, repositoryId])
+}
+
+model WorktreeSnapshot {
+  id           String   @id @default(cuid())
+  deviceId     String
+  repositoryId String
+  capturedAt   DateTime
+  shared       Boolean  @default(false)
+  data         Json // {worktrees:[{path,branch,head,detached,locked,prunable,dirty:{...},tracking,aheadBehind}]}
+
+  device     Device     @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, repositoryId])
+}
+
+model SavedFilter {
+  id     String @id @default(cuid())
+  userId String
+  scope  String
+  name   String
+  query  String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  repositoryId String? // authorization context: filtered by current grants at read time
+  kind        String
+  title       String
+  href        String?
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  actorUserId String?
+  action      String
+  targetType  String?
+  targetId    String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  type        String
+  payload     Json
+  dedupeKey   String?   @unique
+  status      JobStatus @default(QUEUED)
+  runAt       DateTime  @default(now())
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  lockedAt    DateTime?
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  @@index([status, runAt])
+}
+
+model WebhookDelivery {
+  id          String    @id // X-GitHub-Delivery
+  event       String
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+}
+
+model PublicCacheEntry {
+  key       String   @id
+  etag      String?
+  body      Json
+  fetchedAt DateTime @default(now())
+}
+
+model RateLimitState {
+  key       String   @id // e.g. "public-ip", "installation:123"
+  remaining Int
+  limit     Int
+  resetAt   DateTime
+  updatedAt DateTime @updatedAt
+}

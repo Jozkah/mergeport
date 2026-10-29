@@ -1,0 +1,15 @@
+node_modules
+.next
+.data
+.env
+.env.local
+*.log
+src/generated
+.impeccable/review
+coverage
+test-results
+
+.claude
+.playwright-mcp
+.impeccable
+*.tsbuildinfo

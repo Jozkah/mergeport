@@ -1,0 +1,373 @@
+/*
+ * Motion system. ONE place for every animated value in the product.
+ *
+ * Tokens follow the transitions.dev scale (usage-matched; see docs/motion.md for the matrix that says which token each
+ * interaction uses and why). Components never write a literal duration, distance or easing: they reference a token, so
+ * a change here changes every interaction consistently.
+ *
+ * Ownership rule: for any element, exactly ONE system animates a given property.
+ *   CSS    : state transitions and bounded, declarative sequences (this file).
+ *   GSAP   : layout glides on the board (inner wrapper only; Board.tsx).
+ *   dnd-kit: the drag transform on the list item and the drag overlay.
+ *
+ * Reduced motion: movement, scale and blur tokens collapse to nothing and durations shorten, so every keyframe below
+ * degrades to a short fade. Meaning is kept by static cues (text, icon, colour, outline), never by motion alone.
+ */
+:root {
+  /* Durations */
+  --duration-feedback: 120ms; /* hover / press colour feedback (immediate, <= 150ms) */
+  --duration-stagger: 40ms; /* per-item stagger offset */
+  --duration-micro: 80ms; /* tooltip intent delay, shake segment */
+  --duration-quick: 150ms; /* close, text swap, tooltip appear, empty-state fade */
+  --duration-fast: 250ms; /* open, tab pill, accordion, icon swap, number swap */
+  --duration-medium: 350ms; /* panel close, toast reposition */
+  --duration-slow: 400ms; /* panel open, bar change */
+  --duration-very-slow: 500ms; /* emphasis: success check */
+  --duration-loop: 1400ms; /* looping placeholder pulse, only while real work is pending */
+  /* Easings */
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: ease-in-out;
+  --ease-out: ease-out;
+  --ease-linear: linear;
+  /* Distances */
+  --distance-micro: 4px;
+  --distance-small: 6px;
+  --distance-base: 8px;
+  --distance-medium: 12px;
+  --distance-large: 30px;
+  /* Scales (the non-resting "from" value; everything settles at 1) */
+  --scale-large: 0.96;
+  --scale-medium: 0.97;
+  --scale-small: 0.98;
+  --scale-tiny: 0.99;
+  /* Blur (the non-resting "from" value) */
+  --scale-pop: 1.18; /* icon reaction peak (Flint "pop") */
+  --rotate-ring: 14deg; /* bell swing (Flint "ring") */
+  --blur-small: 2px;
+  --blur-medium: 3px;
+  /* Back-compat aliases used by older rules */
+  --ease-out-expo: var(--ease-smooth-out);
+  --dur-fast: var(--duration-feedback);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --distance-micro: 0px;
+    --distance-small: 0px;
+    --distance-base: 0px;
+    --distance-medium: 0px;
+    --distance-large: 0px;
+    --scale-large: 1;
+    --scale-medium: 1;
+    --scale-small: 1;
+    --scale-tiny: 1;
+    --scale-pop: 1;
+    --rotate-ring: 0deg;
+    --blur-small: 0px;
+    --blur-medium: 0px;
+    --duration-quick: 100ms;
+    --duration-fast: 120ms;
+    --duration-medium: 150ms;
+    --duration-slow: 150ms;
+    --duration-very-slow: 200ms;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+  /* Endless loops are decoration under reduced motion; real pending work keeps a spinner (its meaning is also in the label). */
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* ---------- Shared keyframes ---------- */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes sheet-in {
+  from { opacity: 0; transform: scale(var(--scale-large)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sheet-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(var(--scale-large)); }
+}
+@keyframes drawer-in {
+  from { opacity: 0; transform: translateX(var(--distance-base)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes drawer-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateX(var(--distance-base)); }
+}
+@keyframes drawer-left-in {
+  from { opacity: 0; transform: translateX(calc(var(--distance-large) * -1)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes drawer-left-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateX(calc(var(--distance-base) * -1)); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(calc(var(--distance-micro) * -1)) scale(var(--scale-small)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pop-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(var(--scale-tiny)); }
+}
+@keyframes rise-in-small {
+  from { opacity: 0; transform: translateY(var(--distance-small)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(var(--distance-medium)) scale(var(--scale-large)); filter: blur(var(--blur-medium)); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(var(--distance-small)) scale(var(--scale-large)); }
+}
+@keyframes result-in {
+  from { opacity: 0; transform: translateY(var(--distance-micro)); filter: blur(var(--blur-small)); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes number-in {
+  from { opacity: 0; transform: translateY(var(--distance-micro)); filter: blur(var(--blur-small)); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(calc(var(--distance-base) * -1)); }
+  50% { transform: translateX(var(--distance-base)); }
+  75% { transform: translateX(calc(var(--distance-small) * -1)); }
+}
+@keyframes check-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes ring-once {
+  0% { box-shadow: 0 0 0 0 var(--ring-color, var(--color-ink-3)); }
+  40% { box-shadow: 0 0 0 3px var(--ring-color, var(--color-ink-3)); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes skeleton {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+@keyframes icon-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(var(--scale-pop)); }
+  100% { transform: scale(1); }
+}
+@keyframes icon-ring {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(var(--rotate-ring)); }
+  40% { transform: rotate(calc(var(--rotate-ring) * -0.85)); }
+  60% { transform: rotate(calc(var(--rotate-ring) * 0.55)); }
+  80% { transform: rotate(calc(var(--rotate-ring) * -0.3)); }
+}
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(calc(var(--distance-medium) * -1)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mark-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes card-leave {
+  from { opacity: 1; grid-template-rows: 1fr; margin-bottom: 0; }
+  to { opacity: 0; grid-template-rows: 0fr; margin-bottom: -8px; } /* -8px cancels the list's flex gap so no space is left behind */
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--color-muted) 25%, var(--color-subtle) 37%, var(--color-muted) 63%);
+  background-size: 200% 100%;
+  animation: skeleton var(--duration-loop) var(--ease-in-out) infinite; /* a loop only while real work is pending */
+  border-radius: 6px;
+}
+
+/* ---------- Dialogs, drawers, scrim (modal open 250 / close 150; panel open 400 / close 350) ---------- */
+.sheet[data-state="open"] { animation: sheet-in var(--duration-fast) var(--ease-smooth-out); }
+.sheet[data-state="closed"] { animation: sheet-out var(--duration-quick) var(--ease-smooth-out) forwards; }
+.drawer[data-state="open"] { animation: drawer-in var(--duration-slow) var(--ease-smooth-out); }
+.drawer[data-state="closed"] { animation: drawer-out var(--duration-medium) var(--ease-smooth-out) forwards; }
+/* Navigation drawer on small screens: it comes from the side it lives on, and closes quickly. */
+.drawer-left[data-state="open"] { animation: drawer-left-in var(--duration-fast) var(--ease-smooth-out); }
+.drawer-left[data-state="closed"] { animation: drawer-left-out var(--duration-quick) var(--ease-smooth-out) forwards; }
+.scrim[data-state="open"] { animation: fade-in var(--duration-fast) var(--ease-out); }
+.scrim[data-state="closed"] { animation: fade-out var(--duration-quick) var(--ease-out) forwards; }
+
+/* ---------- Tooltip (intent delay is set in the component: --duration-micro) ---------- */
+.tip[data-state="delayed-open"],
+.tip[data-state="instant-open"] { animation: pop-in var(--duration-quick) var(--ease-out); }
+.tip[data-state="closed"] { animation: pop-out var(--duration-micro) var(--ease-out) forwards; }
+.tip[data-side="bottom"] { transform-origin: top center; }
+.tip[data-side="top"] { transform-origin: bottom center; }
+
+/* ---------- Collapse (sub-navigation, disclosures): grid-rows, never height ---------- */
+.disclosure {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--duration-fast) var(--ease-smooth-out), opacity var(--duration-quick) var(--ease-out);
+}
+.disclosure[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.disclosure > .disclosure-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.chevron {
+  transition: transform var(--duration-fast) var(--ease-smooth-out);
+}
+.chevron[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+/* ---------- Segmented pill ---------- */
+.seg { position: relative; }
+.seg-ind {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  border-radius: 6px;
+  background: var(--color-ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform var(--duration-fast) var(--ease-smooth-out), width var(--duration-fast) var(--ease-smooth-out), height var(--duration-fast) var(--ease-smooth-out);
+}
+.seg[data-slide="ready"] .seg-ind { opacity: 1; }
+.seg[data-slide="ready"] [aria-current="true"] { background: transparent; }
+.seg > a { z-index: 1; }
+
+/* ---------- Toasts: a stack of at most three; the newest rises in, older ones step back ---------- */
+.toast-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 8px;
+}
+.toast {
+  --i: 0;
+  animation: toast-in var(--duration-medium) var(--ease-smooth-out);
+  transition: transform var(--duration-medium) var(--ease-smooth-out), opacity var(--duration-medium) var(--ease-smooth-out);
+  transform: translateY(calc(var(--i) * var(--distance-small))) scale(calc(1 - var(--i) * (1 - var(--scale-large))));
+  opacity: calc(1 - var(--i) * 0.18);
+}
+.toast[data-leaving="true"] { animation: toast-out var(--duration-quick) var(--ease-smooth-out) forwards; }
+.toast-stack:hover .toast,
+.toast-stack:focus-within .toast { opacity: 1; transform: none; }
+
+/* ---------- Static feedback that also moves a little ---------- */
+.result-in { animation: result-in var(--duration-fast) var(--ease-smooth-out); }
+.shake { animation: shake calc(var(--duration-micro) * 4) var(--ease-smooth-out); }
+.check-draw path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: check-draw var(--duration-very-slow) var(--ease-smooth-out) var(--duration-micro) backwards;
+}
+.num-in { display: inline-block; animation: number-in var(--duration-fast) var(--ease-in-out); }
+.empty-in { animation: fade-in var(--duration-quick) var(--ease-out); }
+
+/* ---------- Sync state ---------- */
+.sync-pill {
+  transition: background-color var(--duration-fast) ease, border-color var(--duration-fast) ease, color var(--duration-fast) ease;
+}
+.sync-pill .sync-label {
+  display: inline-block;
+  transition: opacity var(--duration-quick) ease, filter var(--duration-quick) ease;
+}
+.sync-pill[data-swapping="true"] .sync-label { opacity: 0; filter: blur(var(--blur-small)); }
+/* One ring when the state turns into something that needs a person (conflict, revoked, offline, rate limit). */
+.sync-pill[data-attn="true"] { --ring-color: currentColor; animation: ring-once calc(var(--duration-very-slow) + var(--duration-fast)) var(--ease-out); }
+
+/* ---------- Board ---------- */
+.card-enter { animation: rise-in-small var(--duration-fast) var(--ease-smooth-out); }
+.card-ghost { display: grid; grid-template-rows: 1fr; animation: card-leave var(--duration-fast) var(--ease-smooth-out) forwards; pointer-events: none; }
+.card-ghost > div { min-height: 0; overflow: hidden; }
+/* A card that changed for a reason other than the pointer shows where, once. Under reduced motion this outline IS the cue. */
+.card-landed { border-radius: 10px; --ring-color: var(--color-ink-3); animation: ring-once calc(var(--duration-very-slow) + var(--duration-fast)) var(--ease-out); }
+
+/* ---------- Charts and meters: only a CHANGED value moves ---------- */
+.bar-h { transition: height var(--duration-slow) var(--ease-smooth-out); }
+.meter-fill {
+  clip-path: inset(0 calc(100% - var(--v, 0%)) 0 0 round 999px);
+  transition: clip-path var(--duration-slow) var(--ease-smooth-out);
+}
+
+/* ---------- Theme toggle and theme change ---------- */
+.theme-switching,
+.theme-switching *:not(.theme-icon),
+.theme-switching *::before,
+.theme-switching *::after { transition: none !important; }
+/* Measured: a page with a backdrop-filter element takes ~1 s to snapshot for a view transition (5 ms without it), which would
+   delay the theme change on screen. The blur is dropped for the duration of the switch only; the bar is opaque enough that
+   the 150 ms cross-fade hides it. */
+.theme-switching header { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.theme-toggle { position: relative; }
+.theme-toggle .theme-icon {
+  position: absolute;
+  transition: opacity var(--duration-quick) var(--ease-smooth-out), transform var(--duration-fast) var(--ease-smooth-out), filter var(--duration-quick) var(--ease-smooth-out);
+}
+/* The icon is chosen by the theme attribute the server rendered (and the OS for "system"), so it is right on first paint.
+   Light shows the moon (what a click switches to); dark shows the sun. */
+.theme-toggle .theme-icon-sun { opacity: 0; transform: rotate(-60deg) scale(0.6); filter: blur(var(--blur-small)); }
+.theme-toggle .theme-icon-moon { opacity: 1; transform: none; filter: none; }
+:root[data-theme="dark"] .theme-toggle .theme-icon-sun { opacity: 1; transform: none; filter: none; }
+:root[data-theme="dark"] .theme-toggle .theme-icon-moon { opacity: 0; transform: rotate(60deg) scale(0.6); filter: blur(var(--blur-small)); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .theme-toggle .theme-icon-sun { opacity: 1; transform: none; filter: none; }
+  :root:not([data-theme]) .theme-toggle .theme-icon-moon { opacity: 0; transform: rotate(60deg) scale(0.6); filter: blur(var(--blur-small)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .theme-toggle .theme-icon-sun,
+  .theme-toggle .theme-icon-moon { transform: none !important; filter: none !important; }
+}
+/* Cross-fade between themes where the browser can snapshot the page; elsewhere the switch is instant. Never longer than a close. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--duration-quick);
+  animation-timing-function: var(--ease-out);
+}
+
+/* ---------- Icons react to hover and keyboard focus (adapted from Flint: pop for controls, ring for the bell) ---------- */
+.nav-item > svg:first-child,
+.btn > svg:not(.animate-spin):not(.chevron):not(.theme-icon) { transform-origin: 50% 50%; }
+.nav-item:is(:hover, :focus-visible) > svg:first-child,
+.btn:not(.bell-link):is(:hover, :focus-visible) > svg:not(.animate-spin):not(.chevron):not(.theme-icon) {
+  animation: icon-pop var(--duration-medium) var(--ease-smooth-out);
+}
+.bell-link { --ring-origin: 50% 8%; }
+.bell-link:is(:hover, :focus-visible) > svg,
+.bell-link[data-ring="true"] > svg {
+  transform-origin: var(--ring-origin);
+  animation: icon-ring var(--duration-slow) var(--ease-in-out);
+}
+.btn .lucide-refresh-cw { transition: rotate var(--duration-medium) var(--ease-smooth-out); }
+.btn:is(:hover, :focus-visible) .lucide-refresh-cw:not(.animate-spin) { rotate: 180deg; }
+
+/* The mobile navigation drawer brings its entries in one after another (Flint's sidebar entrance). */
+.drawer-left[data-state="open"] nav li { animation: slide-in-left var(--duration-medium) var(--ease-smooth-out) backwards; }
+.drawer-left[data-state="open"] nav li:nth-child(2) { animation-delay: var(--duration-stagger); }
+.drawer-left[data-state="open"] nav li:nth-child(3) { animation-delay: calc(var(--duration-stagger) * 2); }
+.drawer-left[data-state="open"] nav li:nth-child(4) { animation-delay: calc(var(--duration-stagger) * 3); }
+.drawer-left[data-state="open"] nav li:nth-child(5) { animation-delay: calc(var(--duration-stagger) * 4); }
+.drawer-left[data-state="open"] nav li:nth-child(n + 6) { animation-delay: calc(var(--duration-stagger) * 5); }
+
+/* The Mergeport mark: on hover the two branches draw in and meet. */
+.mark-logo .mark-branch { stroke-dasharray: 1; stroke-dashoffset: 0; }
+.mark-logo:is(:hover, :focus-visible) .mark-branch { animation: mark-draw var(--duration-slow) var(--ease-smooth-out); }
+.mark-logo:is(:hover, :focus-visible) .mark-port { animation: icon-pop var(--duration-slow) var(--ease-smooth-out) var(--duration-fast) backwards; transform-origin: 16px 25px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn:is(:hover, :focus-visible) .lucide-refresh-cw:not(.animate-spin) { rotate: none; }
+}
