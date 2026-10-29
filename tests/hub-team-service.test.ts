@@ -44,6 +44,16 @@ describe("HubTeamService", () => {
     expect(admin(hub.requests)).toHaveLength(0);
   });
 
+  it("adminSpaces returns spaces with members for an admin; a MEMBER never reaches /admin", async () => {
+    const { hub, svc } = await setup("2", { spaceMembers: { common: [{ githubId: "1", canWrite: true }] } });
+    const s = await svc.adminSpaces();
+    expect(s).toEqual([{ id: "common", kind: "COMMON", name: "Common", members: [{ githubId: "1", canWrite: true }] }]);
+    const m = await setup("3");
+    await expect(m.svc.adminSpaces()).rejects.toThrow("Only admins can");
+    expect(admin(m.hub.requests)).toHaveLength(0);
+    void hub;
+  });
+
   it("promoted after a cached MEMBER overview still succeeds", async () => {
     const { hub, svc } = await setup("3");
     expect((await svc.overview()).canAdmin).toBe(false);

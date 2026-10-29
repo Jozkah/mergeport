@@ -2,6 +2,7 @@ import { requireViewer } from "@/lib/authz-page";
 import { HubForbidden, HubUnauthorized, type HubLinkStatus } from "@/lib/hub/ports";
 import { hubLinkStatus } from "@/lib/hub/ports-stub";
 import { getHubTeamService } from "@/lib/local/runtime";
+import type { HubAdminSpace } from "@/lib/hub/ports";
 import type { HubOverview } from "@/lib/team/hub-service";
 import { HubTeamPanel, type HubTeamError } from "@/components/team/HubTeamPanel";
 
@@ -17,5 +18,8 @@ export async function HubTeamPage({ backend }: { backend: string }) {
   } catch (e) {
     error = e instanceof HubUnauthorized ? { kind: "unauthorized" } : e instanceof HubForbidden ? { kind: "forbidden" } : { kind: "request", message: e instanceof Error && e.name === "HubRequestError" ? e.message : "The server did not answer. What is shown may be out of date." };
   }
-  return <HubTeamPanel origin={origin} status={status} overview={overview} error={error} />;
+  // Members of each space are an admin-only extra; if it fails the page keeps the name-only list.
+  let spaceMembers: HubAdminSpace[] | null = null;
+  if (overview?.canAdmin) spaceMembers = await svc.adminSpaces().catch(() => null);
+  return <HubTeamPanel origin={origin} status={status} overview={overview} error={error} spaceMembers={spaceMembers} />;
 }

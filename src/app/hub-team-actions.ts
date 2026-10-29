@@ -9,7 +9,15 @@ import { isHubBackend } from "@/lib/local/backends";
 import { getHubTeamService } from "@/lib/local/runtime";
 import { currentBackend } from "@/lib/local/workspaces";
 
+type Role = "ADMIN" | "MEMBER" | "READER";
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
+
+/** Narrows form text to a role; anything else is refused here, before the service (which validates again) is reached. */
+function role(fd: FormData, k: string): Role {
+  const v = str(fd, k);
+  if (v !== "ADMIN" && v !== "MEMBER" && v !== "READER") throw new ValidationError("Choose Admin, Member or Reader.");
+  return v;
+}
 
 /** Hub team administration. The hub decides who may do what; `HubTeamService` only gives friendlier messages first. */
 async function hubService() {
@@ -36,7 +44,7 @@ export async function hubInviteAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
     await requireViewer();
     const { svc } = await hubService();
-    await svc.invite(str(fd, "login"), str(fd, "role") as "MEMBER");
+    await svc.invite(str(fd, "login"), role(fd, "role"));
     revalidatePath("/team");
     return { ok: true, message: `Invited @${str(fd, "login").replace(/^@/, "")}.` };
   });
@@ -46,7 +54,7 @@ export async function hubChangeRoleAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
     await requireViewer();
     const { svc } = await hubService();
-    await svc.changeRole(str(fd, "githubId"), str(fd, "role") as "MEMBER"); // the service rejects any value but Admin, Member, Reader
+    await svc.changeRole(str(fd, "githubId"), role(fd, "role"));
     revalidatePath("/team");
     return { ok: true, message: "Role changed." };
   });

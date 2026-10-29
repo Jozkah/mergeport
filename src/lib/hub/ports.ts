@@ -21,6 +21,7 @@ export type HubRole = "OWNER" | "ADMIN" | "MEMBER" | "READER";
 export type HubMember = { githubId: string; login: string; name: string | null; avatarUrl: string | null; role: HubRole; status: "INVITED" | "ACTIVE" | "REMOVED" };
 export type HubSpaceInfo = { id: string; kind: "COMMON" | "RESTRICTED"; name: string; canWrite: boolean; seq: string };
 export type HubSpaceMember = { githubId: string; canWrite: boolean };
+export type HubAdminSpace = { id: string; kind: "COMMON" | "RESTRICTED"; name: string; members: HubSpaceMember[] };
 
 /** Admin calls against the hub. The hub decides who may do what; callers only get friendlier errors. */
 export type HubAdminApi = {
@@ -28,6 +29,8 @@ export type HubAdminApi = {
   invite(login: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void>;
   removeMember(githubId: string): Promise<void>;
   setRole(githubId: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void>;
+  /** ADMIN+ only: every space with its members. */
+  adminSpaces(): Promise<HubAdminSpace[]>;
   createSpace(name: string, members: HubSpaceMember[]): Promise<HubSpaceInfo>;
   updateSpace(id: string, p: { name?: string; members?: HubSpaceMember[] }): Promise<void>;
   deleteSpace(id: string): Promise<void>;

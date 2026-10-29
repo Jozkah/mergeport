@@ -35,6 +35,7 @@ function fakeApi(me: string, over: Partial<HubAdminApi> = {}) {
     invite: async (l) => void calls.push(`invite:${l}`),
     removeMember: async (id) => void calls.push(`remove:${id}`),
     setRole: async (id, r) => void calls.push(`role:${id}:${r}`),
+    adminSpaces: async () => [{ id: "c", kind: "COMMON", name: "Common", members: [] }, { id: "r1", kind: "RESTRICTED", name: "Secret", members: [{ githubId: "2", canWrite: true }, { githubId: "3", canWrite: false }] }],
     createSpace: async (n, m) => (calls.push(`space:${n}:${JSON.stringify(m)}`), spaces[1]),
     updateSpace: async () => {},
     deleteSpace: async (id) => void calls.push(`delete:${id}`),
@@ -114,6 +115,38 @@ describe("HubTeamPage rendering", () => {
     expect(html).toContain("Sign out of this server");
     expect(html).toContain("Live");
     expect(html).not.toContain("pending");
+  });
+
+  it("admin sees each restricted space's members with their access", async () => {
+    const { html } = await render("2");
+    expect(html).toContain("Members of this space");
+    expect(html).toContain("@mem");
+    expect(html).toContain("Read only");
+    expect(html).toContain("Can edit");
+  });
+
+  it("adminSpaces failure degrades to the name-only list", async () => {
+    const { html } = await render("2", { adminSpaces: async () => { throw new HubRequestError("boom", 500); } });
+    expect(html).toContain("Secret");
+    expect(html).not.toContain("Members of this space");
+    expect(html).toContain("Sign out of this server");
+  });
+
+  it("member never triggers adminSpaces", async () => {
+    const adminSpaces = vi.fn(async () => []);
+    const { html } = await render("3", { adminSpaces });
+    expect(adminSpaces).not.toHaveBeenCalled();
+    expect(html).not.toContain("Members of this space");
+  });
+
+  it("action role helper refuses a non-role before the service", async () => {
+    setBackend(hubBackendId(ORIGIN));
+    const { api, calls } = fakeApi("2");
+    mockHub(api, "2");
+    const a = await import("@/app/hub-team-actions");
+    expect(await a.hubInviteAction(fd({ login: "zed", role: "OWNER" }))).toMatchObject({ ok: false });
+    expect(await a.hubInviteAction(fd({ login: "zed" }))).toMatchObject({ ok: false });
+    expect(calls).toEqual([]);
   });
 
   it("member sees no admin controls but can sign out", async () => {
@@ -223,9 +256,9 @@ describe("hub team actions", () => {
   it("hub failures become messages", async () => {
     const a = await actions();
     mockHub(fakeApi("2", { me: async () => { throw new HubUnauthorized(); } }).api, "2");
-    expect(await a.hubInviteAction(fd({ login: "zed" }))).toEqual({ ok: false, error: "Sign in to the server again." });
+    expect(await a.hubInviteAction(fd({ login: "zed", role: "MEMBER" }))).toEqual({ ok: false, error: "Sign in to the server again." });
     mockHub(fakeApi("2", { me: async () => { throw new HubForbidden(); } }).api, "2");
-    expect(await a.hubInviteAction(fd({ login: "zed" }))).toMatchObject({ ok: false, error: expect.stringContaining("removed from this team") });
+    expect(await a.hubInviteAction(fd({ login: "zed", role: "MEMBER" }))).toMatchObject({ ok: false, error: expect.stringContaining("removed from this team") });
   });
 
   it("refuses when the workspace is GitHub", async () => {

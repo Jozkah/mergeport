@@ -6,7 +6,7 @@ import { Avatar, Banner, EmptyState, Mono, PageHeader, Panel, SimplePill } from 
 import { Lock, ShieldCheck, Trash2, Users } from "@/components/ui/icons";
 import { hubChangeRoleAction, hubCreateSpaceAction, hubDeleteSpaceAction, hubInviteAction, hubRemoveMemberAction, hubSignOutAction } from "@/app/hub-team-actions";
 import { HubSignOut } from "@/components/team/HubSignOut";
-import type { HubLinkStatus, HubMember } from "@/lib/hub/ports";
+import type { HubAdminSpace, HubLinkStatus, HubMember, HubSpaceMember } from "@/lib/hub/ports";
 import type { HubOverview } from "@/lib/team/hub-service";
 
 export const DELETE_SPACE_WARNING = "Deleting this space removes its projects, cards and tasks from every member's computer.";
@@ -30,6 +30,21 @@ export function ConnectionPill({ status }: { status: HubLinkStatus }) {
   );
 }
 
+function SpaceMembers({ members, people }: { members?: HubSpaceMember[]; people: HubMember[] }) {
+  if (!members) return null;
+  if (members.length === 0) return <p className="mt-1 text-[12.5px] text-ink-3">No members yet.</p>;
+  return (
+    <ul className="mt-2 flex flex-wrap gap-2" aria-label="Members of this space">
+      {members.map((m) => (
+        <li key={m.githubId} className="inline-flex items-center gap-1.5 text-[12.5px]">
+          @{people.find((p) => p.githubId === m.githubId)?.login ?? `user ${m.githubId}`}
+          <SimplePill tone={m.canWrite ? "ok" : "unknown"}>{m.canWrite ? "Can edit" : "Read only"}</SimplePill>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 const hubHost = (origin: string) => {
   try {
     return new URL(origin).host;
@@ -47,7 +62,7 @@ const ROLE_OPTIONS = (
 );
 
 /** Presentational: everything it shows was already decided by the page. Writes go through server actions, which the hub re-checks. */
-export function HubTeamPanel({ origin, status, overview, error }: { origin: string | null; status: HubLinkStatus; overview: HubOverview | null; error: HubTeamError | null }) {
+export function HubTeamPanel({ origin, status, overview, error, spaceMembers = null }: { origin: string | null; status: HubLinkStatus; overview: HubOverview | null; error: HubTeamError | null; spaceMembers?: HubAdminSpace[] | null }) {
   const removed = error?.kind === "forbidden";
   const needsSignIn = (status.needsSignIn || error?.kind === "unauthorized") && !removed;
   const o = removed ? null : overview;
@@ -119,7 +134,10 @@ export function HubTeamPanel({ origin, status, overview, error }: { origin: stri
               <ul>
                 {restricted.map((s) => (
                   <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 last:border-b-0">
+                    <div className="min-w-0">
                     <p className="flex min-w-0 flex-wrap items-center gap-2 font-medium"><span className="truncate">{s.name}</span><SimplePill tone="waiting">Restricted audience</SimplePill><span className="text-[12.5px] font-normal text-ink-3">your access: {s.canWrite ? "write" : "read"}</span></p>
+                    <SpaceMembers members={spaceMembers?.find((x) => x.id === s.id)?.members} people={o.members} />
+                    </div>
                     {o.canAdmin && (
                       <Sheet title={`Delete “${s.name}”?`} description={DELETE_SPACE_WARNING} trigger={<button type="button" className="btn btn-danger !h-10"><Trash2 size={14} aria-hidden />Delete space</button>}>
                         <ActionForm action={hubDeleteSpaceAction} submitLabel="Delete space" pendingLabel="Deleting…" submitClassName="btn btn-danger !h-10">

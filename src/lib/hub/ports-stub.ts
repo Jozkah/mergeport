@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { HubForbidden, HubRequestError, HubUnauthorized, type HubAdminApi, type HubLinkStatus, type HubSessionPort } from "@/lib/hub/ports";
+import { HubForbidden, HubRequestError, HubUnauthorized, type HubAdminApi, type HubAdminSpace, type HubLinkStatus, type HubSessionPort } from "@/lib/hub/ports";
 
 /**
  * STAND-IN for plan 2. The real implementation keeps the session token encrypted in the profile db (HubSession table
@@ -39,6 +39,22 @@ export const hubSessionPort: HubSessionPort = {
 
 const TIMEOUT_MS = 8000;
 
+/**
+ * ASSUMED shape of `GET /admin/spaces` (the hub plan owns it): `{ spaces: [{ id, kind, name, members: [{ githubId, canWrite }] }] }`.
+ * This is the only place that knows it; entries that do not fit are skipped rather than trusted.
+ */
+export function parseAdminSpaces(raw: unknown): HubAdminSpace[] {
+  const list = (raw as { spaces?: unknown } | null)?.spaces;
+  if (!Array.isArray(list)) throw new HubRequestError("The server sent an unreadable answer", 200);
+  const out: HubAdminSpace[] = [];
+  for (const s of list as Record<string, unknown>[]) {
+    if (!s || typeof s.id !== "string" || typeof s.name !== "string" || (s.kind !== "COMMON" && s.kind !== "RESTRICTED")) continue;
+    const members = Array.isArray(s.members) ? (s.members as Record<string, unknown>[]).filter((m) => m && typeof m.githubId === "string").map((m) => ({ githubId: m.githubId as string, canWrite: m.canWrite === true })) : [];
+    out.push({ id: s.id, kind: s.kind, name: s.name, members });
+  }
+  return out;
+}
+
 /** HTTP admin client. Errors never carry the token or the response body. */
 export function httpHubAdmin(origin: string, token: () => Promise<string | null>, fetchImpl: typeof fetch = fetch): HubAdminApi {
   const call = async (method: string, p: string, body?: unknown): Promise<unknown> => {
@@ -73,6 +89,7 @@ export function httpHubAdmin(origin: string, token: () => Promise<string | null>
     invite: async (login, role) => void (await call("POST", "/admin/invites", { login, role })),
     removeMember: async (id) => void (await call("DELETE", `/admin/members/${seg(id)}`)),
     setRole: async (id, role) => void (await call("PATCH", `/admin/members/${seg(id)}`, { role })),
+    adminSpaces: async () => parseAdminSpaces(await call("GET", "/admin/spaces")),
     createSpace: async (name, members) => (await call("POST", "/admin/spaces", { name, members })) as Awaited<ReturnType<HubAdminApi["createSpace"]>>,
     updateSpace: async (id, p) => void (await call("PATCH", `/admin/spaces/${seg(id)}`, p)),
     deleteSpace: async (id) => void (await call("DELETE", `/admin/spaces/${seg(id)}`)),

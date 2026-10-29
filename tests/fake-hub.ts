@@ -18,6 +18,8 @@ export type FakeHubOpts = {
   verificationUri?: string;
   members?: FakeMember[];
   spaces?: { id: string; kind: "COMMON" | "RESTRICTED"; name: string; canWrite: boolean; seq: string }[];
+  /** Members of each space, answered by GET /admin/spaces. */
+  spaceMembers?: Record<string, { githubId: string; canWrite: boolean }[]>;
   /** Answer every authenticated request with this status (e.g. 401, 403, 429). */
   forceStatus?: number;
 };
@@ -87,6 +89,7 @@ export async function startFakeHub(opts: FakeHubOpts = {}) {
         else return send(res, 422);
         return send(res, 204);
       }
+      if (req.method === "GET" && p === "/admin/spaces") return send(res, 200, { spaces: spaces.map((s) => ({ id: s.id, kind: s.kind, name: s.name, members: opts.spaceMembers?.[s.id] ?? [] })) });
       if (req.method === "POST" && p === "/admin/spaces") {
         if (!b.name) return send(res, 422);
         const sp = { id: `s${spaces.length + 1}`, kind: "RESTRICTED" as const, name: b.name, canWrite: true, seq: "0" };

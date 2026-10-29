@@ -1,5 +1,5 @@
 import { ValidationError } from "@/lib/errors";
-import type { HubAdminApi, HubMember, HubSessionPort, HubSpaceInfo } from "@/lib/hub/ports";
+import type { HubAdminApi, HubAdminSpace, HubMember, HubSessionPort, HubSpaceInfo } from "@/lib/hub/ports";
 import { hubSessionPort } from "@/lib/hub/ports-stub";
 
 /**
@@ -70,6 +70,12 @@ export class HubTeamService {
     const o = await this.requireAdmin("remove people");
     if ((await this.roleOf(o, githubId)) === "OWNER") throw new ValidationError("The owner cannot be removed.");
     await this.mutate(() => this.api.removeMember(githubId));
+  }
+
+  /** Spaces with their members. Admins only; the hub re-checks. */
+  async adminSpaces(): Promise<HubAdminSpace[]> {
+    await this.requireAdmin("see space members");
+    return this.api.adminSpaces();
   }
 
   async createSpace(name: string, members: { githubId: string; canWrite: boolean }[]): Promise<HubSpaceInfo> {
