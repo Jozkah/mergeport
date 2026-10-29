@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Space } from "@/generated/prisma/client";
-import { db } from "@/lib/db";
+import { db, resolveDbFile } from "@/lib/db";
 import { isDemo } from "@/lib/env";
 import { ghFetch } from "@/lib/github/gh";
 import { profileRunner } from "@/lib/local/profile-runner";
@@ -8,13 +8,19 @@ import { GitHubRest } from "@/lib/github/rest";
 import { SyncEngine } from "@/lib/sync/engine";
 import { CoordinationStore } from "@/lib/sync/store";
 import { TeamService } from "@/lib/team/service";
+import { HubTeamService } from "@/lib/team/hub-service";
+import { httpHubAdmin, hubSessionPort } from "@/lib/hub/ports-stub";
+import { hubBackendId } from "@/lib/local/backends";
+import { mergeportHome } from "@/lib/local/profile";
+import { readHubs } from "@/lib/local/registry";
+import { env } from "@/lib/env";
 
 /**
  * Per-process singletons for the local app: the sync engine, the team service and the event bus the browser listens to.
  * They exist only for a signed-in (non-demo) profile; demo mode never contacts GitHub.
  */
 
-type G = typeof globalThis & { __mp?: { bus: EventEmitter; engine?: SyncEngine; team?: TeamService; version: number } };
+type G = typeof globalThis & { __mp?: { bus: EventEmitter; engine?: SyncEngine; team?: TeamService; hub?: { key: string; svc: HubTeamService }; version: number } };
 const g = globalThis as G;
 const state = (g.__mp ??= { bus: new EventEmitter(), version: 0 });
 state.bus.setMaxListeners(50);
@@ -75,9 +81,34 @@ export async function getTeamService(): Promise<TeamService | null> {
   return state.team;
 }
 
+/**
+ * Team administration for a hub profile. The hub origin comes from the known-servers list entry for the active backend; the
+ * session token is read per call, so signing out or in again is picked up at once. One instance per session account, because
+ * the service caches what the hub last said about the actor.
+ */
+export async function getHubTeamService(backend: string): Promise<{ svc: HubTeamService; dbFile: string; origin: string | null }> {
+  const dbFile = resolveDbFile();
+  const entry = readHubs(mergeportHome(env().MERGEPORT_HOME)).find((h) => {
+    try {
+      return hubBackendId(h.origin) === backend;
+    } catch {
+      return false;
+    }
+  });
+  const origin = entry?.origin ?? null;
+  const session = await hubSessionPort.read(dbFile);
+  const key = `${backend}:${session?.githubId ?? ""}`;
+  if (state.hub?.key !== key) {
+    // With no known origin or session every call fails as "sign in again" (HubUnauthorized) before any request is made.
+    state.hub = { key, svc: new HubTeamService(httpHubAdmin(origin ?? "http://127.0.0.1:0", async () => (origin ? ((await hubSessionPort.read(dbFile))?.token ?? null) : null)), session?.githubId ?? "") };
+  }
+  return { svc: state.hub.svc, dbFile, origin };
+}
+
 export const resetRuntime = () => {
   state.engine = undefined;
   state.team = undefined;
+  state.hub = undefined;
 };
 
 /**

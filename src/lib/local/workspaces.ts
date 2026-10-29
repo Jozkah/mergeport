@@ -1,4 +1,6 @@
 import { GITHUB_BACKEND, hubBackendId, type Backend } from "@/lib/local/backends";
+import { env } from "@/lib/env";
+import { mergeportHome } from "@/lib/local/profile";
 import { readActive, readHubs } from "@/lib/local/registry";
 
 export type WorkspaceEntry = { backend: Backend; label: string; detail?: string; available: boolean };
@@ -19,4 +21,14 @@ export function listWorkspaces(home: string, host: string, accountId: string): {
   const a = readActive(home);
   const wanted = a && a.host === host && a.accountId === accountId ? a.backend : GITHUB_BACKEND;
   return { active: entries.some((e) => e.backend === wanted) ? wanted : GITHUB_BACKEND, entries };
+}
+
+/**
+ * Which backend this process serves. Stand-in for `TeamConfig.backend` (plan 2): read from the launcher's active.json and
+ * replaced by the column on integration. A missing, unreadable or foreign-host file means GitHub.
+ */
+export async function currentBackend(): Promise<Backend> {
+  const e = env();
+  const a = readActive(mergeportHome(e.MERGEPORT_HOME));
+  return a && a.host === e.MERGEPORT_HOST ? a.backend : GITHUB_BACKEND;
 }
