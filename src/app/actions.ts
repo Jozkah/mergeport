@@ -15,7 +15,8 @@ import * as work from "@/lib/services/work-actions";
 import { addDependency, assertSameAudience, createCard, moveCard, requestManualReview, resolveManualReview, createColumnsForProject } from "@/lib/services/planning";
 import { mapLocalRoot, scanWorktrees, unmapLocalRoot } from "@/lib/services/worktrees";
 import { audit } from "@/lib/services/audit";
-import { publicPort } from "@/lib/github/factory";
+import { portForDiscovery, publicPort } from "@/lib/github/factory";
+import { applyWatchlist } from "@/lib/services/watchlist";
 import { readCached } from "@/lib/local/discovery";
 import type { Discovery } from "@/lib/github/port";
 import { GithubError } from "@/lib/github/port";
@@ -435,6 +436,19 @@ export async function mapForkAction(fd: FormData): Promise<ActionResult> {
     await enqueue(db, { type: "sync.fork", payload: { mappingId: m.id }, dedupeKey: `fork:${m.id}` });
     revalidatePath("/forks");
     return { ok: true, message: "Branch mapping saved. A comparison is queued." };
+  });
+}
+
+/** Many repositories at once: one address tracks it and its parent, two addresses ("fork upstream") map them. */
+export async function watchlistAction(input: { text: string }): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireAdminViewer();
+    const port = await portForDiscovery(db, { id: viewer.githubId.toString(), login: viewer.login });
+    const results = await applyWatchlist(db, viewer, port, String(input.text ?? ""));
+    revalidatePath("/forks");
+    revalidatePath("/repositories");
+    const ok = results.filter((r) => r.ok).length;
+    return { ok: true, message: `${ok} of ${results.length} added. Comparisons are queued.`, data: { results } };
   });
 }
 

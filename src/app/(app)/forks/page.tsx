@@ -1,5 +1,6 @@
 import { Select } from "@/components/ui/Select";
 import { ForkMapFields } from "@/components/forms/ForkMapFields";
+import { WatchlistForm } from "@/components/forms/WatchlistForm";
 import { byOwnerFirst } from "@/lib/domain/ordering";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -10,7 +11,7 @@ import { formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Sheet } from "@/components/ui/dialog";
 import { Banner, EmptyState, Mono, PageHeader, Panel, SimplePill, Time } from "@/components/ui/primitives";
-import { ArrowRight, GitFork, GitCompare, RefreshCw } from "@/components/ui/icons";
+import { ArrowRight, Eye, GitFork, GitCompare, RefreshCw } from "@/components/ui/icons";
 import { ackEvidenceAction, mapForkAction, refreshForkAction, syncForkBranchAction, triageAction } from "@/app/actions";
 
 export const metadata = { title: "Forks & upstream" };
@@ -37,7 +38,7 @@ export default async function Forks() {
   const { viewer } = await requireViewer();
   const mappings = await visibleForkMappings(db, viewer);
   const [forkRepos, allRepos, unmappedForks] = await Promise.all([
-    db.repository.findMany({ where: { ...repoWhere(viewer), isFork: true }, select: { id: true, fullName: true, defaultBranch: true, parentGithubId: true, parentFullName: true } }),
+    db.repository.findMany({ where: repoWhere(viewer), orderBy: [{ isFork: "desc" }, { fullName: "asc" }], select: { id: true, fullName: true, defaultBranch: true, parentGithubId: true, parentFullName: true } }),
     db.repository.findMany({ where: repoWhere(viewer), select: { id: true, githubId: true, fullName: true, defaultBranch: true } }).then((rs) => rs.sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName))),
     db.repository.count({ where: { ...repoWhere(viewer), isFork: true, forkMappings: { none: { upstream: repoWhere(viewer) } } } }),
   ]);
@@ -62,7 +63,7 @@ export default async function Forks() {
       {unmappedForks > 0 && <div className="mb-4"><Banner title={`${unmappedForks} fork${unmappedForks === 1 ? "" : "s"} without a mapped upstream you can see`}>Upstream content is only shown when the upstream repository is also shared with you.</Banner></div>}
 
       {mappings.length === 0 ? (
-        <Panel title="Forks" icon={GitFork}><EmptyState icon={GitFork} title="No tracked forks">{viewer.isAdmin ? "Map a fork to its upstream below to start comparing branches." : "An administrator has not mapped any fork you can see to an upstream you can see."}</EmptyState></Panel>
+        <Panel title="Forks" icon={GitFork}><EmptyState icon={GitFork} title="No tracked forks">{viewer.isAdmin ? "Paste repositories into the watchlist below, or map a fork to its upstream, to start comparing branches." : "An administrator has not mapped any fork you can see to an upstream you can see."}</EmptyState></Panel>
       ) : (
         <div className="flex flex-col gap-6">
           {detail.map(({ m, prs, issues, caps, forkTip, upTip }) => {
@@ -143,7 +144,13 @@ export default async function Forks() {
         </div>
       )}
 
-      {viewer.isAdmin && forkRepos.length > 0 && (
+      {viewer.isAdmin && (
+        <div className="mt-6">
+          <Panel title="Watchlist" icon={Eye} id="watchlist"><WatchlistForm /></Panel>
+        </div>
+      )}
+
+      {viewer.isAdmin && forkRepos.length > 1 && (
         <div className="mt-6">
           <Panel title="Map a fork to its upstream" icon={GitFork} id="map">
             <div className="p-4">
