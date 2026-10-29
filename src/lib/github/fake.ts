@@ -63,6 +63,12 @@ export class FakeGithub implements GithubPort {
     if (!it) throw new GithubError("not-found", "Not found");
     return it;
   }
+  async getIssue(owner: string, repo: string, number: number) {
+    this.maybeFail("getIssue");
+    const it = (this.items.get(this.k(owner, repo)) ?? []).find((i) => i.number === number);
+    if (!it) throw new GithubError("not-found", "Not found");
+    return it;
+  }
   async listReviews(o: string, r: string, n: number) {
     this.maybeFail("listReviews");
     return this.reviews.get(this.kn(o, r, n)) ?? [];
@@ -71,8 +77,9 @@ export class FakeGithub implements GithubPort {
     this.maybeFail("listIssueComments");
     return this.comments.get(this.kn(o, r, n)) ?? [];
   }
-  async listReviewComments() {
-    return [];
+  reviewComments = new Map<string, import("./port").RemoteComment[]>();
+  async listReviewComments(o: string, r: string, n: number) {
+    return this.reviewComments.get(this.kn(o, r, n)) ?? [];
   }
   async listRequestedReviewers(o: string, r: string, n: number) {
     this.maybeFail("listRequestedReviewers");
@@ -94,7 +101,22 @@ export class FakeGithub implements GithubPort {
   async listCommitFiles() {
     return { files: [], truncated: false };
   }
-  async getContents(): Promise<never> {
+  commitCompares = new Map<string, { files: { filename: string; status: string; additions: number; deletions: number; patch: string | null; previousFilename: string | null }[]; aheadBy: number }>();
+  async compareCommits(o: string, r: string, base: string, head: string) {
+    this.maybeFail("compareCommits");
+    const c = this.commitCompares.get(`${o}/${r}:${base}...${head}`);
+    return { files: c?.files ?? [], truncated: false, aheadBy: c?.aheadBy ?? 0 };
+  }
+  threads = new Map<string, { rootCommentId: bigint; resolved: boolean }[]>();
+  async listReviewThreads(o: string, r: string, n: number) {
+    this.maybeFail("listReviewThreads");
+    return this.threads.get(this.kn(o, r, n)) ?? [];
+  }
+  /** Files by `owner/repo:ref:path`, for tests that read repository files (CODEOWNERS). */
+  files = new Map<string, string>();
+  async getContents(o?: string, r?: string, path?: string, ref?: string): Promise<any> {
+    const text = this.files.get(`${o}/${r}:${ref}:${path}`);
+    if (text !== undefined) return { kind: "file", file: { path, sha: "fake", size: text.length, text, binary: false, tooLarge: false, htmlUrl: null } };
     throw new GithubError("not-found", "Not found", undefined, undefined, 404);
   }
   async createReviewComment(o: string, r: string, n: number, i: { body: string; path: string; line: number }) {
@@ -133,8 +155,8 @@ export class FakeGithub implements GithubPort {
   async requestReviewers(o: string, r: string, n: number) {
     this.writes.push(`request ${o}/${r}#${n}`);
   }
-  async submitReview(o: string, r: string, n: number, i: { event: string }) {
-    this.writes.push(`review ${o}/${r}#${n} ${i.event}`);
+  async submitReview(o: string, r: string, n: number, i: { event: string; comments?: unknown[] }) {
+    this.writes.push(`review ${o}/${r}#${n} ${i.event}${i.comments?.length ? ` +${i.comments.length} comments` : ""}`);
   }
   async mergePull(o: string, r: string, n: number, i: { method: MergeMethod; expectedHeadSha: string }) {
     this.maybeFail("mergePull");

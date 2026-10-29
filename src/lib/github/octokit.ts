@@ -1,5 +1,6 @@
 import { Octokit } from "octokit";
 const MAX_TEXT_BYTES = 1_000_000;
+const COMMIT_FILE_PAGES = 30; // 100 files a page; GitHub itself stops listing a commit at 3000 files
 import type { RepoMeta } from "@/lib/services/repositories";
 import type { CompareOutcome } from "@/lib/domain/forks";
 import {
@@ -204,6 +205,11 @@ export class OctokitPort implements GithubPort {
     };
   }
 
+  async getIssue(owner: string, repo: string, number: number): Promise<RemoteWorkItem> {
+    const { data } = await this.get<any>("GET /repos/{owner}/{repo}/issues/{issue_number}", { owner, repo, issue_number: number });
+    return OctokitPort.toWorkItem(data);
+  }
+
   async getPull(owner: string, repo: string, number: number) {
     const { data } = await this.get<any>("GET /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo, pull_number: number });
     const base = OctokitPort.toWorkItem({ ...data, pull_request: { merged_at: data.merged_at } });
@@ -252,18 +258,44 @@ export class OctokitPort implements GithubPort {
     return { users: (data.users ?? []).map((u: any) => u.login), teams: (data.teams ?? []).map((t: any) => t.slug) };
   }
 
+  /**
+   * CI reports through two separate APIs: check runs (GitHub Actions and apps) and commit statuses (older and external CI).
+   * Both are read and combined; a failure in either wins. "Cannot read" (no permission) stays UNKNOWN and is never reported as "no checks".
+   */
   async getChecksState(owner: string, repo: string, sha: string) {
-    try {
-      const { data } = await this.get<any>("GET /repos/{owner}/{repo}/commits/{ref}/check-runs", { owner, repo, ref: sha, per_page: 100 });
-      const runs: any[] = data.check_runs ?? [];
-      if (runs.length === 0) return "NONE" as const;
-      if (runs.some((r) => r.conclusion === "failure" || r.conclusion === "timed_out" || r.conclusion === "cancelled" || r.conclusion === "action_required")) return "FAILURE" as const;
-      if (runs.some((r) => r.status !== "completed")) return "PENDING" as const;
-      return "SUCCESS" as const;
-    } catch (e) {
-      if (e instanceof GithubError && (e.kind === "forbidden" || e.kind === "not-found")) return "UNKNOWN" as const; // checks permission may be missing
-      throw e;
-    }
+    type Part = "NONE" | "PENDING" | "SUCCESS" | "FAILURE" | "UNKNOWN";
+    const guard = async (read: () => Promise<Part>): Promise<Part> => {
+      try {
+        return await read();
+      } catch (e) {
+        if (e instanceof GithubError && (e.kind === "forbidden" || e.kind === "not-found")) return "UNKNOWN"; // the permission may be missing
+        throw e;
+      }
+    };
+    const runs = guard(async () => {
+      const all: any[] = [];
+      for (let page = 1; page <= 10; page++) {
+        const { data } = await this.get<any>("GET /repos/{owner}/{repo}/commits/{ref}/check-runs", { owner, repo, ref: sha, per_page: 100, page });
+        const got: any[] = data.check_runs ?? [];
+        all.push(...got);
+        if (got.length < 100) break;
+      }
+      if (all.length === 0) return "NONE";
+      if (all.some((r) => r.conclusion === "failure" || r.conclusion === "timed_out" || r.conclusion === "cancelled" || r.conclusion === "action_required")) return "FAILURE";
+      if (all.some((r) => r.status !== "completed")) return "PENDING";
+      return "SUCCESS";
+    });
+    const statuses = guard(async () => {
+      const { data } = await this.get<any>("GET /repos/{owner}/{repo}/commits/{ref}/status", { owner, repo, ref: sha, per_page: 100 });
+      if (!data.total_count && !(data.statuses ?? []).length) return "NONE"; // GitHub reports "pending" for a commit with no statuses at all
+      return data.state === "failure" || data.state === "error" ? "FAILURE" : data.state === "pending" ? "PENDING" : "SUCCESS";
+    });
+    const parts = await Promise.all([runs, statuses]);
+    if (parts.includes("FAILURE")) return "FAILURE" as const;
+    if (parts.includes("PENDING")) return "PENDING" as const;
+    if (parts.includes("SUCCESS")) return parts.includes("UNKNOWN") ? ("UNKNOWN" as const) : ("SUCCESS" as const);
+    if (parts.includes("UNKNOWN")) return "UNKNOWN" as const;
+    return "NONE" as const;
   }
 
   async listBranches(owner: string, repo: string): Promise<RemoteBranch[]> {
@@ -300,10 +332,17 @@ export class OctokitPort implements GithubPort {
     return { kind: "file", file: { ...file, text: buf.toString("utf8"), binary: false, tooLarge: false } };
   }
 
+  /** Follows the commit's file pages up to a bound (GitHub lists at most 3000 files). Anything left over is reported as truncated. */
   async listCommitFiles(owner: string, repo: string, sha: string) {
-    const { data } = await this.get<any>("GET /repos/{owner}/{repo}/commits/{ref}", { owner, repo, ref: sha, per_page: 100 });
-    const files: any[] = data.files ?? [];
-    return { files: files.map((f) => ({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch ?? null, previousFilename: f.previous_filename ?? null })), truncated: files.length >= 300 };
+    const files: any[] = [];
+    let truncated = false;
+    for (let page = 1; page <= COMMIT_FILE_PAGES; page++) {
+      const { data, headers } = await this.get<any>("GET /repos/{owner}/{repo}/commits/{ref}", { owner, repo, ref: sha, per_page: 100, page });
+      files.push(...(data.files ?? []));
+      if (OctokitPort.nextPage(headers.link) === null) break;
+      if (page === COMMIT_FILE_PAGES) truncated = true;
+    }
+    return { files: files.map((f) => ({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch ?? null, previousFilename: f.previous_filename ?? null })), truncated };
   }
 
   async createReviewComment(owner: string, repo: string, number: number, i: { body: string; commitSha: string; path: string; line: number; side: "LEFT" | "RIGHT" }): Promise<RemoteComment> {
@@ -373,8 +412,32 @@ export class OctokitPort implements GithubPort {
   async requestReviewers(owner: string, repo: string, number: number, r: { users?: string[]; teams?: string[] }) {
     await this.send("POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers", { owner, repo, pull_number: number, reviewers: r.users ?? [], team_reviewers: r.teams ?? [] });
   }
-  async submitReview(owner: string, repo: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string }) {
-    await this.send("POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews", { owner, repo, pull_number: number, event: input.event, body: input.body, commit_id: input.commitSha });
+  async submitReview(owner: string, repo: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string; comments?: { path: string; line: number; side: "LEFT" | "RIGHT"; body: string }[] }) {
+    // One request creates the review and every pending comment together, so a batch is submitted once or not at all.
+    await this.send("POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews", { owner, repo, pull_number: number, event: input.event, body: input.body, commit_id: input.commitSha, ...(input.comments?.length ? { comments: input.comments.map((c) => ({ path: c.path, line: c.line, side: c.side, body: c.body })) } : {}) });
+  }
+
+  async compareCommits(owner: string, repo: string, base: string, head: string) {
+    const basehead = `${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+    const files: any[] = [];
+    let aheadBy = 0;
+    let truncated = false;
+    for (let page = 1; page <= COMMIT_FILE_PAGES; page++) {
+      const { data, headers } = await this.get<any>("GET /repos/{owner}/{repo}/compare/{basehead}", { owner, repo, basehead, per_page: 100, page });
+      aheadBy = data.ahead_by ?? aheadBy;
+      files.push(...(data.files ?? []));
+      if (OctokitPort.nextPage(headers.link) === null) break;
+      if (page === COMMIT_FILE_PAGES) truncated = true;
+    }
+    return { files: files.map((f) => ({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch ?? null, previousFilename: f.previous_filename ?? null })), truncated, aheadBy };
+  }
+
+  /** Thread resolution exists only in GitHub's GraphQL API. A failure means "not known", never "unresolved". */
+  async listReviewThreads(owner: string, repo: string, number: number) {
+    const query = "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{databaseId}}}}}}}";
+    const res = await this.send<any>("POST /graphql", { query, variables: { o: owner, r: repo, n: number } });
+    const nodes: any[] = res?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    return nodes.flatMap((t) => (t.comments?.nodes?.[0]?.databaseId ? [{ rootCommentId: BigInt(t.comments.nodes[0].databaseId), resolved: !!t.isResolved }] : []));
   }
   async mergePull(owner: string, repo: string, number: number, input: { method: MergeMethod; expectedHeadSha: string }) {
     // `sha` makes GitHub refuse the merge if the head moved after the user confirmed.

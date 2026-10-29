@@ -4,18 +4,19 @@ import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { repoWhere, viaRepo } from "@/lib/authz/viewer";
 import { worktreesFor } from "@/lib/services/worktrees";
+import { describeWorktree, worktreesOnBranch, type Worktree } from "@/lib/domain/worktree-links";
 import { formatDuration, formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Banner, EmptyState, Mono, PageHeader, Panel, SimplePill, Time } from "@/components/ui/primitives";
 import { GitBranch, Laptop, Lock } from "@/components/ui/icons";
 import { mapRootAction, scanRootAction, unmapRootAction } from "@/app/actions";
 
-export const metadata = { title: "Branches & worktrees" };
+export const metadata = { title: "Branches" };
 export const dynamic = "force-dynamic";
 
-export default async function Branches({ searchParams }: { searchParams: Promise<{ all?: string }> }) {
+export default async function Branches({ searchParams }: { searchParams: Promise<{ repo?: string; q?: string }> }) {
   const { viewer } = await requireViewer();
-  const showAll = (await searchParams).all === "1";
+  const sp = await searchParams;
   const now = new Date();
   const repos = (await db.repository.findMany({ where: repoWhere(viewer), orderBy: { fullName: "asc" }, select: { id: true, fullName: true, owner: { select: { login: true } }, name: true } })).sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
   const [branches, openPrs] = await Promise.all([
@@ -25,17 +26,45 @@ export default async function Branches({ searchParams }: { searchParams: Promise
   // Repositories with a local folder come first; the rest wait behind "Show all" so the page stays light (each one is a full panel).
   const mappedIds = new Set((await db.deviceRepoMapping.findMany({ select: { repositoryId: true } })).map((m) => m.repositoryId));
   const ordered = [...repos.filter((r) => mappedIds.has(r.id)), ...repos.filter((r) => !mappedIds.has(r.id))];
-  const LIMIT = Math.max(12, mappedIds.size);
-  const shown = showAll ? ordered : ordered.slice(0, LIMIT);
-  const perRepo = await Promise.all(shown.map(async (r) => ({ repo: r, view: await worktreesFor(db, viewer, r.id, now) })));
+  const needle = (sp.q ?? "").trim().toLowerCase();
+  const listed = needle ? ordered.filter((r) => r.fullName.toLowerCase().includes(needle)) : ordered;
+  const selected = ordered.find((r) => r.id === sp.repo) ?? listed[0] ?? ordered[0];
+  const perRepo = selected ? [{ repo: selected, view: await worktreesFor(db, viewer, selected.id, now) }] : [];
+  const branchCount = new Map<string, number>();
+  for (const b of branches) branchCount.set(b.repositoryId, (branchCount.get(b.repositoryId) ?? 0) + 1);
+  // Beneath the selected repository: every open pull request, and whether its branch is checked out on this computer.
+  const dev = await db.device.findFirst({ where: { userId: viewer.userId } });
+  const snaps = dev ? await db.worktreeSnapshot.findMany({ where: { deviceId: dev.id, repositoryId: { in: repos.map((r) => r.id) } } }) : [];
+  const snapBy = new Map(snaps.map((x) => [x.repositoryId, (x.data as unknown as { worktrees: Worktree[] }).worktrees ?? []]));
+  const repoName = new Map(repos.map((r) => [r.id, r.fullName]));
+  const prRows = openPrs.map((p) => ({ p, wts: worktreesOnBranch(snapBy.get(p.repositoryId) ?? [], p.headRef) })).sort((a, b) => Number(b.wts.length > 0) - Number(a.wts.length > 0) || (repoName.get(a.p.repositoryId) ?? "").localeCompare(repoName.get(b.p.repositoryId) ?? "") || b.p.number - a.p.number);
+  const href = (id: string) => `/branches?repo=${id}${sp.q ? `&q=${encodeURIComponent(sp.q)}` : ""}`;
   const prFor = (repoId: string, branch: string | null) => (branch ? openPrs.find((p) => p.repositoryId === repoId && p.headRef === branch) : undefined);
 
   return (
     <>
-      <PageHeader title="Branches & worktrees" subtitle="Remote branches come from GitHub. Local worktrees are read from folders you choose on this computer. Each list says which it is and how old it is." />
+      <PageHeader title="Branches" subtitle="Remote branches come from GitHub. Local worktrees are read from folders you choose on this computer. Each list says which it is and how old it is." />
       <div className="mb-5"><Banner title="Read-only and private to this computer">Mergeport reads branch names, paths and counts of changed files with a fixed set of read-only git commands. It never reads file contents or diffs, never runs hooks or scripts from a repository, and never writes worktree data to a shared repository. There are no create, remove, reset or checkout controls.</Banner></div>
 
-      <div className="fit-grid" style={{ "--fit-min": "720px" } as React.CSSProperties}>
+      <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
+        <nav aria-label="Repositories" className="panel lg:sticky lg:top-3">
+          <form method="get" action="/branches" className="px-2 pb-2 pt-1">
+            <input name="q" defaultValue={sp.q ?? ""} className="input !h-8" placeholder="Search repositories" aria-label="Search repositories" />
+          </form>
+          <ul className="scroll-region !max-h-[calc(100dvh-16rem)] rounded-[9px] border border-edge bg-inset p-1">
+            {listed.map((r) => (
+              <li key={r.id}>
+                <Link href={href(r.id)} aria-current={r.id === selected?.id ? "page" : undefined} className="flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-[13px] hover:bg-hover aria-[current=page]:bg-nav-active aria-[current=page]:font-medium">
+                  <span className="min-w-0 flex-1 truncate">{r.fullName}</span>
+                  {mappedIds.has(r.id) && <Laptop size={12} aria-label="Has a local folder" className="shrink-0 text-ink-3" />}
+                  <span className="tnum shrink-0 text-[11.5px] text-ink-3">{branchCount.get(r.id) ?? 0}</span>
+                </Link>
+              </li>
+            ))}
+            {listed.length === 0 && <li className="px-2 py-4 text-center text-[12.5px] text-ink-3">No repositories match.</li>}
+          </ul>
+        </nav>
+        <div className="flex min-w-0 flex-col gap-5">
         {perRepo.map(({ repo, view }) => {
           const rb = branches.filter((b) => b.repositoryId === repo.id);
           return (
@@ -44,8 +73,8 @@ export default async function Branches({ searchParams }: { searchParams: Promise
                 <section className="min-w-0 p-4" aria-labelledby={`rb-${repo.id}`}>
                   <h3 id={`rb-${repo.id}`} className="mb-2 flex flex-wrap items-center gap-2 text-[13px] font-medium">Remote branches <SimplePill tone="unknown">Source: GitHub</SimplePill></h3>
                   {rb.length === 0 ? <p className="text-[12.5px] text-ink-3">No branches synchronized yet.</p> : (
-                    <ul className="flex flex-col gap-1.5 text-[13px]">
-                      {rb.slice(0, 15).map((b) => <li key={b.id} className="flex items-center justify-between gap-2"><span className="min-w-0 truncate" title={b.name}><Mono>{b.name}</Mono>{b.isDefault && <span className="ml-2 text-[11.5px] text-ink-3">default</span>}</span><Mono title={b.sha}>{b.sha.slice(0, 7)}</Mono></li>)}
+                    <ul className="scroll-region !max-h-80 flex flex-col gap-1.5 pr-1 text-[13px]">
+                      {rb.map((b) => <li key={b.id} className="flex items-center justify-between gap-2"><span className="min-w-0 truncate" title={b.name}><Mono>{b.name}</Mono>{b.isDefault && <span className="ml-2 text-[11.5px] text-ink-3">default</span>}</span><Mono title={b.sha}>{b.sha.slice(0, 7)}</Mono></li>)}
                     </ul>
                   )}
                   {rb[0] && <p className="mt-2 text-[11.5px] text-ink-3">Fetched {formatDuration(now.getTime() - rb[0].fetchedAt.getTime())} ago.</p>}
@@ -98,10 +127,24 @@ export default async function Branches({ searchParams }: { searchParams: Promise
             </Panel>
           );
         })}
-        {repos.length === 0 && <Panel title="Branches" icon={GitBranch}><EmptyState icon={GitBranch} title="No repositories to show" /></Panel>}
+        {repos.length > 0 && (
+          <Panel title={`Open pull requests (${openPrs.length})`} icon={GitBranch} id="open-prs">
+            {prRows.length === 0 ? <p className="p-4 text-[13px] text-ink-3">No open pull requests in the repositories you can see.</p> : (
+              <ul className="scroll-region !max-h-[28rem] divide-y divide-line text-[13px]">
+                {prRows.slice(0, 60).map(({ p, wts }) => (
+                  <li key={p.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 px-4 py-2.5">
+                    <div className="min-w-0"><Link href={`/pull-requests/${p.id}`} className="font-medium underline-offset-2 hover:underline [overflow-wrap:anywhere]">{p.title}</Link><p className="text-[12px] text-ink-3"><Mono>{repoName.get(p.repositoryId)}#{p.number}</Mono>{p.headRef ? <> · <Mono>{p.headRef}</Mono></> : null}</p></div>
+                    <p className="shrink-0 text-[12px] text-ink-3">{wts.length === 0 ? (snapBy.has(p.repositoryId) ? "Not checked out here" : "No local folder") : wts.map((w) => describeWorktree(w)).join("; ")}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {prRows.length > 60 && <p className="border-t border-line px-4 py-2 text-[12px] text-ink-3">Showing 60 of {prRows.length}.</p>}
+          </Panel>
+        )}
+        </div>
+        {repos.length === 0 && <Panel title="Branches" icon={GitBranch}><EmptyState icon={GitBranch} title="No repositories to show" action={<Link href="/repositories/connect" className="btn btn-primary">Connect repositories</Link>}>Connect a repository and its branches appear here.</EmptyState></Panel>}
       </div>
-      {ordered.length > shown.length && <p className="mt-4 text-[13px] text-ink-3">Showing {shown.length} of {ordered.length} repositories (those with a local folder first). <Link className="underline" href="/branches?all=1">Show all</Link></p>}
-      {showAll && ordered.length > LIMIT && <p className="mt-4 text-[13px] text-ink-3"><Link className="underline" href="/branches">Show fewer</Link></p>}
     </>
   );
 }

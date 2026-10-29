@@ -1,3 +1,4 @@
+import { KINDS } from "@/lib/domain/notify-prefs";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -17,9 +18,9 @@ export default async function ActivityPage() {
   return (
     <>
       <PageHeader title="Activity" subtitle="Synchronized from GitHub for the repositories you can see. Notifications are dashboard records; nothing is emailed or posted." />
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <Panel title="Recent activity" icon={Activity} id="act">
-          {events.length === 0 ? <EmptyState icon={Activity} title="No activity yet" /> : (
+          {events.length === 0 ? <EmptyState icon={Activity} title="No activity yet" action={<Link href="/repositories/connect" className="btn btn-primary">Connect repositories</Link>}>Pull requests, issues and comments from your repositories show up here once they have synced.</EmptyState> : (
             <ul className="fit-list scroll-region" style={{ "--fit-min": "520px" } as React.CSSProperties}>{events.map((a) => (
               <li key={a.id} className="flex items-start gap-2.5 border-b border-line px-4 py-3 text-[13px] last:border-b-0">
                 <Avatar login={a.actor ?? "?"} size={22} />
@@ -28,9 +29,16 @@ export default async function ActivityPage() {
             ))}</ul>
           )}
         </Panel>
-        <Panel title={`Notifications${unread ? ` (${unread} unread)` : ""}`} icon={Bell} id="notes" actions={unread ? <ActionForm action={markNotificationsReadAction} submitLabel="Mark all read" submitClassName="btn">{null}</ActionForm> : undefined}>
+        <Panel title={`Notifications${unread ? ` (${unread} unread)` : ""}`} icon={Bell} id="notes" actions={unread ? <ActionForm action={markNotificationsReadAction} submitLabel="Mark all read" submitClassName="btn" className="[&>div]:!mt-0">{null}</ActionForm> : undefined}>
           {notes.length === 0 ? <EmptyState icon={Bell} title="No notifications">You will see review requests for you here.</EmptyState> : (
-            <ul>{notes.map((n) => <li key={n.id} className={`border-b border-line px-4 py-3 text-[13px] last:border-b-0 ${n.readAt ? "" : "bg-faint"}`}>{n.href ? <Link href={n.href} className="hover:underline">{n.title}</Link> : n.title}<p className="text-[11.5px] text-ink-3"><Time value={n.createdAt} formatted={formatInstant(n.createdAt, viewer.timezone)} />{n.readAt ? "" : " · unread"}</p></li>)}</ul>
+            <div>
+              {KINDS.map((k) => ({ k, rows: notes.filter((n) => n.kind === k.key) })).concat([{ k: { key: "other", label: "Other" } as never, rows: notes.filter((n) => !KINDS.some((x) => x.key === n.kind)) }]).filter((g) => g.rows.length > 0).map((g) => (
+                <section key={g.k.key} aria-label={g.k.label}>
+                  <h3 className="border-b border-line bg-surface px-4 py-1.5 text-[12px] font-medium text-ink-2">{g.k.key === "review-requested" ? "Review requests" : g.k.key === "changes-requested" ? "Changes requested on your pull requests" : "Other"} <span className="tnum text-ink-3">{g.rows.length}</span></h3>
+                  <ul>{g.rows.map((n) => <li key={n.id} className={`border-b border-line px-4 py-3 text-[13px] last:border-b-0 ${n.readAt ? "" : "bg-faint"}`}>{n.href ? <Link href={n.href} className="hover:underline">{n.title}</Link> : n.title}<p className="text-[11.5px] text-ink-3"><Time value={n.createdAt} formatted={formatInstant(n.createdAt, viewer.timezone)} />{n.readAt ? "" : " · unread"}</p></li>)}</ul>
+                </section>
+              ))}
+            </div>
           )}
         </Panel>
       </div>

@@ -24,14 +24,30 @@ export async function enqueue(db: Db, job: EnqueueInput) {
   const runAt = job.runAt ?? new Date();
   const maxAttempts = job.maxAttempts ?? 5;
   if (!job.dedupeKey) return db.job.create({ data: { type: job.type, payload: job.payload, runAt, maxAttempts, intervalMs: job.intervalMs } });
-  const existing = await db.job.findUnique({ where: { dedupeKey: job.dedupeKey } });
-  if (!existing) return db.job.create({ data: { type: job.type, payload: job.payload, dedupeKey: job.dedupeKey, runAt, maxAttempts, intervalMs: job.intervalMs } });
-  // A request for a complete (full) run is never downgraded by a later, lighter request that merges into the same job.
-  const keepFull = (existing.payload as { full?: boolean } | null)?.full === true && (job.payload as { full?: boolean } | null)?.full !== true;
-  const payload = keepFull ? ({ ...(job.payload as object), full: true } as Prisma.InputJsonValue) : job.payload;
-  if (existing.status === "RUNNING") return db.job.update({ where: { id: existing.id }, data: { dirty: true, payload } }); // run again after this run
-  if (existing.status === "QUEUED") return db.job.update({ where: { id: existing.id }, data: { payload, runAt: runAt < existing.runAt ? runAt : existing.runAt } });
-  return db.job.update({ where: { id: existing.id }, data: { status: "QUEUED", payload: job.payload, runAt, attempts: 0, lastError: null, lockedAt: null, finishedAt: null, dirty: false } });
+  // The row can change state between the read and the write (a running job finishing, a queued one being claimed), so each write
+  // names the state it was decided from, and a lost race simply decides again from the new state.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const existing = await db.job.findUnique({ where: { dedupeKey: job.dedupeKey } });
+    if (!existing) {
+      try {
+        return await db.job.create({ data: { type: job.type, payload: job.payload, dedupeKey: job.dedupeKey, runAt, maxAttempts, intervalMs: job.intervalMs } });
+      } catch {
+        continue; // another caller created it first
+      }
+    }
+    // A request for a complete (full) run is never downgraded by a later, lighter request that merges into the same job.
+    const keepFull = (existing.payload as { full?: boolean } | null)?.full === true && (job.payload as { full?: boolean } | null)?.full !== true;
+    const payload = keepFull ? ({ ...(job.payload as object), full: true } as Prisma.InputJsonValue) : job.payload;
+    const where = { id: existing.id, status: existing.status };
+    const res =
+      existing.status === "RUNNING"
+        ? await db.job.updateMany({ where, data: { dirty: true, payload } }) // run again after this run
+        : existing.status === "QUEUED"
+          ? await db.job.updateMany({ where, data: { payload, runAt: runAt < existing.runAt ? runAt : existing.runAt } })
+          : await db.job.updateMany({ where, data: { status: "QUEUED", payload: job.payload, runAt, attempts: 0, lastError: null, lockedAt: null, finishedAt: null, dirty: false } });
+    if (res.count === 1) return db.job.findUniqueOrThrow({ where: { id: existing.id } });
+  }
+  throw new Error("Could not queue the job: it kept changing state");
 }
 
 /** Idempotent: call on every start. Never resets a pending run time or duplicates the job. */
@@ -87,21 +103,15 @@ export async function runOne(db: Db, handlers: Record<string, Handler>, now = ne
 }
 
 async function finish(db: Db, job: JobRow, at: Date, error: string | null): Promise<RunResult> {
-  // Re-read: `dirty` may have been set while the handler ran.
-  const cur = await db.job.findUniqueOrThrow({ where: { id: job.id } });
-  if (cur.dirty) {
-    await db.job.update({ where: { id: job.id }, data: { status: "QUEUED", dirty: false, runAt: at, attempts: 0, lockedAt: null, lastError: error } });
-    return "requeued";
-  }
-  if (job.intervalMs) {
-    // Next run is a full interval after THIS run finished. A failure never ends the recurrence.
-    await db.job.update({ where: { id: job.id }, data: { status: "QUEUED", runAt: new Date(at.getTime() + job.intervalMs), attempts: 0, lockedAt: null, lastError: error, finishedAt: at } });
-    return "requeued";
-  }
-  if (error) {
-    await db.job.update({ where: { id: job.id }, data: { status: "FAILED", lastError: error, finishedAt: at, lockedAt: null } });
-    return "failed";
-  }
-  await db.job.update({ where: { id: job.id }, data: { status: "DONE", finishedAt: at, lockedAt: null, lastError: null } });
-  return "done";
+  // `dirty` can be set at any moment while the handler runs, including between a read and the final write. So every terminal
+  // write is conditional on `dirty` still being false, and a lost race falls through to the requeue below instead of finishing.
+  const terminal: Prisma.JobUpdateManyMutationInput = job.intervalMs
+    ? { status: "QUEUED", runAt: new Date(at.getTime() + job.intervalMs), attempts: 0, lockedAt: null, lastError: error, finishedAt: at } // a failure never ends the recurrence
+    : error
+      ? { status: "FAILED", lastError: error, finishedAt: at, lockedAt: null }
+      : { status: "DONE", finishedAt: at, lockedAt: null, lastError: null };
+  const done = await db.job.updateMany({ where: { id: job.id, dirty: false }, data: terminal });
+  if (done.count === 1) return job.intervalMs ? "requeued" : error ? "failed" : "done";
+  await db.job.updateMany({ where: { id: job.id, dirty: true }, data: { status: "QUEUED", dirty: false, runAt: at, attempts: 0, lockedAt: null, lastError: error } });
+  return "requeued";
 }

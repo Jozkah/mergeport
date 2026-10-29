@@ -94,7 +94,7 @@ const project: EntityDef = {
     const rows = await db.project.findMany({ where: { spaceId: { not: null } }, include: { repositories: { include: { repository: true } } } });
     return rows.map((p) => ({
       id: p.id, spaceId: p.spaceId,
-      data: { name: p.name, slug: p.slug, description: p.description, repoIds: p.repositories.map((x) => repoEntityId(x.repository.githubId)).sort() },
+      data: { name: p.name, slug: p.slug, description: p.description, automation: p.automation, repoIds: p.repositories.map((x) => repoEntityId(x.repository.githubId)).sort() },
     }));
   },
   async apply(db, ctx, id, data) {
@@ -102,7 +102,7 @@ const project: EntityDef = {
       await db.project.deleteMany({ where: { id } });
       return;
     }
-    const f = { name: String(data.name), slug: String(data.slug), description: (data.description as string | null) ?? null, spaceId: ctx.space.id };
+    const f = { name: String(data.name), slug: String(data.slug), description: (data.description as string | null) ?? null, automation: data.automation === "suggest" ? "suggest" : "off", spaceId: ctx.space.id };
     await db.project.upsert({ where: { id }, create: { id, workspaceId: ctx.workspaceId, ...f }, update: f });
     await createColumnsForProject(db, id);
     await db.projectMember.upsert({ where: { projectId_memberId: { projectId: id, memberId: ctx.localMemberId } }, create: { projectId: id, memberId: ctx.localMemberId }, update: {} });
@@ -128,7 +128,7 @@ const milestone: EntityDef = {
       id: m.id,
       spaceId: m.project ? m.project.spaceId : commonSpaceId,
       data: {
-        name: m.name, description: m.description, projectId: m.projectId, startDate: day(m.startDate), targetDate: day(m.targetDate), status: m.status,
+        name: m.name, description: m.description, projectId: m.projectId, startDate: day(m.startDate), targetDate: day(m.targetDate), status: m.status, releaseTag: m.releaseTag, releaseUrl: m.releaseUrl, shippedAt: iso(m.shippedAt),
         repoLinks: m.repoLinks.map((l) => `${l.repository.githubId}#${l.githubMilestoneNumber}`).sort(),
       },
     }));
@@ -140,7 +140,7 @@ const milestone: EntityDef = {
     }
     const projectId = (data.projectId as string | null) ?? null;
     const p = projectId ? await db.project.findUnique({ where: { id: projectId } }) : null;
-    const f = { name: String(data.name), description: (data.description as string | null) ?? null, projectId: p ? projectId : null, startDate: toDate(data.startDate), targetDate: toDate(data.targetDate), status: String(data.status ?? "OPEN") };
+    const f = { name: String(data.name), description: (data.description as string | null) ?? null, projectId: p ? projectId : null, startDate: toDate(data.startDate), targetDate: toDate(data.targetDate), status: String(data.status ?? "OPEN"), releaseTag: (data.releaseTag as string | null) ?? null, releaseUrl: (data.releaseUrl as string | null) ?? null, shippedAt: toDate(data.shippedAt) };
     await db.dashboardMilestone.upsert({ where: { id }, create: { id, workspaceId: ctx.workspaceId, ...f }, update: f });
     const wanted: string[] = [];
     for (const link of (data.repoLinks as string[]) ?? []) {
@@ -159,7 +159,7 @@ const milestone: EntityDef = {
 const card: EntityDef = {
   type: "card",
   order: 4,
-  setKeys: ["blockedBy"],
+  setKeys: ["blockedBy", "related", "duplicates"],
   async list(db) {
     const rows = await db.planningItem.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true, column: true, workItem: { include: { repository: true } }, blockedBy: true } });
     return rows.map((c) => ({
@@ -169,7 +169,10 @@ const card: EntityDef = {
         workRepoGithubId: c.workItem ? c.workItem.repository.githubId.toString() : (c.workRepoGithubId?.toString() ?? null),
         workNumber: c.workItem ? c.workItem.number : c.workNumber,
         assigneeLogin: c.assigneeLogin, assignedByLogin: c.assignedByLogin, authorLogin: c.authorLogin, labels: c.labels, priority: c.priority, due: day(c.dueDate), milestoneId: c.milestoneId,
-        blockedBy: c.blockedBy.map((l) => l.fromId).sort(),
+        blockedBy: c.blockedBy.filter((l) => l.kind === "blocks").map((l) => l.fromId).sort(),
+        related: c.blockedBy.filter((l) => l.kind === "related").map((l) => l.fromId).sort(),
+        duplicates: c.blockedBy.filter((l) => l.kind === "duplicates").map((l) => l.fromId).sort(),
+        epicId: c.epicId, iterationId: c.iterationId, branchRef: c.branchRef,
       },
     }));
   },
@@ -184,21 +187,26 @@ const card: EntityDef = {
     const work = data.workRepoGithubId !== null && data.workRepoGithubId !== undefined ? await repoByGithubId(db, ctx.workspaceId, data.workRepoGithubId) : null;
     const wi = work && data.workNumber ? await db.workItem.findUnique({ where: { repositoryId_number: { repositoryId: work.id, number: Number(data.workNumber) } } }) : null;
     const ms = data.milestoneId ? await db.dashboardMilestone.findUnique({ where: { id: String(data.milestoneId) } }) : null;
+    const epic = data.epicId ? await db.epic.findUnique({ where: { id: String(data.epicId) }, select: { id: true } }) : null;
+    const iteration = data.iterationId ? await db.iteration.findUnique({ where: { id: String(data.iterationId) }, select: { id: true } }) : null;
     const f = {
       projectId, columnId: col.id, position: Number(data.position), title: String(data.title), description: (data.description as string | null) ?? null,
       workItemId: wi?.id ?? null, workRepoGithubId: bigOrNull(data.workRepoGithubId), workNumber: data.workNumber === null || data.workNumber === undefined ? null : Number(data.workNumber),
-      assigneeLogin: (data.assigneeLogin as string | null) ?? null, assignedByLogin: (data.assignedByLogin as string | null) ?? null, authorLogin: (data.authorLogin as string | null) ?? null,
-      labels: (data.labels ?? []) as Prisma.InputJsonValue, priority: Number(data.priority ?? 0), dueDate: toDate(data.due), milestoneId: ms ? ms.id : null, version,
+      assigneeLogin: ((data.assigneeLogin as string | null) ?? null)?.toLowerCase() ?? null, assignedByLogin: ((data.assignedByLogin as string | null) ?? null)?.toLowerCase() ?? null, authorLogin: (data.authorLogin as string | null) ?? null,
+      labels: (data.labels ?? []) as Prisma.InputJsonValue, priority: Number(data.priority ?? 0), dueDate: toDate(data.due), milestoneId: ms ? ms.id : null, epicId: epic?.id ?? null, iterationId: iteration?.id ?? null, branchRef: (data.branchRef as string | null) ?? null, version,
     };
     await db.planningItem.upsert({ where: { id }, create: { id, createdById: ctx.localMemberId, ...f }, update: f });
   },
   async post(db, _ctx, applied) {
     for (const a of applied) {
-      const want = ((a.data.blockedBy as string[]) ?? []).filter((x) => x !== a.id);
-      const existing = await db.planningItem.findMany({ where: { id: { in: want } }, select: { id: true } });
-      const ok = existing.map((e) => e.id);
-      await db.planningLink.deleteMany({ where: { toId: a.id, fromId: { notIn: ok } } });
-      for (const fromId of ok) await db.planningLink.upsert({ where: { fromId_toId: { fromId, toId: a.id } }, create: { fromId, toId: a.id }, update: {} });
+      // One pass per link kind, so a "related" link is never mistaken for a blocker (or the reverse).
+      for (const [kind, field] of [["blocks", "blockedBy"], ["related", "related"], ["duplicates", "duplicates"]] as const) {
+        const want = ((a.data[field] as string[]) ?? []).filter((x) => x !== a.id);
+        const existing = await db.planningItem.findMany({ where: { id: { in: want } }, select: { id: true } });
+        const ok = existing.map((e) => e.id);
+        await db.planningLink.deleteMany({ where: { toId: a.id, kind, fromId: { notIn: ok } } });
+        for (const fromId of ok) await db.planningLink.upsert({ where: { fromId_toId: { fromId, toId: a.id } }, create: { fromId, toId: a.id, kind }, update: { kind } });
+      }
     }
   },
 };
@@ -282,7 +290,7 @@ const waitrule: EntityDef = {
     return rows.map((r) => ({
       id: r.id,
       spaceId: r.scope === "REPOSITORY" ? (r.repository?.spaceId ?? null) : r.scope === "PROJECT" ? (r.project?.spaceId ?? null) : commonSpaceId,
-      data: { scope: r.scope, repoGithubId: r.repository?.githubId.toString() ?? null, projectId: r.projectId, ownerLogin: r.ownerLogin, itemType: r.itemType, labels: r.labels, authors: r.authors, includeDrafts: r.includeDrafts, waitingOn: r.waitingOn, reason: r.reason, enabled: r.enabled },
+      data: { scope: r.scope, repoGithubId: r.repository?.githubId.toString() ?? null, projectId: r.projectId, ownerLogin: r.ownerLogin, itemType: r.itemType, labels: r.labels, authors: r.authors, includeDrafts: r.includeDrafts, waitingOn: r.waitingOn, reason: r.reason, stage: r.stage, enabled: r.enabled },
     }));
   },
   async apply(db, ctx, id, data) {
@@ -294,9 +302,195 @@ const waitrule: EntityDef = {
     const f = {
       scope: data.scope as "REPOSITORY" | "OWNER" | "PROJECT" | "WORKSPACE", repositoryId: r?.id ?? null, projectId: (data.projectId as string | null) ?? null, ownerLogin: (data.ownerLogin as string | null) ?? null,
       itemType: String(data.itemType ?? "PULL_REQUEST"), labels: (data.labels ?? []) as Prisma.InputJsonValue, authors: (data.authors ?? []) as Prisma.InputJsonValue, includeDrafts: !!data.includeDrafts,
-      waitingOn: (data.waitingOn ?? []) as Prisma.InputJsonValue, reason: String(data.reason), enabled: !!data.enabled,
+      waitingOn: (data.waitingOn ?? []) as Prisma.InputJsonValue, reason: String(data.reason), stage: String(data.stage ?? ""), enabled: !!data.enabled,
     };
     await db.waitingRule.upsert({ where: { id }, create: { id, workspaceId: ctx.workspaceId, ...f }, update: f });
+  },
+};
+
+// ---------- shared views (definitions only) ----------
+
+const view: EntityDef = {
+  type: "view",
+  order: 9,
+  async list(db, { commonSpaceId }) {
+    // Received copies are listed too, unchanged, so they round-trip: leaving them out would make this computer look like it deleted them.
+    // The service refuses to edit a view that belongs to someone else, so a received copy never produces a new version.
+    const me = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
+    if (!me) return [];
+    const rows = await db.savedFilter.findMany({ where: { shared: true, userId: me.id } });
+    return rows.map((r) => ({ id: r.id, spaceId: commonSpaceId, data: { scope: r.scope, name: r.name, query: r.query, ownerLogin: r.ownerLogin ?? me.login } }));
+  },
+  async apply(db, ctx, id, data) {
+    if (!data) {
+      await db.savedFilter.deleteMany({ where: { id, shared: true } });
+      return;
+    }
+    const member = await db.member.findUnique({ where: { id: ctx.localMemberId } });
+    if (!member) return false;
+    const f = { userId: member.userId, scope: String(data.scope), name: String(data.name), query: String(data.query ?? ""), shared: true, ownerLogin: String(data.ownerLogin ?? "") || null };
+    await db.savedFilter.upsert({ where: { id }, create: { id, ...f }, update: f });
+  },
+};
+
+// ---------- boards, epics, iterations and planning history ----------
+
+const projectSpace = async (db: Db, projectId: string) => (await db.project.findUnique({ where: { id: projectId }, select: { spaceId: true } }))?.spaceId ?? null;
+
+const board: EntityDef = {
+  type: "board",
+  order: 4,
+  async list(db) {
+    const rows = await db.planBoard.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
+    return rows.map((b) => ({ id: b.id, spaceId: b.project.spaceId, data: { projectId: b.projectId, name: b.name, template: b.template, columns: b.columns, groupBy: b.groupBy, density: b.density, position: b.position } }));
+  },
+  async apply(db, _ctx, id, data) {
+    if (!data) {
+      await db.planBoard.deleteMany({ where: { id } });
+      return;
+    }
+    if (!(await db.project.findUnique({ where: { id: String(data.projectId) }, select: { id: true } }))) return false;
+    const f = { projectId: String(data.projectId), name: String(data.name), template: String(data.template ?? ""), columns: (data.columns ?? []) as Prisma.InputJsonValue, groupBy: String(data.groupBy ?? "none"), density: String(data.density ?? "comfortable"), position: Number(data.position ?? 0) };
+    await db.planBoard.upsert({ where: { id }, create: { id, ...f }, update: f });
+  },
+};
+
+const epic: EntityDef = {
+  type: "epic",
+  order: 3,
+  async list(db) {
+    const rows = await db.epic.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
+    return rows.map((e) => ({ id: e.id, spaceId: e.project.spaceId, data: { projectId: e.projectId, title: e.title, description: e.description, ownerLogin: e.ownerLogin, start: day(e.startDate), target: day(e.targetDate), status: e.status, decisions: e.decisions } }));
+  },
+  async apply(db, _ctx, id, data) {
+    if (!data) {
+      await db.epic.deleteMany({ where: { id } });
+      return;
+    }
+    if (!(await db.project.findUnique({ where: { id: String(data.projectId) }, select: { id: true } }))) return false;
+    const f = { projectId: String(data.projectId), title: String(data.title), description: (data.description as string | null) ?? null, ownerLogin: (data.ownerLogin as string | null) ?? null, startDate: toDate(data.start), targetDate: toDate(data.target), status: String(data.status ?? "OPEN"), decisions: (data.decisions as string | null) ?? null };
+    await db.epic.upsert({ where: { id }, create: { id, ...f }, update: f });
+  },
+};
+
+const iteration: EntityDef = {
+  type: "iteration",
+  order: 3,
+  async list(db) {
+    const rows = await db.iteration.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
+    return rows.map((i) => ({ id: i.id, spaceId: i.project.spaceId, data: { projectId: i.projectId, name: i.name, start: day(i.startDate), end: day(i.endDate), closedAt: iso(i.closedAt) } }));
+  },
+  async apply(db, _ctx, id, data) {
+    if (!data) {
+      await db.iteration.deleteMany({ where: { id } });
+      return;
+    }
+    if (!(await db.project.findUnique({ where: { id: String(data.projectId) }, select: { id: true } }))) return false;
+    const f = { projectId: String(data.projectId), name: String(data.name), startDate: toDate(data.start) ?? new Date(), endDate: toDate(data.end) ?? new Date(), closedAt: toDate(data.closedAt) };
+    await db.iteration.upsert({ where: { id }, create: { id, ...f }, update: f });
+  },
+};
+
+/** Append-only: an event is created once and never edited, so two people can never conflict on one. Events from teammates are stored as received. */
+const planevent: EntityDef = {
+  type: "planevent",
+  order: 9,
+  async list(db) {
+    const rows = await db.planEvent.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
+    return rows.map((e) => ({ id: e.id, spaceId: e.project.spaceId, data: { projectId: e.projectId, itemId: e.itemId, kind: e.kind, fromKey: e.fromKey, toKey: e.toKey, refId: e.refId, actorLogin: e.actorLogin, at: iso(e.at) } }));
+  },
+  async apply(db, _ctx, id, data) {
+    if (!data) {
+      await db.planEvent.deleteMany({ where: { id } });
+      return;
+    }
+    if (!(await db.project.findUnique({ where: { id: String(data.projectId) }, select: { id: true } }))) return false;
+    const f = { projectId: String(data.projectId), itemId: String(data.itemId), kind: String(data.kind), fromKey: (data.fromKey as string | null) ?? null, toKey: (data.toKey as string | null) ?? null, refId: (data.refId as string | null) ?? null, actorLogin: (data.actorLogin as string | null) ?? null, at: toDate(data.at) ?? new Date() };
+    await db.planEvent.upsert({ where: { id }, create: { id, ...f }, update: f });
+  },
+};
+void projectSpace;
+
+// ---------- label mappings, upstream subscriptions and backport records ----------
+
+const labelmap: EntityDef = {
+  type: "labelmap",
+  order: 9,
+  async list(db, { commonSpaceId }) {
+    const rows = await db.labelMap.findMany();
+    const repos = new Map((await db.repository.findMany({ where: { id: { in: rows.flatMap((r) => (r.repoKey ? [r.repoKey] : [])) } }, select: { id: true, githubId: true } })).map((r) => [r.id, r.githubId.toString()]));
+    return rows.map((m) => ({ id: m.id, spaceId: commonSpaceId, data: { concept: m.concept, spelling: m.spelling, repoGithubId: m.repoKey ? (repos.get(m.repoKey) ?? null) : null } }));
+  },
+  async apply(db, ctx, id, data) {
+    if (!data) {
+      await db.labelMap.deleteMany({ where: { id } });
+      return;
+    }
+    let repoKey = "";
+    if (data.repoGithubId) {
+      const r = await repoByGithubId(db, ctx.workspaceId, data.repoGithubId);
+      if (!r) return false;
+      repoKey = r.id;
+    }
+    const f = { concept: String(data.concept), spelling: String(data.spelling), repoKey };
+    await db.labelMap.upsert({ where: { id }, create: { id, workspaceId: ctx.workspaceId, ...f }, update: f });
+  },
+};
+
+const upstreamsub: EntityDef = {
+  type: "upstreamsub",
+  order: 9,
+  async list(db, { commonSpaceId }) {
+    const rows = await db.upstreamSubscription.findMany();
+    const maps = new Map((await db.forkMapping.findMany({ where: { id: { in: rows.flatMap((r) => (r.mappingId ? [r.mappingId] : [])) } } })).map((m) => [m.id, m]));
+    return rows.map((s) => ({ id: s.id, spaceId: commonSpaceId, data: { name: s.name, mappingId: s.mappingId && maps.has(s.mappingId) ? s.mappingId : null, criteria: s.criteria, muted: s.muted } }));
+  },
+  async apply(db, ctx, id, data) {
+    if (!data) {
+      await db.upstreamSubscription.deleteMany({ where: { id } });
+      return;
+    }
+    const mappingId = (data.mappingId as string | null) ?? null;
+    if (mappingId && !(await db.forkMapping.findUnique({ where: { id: mappingId }, select: { id: true } }))) return false;
+    const f = { name: String(data.name), mappingId, criteria: (data.criteria ?? {}) as Prisma.InputJsonValue, muted: !!data.muted };
+    await db.upstreamSubscription.upsert({ where: { id }, create: { id, workspaceId: ctx.workspaceId, ...f }, update: f });
+  },
+};
+
+const backport: EntityDef = {
+  type: "backport",
+  order: 7,
+  async list(db) {
+    const rows = await db.backportRecord.findMany({ include: { mapping: { include: { fork: true } } } });
+    return rows.map((b) => ({ id: b.id, spaceId: b.mapping.fork.spaceId, data: { mappingId: b.mappingId, upstreamNumber: b.upstreamNumber, targetBranch: b.targetBranch, state: b.state, evidence: b.evidence, localSha: b.localSha, note: b.note, byLogin: b.byLogin } }));
+  },
+  async apply(db, _ctx, id, data) {
+    if (!data) {
+      await db.backportRecord.deleteMany({ where: { id } });
+      return;
+    }
+    if (!(await db.forkMapping.findUnique({ where: { id: String(data.mappingId) }, select: { id: true } }))) return false;
+    const f = { mappingId: String(data.mappingId), upstreamNumber: Number(data.upstreamNumber), targetBranch: String(data.targetBranch), state: String(data.state ?? "planned"), evidence: String(data.evidence ?? "unknown"), localSha: (data.localSha as string | null) ?? null, note: (data.note as string | null) ?? null, byLogin: (data.byLogin as string | null) ?? null };
+    await db.backportRecord.upsert({ where: { id }, create: { id, ...f }, update: f });
+  },
+};
+
+// ---------- reviewer availability and configured backups ----------
+
+const availability: EntityDef = {
+  type: "availability",
+  order: 9,
+  async list(db, { commonSpaceId }) {
+    const rows = await db.reviewerAvailability.findMany();
+    return rows.map((a) => ({ id: a.id, spaceId: commonSpaceId, data: { login: a.login, from: iso(a.unavailableFrom), until: iso(a.unavailableUntil), backup: a.backupLogin, note: a.note } }));
+  },
+  async apply(db, ctx, id, data) {
+    if (!data) {
+      await db.reviewerAvailability.deleteMany({ where: { id } });
+      return;
+    }
+    const f = { unavailableFrom: toDate(data.from), unavailableUntil: toDate(data.until), backupLogin: (data.backup as string | null) ?? null, note: (data.note as string | null) ?? null };
+    await db.reviewerAvailability.upsert({ where: { workspaceId_login: { workspaceId: ctx.workspaceId, login: String(data.login) } }, create: { id, workspaceId: ctx.workspaceId, login: String(data.login), ...f }, update: { id, ...f } });
   },
 };
 
@@ -355,7 +549,7 @@ const waiting: EntityDef = {
         id: w.id, spaceId,
         data: {
           workRepoGithubId: w.workItem?.repository.githubId.toString() ?? null, workNumber: w.workItem?.number ?? null, cardId: w.planningItemId,
-          reviewerKind: w.reviewerKind, reviewerRef: w.reviewerRef, reason: w.reason, status: w.status, startedAt: iso(w.startedAt), clearedAt: iso(w.clearedAt), clearReason: w.clearReason,
+          reviewerKind: w.reviewerKind, reviewerRef: w.reviewerRef, reason: w.reason, stage: w.stage, status: w.status, startedAt: iso(w.startedAt), clearedAt: iso(w.clearedAt), clearReason: w.clearReason,
         },
       });
     }
@@ -372,14 +566,14 @@ const waiting: EntityDef = {
     if (!wi && !card) return false;
     const f = {
       workspaceId: ctx.workspaceId, workItemId: wi?.id ?? null, planningItemId: card?.id ?? null, source: "MANUAL" as const, reviewerKind: data.reviewerKind as "USER" | "TEAM" | "EXTERNAL_ROLE",
-      reviewerRef: String(data.reviewerRef), reason: String(data.reason), status: data.status as "PENDING" | "SATISFIED" | "CANCELLED" | "STALE", startedAt: new Date(String(data.startedAt)),
+      reviewerRef: String(data.reviewerRef), reason: String(data.reason), stage: String(data.stage ?? ""), status: data.status as "PENDING" | "SATISFIED" | "CANCELLED" | "STALE", startedAt: new Date(String(data.startedAt)),
       clearedAt: toDate(data.clearedAt), clearReason: (data.clearReason as string | null) ?? null,
     };
     await db.waitingRecord.upsert({ where: { id }, create: { id, ...f }, update: f });
   },
 };
 
-export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, card, taskcomment, checkitem, rule, waitrule, forkmap, triage, waiting];
+export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, epic, iteration, card, board, planevent, taskcomment, checkitem, rule, waitrule, forkmap, triage, waiting, view, availability, labelmap, upstreamsub, backport];
 export const entityDef = (type: string) => ENTITY_TYPES.find((t) => t.type === type);
 export const entityPath = (type: string, id: string) => `entities/${type}/${id}.json`;
 export const parseEntityPath = (path: string): { type: string; id: string } | null => {

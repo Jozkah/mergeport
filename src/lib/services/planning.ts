@@ -1,8 +1,11 @@
 import type { Db } from "@/lib/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { repoWhere, requireProject, requireRepo, requireWorkItem, type Viewer } from "@/lib/authz/viewer";
-import { checkVersion, computeProgress, positionBetween, wouldCreateCycle, type PlanItem } from "@/lib/domain/planning";
+import { checkVersion, computeProgress, positionBetween, type PlanItem } from "@/lib/domain/planning";
+import { blockerFinished, blocksCycle, isLinkKind } from "@/lib/domain/deps";
+import { STAGE_KEYS, type StageKey } from "@/lib/domain/stages";
 import { audit } from "./audit";
+import { recordColumnChange, recordPlanEvent } from "./plan-events";
 import { planningWhere } from "./queries";
 
 export const DEFAULT_COLUMNS = [
@@ -66,12 +69,14 @@ export async function createCard(
       workItemId: input.workItemId ?? null,
       priority: input.priority ?? 0,
       dueDate: input.dueDate ?? null,
-      assigneeLogin: input.assigneeLogin ?? null,
+      assigneeLogin: input.assigneeLogin?.toLowerCase() ?? null,
       milestoneId: input.milestoneId ?? null,
       createdById: v.memberId,
     },
   });
   await audit(db, v, "planning.create", { type: "PlanningItem", id: card.id });
+  await recordPlanEvent(db, { projectId: project.id, itemId: card.id, kind: "created", toKey: column.key, actorLogin: v.login });
+  if (card.milestoneId) await recordPlanEvent(db, { projectId: project.id, itemId: card.id, kind: "milestone", refId: card.milestoneId, actorLogin: v.login });
   return card;
 }
 
@@ -104,39 +109,65 @@ export async function moveCard(db: Db, v: Viewer, input: { itemId: string; toCol
     data: { columnId: column.id, position, version: { increment: 1 } },
   });
   if (res.count !== 1) throw new ConflictError();
+  const from = await db.planningColumn.findUnique({ where: { id: item.columnId }, select: { key: true } });
+  await recordColumnChange(db, { projectId: item.projectId, itemId: item.id, from: from?.key ?? "", to: column.key, actorLogin: v.login });
   await audit(db, v, "planning.move", { type: "PlanningItem", id: item.id }, { to: column.key });
   return { version: chk.version };
 }
 
-/** Dependency: `blockerId` blocks `blockedId`. Both ends must be visible; cycles are rejected. */
-export async function addDependency(db: Db, v: Viewer, blockerId: string, blockedId: string) {
+/**
+ * Link two cards. "blocks" holds the second back and is cycle-checked across the whole workspace; "related" and "duplicates" only connect.
+ * Both ends must be visible to the viewer. Cards of different projects may be linked only when both projects are shared with the same
+ * audience (or both are local), so a link never carries one audience's card id into another's coordination repository.
+ */
+export async function addDependency(db: Db, v: Viewer, blockerId: string, blockedId: string, kind: string = "blocks") {
+  if (!isLinkKind(kind)) throw new ValidationError("Unknown link type");
   const [a, b] = await Promise.all([requireItem(db, v, blockerId), requireItem(db, v, blockedId)]);
   await requireManage(db, v, b);
-  if (a.projectId !== b.projectId) throw new ValidationError("Dependencies stay within one project");
-  const edges = await db.planningLink.findMany({ where: { from: { projectId: a.projectId } } });
-  if (wouldCreateCycle(edges.map((e) => ({ from: e.fromId, to: e.toId })), a.id, b.id)) throw new ValidationError("That dependency would create a cycle");
-  await db.planningLink.upsert({ where: { fromId_toId: { fromId: a.id, toId: b.id } }, create: { fromId: a.id, toId: b.id }, update: {} });
-  await audit(db, v, "planning.link", { type: "PlanningItem", id: b.id }, { blocker: a.id });
+  if (a.id === b.id) throw new ValidationError("A card cannot be linked to itself");
+  if (a.projectId !== b.projectId) {
+    const [pa, pb] = await Promise.all([db.project.findUniqueOrThrow({ where: { id: a.projectId } }), db.project.findUniqueOrThrow({ where: { id: b.projectId } })]);
+    if ((pa.spaceId ?? null) !== (pb.spaceId ?? null)) throw new ValidationError("These projects are shared with different audiences, so their cards cannot be linked");
+  }
+  if (kind === "blocks") {
+    const edges = await db.planningLink.findMany({ where: { from: { project: { workspaceId: v.workspaceId } } }, select: { fromId: true, toId: true, kind: true } });
+    if (blocksCycle(edges.map((e) => ({ from: e.fromId, to: e.toId, kind: isLinkKind(e.kind) ? e.kind : "blocks" })), a.id, b.id)) throw new ValidationError("That dependency would create a cycle");
+  }
+  const existing = await db.planningLink.findFirst({ where: { OR: [{ fromId: a.id, toId: b.id }, ...(kind !== "blocks" ? [{ fromId: b.id, toId: a.id }] : [])] } });
+  if (existing && existing.kind !== kind) throw new ValidationError(`These cards are already linked as "${existing.kind}". Remove that link first`);
+  if (!existing) await db.planningLink.create({ data: { fromId: a.id, toId: b.id, kind } });
+  await audit(db, v, "planning.link", { type: "PlanningItem", id: b.id }, { from: a.id, kind });
 }
 
-/** Dependencies as the viewer may see them. A hidden endpoint becomes an opaque marker with no title or id. */
+export async function removeDependency(db: Db, v: Viewer, fromId: string, toId: string) {
+  const [a, b] = await Promise.all([requireItem(db, v, fromId), requireItem(db, v, toId)]);
+  await requireManage(db, v, b);
+  await db.planningLink.deleteMany({ where: { fromId: a.id, toId: b.id } });
+  await audit(db, v, "planning.unlink", { type: "PlanningItem", id: b.id }, { from: a.id });
+}
+
+/** Links as the viewer may see them. A hidden endpoint becomes an opaque marker with no title or id. */
 export async function listDependencies(db: Db, v: Viewer, itemId: string) {
   await requireItem(db, v, itemId);
-  const links = await db.planningLink.findMany({ where: { OR: [{ fromId: itemId }, { toId: itemId }] } });
+  const links = await db.planningLink.findMany({ where: { OR: [{ fromId: itemId }, { toId: itemId }] }, include: { from: { include: { column: true, workItem: { select: { type: true, state: true } } } }, to: { include: { column: true, workItem: { select: { type: true, state: true } } } } } });
   const otherIds = links.map((l) => (l.fromId === itemId ? l.toId : l.fromId));
   const visible = await db.planningItem.findMany({ where: { id: { in: otherIds }, ...(await planningWhere(db, v)) }, select: { id: true, title: true, column: { select: { key: true } } } });
   const vis = new Map(visible.map((i) => [i.id, i]));
   return links.map((l) => {
     const other = l.fromId === itemId ? l.toId : l.fromId;
     const o = vis.get(other);
-    const direction = l.fromId === itemId ? ("blocks" as const) : ("blocked-by" as const);
-    return o ? { direction, opaque: false as const, id: o.id, title: o.title, done: o.column.key === "done" } : { direction, opaque: true as const };
+    const kind = isLinkKind(l.kind) ? l.kind : "blocks";
+    const direction = kind !== "blocks" ? ("related" as const) : l.fromId === itemId ? ("blocks" as const) : ("blocked-by" as const);
+    const end = l.fromId === itemId ? l.to : l.from;
+    const finished = blockerFinished({ columnKey: end.column.key, workType: end.workItem?.type ?? null, workState: end.workItem?.state ?? null });
+    return o ? { direction, kind, opaque: false as const, id: o.id, title: o.title, done: finished } : { direction, kind, opaque: true as const };
   });
 }
 
 /** Unfinished blockers, counting hidden ones (blocked status is true even when the blocker is not visible). */
 export async function blockedByCount(db: Db, itemId: string) {
-  return db.planningLink.count({ where: { toId: itemId, from: { column: { key: { not: "done" } } } } });
+  const links = await db.planningLink.findMany({ where: { toId: itemId, kind: "blocks" }, include: { from: { include: { column: true, workItem: { select: { type: true, state: true } } } } } });
+  return links.filter((l) => !blockerFinished({ columnKey: l.from.column.key, workType: l.from.workItem?.type ?? null, workState: l.from.workItem?.state ?? null })).length;
 }
 
 export async function milestoneProgress(db: Db, v: Viewer, milestoneId: string) {
@@ -153,7 +184,7 @@ export async function milestoneProgress(db: Db, v: Viewer, milestoneId: string) 
 
 // ---------- manual waiting (non-PR items) ----------
 
-export async function requestManualReview(db: Db, v: Viewer, input: { planningItemId?: string; workItemId?: string; reviewerKind: "USER" | "EXTERNAL_ROLE"; reviewerRef: string; reason: string }) {
+export async function requestManualReview(db: Db, v: Viewer, input: { planningItemId?: string; workItemId?: string; reviewerKind: "USER" | "EXTERNAL_ROLE"; reviewerRef: string; reason: string; stage?: string }) {
   if (!input.planningItemId === !input.workItemId) throw new ValidationError("Choose exactly one item");
   if (!input.reason.trim()) throw new ValidationError("Say why this is waiting");
   if (input.planningItemId) {
@@ -163,7 +194,7 @@ export async function requestManualReview(db: Db, v: Viewer, input: { planningIt
     await requireWorkItem(db, v, input.workItemId!, "manageWork");
   }
   const rec = await db.waitingRecord.create({
-    data: { workspaceId: v.workspaceId, planningItemId: input.planningItemId, workItemId: input.workItemId, source: "MANUAL", reviewerKind: input.reviewerKind, reviewerRef: input.reviewerRef, reason: input.reason.trim() },
+    data: { workspaceId: v.workspaceId, planningItemId: input.planningItemId, workItemId: input.workItemId, source: "MANUAL", reviewerKind: input.reviewerKind, reviewerRef: input.reviewerRef, reason: input.reason.trim(), stage: STAGE_KEYS.includes(input.stage as StageKey) ? input.stage! : "" },
   });
   await audit(db, v, "waiting.request", { type: "WaitingRecord", id: rec.id });
   return rec;

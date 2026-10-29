@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { Bell, ChevronRight, LayoutDashboard, LogOut } from "@/components/ui/icons";
 import { ThemeToggle } from "@/components/shell/ThemeControls";
 import { WorkspaceSwitcher } from "@/components/shell/WorkspaceSwitcher";
-import type { WorkspaceEntry } from "@/lib/local/workspaces";
 import { Tip } from "@/components/ui/Tooltip";
 import { Metric } from "@/components/ui/Metric";
 import { SyncBadge, type SyncStateName } from "@/components/sync/SyncBadge";
@@ -14,6 +13,7 @@ import type { ThemePreference } from "@/lib/theme";
 
 const LABELS: Record<string, string> = {
   attention: "My attention",
+  inbox: "Inbox",
   "pull-requests": "Pull requests",
   issues: "Issues",
   planning: "Planning",
@@ -21,19 +21,22 @@ const LABELS: Record<string, string> = {
   activity: "Activity",
   repositories: "Repositories",
   connect: "Connect repositories",
-  forks: "Forks & upstream",
-  branches: "Branches & worktrees",
-  admin: "Administration",
+  forks: "Forks",
+  branches: "Branches",
+  admin: "Admin",
   team: "Team",
-  sync: "Sync",
+  capacity: "Review capacity",
+  sync: "Sync status",
   join: "Join a space",
   projects: "Projects",
-  rules: "Review routing",
+  rules: "Who reviews what",
+  labels: "Label taxonomy",
   settings: "Settings",
+  help: "Help",
   search: "Search",
 };
 
-export function Topbar({ unread, menu, syncNote, theme, sync, workspaces }: { unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null; workspaces?: { entries: WorkspaceEntry[]; active: string; switchable: boolean } | null }) {
+export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, workspaces }: { workspaces?: React.ComponentProps<typeof WorkspaceSwitcher> | null; scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
   const path = usePathname();
   const parts = path.split("/").filter(Boolean);
   const crumbs = parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
@@ -61,6 +64,7 @@ export function Topbar({ unread, menu, syncNote, theme, sync, workspaces }: { un
         </ol>
       </nav>
       {workspaces ? <WorkspaceSwitcher {...workspaces} /> : null}
+      {scopePicker}
       {syncNote && <span className="hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
       {sync && <SyncBadge {...sync} href="/sync" />}
       <ThemeToggle initial={theme} />

@@ -72,6 +72,9 @@ const PERMISSION_RECHECK_MS = 5 * 60_000;
 const PUSH_PERMISSION_RECHECK_MS = 60_000;
 const isBlocked = (se: { meta: unknown } | null | undefined) => !!(se?.meta as { newer?: boolean } | null)?.newer;
 
+/** How long an operation may stay SENT before it is treated as orphaned by a crash. */
+const STALE_SENT_MS = 2 * 60_000;
+
 export class SyncEngine {
   private syncing = new Set<string>();
   private readonly now: () => Date;
@@ -406,6 +409,9 @@ export class SyncEngine {
       if (space.headSha === null || this.permissionsStale(space, PERMISSION_RECHECK_MS)) space = await this.refreshPermissions(space, store);
       if (space.access !== "OK") return { changed: false, applied: 0 };
       head = await store.head(space.branch, space.etag);
+      // An unchanged head normally means nothing to do. But entities that were deferred (their source item was not here yet) may be
+      // applicable now that source sync has caught up, so read once more without the conditional header.
+      if (head === null && space.deferredCount > 0) head = await store.head(space.branch, null);
     } catch (e) {
       await this.handleError(space, e, "read");
       return { changed: false, applied: 0 };
@@ -461,6 +467,7 @@ export class SyncEngine {
 
     const ctx = await this.ctx(space);
     let applied = 0;
+    let deferred = 0;
     const skipped: string[] = [];
     for (const def of ENTITY_TYPES) {
       const local = await this.localMap(def, ctx.commonSpaceId);
@@ -480,13 +487,14 @@ export class SyncEngine {
         // overwritten, moved or deleted by a file (or tombstone) arriving from here.
         const row = local.get(f.id);
         if (row?.spaceId && row.spaceId !== space.id) continue;
-        let r: { applied: boolean; data: Data | null };
+        let r: { applied: boolean; data: Data | null; deferred?: boolean };
         try {
           r = await this.reconcile(ctx, def, parsed, f.sha, row?.data ?? null);
         } catch (e) {
           skipped.push(`${f.type}/${f.id}: ${e instanceof Error ? e.message : "could not be applied"}`);
           continue;
         }
+        if (r.deferred) deferred++;
         if (r.applied) {
           applied++;
           if (r.data) appliedHere.push({ id: f.id, data: r.data });
@@ -506,14 +514,14 @@ export class SyncEngine {
     }
 
     await this.refreshRole();
-    await this.db.space.update({ where: { id: space.id }, data: { headSha: head.sha, etag: head.etag, lastPolledAt: now, lastChangedAt: now, unchangedPolls: 0, lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity file(s): ${skipped[0]}` : null, rateLimitedUntil: null } });
+    await this.db.space.update({ where: { id: space.id }, data: { headSha: head.sha, etag: head.etag, lastPolledAt: now, lastChangedAt: now, unchangedPolls: 0, deferredCount: deferred, lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity file(s): ${skipped[0]}` : null, rateLimitedUntil: null } });
     await this.schedule({ ...space, headSha: head.sha, etag: head.etag }, "changed");
     if (applied) this.emit(space.id, "pulled");
     return { changed: true, applied };
   }
 
   /** One entity: apply remote, merge with local edits, or record a conflict. */
-  private async reconcile(ctx: Ctx, def: EntityDef, file: EntityFile, sha: string, local: Data | null): Promise<{ applied: boolean; data: Data | null }> {
+  private async reconcile(ctx: Ctx, def: EntityDef, file: EntityFile, sha: string, local: Data | null): Promise<{ applied: boolean; data: Data | null; deferred?: boolean }> {
     const spaceId = ctx.space.id;
     const key = { spaceId_type_entityId: { spaceId, type: def.type, entityId: file.id } };
     const se = await this.db.syncEntity.findUnique({ where: key });
@@ -549,7 +557,7 @@ export class SyncEngine {
 
     if (!localChanged) {
       const ok = await def.apply(this.db, ctx, file.id, remoteData, file.version);
-      if (ok === false) return { applied: false, data: null };
+      if (ok === false) return { applied: false, data: null, deferred: true };
       await record(remoteData);
       return { applied: true, data: remoteData };
     }
@@ -741,6 +749,10 @@ export class SyncEngine {
       }
       if (!space.canWrite || space.access !== "OK") return { sent };
     }
+    // An operation is SENT only while its commit is in flight. One that has been SENT for a long time belongs to a process that died
+    // between "sending" and learning the result: it goes back to PENDING. This is safe because the entity file records the operation id,
+    // so if the commit did land the retry finds it and deletes the operation instead of sending it twice.
+    await this.db.outboxOp.updateMany({ where: { spaceId: space.id, status: "SENT", updatedAt: { lt: new Date(this.now().getTime() - STALE_SENT_MS) } }, data: { status: "PENDING", error: "Recovered after the app stopped while sending" } });
     for (let attempt = 0; attempt < 5; attempt++) {
       const ops0 = await this.db.outboxOp.findMany({ where: { spaceId: space.id, status: "PENDING" }, orderBy: { createdAt: "asc" } });
       if (ops0.length === 0) return { sent };
@@ -789,7 +801,7 @@ export class SyncEngine {
           await this.db.syncEntity.upsert({ where: key, create: { spaceId: space.id, type: op.entityType, entityId: op.entityId, ...row }, update: row });
         }
         await this.db.outboxOp.deleteMany({ where: { id: { in: ops.map((o) => o.id) } } });
-        await this.db.space.update({ where: { id: space.id }, data: { headSha: sha, etag: null, lastChangedAt: this.now(), lastError: null } });
+        await this.db.space.update({ where: { id: space.id }, data: { headSha: sha, etag: null, lastChangedAt: this.now(), lastPushedAt: this.now(), lastError: null } });
         space = await this.db.space.findUniqueOrThrow({ where: { id: space.id } });
         sent += ops.length;
         this.emit(space.id, "pushed");

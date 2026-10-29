@@ -68,8 +68,9 @@ export async function makeHubClient(hub: FakeHub, githubId: bigint, login: strin
 }
 
 /** Entity data exactly as `entityDef.list` produces it for a project / card, so a pulled entity never looks like a local edit. */
-export const projectData = (name: string, slug = name.toLowerCase().replace(/\W+/g, "-")) => ({ name, slug, description: null, repoIds: [] as string[] });
+export const projectData = (name: string, slug = name.toLowerCase().replace(/\W+/g, "-")) => ({ name, slug, description: null, automation: "off", repoIds: [] as string[] });
 export const cardData = (projectId: string, title: string, columnKey = "ready") => ({
   projectId, columnKey, position: 1024, title, description: null, workRepoGithubId: null, workNumber: null, assigneeLogin: null, assignedByLogin: null, authorLogin: null,
   labels: [] as string[], priority: 0, due: null, milestoneId: null, blockedBy: [] as string[],
+  related: [] as string[], duplicates: [] as string[], epicId: null, iterationId: null, branchRef: null,
 });

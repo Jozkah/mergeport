@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/local/runtime", () => ({ getTeamService: mocks.getTeamService, getEngine: mocks.getEngine, getHubTeamService: mocks.getHubTeamService, syncSoon: () => {} }));
 vi.mock("@/lib/auth/current", () => ({ requireViewer: async () => ({ user: { githubId: 2n, login: "adm" }, viewer: { login: "adm", timezone: "UTC", isAdmin: true }, csrf: "x" }) }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/team", useRouter: () => ({ push: () => {}, refresh: () => {} }), redirect: () => {} }));
 vi.mock("@/lib/hub/ports-impl", async (orig) => ({ ...(await orig<typeof import("@/lib/hub/ports-impl")>()), hubLinkStatus: async () => mocks.link as HubLinkStatus }));
 
 const ORIGIN = "https://hub.example.com";

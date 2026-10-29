@@ -1,3 +1,6 @@
+import { SectionTile } from "@/components/ui/SectionTile";
+import { TiltTile } from "@/components/ui/TiltTile";
+import { CollapsiblePanel } from "@/components/ui/CollapsiblePanel";
 import type { ComponentType, CSSProperties, ReactNode, SVGProps } from "react";
 import { cn } from "@/lib/util";
 import { Ban, Check, CircleAlert, CircleHelp, Eye, Hourglass, Info, Users } from "./icons";
@@ -5,7 +8,15 @@ import type { PrimaryStatus } from "@/lib/domain/review";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 
-export function Panel({ title, icon: I, actions, children, className, bodyClassName, id }: { title?: ReactNode; icon?: Icon; actions?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string; id?: string }) {
+export function Panel({ title, icon: I, actions, children, className, bodyClassName, id, collapsible = true, defaultOpen = true }: { title?: ReactNode; icon?: Icon; actions?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string; id?: string; collapsible?: boolean; defaultOpen?: boolean }) {
+  // A panel with a title and an id can be folded away; the choice is remembered per page.
+  if (collapsible && id && title) {
+    return (
+      <CollapsiblePanel id={id} defaultOpen={defaultOpen} className={className} bodyClassName={bodyClassName} actions={actions} head={<>{I && <I size={16} aria-hidden className="shrink-0 text-ink-3" />}<span className="min-w-0 truncate">{title}</span></>}>
+        {children}
+      </CollapsiblePanel>
+    );
+  }
   return (
     <section className={cn("panel", className)} aria-labelledby={id ? `${id}-title` : undefined}>
       {(title || actions) && (
@@ -14,7 +25,7 @@ export function Panel({ title, icon: I, actions, children, className, bodyClassN
             {I && <I size={16} aria-hidden className="shrink-0 text-ink-3" />}
             <span className="truncate">{title}</span>
           </h2>
-          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+          {actions && <div className="flex shrink-0 items-center gap-2 [&_form>div]:!mt-0">{actions}</div>}
         </div>
       )}
       <div className={cn("panel-body", bodyClassName)}>{children}</div>
@@ -26,10 +37,10 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
       <div className="min-w-0">
-        <h1 className="text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink">{title}</h1>
+        <h1 className="flex items-center gap-3 text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink"><SectionTile /><span className="min-w-0">{title}</span></h1>
         {subtitle && <p className="mt-1 max-w-[70ch] text-[13px] text-ink-3">{subtitle}</p>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 [&_form>div]:!mt-0">{actions}</div>}
     </div>
   );
 }
@@ -84,11 +95,11 @@ export { Avatar } from "./Avatar";
 
 export function EmptyState({ icon: I, title, children, action }: { icon?: Icon; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="empty-in flex flex-col items-center px-6 py-12 text-center">
+    <div className="empty-in flex flex-col items-center px-6 py-8 text-center">
       {I && (
-        <span className="mb-3 inline-flex size-10 items-center justify-center rounded-full border border-line bg-canvas text-ink-3">
+        <TiltTile>
           <I size={18} aria-hidden />
-        </span>
+        </TiltTile>
       )}
       <p className="text-[14px] font-medium text-ink">{title}</p>
       {children && <p className="mt-1 max-w-[52ch] text-[13px] text-ink-3">{children}</p>}
@@ -104,7 +115,7 @@ export function Banner({ tone = "info", title, children, action }: { tone?: "inf
   return (
     <div role={tone === "error" ? "alert" : "status"} className={cn("flex items-start gap-3 rounded-[10px] border px-3 py-2.5 text-[13px]", cls)} style={{ height: "auto", borderRadius: 10 }}>
       <I size={16} aria-hidden className="mt-0.5 shrink-0" />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 max-w-[110ch] flex-1">
         <p className="font-medium">{title}</p>
         {children && <div className="mt-0.5 text-[12.5px] opacity-90">{children}</div>}
       </div>
