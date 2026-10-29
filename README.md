@@ -43,6 +43,14 @@ Demo mode keeps its own database under `~/.mergeport/demo/`. Everything in it is
 
 Create, invite and join are in the app (**Team**). Creating a team shows the exact repository name, owner, visibility and permissions first and does nothing until you confirm. See `docs/architecture.md`.
 
+### Joining an existing team
+
+1. Accept the GitHub invitation (Team page, or from GitHub).
+2. Open **Team**. Private `mergeport-*` repositories your account can read are listed with what they are and what joining downloads.
+3. Review one and confirm. Projects, cards, review rules, waiting rules, fork mappings and the shared repository list then arrive on their own and stay in sync. Nothing is joined without that confirmation.
+
+Repositories the team shares are matched to your own GitHub access; a repository you cannot read shows up as shared but unavailable to you.
+
 ## Commands
 
 | Command | What it does |

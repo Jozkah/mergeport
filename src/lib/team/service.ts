@@ -357,8 +357,10 @@ export class TeamService {
    */
   async candidates(limit = 25): Promise<SpaceCandidate[]> {
     const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
-    if (!team || team.mode !== "TEAM" || !team.teamRemoteId) return [];
-    const prefix = `mergeport-${slugify(team.name ?? "team")}-`;
+    // Before joining anything this lists every private "mergeport-<team>-<space>" repository the account can already read, so a new
+    // computer finds an accepted invitation without anyone typing a name. Joining still needs the explicit review and confirm.
+    const joined = !!team && team.mode === "TEAM" && !!team.teamRemoteId;
+    const prefix = joined ? `mergeport-${slugify(team!.name ?? "team")}-` : "mergeport-";
     const repos = await this.rest.paginate<{ full_name: string; name: string; private: boolean }>("/user/repos?affiliation=owner,collaborator,organization_member", 5);
     const named = repos.filter((r) => r.name.startsWith(prefix)).slice(0, limit);
     const out: SpaceCandidate[] = [];

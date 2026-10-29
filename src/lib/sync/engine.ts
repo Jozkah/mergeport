@@ -572,14 +572,21 @@ export class SyncEngine {
     const space = await this.db.space.findUniqueOrThrow({ where: { id: spaceId } });
     await this.db.space.update({ where: { id: spaceId }, data: { access: "REVOKED", canWrite: false, canAdmin: false, lastError: why, headSha: null, etag: null, nextPollAt: new Date(this.now().getTime() + REVOKED_RECHECK_MS) } });
     await this.db.outboxOp.updateMany({ where: { spaceId, status: { in: ["PENDING", "SENT", "CONFLICT"] } }, data: { status: "QUARANTINED", error: why } });
-    const ctx = await this.ctx(space);
-    const entities = await this.db.syncEntity.findMany({ where: { spaceId } });
-    for (const def of [...ENTITY_TYPES].reverse()) {
-      if (def.type === "repo") continue;
-      for (const se of entities.filter((e) => e.type === def.type)) await def.apply(this.db, ctx, se.entityId, null, se.baseVersion).catch(() => {});
+    if (space.canAdmin) {
+      // An admin created this data on this computer. A repository that was renamed, deleted or hidden must never erase their
+      // projects, cards and rules: they become local again, and can be shared into a new space.
+      await this.db.repository.updateMany({ where: { spaceId }, data: { spaceId: null } });
+      await this.db.project.updateMany({ where: { spaceId }, data: { spaceId: null } });
+    } else {
+      const ctx = await this.ctx(space);
+      const entities = await this.db.syncEntity.findMany({ where: { spaceId } });
+      for (const def of [...ENTITY_TYPES].reverse()) {
+        if (def.type === "repo") continue;
+        for (const se of entities.filter((e) => e.type === def.type)) await def.apply(this.db, ctx, se.entityId, null, se.baseVersion).catch(() => {});
+      }
+      // Repositories last: removing them cascades their cached issues, pull requests and comments.
+      await this.db.repository.deleteMany({ where: { spaceId } });
     }
-    // Repositories last: removing them cascades their cached issues, pull requests and comments.
-    await this.db.repository.deleteMany({ where: { spaceId } });
     await this.db.syncEntity.deleteMany({ where: { spaceId } });
     await this.db.syncConflict.updateMany({ where: { spaceId, status: "OPEN" }, data: { status: "RESOLVED", resolution: "access-revoked", resolvedAt: this.now() } });
     await this.refreshRole();

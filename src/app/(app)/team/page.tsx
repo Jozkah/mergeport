@@ -45,7 +45,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   // Everything below comes from the local cache: no GitHub call, no waiting. Each list says how old it is and why.
   const invView = !demo && team ? await cached.invitations() : null;
   const invitations = invView?.payload ?? [];
-  const candView = !demo && team && cfg?.mode === "TEAM" ? await cached.candidates() : null;
+  const candView = !demo && team ? await cached.candidates() : null;
   const candidates = candView?.payload ?? [];
   const states = engine ? new Map(await Promise.all(spaces.map(async (s) => [s.id, await engine.stateFor(s)] as const))) : new Map();
   const delay = expectedConsistencyDelaySeconds(cfg?.pollSeconds ?? 30);
@@ -105,6 +105,13 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                     </li>
                   ))}
                 </ul>
+              )}
+              {candView && <Freshness view={candView} listKey={KEY_CANDIDATES} timezone={viewer.timezone} refreshing={refreshing(KEY_CANDIDATES)} />}
+              {candidates.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-ink-3">Private team repositories your GitHub account can already read. <strong className="font-medium text-ink-2">Nothing is joined until you review and confirm.</strong></p>
+                  <ul className="flex flex-col gap-2">{candidates.map((c) => <CandidateCard key={c.fullName} c={c} />)}</ul>
+                </div>
               )}
               <form method="get" action="/join" className="flex flex-wrap items-end gap-2">
                 <div><label className="label" htmlFor="j-repo">Join link or repository (owner/repo)</label><input id="j-repo" name="repo" className="input !w-72" required placeholder="owner/mergeport-team-workspace" /></div>
