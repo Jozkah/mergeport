@@ -15,12 +15,16 @@ function teamJson(ctx: HubContext): { id: string; name: string } {
   return t;
 }
 
-/** First X-Forwarded-For entry when behind a trusted proxy, else the socket address. */
+/**
+ * Behind a trusted proxy, the RIGHTMOST X-Forwarded-For entry: that is the address the proxy itself saw, while anything
+ * to its left was sent by the client and can be anything. Otherwise the socket address.
+ */
 export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
   if (trustProxy) {
     const xff = req.headers["x-forwarded-for"];
-    const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim();
-    if (first) return first;
+    const entries = (Array.isArray(xff) ? xff.join(",") : (xff ?? "")).split(",").map((e) => e.trim()).filter(Boolean);
+    const last = entries[entries.length - 1];
+    if (last) return last;
   }
   return req.socket.remoteAddress ?? "unknown";
 }

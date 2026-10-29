@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createLimiter } from "../../hub/src/ratelimit";
+import { clientIp } from "../../hub/src/auth-routes";
 import { signInAs, startTestHub, type TestHub } from "./harness";
 
 describe("createLimiter", () => {
@@ -72,11 +73,24 @@ describe("rate limits over HTTP", () => {
     expect((await hub.api()("POST", "/auth/device/start")).status).toBe(200);
   });
 
-  it("X-Forwarded-For first entry is the key when trustProxy", async () => {
-    const start = (ip: string) => fetch(hub.url + "/auth/device/start", { method: "POST", headers: { "x-forwarded-for": `${ip}, 10.0.0.1` } });
-    for (let i = 0; i < 10; i++) expect((await start("203.0.113.5")).status).toBe(200);
-    expect((await start("203.0.113.5")).status).toBe(429);
+  it("X-Forwarded-For rightmost entry (the one the proxy appended) is the key when trustProxy", async () => {
+    const start = (xff: string) => fetch(hub.url + "/auth/device/start", { method: "POST", headers: { "x-forwarded-for": xff } });
+    // A client that puts a fresh fake address first on every request is still one client to the proxy.
+    for (let i = 0; i < 10; i++) expect((await start(`10.${i}.0.1, 203.0.113.5`)).status).toBe(200);
+    expect((await start("10.99.0.1, 203.0.113.5")).status).toBe(429);
+    expect((await start("203.0.113.5 ,")).status).toBe(429); // trailing comma and spaces do not make a new key
     expect((await start("203.0.113.6")).status).toBe(200);
+    expect((await start("10.0.0.1, 203.0.113.7")).status).toBe(200);
+  });
+
+  it("clientIp takes the rightmost entry, joins repeated headers, and falls back to the socket", () => {
+    const req = (xff: string | string[] | undefined) => ({ headers: { "x-forwarded-for": xff }, socket: { remoteAddress: "127.0.0.1" } }) as unknown as import("node:http").IncomingMessage;
+    expect(clientIp(req("1.1.1.1, 2.2.2.2, 3.3.3.3"), true)).toBe("3.3.3.3");
+    expect(clientIp(req(["1.1.1.1, 2.2.2.2", "3.3.3.3"]), true)).toBe("3.3.3.3");
+    expect(clientIp(req(" 4.4.4.4 "), true)).toBe("4.4.4.4");
+    expect(clientIp(req(""), true)).toBe("127.0.0.1");
+    expect(clientIp(req(undefined), true)).toBe("127.0.0.1");
+    expect(clientIp(req("1.1.1.1, 2.2.2.2"), false)).toBe("127.0.0.1");
   });
 });
 
