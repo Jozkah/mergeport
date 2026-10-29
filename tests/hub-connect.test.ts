@@ -97,7 +97,7 @@ describe("HubAuth device flow", () => {
 describe("completeConnect", () => {
   const base = (h: string, origin: string, gh: GhStatus) => ({ home: h, host: "github.com", origin, teamName: "Fake Team", session: "session-token-secret", member: { githubId: "42", login: "octocat" }, gh, ports: { session: hubSessionPort } });
 
-  it("creates the profile and registry entries, and never writes the token to hubs/active", async () => {
+  it("creates the profile and hubs.json entry, leaves active.json to the launcher, and never writes the token", async () => {
     const h = home();
     const origin = "http://127.0.0.1:4000";
     const r = await completeConnect(base(h, origin, ghOk(42n)));
@@ -107,8 +107,9 @@ describe("completeConnect", () => {
     expect(db).toMatch(/github\.com-42-hub-[0-9a-f]{16}/);
     expect(fs.existsSync(db)).toBe(true);
     expect(readHubs(h)[0]).toMatchObject({ origin, teamName: "Fake Team", lastSignedInAs: { id: "42", login: "octocat" } });
-    expect(readActive(h)).toEqual({ host: "github.com", accountId: "42", backend });
-    for (const f of ["hubs.json", "active.json"]) expect(fs.readFileSync(path.join(h, f), "utf8")).not.toContain("session-token-secret");
+    expect(readActive(h)).toBeNull(); // written by the launcher's onSwitched once the new workspace is up
+    expect(fs.existsSync(path.join(h, "active.json"))).toBe(false);
+    expect(fs.readFileSync(path.join(h, "hubs.json"), "utf8")).not.toContain("session-token-secret");
     for (const f of fs.readdirSync(path.dirname(db))) expect(fs.readFileSync(path.join(path.dirname(db), f))).not.toContain("session-token-secret");
     expect(await hubSessionPort.read(db)).toEqual({ origin, token: "session-token-secret", githubId: "42" });
     const prisma = createPrisma(db);

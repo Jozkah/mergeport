@@ -105,7 +105,7 @@ describe("hub connect routes", () => {
     }
   });
 
-  it("start then pending then ok writes active.json, switches once, and never leaks the session", async () => {
+  it("start then pending then ok switches once, leaves active.json to the launcher, and never leaks the session", async () => {
     const h = await hub({ slowDownPolls: 1, pollsBeforeOk: 1 });
     const s = await begin(h.origin);
     expect(await (await poll(req("poll", { pollId: s.pollId }))).json()).toEqual({ status: "pending", slowDown: true });
@@ -117,7 +117,7 @@ describe("hub connect routes", () => {
     const backend = hubBackendId(h.origin);
     expect(JSON.parse(text)).toEqual({ status: "ok", switch: { launchUrl: "http://127.0.0.1:3000/api/local/launch?token=z", previousBootId: "old", expectedBackend: backend } });
     expect(text).not.toContain("session-token-secret");
-    expect(readActive(home)).toEqual({ host: "github.com", accountId: "42", backend });
+    expect(readActive(home)).toBeNull(); // a failed switch must leave the next launch on the previous workspace
     expect(m.requestSwitch).toHaveBeenCalledTimes(1);
     expect(m.requestSwitch).toHaveBeenCalledWith(backend);
     expect((await poll(req("poll", { pollId: s.pollId }))).status).toBe(400); // a finished flow is forgotten

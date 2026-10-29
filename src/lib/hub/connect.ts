@@ -3,7 +3,7 @@ import { createPrisma } from "@/lib/db";
 import type { GhStatus } from "@/lib/github/gh";
 import { hubBackendId, normalizeHubOrigin, type Backend } from "@/lib/local/backends";
 import { ensureLocalProfile, profileDbPath } from "@/lib/local/profile";
-import { upsertHub, writeActive } from "@/lib/local/registry";
+import { upsertHub } from "@/lib/local/registry";
 import type { HubSessionPort } from "@/lib/hub/ports";
 
 /** Client side of the hub's health check and device sign-in. Error messages never carry codes or session tokens. */
@@ -115,7 +115,9 @@ export type ConnectInput = {
 
 /**
  * Creates the hub profile for the account that signed in. Nothing is created unless `gh` is signed in as the same
- * numeric id the hub confirmed, so a hub profile is never opened as another account.
+ * numeric id the hub confirmed, so a hub profile is never opened as another account. active.json is NOT written here:
+ * the launcher records the active workspace once the switch to it has succeeded, so a failed switch leaves the next
+ * launch on the workspace that still works.
  */
 export async function completeConnect(i: ConnectInput): Promise<{ ok: true; backend: Backend } | { ok: false; error: "mismatch" | "gh-login" | "gh-missing" | "gh-error" }> {
   if (i.gh.state === "not-logged-in") return { ok: false, error: "gh-login" };
@@ -137,6 +139,5 @@ export async function completeConnect(i: ConnectInput): Promise<{ ok: true; back
   await i.ports.session.save(dbFile, { origin, token: i.session, githubId: i.member.githubId, login: i.member.login });
   await i.ports.session.markProfile(dbFile, { backend, origin, teamName: i.teamName });
   upsertHub(i.home, { origin, teamName: i.teamName, lastSignedInAs: { id: i.member.githubId, login: i.member.login }, addedAt: new Date().toISOString() });
-  writeActive(i.home, { host: i.host, accountId: i.member.githubId, backend });
   return { ok: true, backend };
 }
