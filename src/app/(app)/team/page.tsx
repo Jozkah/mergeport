@@ -20,6 +20,9 @@ import { Link, Lock, Mail, ShieldCheck, Users } from "@/components/ui/icons";
 import { SyncBadge } from "@/components/sync/SyncBadge";
 import { leaveTeamAction, acceptGithubInvitationAction, createSpaceAction, createTeamAction, inviteAction, revokeAccessAction } from "@/app/team-actions";
 import { env } from "@/lib/env";
+import { isHubBackend } from "@/lib/local/backends";
+import { currentBackend } from "@/lib/local/workspaces";
+import { HubTeamPage } from "@/components/team/HubTeamPage";
 
 export const metadata = { title: "Team" };
 export const dynamic = "force-dynamic";
@@ -28,6 +31,8 @@ type SP = { name?: string; owner?: string; invite?: string; users?: string; perm
 
 export default async function TeamPage({ searchParams }: { searchParams: Promise<SP> }) {
   const { viewer } = await requireViewer();
+  const backend = await currentBackend();
+  if (isHubBackend(backend)) return <HubTeamPage backend={backend} />;
   const sp = await searchParams;
   const demo = isDemo();
   const cfg = await db.teamConfig.findUnique({ where: { id: "team" } });
