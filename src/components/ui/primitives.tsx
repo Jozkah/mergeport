@@ -1,5 +1,6 @@
 import { SectionTile } from "@/components/ui/SectionTile";
 import { TiltTile } from "@/components/ui/TiltTile";
+import { CollapsiblePanel } from "@/components/ui/CollapsiblePanel";
 import type { ComponentType, CSSProperties, ReactNode, SVGProps } from "react";
 import { cn } from "@/lib/util";
 import { Ban, Check, CircleAlert, CircleHelp, Eye, Hourglass, Info, Users } from "./icons";
@@ -7,7 +8,15 @@ import type { PrimaryStatus } from "@/lib/domain/review";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 
-export function Panel({ title, icon: I, actions, children, className, bodyClassName, id }: { title?: ReactNode; icon?: Icon; actions?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string; id?: string }) {
+export function Panel({ title, icon: I, actions, children, className, bodyClassName, id, collapsible = true, defaultOpen = true }: { title?: ReactNode; icon?: Icon; actions?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string; id?: string; collapsible?: boolean; defaultOpen?: boolean }) {
+  // A panel with a title and an id can be folded away; the choice is remembered per page.
+  if (collapsible && id && title) {
+    return (
+      <CollapsiblePanel id={id} defaultOpen={defaultOpen} className={className} bodyClassName={bodyClassName} actions={actions} head={<>{I && <I size={16} aria-hidden className="shrink-0 text-ink-3" />}<span className="min-w-0 truncate">{title}</span></>}>
+        {children}
+      </CollapsiblePanel>
+    );
+  }
   return (
     <section className={cn("panel", className)} aria-labelledby={id ? `${id}-title` : undefined}>
       {(title || actions) && (
