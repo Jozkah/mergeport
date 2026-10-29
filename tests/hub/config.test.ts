@@ -22,6 +22,16 @@ describe("hub config and health", () => {
     expect(loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "http://h.example", MERGEPORT_HUB_TRUST_PROXY: "false" }).bindHost).toBe("127.0.0.1");
     expect(loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "https://h.example", MERGEPORT_HUB_TRUST_PROXY: "false" }).bindHost).toBe("0.0.0.0");
   });
+  it("trustProxy defaults to false (binds 0.0.0.0 with an https public url, loopback otherwise)", () => {
+    const base = { MERGEPORT_HUB_GITHUB_CLIENT_ID: "a", MERGEPORT_HUB_GITHUB_CLIENT_SECRET: "b", MERGEPORT_HUB_DATA: "x", MERGEPORT_HUB_OWNER_LOGIN: "olive" };
+    const https = loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "https://h.example" });
+    expect(https.trustProxy).toBe(false);
+    expect(https.bindHost).toBe("0.0.0.0");
+    const http = loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "http://h.example" });
+    expect(http.trustProxy).toBe(false);
+    expect(http.bindHost).toBe("127.0.0.1");
+    expect(loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "https://h.example", MERGEPORT_HUB_TRUST_PROXY: "true" }).trustProxy).toBe(true);
+  });
   it("serves /health with team null before bootstrap", async () => {
     const hub = await startTestHub();
     const r = await hub.api()("GET", "/health");

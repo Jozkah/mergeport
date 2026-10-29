@@ -25,7 +25,7 @@ const schema = z.object({
   MERGEPORT_HUB_GITHUB_CLIENT_ID: z.string().min(1),
   MERGEPORT_HUB_GITHUB_CLIENT_SECRET: z.string().min(1),
   MERGEPORT_HUB_OWNER_LOGIN: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login"),
-  MERGEPORT_HUB_TRUST_PROXY: bool.default(true),
+  MERGEPORT_HUB_TRUST_PROXY: bool.default(false),
   MERGEPORT_HUB_GITHUB_API_BASE: z.string().url().default("https://api.github.com"),
   MERGEPORT_HUB_GITHUB_OAUTH_BASE: z.string().url().default("https://github.com"),
 });

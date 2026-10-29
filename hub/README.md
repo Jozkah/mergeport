@@ -41,7 +41,7 @@ MERGEPORT_HUB_TRUST_PROXY=true
 | `MERGEPORT_HUB_GITHUB_CLIENT_SECRET` | yes | | OAuth App client secret. |
 | `MERGEPORT_HUB_OWNER_LOGIN` | yes | | GitHub login of the person who becomes the team owner. Only this login (compared case-insensitively) can sign in to an empty hub; everyone else is refused as not invited until the owner has signed in and invited them. |
 | `MERGEPORT_HUB_PORT` | no | `8787` | Listen port. |
-| `MERGEPORT_HUB_TRUST_PROXY` | no | `true` | `true` when a reverse proxy fronts the hub: it binds `127.0.0.1` only and takes the client IP from the first `X-Forwarded-For` entry (used for rate limits). `false` binds `0.0.0.0` (only when the public URL is https; otherwise still loopback) and uses the socket address. Never set `false` behind a proxy and never `true` when clients can reach the hub directly (they could spoof the header). |
+| `MERGEPORT_HUB_TRUST_PROXY` | no | `false` | Set `true` only when a reverse proxy fronts the hub (the Caddy setup below): it binds `127.0.0.1` only and takes the client IP from the it binds `127.0.0.1` only and takes the client IP from the rightmost `X-Forwarded-For` entry (used for rate limits). The default `false` uses the socket address and binds `0.0.0.0` only when the public URL is https (otherwise still loopback). Never leave it `false` behind a proxy (every client would share the proxy's rate limit) and never set `true` when clients can reach the hub directly (they could spoof the header). |
 | `MERGEPORT_HUB_GITHUB_API_BASE` | no | `https://api.github.com` | Tests only. Points the hub at a fake GitHub API. |
 | `MERGEPORT_HUB_GITHUB_OAUTH_BASE` | no | `https://github.com` | Tests only. Points the hub at a fake GitHub OAuth host. |
 
@@ -57,6 +57,8 @@ npm run hub
 Load the `.env` with your process manager (systemd below) or your shell. The first sign-in by `MERGEPORT_HUB_OWNER_LOGIN` bootstraps the team (named `<login>'s team`) with that person as owner; any other login is refused on an empty hub, so nobody can claim the hub before you do. Everyone else needs an invite from an owner or admin. `GET /health` reports `bootstrapped: false` until the owner has signed in.
 
 ## 4. Reverse proxy (Caddy)
+
+This setup needs `MERGEPORT_HUB_TRUST_PROXY=true` in `.env` (it is `false` by default).
 
 ```
 hub.example.com {
