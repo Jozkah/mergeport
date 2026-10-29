@@ -14,8 +14,10 @@ import path from "node:path";
 import { createPrisma } from "../src/lib/db";
 import { ghStatus, loginCommand, REQUIRED_SCOPES } from "../src/lib/github/gh";
 import { mergeportHome } from "../src/lib/local/profile";
+import { writeActive } from "../src/lib/local/registry";
 import { resolveStartProfile, resolveSwitchTarget } from "../src/lib/local/start-profile";
 import { spawnNext, waitForReady } from "../src/lib/local/child-process";
+import type { Backend } from "../src/lib/local/backends";
 import { Supervisor } from "../src/lib/local/supervisor";
 import { looksOffline, savedProfiles } from "../src/lib/local/saved-profiles";
 import { seedDemo } from "../src/lib/demo/seed";
@@ -29,6 +31,7 @@ const host = process.env.MERGEPORT_HOST ?? "github.com";
 async function main() {
   const home = mergeportHome(process.env.MERGEPORT_HOME);
   let dbFile: string;
+  let startBackend: Backend = "github";
   let signedInId: bigint | null = null; // who gh is (or, offline, who the saved profile is); switching only opens this account's profiles
   if (demo) {
     dbFile = path.join(home, "demo", "mergeport-demo.db");
@@ -61,7 +64,9 @@ async function main() {
       console.log(`GitHub is unreachable (${st.message}). Opening the saved profile for @${saved[0].login} (id ${saved[0].id}) from this computer: ${dbFile}\nData is shown as last saved. Nothing is sent to GitHub until the account is verified again.`);
     } else {
       signedInId = st.identity.id;
-      dbFile = resolveStartProfile(home, host, st.identity.id).dbFile;
+      const prof = resolveStartProfile(home, host, st.identity.id);
+      dbFile = prof.dbFile;
+      startBackend = prof.backend;
       fs.mkdirSync(path.dirname(dbFile), { recursive: true });
       createPrisma(dbFile); // applies migrations
       console.log(`Signed in to ${host} as ${st.identity.login} (id ${st.identity.id}). Profile: ${dbFile}`);
@@ -85,6 +90,10 @@ async function main() {
         if (demo || signedInId === null) throw new Error("Switching workspaces is not available in this mode.");
         return resolveSwitchTarget(home, host, signedInId, backend);
       },
+      // The launcher owns active.json: it changes only once the new workspace is really up.
+      onSwitched: (backend) => {
+        if (signedInId !== null) writeActive(home, { host, accountId: String(signedInId), backend });
+      },
       newToken: () => randomBytes(24).toString("base64url"),
     },
     { port, demo },
@@ -98,7 +107,7 @@ async function main() {
   supervisor.on("child-exit", (c) => process.exit(c ?? 0));
 
   const started = Date.now();
-  const { launchUrl: url } = await supervisor.start({ dbFile }).catch(async (e) => {
+  const { launchUrl: url } = await supervisor.start({ dbFile, backend: startBackend }).catch(async (e) => {
     await supervisor.stop();
     throw e;
   });

@@ -8,14 +8,20 @@ const KILL_TIMEOUT_MS = 15_000;
 /** Runs `next start` for one profile. kill() resolves only after the process has exited, so the port is free again. */
 export function spawnNext(spec: ChildSpec, extraEnv: Record<string, string>): ChildHandle {
   const next = path.join("node_modules", "next", "dist", "bin", "next");
-  const env = { ...process.env, MERGEPORT_DB: spec.dbFile, MERGEPORT_LAUNCH_TOKEN: spec.token, MERGEPORT_PORT: String(spec.port), DEMO_MODE: spec.demo ? "true" : "false", NODE_ENV: "production", ...extraEnv } as unknown as NodeJS.ProcessEnv;
+  const env = { ...process.env, MERGEPORT_DB: spec.dbFile, MERGEPORT_LAUNCH_TOKEN: spec.token, MERGEPORT_PORT: String(spec.port), MERGEPORT_BACKEND: spec.backend ?? "github", DEMO_MODE: spec.demo ? "true" : "false", NODE_ENV: "production", ...extraEnv } as unknown as NodeJS.ProcessEnv;
   const child = spawn(process.execPath, [next, "start", "-H", "127.0.0.1", "-p", String(spec.port)], { stdio: "inherit", env });
   let exited = false;
   const waiters: Array<() => void> = [];
-  child.once("exit", () => {
+  const exitCbs: Array<(code: number | null) => void> = [];
+  const done = (code: number | null) => {
+    if (exited) return;
     exited = true;
     waiters.splice(0).forEach((w) => w());
-  });
+    exitCbs.forEach((cb) => cb(code));
+  };
+  child.once("exit", (code) => done(code));
+  // A process that could not even start never emits "exit": treat it as exited so boot fails fast and kill() resolves.
+  child.once("error", () => done(1));
   return {
     kill() {
       if (exited) return Promise.resolve();
@@ -29,7 +35,7 @@ export function spawnNext(spec: ChildSpec, extraEnv: Record<string, string>): Ch
       });
     },
     onExit(cb) {
-      child.once("exit", (code) => cb(code));
+      exitCbs.push(cb);
     },
   };
 }

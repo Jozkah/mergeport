@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { Backend } from "@/lib/local/backends";
 
-export type ChildSpec = { dbFile: string; token: string; port: number; demo: boolean };
+export type ChildSpec = { dbFile: string; token: string; port: number; demo: boolean; backend?: Backend };
 export type ChildHandle = { kill(): Promise<void>; onExit(cb: (code: number | null) => void): void };
 export type SupervisorDeps = {
   spawnChild(spec: ChildSpec): ChildHandle;
@@ -11,8 +11,11 @@ export type SupervisorDeps = {
   /** Throws when the workspace cannot be opened (not signed in, hub gone, ...). */
   resolveTarget(req: { backend: Backend }): Promise<{ dbFile: string }>;
   newToken(): string;
+  /** Called after a switch fully succeeded (the new child is ready). The launcher records the active workspace here. */
+  onSwitched?(backend: Backend): void;
 };
 type Started = { launchUrl: string; bootId: string };
+type Announced = { launchUrl: string; previousBootId: string | null };
 
 const BACKEND_RE = /^(github|hub-[0-9a-f]{16})$/;
 const SECRET_HEADER = "x-mergeport-control";
@@ -24,7 +27,7 @@ class TargetUnavailableError extends Error {}
 /** A different switch is already running; answered as 409 too. */
 class SwitchBusyError extends Error {}
 
-type Running = { spec: ChildSpec; handle: ChildHandle; expectedExit: boolean };
+type Running = { spec: ChildSpec; handle: ChildHandle; expectedExit: boolean; bootId: string | null };
 
 /** Owns the one app child process. A switch kills it and starts another, so two children never share the port. */
 export class Supervisor {
@@ -41,11 +44,12 @@ export class Supervisor {
     if (event === "child-exit") this.listeners.push(cb);
   }
 
-  start(initial: { dbFile: string }): Promise<Started> {
-    return this.serialized("start", async () => this.boot({ dbFile: initial.dbFile, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo }));
+  start(initial: { dbFile: string; backend?: Backend }): Promise<Started> {
+    return this.serialized("start", async () => this.boot({ dbFile: initial.dbFile, backend: initial.backend, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo }));
   }
 
-  switchTo(req: { backend: Backend }): Promise<Started> {
+  /** `announce` fires once the target is accepted and BEFORE the current child is killed, so a caller living in that child still gets an answer. */
+  switchTo(req: { backend: Backend }, announce?: (a: Announced) => void): Promise<Started> {
     return this.serialized(req.backend, async () => {
       let target: { dbFile: string };
       try {
@@ -54,9 +58,17 @@ export class Supervisor {
         throw new TargetUnavailableError(e instanceof Error ? e.message : "That workspace is not available.");
       }
       const previous = this.current?.spec ?? null;
+      const next: ChildSpec = { dbFile: target.dbFile, backend: req.backend, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo };
+      announce?.({ launchUrl: launchUrl(next), previousBootId: this.current?.bootId ?? null });
       await this.killCurrent();
       try {
-        return await this.boot({ dbFile: target.dbFile, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo }, true);
+        const started = await this.boot(next, true);
+        try {
+          this.deps.onSwitched?.(req.backend);
+        } catch {
+          /* recording the choice must not undo a working switch */
+        }
+        return started;
       } catch {
         await this.killCurrent();
         if (previous && !this.stopping.signal.aborted) {
@@ -107,9 +119,16 @@ export class Supervisor {
         if (tooBig) return;
         const backend = parseBackend(raw);
         if (!backend) return reply(400, { error: "Bad request" });
-        this.switchTo({ backend }).then(
-          (r) => reply(200, { launchUrl: r.launchUrl }),
-          (e) => (e instanceof TargetUnavailableError || e instanceof SwitchBusyError ? reply(409, { error: e.message }) : reply(500, { error: e instanceof Error ? e.message : "Switch failed" })),
+        // Answer 202 as soon as the switch is accepted: the caller is the very process about to be killed.
+        let answered = false;
+        const answer = (status: number, body: unknown) => {
+          if (answered) return;
+          answered = true;
+          reply(status, body);
+        };
+        this.switchTo({ backend }, (a) => answer(202, a)).then(
+          (r) => answer(202, { launchUrl: r.launchUrl, previousBootId: null }), // joined a switch already running
+          (e) => (e instanceof TargetUnavailableError || e instanceof SwitchBusyError ? answer(409, { error: e.message }) : answer(500, { error: e instanceof Error ? e.message : "Switch failed" })),
         );
       });
     });
@@ -139,7 +158,7 @@ export class Supervisor {
 
   /** `quiet`: a switch is handling this boot, so a child dying before it is ready is not reported as "child-exit". */
   private async boot(spec: ChildSpec, quiet = false): Promise<Started> {
-    const run: Running = { spec, handle: this.deps.spawnChild(spec), expectedExit: quiet };
+    const run: Running = { spec, handle: this.deps.spawnChild(spec), expectedExit: quiet, bootId: null };
     this.current = run;
     // Aborting on exit lets waitReady fail fast when the child dies while booting.
     const boot = new AbortController();
@@ -153,7 +172,8 @@ export class Supervisor {
     try {
       const bootId = await this.deps.waitReady(spec.port, boot.signal);
       run.expectedExit = false;
-      return { launchUrl: `http://127.0.0.1:${spec.port}/api/local/launch?token=${spec.token}`, bootId };
+      run.bootId = bootId;
+      return { launchUrl: launchUrl(spec), bootId };
     } finally {
       this.stopping.signal.removeEventListener("abort", abort);
     }
@@ -167,6 +187,8 @@ export class Supervisor {
     await run.handle.kill();
   }
 }
+
+const launchUrl = (spec: ChildSpec) => `http://127.0.0.1:${spec.port}/api/local/launch?token=${spec.token}`;
 
 function sameSecret(got: string | string[] | undefined, secret: string): boolean {
   if (typeof got !== "string") return false;
@@ -188,14 +210,14 @@ function parseBackend(raw: string): Backend | null {
 export class ControlClient {
   constructor(private url: string, private secret: string) {}
 
-  async switchTo(backend: Backend): Promise<{ launchUrl: string }> {
+  async switchTo(backend: Backend): Promise<{ launchUrl: string; previousBootId: string | null }> {
     const res = await fetch(`${this.url}/switch`, {
       method: "POST",
       headers: { "content-type": "application/json", [SECRET_HEADER]: this.secret },
       body: JSON.stringify({ backend }),
     });
-    const body = (await res.json().catch(() => ({}))) as { launchUrl?: string; error?: string };
+    const body = (await res.json().catch(() => ({}))) as { launchUrl?: string; previousBootId?: string | null; error?: string };
     if (!res.ok || !body.launchUrl) throw new Error(body.error ?? `Switch failed (${res.status})`);
-    return { launchUrl: body.launchUrl };
+    return { launchUrl: body.launchUrl, previousBootId: body.previousBootId ?? null };
   }
 }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlClient, Supervisor, type ChildHandle, type ChildSpec, type SupervisorDeps } from "@/lib/local/supervisor";
 import type { Backend } from "@/lib/local/backends";
 
@@ -204,11 +204,27 @@ describe("control channel", () => {
     expect(await res.json()).toEqual({ error: "No such workspace" });
   });
 
-  it("answers 200 with the launch url once the child is ready", async () => {
-    const { f, url, secret } = await control();
-    const res = await post(url, { backend: HUB }, secret);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ launchUrl: `http://127.0.0.1:4100/api/local/launch?token=${f.spawned[1].token}` });
+  it("answers 202 with the launch url and previous boot id BEFORE killing the old child", async () => {
+    const f = makeDeps();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const spawn = f.deps.spawnChild;
+    f.deps.spawnChild = (spec) => {
+      const h = spawn(spec);
+      return { ...h, kill: async () => { await gate; await h.kill(); } };
+    };
+    const s = sup(f.deps);
+    await s.start({ dbFile: "/db/a" });
+    const { url, secret } = await s.listenControl();
+    const res = await Promise.race([post(url, { backend: HUB }, secret), new Promise<null>((r) => setTimeout(() => r(null), 2000))]);
+    expect(f.events).not.toContain("kill:/db/a"); // reply arrived while the old child was still alive
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(202);
+    const body = await res!.json();
+    expect(body.previousBootId).toBe("boot-1");
+    release();
+    await vi.waitFor(() => expect(f.spawned).toHaveLength(2));
+    expect(body.launchUrl).toBe(`http://127.0.0.1:4100/api/local/launch?token=${f.spawned[1].token}`);
   });
 
   it("answers 413 for an oversized body", async () => {
@@ -230,7 +246,7 @@ describe("control channel", () => {
     const second = await post(url, { backend: "github" }, secret);
     expect(second.status).toBe(409);
     release();
-    expect((await first).status).toBe(200);
+    expect((await first).status).toBe(202);
   });
 
   it("refuses a second listenControl", async () => {
@@ -244,6 +260,22 @@ describe("control channel", () => {
     const { url, secret } = await control();
     const ok = await new ControlClient(url, secret).switchTo(HUB);
     expect(ok.launchUrl).toContain("/api/local/launch?token=");
+    expect(ok.previousBootId).toBe("boot-1");
     await expect(new ControlClient(url, "wrong").switchTo(HUB)).rejects.toThrow();
+  });
+});
+
+describe("onSwitched", () => {
+  it("fires with the new backend after a successful switch, never after a failed one", async () => {
+    const bad = "hub-ffffffffffffffff" as Backend;
+    const f = makeDeps({ failReadyFor: (spec) => spec.dbFile === `/db/${bad}` });
+    const seen: Backend[] = [];
+    f.deps.onSwitched = (b) => seen.push(b);
+    const s = sup(f.deps);
+    await s.start({ dbFile: "/db/a" });
+    await s.switchTo({ backend: HUB });
+    expect(seen).toEqual([HUB]);
+    await expect(s.switchTo({ backend: bad })).rejects.toThrow();
+    expect(seen).toEqual([HUB]);
   });
 });

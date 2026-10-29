@@ -60,6 +60,10 @@ describe("GET /api/local/ready", () => {
     const a = await readyGet().json();
     const b = await readyGet().json();
     expect(a.bootId).toBeTruthy();
+    expect(a.backend).toBe("github");
+    process.env.MERGEPORT_BACKEND = HUB;
+    expect((await readyGet().json()).backend).toBe(HUB);
+    delete process.env.MERGEPORT_BACKEND;
     expect(b.bootId).toBe(a.bootId);
   });
 });
@@ -77,26 +81,22 @@ describe("POST /api/local/switch", () => {
     for (const backend of ["nope", "hub-xyz", 5, undefined]) expect((await POST(post({ backend }))).status).toBe(400);
     expect(sw.requestSwitch).not.toHaveBeenCalled();
   });
-  it("writes active.json before requesting the switch and returns the launch url", async () => {
-    let seen: unknown;
-    sw.requestSwitch.mockImplementation(async () => {
-      seen = readActive(home);
-      return { launchUrl: "http://127.0.0.1:3000/api/local/launch?token=z" };
-    });
+  it("returns launchUrl, previousBootId and expectedBackend, and never touches active.json", async () => {
+    writeActive(home, { host: "github.com", accountId: "7", backend: "github" });
+    sw.requestSwitch.mockResolvedValue({ launchUrl: "http://127.0.0.1:3000/api/local/launch?token=z", previousBootId: "old" });
     const res = await POST(post({ backend: HUB }));
     expect(res.status).toBe(200);
-    const j = await res.json();
-    expect(j.launchUrl).toContain("token=z");
-    expect(j.bootId).toBeTruthy();
-    expect(seen).toEqual({ host: "github.com", accountId: "7", backend: HUB });
-  });
-  it("restores the previous active.json and answers 409 when the switch fails", async () => {
-    writeActive(home, { host: "github.com", accountId: "7", backend: "github" });
-    sw.requestSwitch.mockRejectedValue(new Error("Another workspace switch is in progress"));
-    const res = await POST(post({ backend: HUB }));
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toBe("Another workspace switch is in progress");
+    expect(await res.json()).toEqual({ launchUrl: "http://127.0.0.1:3000/api/local/launch?token=z", previousBootId: "old", expectedBackend: HUB });
     expect(readActive(home)).toEqual({ host: "github.com", accountId: "7", backend: "github" });
+  });
+  it("answers 409 when the launcher refuses (busy, unavailable target, no launcher)", async () => {
+    for (const msg of ["Another workspace switch is in progress", "That server has no profile for this account yet.", "Switching needs the launcher. Start Mergeport with npm run local."]) {
+      sw.requestSwitch.mockRejectedValueOnce(new Error(msg));
+      const res = await POST(post({ backend: HUB }));
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe(msg);
+    }
+    expect(readActive(home)).toBeNull();
   });
 });
 
