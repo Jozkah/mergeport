@@ -85,7 +85,7 @@ function Column({ col, cards: allCards, cols, onMove, busy, fx }: { col: Col; ca
   const cards = allCards.slice(0, limit); // a long column renders in pages; the count in the header is the real one
   return (
     <section aria-labelledby={`col-${col.key}`} className="flex min-h-0 max-h-[calc(100dvh-19rem)] min-w-[236px] flex-1 basis-[236px] flex-col rounded-[12px] border border-line bg-canvas p-2">
-      <h3 id={`col-${col.key}`} className="mb-2 flex items-center justify-between px-1.5 text-[13px] font-medium text-ink-2">{col.name}<span className="rounded-full bg-muted px-2 text-[11.5px] leading-5"><Metric value={allCards.length} /></span></h3>
+      <h3 id={`col-${col.key}`} className="mb-2 flex items-center justify-between px-1.5 text-[13px] font-medium text-ink-2"><span className="inline-flex items-center gap-2"><span className="col-dot" data-col={col.key} aria-hidden />{col.name}</span><span className="rounded-full bg-muted px-2 text-[11.5px] leading-5"><Metric value={allCards.length} /></span></h3>
       <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <ul ref={setNodeRef} className={`flex min-h-16 flex-1 flex-col gap-2 overflow-y-auto rounded-[8px] p-1 transition-colors duration-[var(--duration-feedback)] ${isOver ? "bg-muted" : ""}`}>
           {(() => {

@@ -1,6 +1,7 @@
 import { Select } from "@/components/ui/Select";
 import { describeAccess, type RepoPermissions } from "@/lib/domain/repo-access";
 import Link from "next/link";
+import { ctx } from "@/lib/ctx";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { listRepositories } from "@/lib/services/queries";
@@ -66,7 +67,7 @@ export default async function Repositories({ searchParams }: { searchParams: Pro
               <thead><tr><th scope="col">Repository</th><th scope="col">Account</th><th scope="col">Access</th><th scope="col">Status</th><th scope="col">Sharing</th><th scope="col">Projects</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
               <tbody>
                 {(showAll ? repos : repos.slice(0, 30)).map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} data-ctx={ctx([{ label: "Browse code", href: `/repositories/${r.id}/code` }, { label: "Open on GitHub", href: `https://github.com/${r.fullName}`, external: true }, "sep", { label: "Copy repository name", copy: r.fullName }, { label: "Copy clone URL", copy: `https://github.com/${r.fullName}.git` }])}>
                     <td>
                       <div className="flex items-center gap-2"><span className="font-medium [overflow-wrap:anywhere]">{r.name}</span>{r.archived && <SimplePill tone="unknown">Archived</SimplePill>}{r.isDemo && <DemoBadge />}</div>
                       <p className="mt-0.5 text-[12px] text-ink-3">{r.isFork ? <span className="inline-flex items-center gap-1"><GitFork size={12} aria-hidden />fork of {r.parentGithubId !== null && hiddenParents.has(r.parentGithubId.toString()) ? <span>an upstream not shared with you</span> : <Mono>{r.parentFullName ?? "unknown"}</Mono>} · </span> : null}default branch <Mono>{r.defaultBranch ?? "unknown"}</Mono></p>

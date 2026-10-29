@@ -9,6 +9,8 @@ import { formatInstant } from "@/lib/format";
 import { MobileNav, Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
 import { LiveRefresh } from "@/components/sync/LiveRefresh";
+import { SectionMain } from "@/components/shell/SectionMain";
+import { ContextMenuProvider } from "@/components/ui/ContextMenu";
 import { SyncAnnouncer } from "@/components/sync/SyncAnnouncer";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { TooltipProvider } from "@/components/ui/Tooltip";
@@ -81,6 +83,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <ToastProvider>
     <div className="mx-auto flex min-h-dvh max-w-[3200px]">
       <LiveRefresh />
+      <ContextMenuProvider />
       <SyncAnnouncer state={sync?.state ?? null} />
       <Suspense fallback={<aside className="hidden w-[250px] shrink-0 lg:block" />}>
         <Sidebar {...navProps} />
@@ -104,7 +107,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             Demo mode: {demoRepos} repositor{demoRepos === 1 ? "y" : "ies"} hold synthetic data. Actions change the demo database only; nothing is sent to GitHub.
           </div>
         )}
-        <main id="main" className="min-w-0 flex-1 px-4 pb-16 pt-6 lg:px-6">{children}</main>
+        <SectionMain>{children}</SectionMain>
       </div>
     </div>
     </ToastProvider>

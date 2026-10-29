@@ -479,6 +479,48 @@ export async function triageAction(fd: FormData): Promise<ActionResult> {
   });
 }
 
+const TRIAGE = ["UNTRIAGED", "WATCHING", "RELEVANT", "ADDRESSED", "IGNORED"] as const;
+
+/** Sets the status (and optionally the note) of many upstream issues at once. Every mapping touched must be one the person may manage. */
+export async function triageManyAction(input: { ids: string[]; status: (typeof TRIAGE)[number]; note?: string | null }): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireViewer();
+    const status = z.enum(TRIAGE).parse(input.status);
+    const ids = [...new Set((input.ids ?? []).map(String))].slice(0, 500);
+    if (ids.length === 0) throw new ValidationError("Pick at least one issue");
+    const rows = await db.upstreamIssueTriage.findMany({ where: { id: { in: ids } }, include: { mapping: true } });
+    if (rows.length !== ids.length) throw new NotFoundError();
+    for (const m of new Map(rows.map((r) => [r.mappingId, r.mapping])).values()) {
+      await requireRepo(db, viewer, m.forkRepoId, "manageWork");
+      await requireRepo(db, viewer, m.upstreamRepoId, "view");
+    }
+    const note = input.note === undefined ? undefined : (String(input.note ?? "").trim().slice(0, 500) || null);
+    await db.upstreamIssueTriage.updateMany({ where: { id: { in: ids } }, data: { status, decidedById: viewer.userId, ...(note !== undefined ? { note } : {}) } });
+    await audit(db, viewer, "triage.set", { type: "UpstreamIssueTriage", id: ids[0] }, { status, count: ids.length });
+    revalidatePath("/forks");
+    return { ok: true, message: ids.length === 1 ? "Saved" : `${ids.length} issues updated` };
+  });
+}
+
+/** Acknowledges many merged upstream pull requests at once: a decision by a person, not proof. */
+export async function ackManyAction(input: { ids: string[] }): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireViewer();
+    const ids = [...new Set((input.ids ?? []).map(String))].slice(0, 500);
+    if (ids.length === 0) throw new ValidationError("Pick at least one pull request");
+    const rows = await db.upstreamPrState.findMany({ where: { id: { in: ids } }, include: { mapping: true } });
+    if (rows.length !== ids.length) throw new NotFoundError();
+    for (const m of new Map(rows.map((r) => [r.mappingId, r.mapping])).values()) {
+      await requireRepo(db, viewer, m.forkRepoId, "manageWork");
+      await requireRepo(db, viewer, m.upstreamRepoId, "view");
+    }
+    await db.upstreamPrState.updateMany({ where: { id: { in: ids }, state: "merged", evidence: { not: "ANCESTRY_EXACT" } }, data: { ackedById: viewer.memberId, evidence: "MANUAL_ACK", evidenceNote: "Acknowledged manually by a person. This is a decision, not Git evidence." } });
+    await audit(db, viewer, "upstream.ack", { type: "UpstreamPrState", id: ids[0] }, { count: ids.length });
+    revalidatePath("/forks");
+    return { ok: true, message: ids.length === 1 ? "Acknowledged" : `${ids.length} acknowledged` };
+  });
+}
+
 export async function ackEvidenceAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireViewer();

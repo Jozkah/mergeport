@@ -7,6 +7,7 @@ import type { DiffFile, DiffLine } from "@/lib/diff";
 import { toSplitRows } from "@/lib/diff";
 import { inlineCommentAction } from "@/app/actions";
 import { Avatar } from "@/components/ui/Avatar";
+import { ctx } from "@/lib/ctx";
 import { Tokens } from "@/components/code/Code";
 import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, Plus } from "@/components/ui/icons";
 
@@ -377,7 +378,7 @@ function FileDiff({ file, itemId, repoId, headSha, githubFilesUrl, mode, wrap, c
 
   return (
     <section className={`diff-file ${collapsed ? "is-collapsed" : ""}`} aria-label={file.filename}>
-      <div className="diff-file-head">
+      <div className="diff-file-head" data-ctx={ctx([{ label: "Copy file path", copy: file.filename }, { label: "Copy file name", copy: file.filename.split("/").pop() ?? file.filename }])}>
         <button type="button" className="btn btn-quiet btn-icon !h-7 !w-7" aria-expanded={!collapsed} aria-label={`${collapsed ? "Expand" : "Collapse"} ${file.filename}`} onClick={onToggle}>{collapsed ? <ChevronRight size={15} aria-hidden /> : <ChevronDown size={15} aria-hidden />}</button>
         <span className="min-w-0 truncate font-mono text-[12.5px]" title={label}>{label}</span>
         <button type="button" className="btn btn-quiet btn-icon !h-7 !w-7" aria-label="Copy file path" onClick={() => navigator.clipboard?.writeText(file.filename).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}>{copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}</button>

@@ -1,6 +1,7 @@
-import { Select } from "@/components/ui/Select";
 import { ForkMapFields } from "@/components/forms/ForkMapFields";
 import { WatchlistForm } from "@/components/forms/WatchlistForm";
+import { UpstreamIssues } from "@/components/forks/UpstreamIssues";
+import { UpstreamPrs } from "@/components/forks/UpstreamPrs";
 import { byOwnerFirst } from "@/lib/domain/ordering";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -12,7 +13,7 @@ import { ActionForm } from "@/components/forms/ActionForm";
 import { Sheet } from "@/components/ui/dialog";
 import { Banner, EmptyState, Mono, PageHeader, Panel, SimplePill, Time } from "@/components/ui/primitives";
 import { ArrowRight, Eye, GitFork, GitCompare, RefreshCw } from "@/components/ui/icons";
-import { ackEvidenceAction, mapForkAction, refreshForkAction, syncForkBranchAction, triageAction } from "@/app/actions";
+import { mapForkAction, refreshForkAction, syncForkBranchAction } from "@/app/actions";
 
 export const metadata = { title: "Forks & upstream" };
 
@@ -24,14 +25,6 @@ const STATUS = {
   unrelated: { tone: "unknown", label: "Unrelated histories" },
   unavailable: { tone: "blocked", label: "Unavailable" },
   unknown: { tone: "unknown", label: "Unknown" },
-} as const;
-
-const EVIDENCE = {
-  ANCESTRY_EXACT: { tone: "ok", label: "Exact: merge commit is in fork history" },
-  PATCH_EQUIVALENT_POSSIBLE: { tone: "waiting", label: "Possibly equivalent patch" },
-  MANUAL_ACK: { tone: "needs", label: "Acknowledged by a person" },
-  NOT_DETECTED: { tone: "changes", label: "Not detected (not proof of absence)" },
-  UNKNOWN: { tone: "unknown", label: "Unknown" },
 } as const;
 
 export default async function Forks() {
@@ -105,37 +98,13 @@ export default async function Forks() {
 
                   <section aria-labelledby={`prs-${m.id}`}>
                     <h3 id={`prs-${m.id}`} className="mb-2 text-[13px] font-medium">Upstream pull requests</h3>
-                    {prs.length === 0 ? <p className="text-[12.5px] text-ink-3">No upstream pull requests synchronized.</p> : (
-                      <div className="table-wrap rounded-[8px] border border-line" tabIndex={0} role="region" aria-label="Upstream pull requests">
-                        <table className="data min-w-[640px]"><thead><tr><th scope="col">Pull request</th><th scope="col">State</th><th scope="col">In the fork?</th>{caps.manageWork && <th scope="col"><span className="sr-only">Actions</span></th>}</tr></thead>
-                          <tbody>{prs.map((p) => { const e = EVIDENCE[p.evidence]; return (
-                            <tr key={p.id}><td><a className="font-medium hover:underline" href={p.htmlUrl} target="_blank" rel="noopener noreferrer">#{p.number} {p.title}</a></td><td className="capitalize">{p.state}</td>
-                              <td>{p.state === "merged" ? <><SimplePill tone={e.tone}>{e.label}</SimplePill><p className="mt-1 max-w-[46ch] text-[11.5px] text-ink-3">{p.evidenceNote}</p></> : <span className="text-ink-3">Open upstream: not merged yet</span>}</td>
-                              {caps.manageWork && <td>{p.state === "merged" && p.evidence !== "MANUAL_ACK" && p.evidence !== "ANCESTRY_EXACT" && <ActionForm action={ackEvidenceAction} submitLabel="Acknowledge" submitClassName="btn"><input type="hidden" name="id" value={p.id} /></ActionForm>}</td>}
-                            </tr>); })}</tbody></table>
-                      </div>
-                    )}
+                    <UpstreamPrs canEdit={caps.manageWork} rows={prs.map((p) => ({ id: p.id, number: p.number, title: p.title, url: p.htmlUrl, state: p.state, evidence: p.evidence, note: p.evidenceNote }))} />
                   </section>
 
                   <section aria-labelledby={`is-${m.id}`}>
                     <h3 id={`is-${m.id}`} className="mb-1 text-[13px] font-medium">Upstream issues to triage</h3>
-                    <p className="mb-2 text-[12px] text-ink-3">Issues are discussions, not commits. Decide per fork whether each matters here.</p>
-                    {issues.length === 0 ? <p className="text-[12.5px] text-ink-3">No upstream issues synchronized.</p> : (
-                      <ul className="divide-y divide-line rounded-[8px] border border-line">
-                        {issues.map((i) => (
-                          <li key={i.id} className="flex flex-col gap-2 p-3 md:flex-row md:items-center md:justify-between">
-                            <div className="min-w-0"><a href={i.htmlUrl} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">#{i.issueNumber} {i.title}</a>{i.note && <p className="text-[12px] text-ink-3">{i.note}</p>}</div>
-                            {caps.manageWork ? (
-                              <ActionForm action={triageAction} submitLabel="Save" submitClassName="btn" className="flex flex-wrap items-end gap-2" resetOnSuccess={false}>
-                                <input type="hidden" name="id" value={i.id} />
-                                <div><label className="label" htmlFor={`st-${i.id}`}>Status</label><Select id={`st-${i.id}`} name="status" defaultValue={i.status} className="select !w-32">{["UNTRIAGED", "WATCHING", "RELEVANT", "ADDRESSED", "IGNORED"].map((x) => <option key={x} value={x}>{x[0] + x.slice(1).toLowerCase()}</option>)}</Select></div>
-                                <div><label className="label" htmlFor={`nt-${i.id}`}>Note</label><input id={`nt-${i.id}`} name="note" defaultValue={i.note ?? ""} className="input !w-44" /></div>
-                              </ActionForm>
-                            ) : <SimplePill tone="unknown">{i.status[0] + i.status.slice(1).toLowerCase()}</SimplePill>}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                    <p className="mb-2 text-[12px] text-ink-3">Issues are discussions, not commits. Decide per fork whether each matters here. A status saves as soon as you pick it.</p>
+                    <UpstreamIssues canEdit={caps.manageWork} rows={issues.map((i) => ({ id: i.id, number: i.issueNumber, title: i.title, url: i.htmlUrl, status: i.status, note: i.note }))} />
                   </section>
                 </div>
               </Panel>

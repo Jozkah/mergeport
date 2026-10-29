@@ -7,6 +7,7 @@ import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { formatDateOnly, relativeTime } from "@/lib/format";
 import { Avatar, EmptyState, LabelChip, PageHeader, Panel, Segmented } from "@/components/ui/primitives";
 import { CalendarDays, Flag, ListChecks, MessageSquare } from "@/components/ui/icons";
+import { ctx } from "@/lib/ctx";
 import { NewTask } from "@/components/tasks/NewTask";
 
 export const metadata = { title: "Tasks" };
@@ -69,7 +70,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
             {tasks.map((t) => {
               const overdue = isOverdue(t.dueDate, t.column.key, today);
               return (
-                <li key={t.id}>
+                <li key={t.id} data-ctx={ctx([{ label: "Copy task title", copy: t.title }])}>
                   <Link href={`/tasks/${t.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-hover">
                     <span className="mt-0.5 shrink-0 text-ink-3" aria-hidden><ListChecks size={16} /></span>
                     <span className="min-w-0 flex-1">
@@ -81,7 +82,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
                         <span>{t.project.name}</span>
                         <span>{t.column.name}</span>
                         {t.workItem && <span>{t.workItem.repository.fullName}#{t.workItem.number}</span>}
-                        {t.priority > 0 && <span className="inline-flex items-center gap-1"><Flag size={12} aria-hidden />{priorityName(t.priority)}</span>}
+                        {t.priority > 0 && <span className={`inline-flex items-center gap-1 prio-${t.priority}`}><Flag size={12} aria-hidden />{priorityName(t.priority)}</span>}
                         {t.dueDate && <span className={overdue ? "inline-flex items-center gap-1 text-blocked" : "inline-flex items-center gap-1"}><CalendarDays size={12} aria-hidden />{overdue ? "Overdue " : "Due "}{formatDateOnly(t.dueDate)}</span>}
                         {t.checklist.total > 0 && <span className={`inline-flex items-center gap-1 ${t.checklist.done === t.checklist.total ? "text-ok" : ""}`}><ListChecks size={12} aria-hidden /><span className="sr-only">Checklist </span>{t.checklist.done}/{t.checklist.total}</span>}
                         {t._count.comments > 0 && <span className="inline-flex items-center gap-1"><MessageSquare size={12} aria-hidden />{t._count.comments}</span>}

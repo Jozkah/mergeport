@@ -1,3 +1,4 @@
+import { SectionTile } from "@/components/ui/SectionTile";
 import type { ComponentType, CSSProperties, ReactNode, SVGProps } from "react";
 import { cn } from "@/lib/util";
 import { Ban, Check, CircleAlert, CircleHelp, Eye, Hourglass, Info, Users } from "./icons";
@@ -26,7 +27,7 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
       <div className="min-w-0">
-        <h1 className="text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink">{title}</h1>
+        <h1 className="flex items-center gap-3 text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink"><SectionTile /><span className="min-w-0">{title}</span></h1>
         {subtitle && <p className="mt-1 max-w-[70ch] text-[13px] text-ink-3">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}

@@ -1,5 +1,6 @@
 "use client";
 
+import { sectionFor } from "@/lib/section";
 import { Avatar } from "@/components/ui/Avatar";
 import { Logo } from "@/components/ui/Logo";
 import Link from "next/link";
@@ -80,7 +81,7 @@ function NavList({ items, onNavigate }: { items: Item[]; onNavigate?: () => void
         return (
           <li key={it.href}>
             <div className="relative">
-              <Link href={it.href} className="nav-item" aria-current={active && !it.children ? "page" : undefined} onClick={onNavigate}>
+              <Link href={it.href} className="nav-item" data-section={sectionFor(it.href)} aria-current={active && !it.children ? "page" : undefined} onClick={onNavigate}>
                 <I size={16} aria-hidden className="shrink-0 text-ink-3" />
                 <span className="min-w-0 flex-1 truncate">{it.label}</span>
                 {!it.children && it.count ? <span className="rounded-full bg-ink px-1.5 text-[11px] leading-[18px] text-ink-invert"><Metric value={it.count} /></span> : null}

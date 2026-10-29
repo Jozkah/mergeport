@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ctx } from "@/lib/ctx";
 import type { ReactNode } from "react";
 import { Ban, Check, CircleHelp, Clock, GitPullRequest, CircleDot, GitMerge } from "@/components/ui/icons";
 import { Avatar, LabelChip, Mono, StatusPill, Time, DemoBadge } from "@/components/ui/primitives";
@@ -62,7 +63,7 @@ export function WorkTable({ rows, derived, tz, now, showReview, empty }: { rows:
             const d = derived?.get(r.id);
             const labels = asLabels(r.labels);
             return (
-              <tr key={r.id}>
+              <tr key={r.id} data-ctx={ctx([{ label: "Open on GitHub", href: `https://github.com/${r.repository.fullName}/${r.type === "PULL_REQUEST" ? "pull" : "issues"}/${r.number}`, external: true }, { label: `Copy #${r.number}`, copy: `${r.repository.fullName}#${r.number}` }, { label: "Copy title", copy: r.title }, { label: "Copy GitHub link", copy: `https://github.com/${r.repository.fullName}/${r.type === "PULL_REQUEST" ? "pull" : "issues"}/${r.number}` }])}>
                 <td>
                   <div className="flex items-start gap-2.5">
                     <span className="mt-0.5 shrink-0"><StateIcon r={r} /></span>
