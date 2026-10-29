@@ -17,6 +17,9 @@ import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 import { checkProfile } from "@/lib/local/identity";
 import { getEngine } from "@/lib/local/runtime";
 import { deriveSourceStatus } from "@/lib/sync/source-status";
+import { env, isDemo } from "@/lib/env";
+import { mergeportHome } from "@/lib/local/profile";
+import { listWorkspaces } from "@/lib/local/workspaces";
 import Link from "next/link";
 import { cookies } from "next/headers";
 
@@ -75,6 +78,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (spaceCount > 0) candidates.push({ state: aggregate, pending: pendingOps, conflicts: openConflicts });
   if (source) candidates.push({ state: source.state, pending: 0, conflicts: 0, detail: source.detail, scope: "source" });
   const sync = candidates.sort((x, y) => SEVERITY.indexOf(x.state) - SEVERITY.indexOf(y.state))[0] ?? null;
+  // Switching needs the launcher's control channel; without it (plain dev server) the label is static, and demo shows nothing.
+  const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
+  const wsList = isDemo() ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId.toString());
+  const workspaces = wsList && { ...wsList, switchable };
   const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: ws.name };
   return (
     <TooltipProvider>
@@ -87,7 +94,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </Suspense>
       <div className="flex min-w-0 flex-1 flex-col">
         <Suspense fallback={<div className="h-14" />}>
-          <Topbar unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
+          <Topbar workspaces={workspaces} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "mismatch" && (
           <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">
