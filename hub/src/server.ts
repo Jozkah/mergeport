@@ -4,6 +4,7 @@ import type { HubConfig } from "./config";
 import type { HubDb } from "./db";
 import { adminRoutes } from "./admin-routes";
 import { authRoutes } from "./auth-routes";
+import { entityRoutes, startPruneTimer } from "./entities";
 import { HttpError, json, matchRoute, route, type Route } from "./http";
 import { createLogger, type Logger } from "./log";
 
@@ -29,6 +30,7 @@ export function coreRoutes(): Route<HubContext>[] {
     }),
     ...authRoutes(),
     ...adminRoutes(),
+    ...entityRoutes(),
   ];
 }
 
@@ -64,6 +66,8 @@ export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => numb
     })();
   });
 
+  let stopPrune: (() => void) | null = null;
+
   return {
     listen(port = opts.config.port) {
       return new Promise((resolve, reject) => {
@@ -71,11 +75,14 @@ export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => numb
         server.listen(port, opts.config.bindHost, () => {
           const p = (server.address() as AddressInfo).port;
           listened = `http://127.0.0.1:${p}`;
+          stopPrune ??= startPruneTimer(ctx);
           resolve({ port: p, url: listened });
         });
       });
     },
     close() {
+      stopPrune?.();
+      stopPrune = null;
       return new Promise((resolve) => {
         server.close(() => resolve());
         server.closeAllConnections();
