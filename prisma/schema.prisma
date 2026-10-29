@@ -889,6 +889,8 @@ model Space {
   rateLimitedUntil DateTime?
   /// Entities seen but not applicable yet (a referenced source item is not synchronised here). While above zero, an unchanged head is re-read.
   deferredCount  Int         @default(0)
+  /// Last time this computer published to the space. Teammates only see it on their next poll.
+  lastPushedAt   DateTime?
   createdAt      DateTime    @default(now())
 
   entities  SyncEntity[]

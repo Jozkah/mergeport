@@ -29,7 +29,7 @@ export default async function ActivityPage() {
             ))}</ul>
           )}
         </Panel>
-        <Panel title={`Notifications${unread ? ` (${unread} unread)` : ""}`} icon={Bell} id="notes" actions={unread ? <ActionForm action={markNotificationsReadAction} submitLabel="Mark all read" submitClassName="btn">{null}</ActionForm> : undefined}>
+        <Panel title={`Notifications${unread ? ` (${unread} unread)` : ""}`} icon={Bell} id="notes" actions={unread ? <ActionForm action={markNotificationsReadAction} submitLabel="Mark all read" submitClassName="btn" className="[&>div]:!mt-0">{null}</ActionForm> : undefined}>
           {notes.length === 0 ? <EmptyState icon={Bell} title="No notifications">You will see review requests for you here.</EmptyState> : (
             <div>
               {KINDS.map((k) => ({ k, rows: notes.filter((n) => n.kind === k.key) })).concat([{ k: { key: "other", label: "Other" } as never, rows: notes.filter((n) => !KINDS.some((x) => x.key === n.kind)) }]).filter((g) => g.rows.length > 0).map((g) => (

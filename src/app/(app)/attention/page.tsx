@@ -11,6 +11,7 @@ import { formatDuration, formatInstant } from "@/lib/format";
 import { listTasks } from "@/lib/services/tasks";
 import { EmptyState, Mono, PageHeader, Panel, Segmented, StatusPill, Time, Avatar } from "@/components/ui/primitives";
 import { BellRing, Hourglass, ListChecks } from "@/components/ui/icons";
+import { RepoChip } from "@/components/ui/RepoChip";
 import { StageList } from "@/components/review/StageList";
 import { itemHref } from "@/components/work/WorkTable";
 
@@ -35,14 +36,14 @@ function Row({ d, tz, now, queue }: { d: DerivedItem; tz: string; now: Date; que
   return (
     <li className="flex flex-col gap-1.5 px-4 py-3">
       <div className="flex items-start justify-between gap-3">
-        <Link href={itemHref(d.item)} className="min-w-0 text-[13.5px] font-medium leading-snug underline-offset-2 hover:underline [overflow-wrap:anywhere]">{d.item.title}</Link>
+        <Link data-row href={itemHref(d.item)} className="min-w-0 text-[13.5px] font-medium leading-snug underline-offset-2 hover:underline [overflow-wrap:anywhere]">{d.item.title}</Link>
         <div className="flex shrink-0 items-center gap-2">
           {showStatus && <StatusPill status={x.primary} />}
           {x.waiting && <span className="tnum whitespace-nowrap text-[12px] text-ink-3" title={`since ${x.waiting.since.toISOString()}`}>{formatDuration(x.waiting.elapsedMs)}</span>}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-3">
-        <Mono title={d.item.repository.fullName}>#{d.item.number}</Mono>
+        <RepoChip fullName={d.item.repository.fullName} number={d.item.number} />
         <span className="inline-flex items-center gap-1"><Avatar login={d.item.authorLogin ?? "?"} size={14} />{d.item.authorLogin ?? "unknown"}</span>
         {first && <span className="inline-flex items-center gap-1 text-ink-2"><Hourglass size={12} aria-hidden />{queue === "changes" ? "Changes asked by" : "Waiting on"} <Avatar login={first.actor.ref} size={14} /><span className="font-medium">{first.actor.display ?? first.actor.ref}</span>{pending.length > 1 && <span className="text-ink-3">+{pending.length - 1}</span>}</span>}
         {d.ruleConflict && <span className="text-waiting">Rule conflict</span>}

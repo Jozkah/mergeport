@@ -4,7 +4,9 @@ import { requireViewer } from "@/lib/auth/current";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { readScope, scopeKey } from "@/lib/scope";
 import { Suspense } from "react";
+import { CommandPalette } from "@/components/shell/CommandPalette";
 import { TaskDrawer } from "@/components/planning/TaskDrawer";
+import { Shortcuts } from "@/components/shell/Shortcuts";
 import { DesktopNotifier } from "@/components/shell/DesktopNotifier";
 import { ScopePicker } from "@/components/shell/ScopePicker";
 import { inbox } from "@/lib/services/inbox";
@@ -102,7 +104,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="flex min-w-0 flex-1 flex-col">
         <Suspense fallback={<div className="h-14" />}>
           <DesktopNotifier />
-          <Suspense fallback={null}><TaskDrawer /></Suspense>
+          <Shortcuts />
+          <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
           <Topbar scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "mismatch" && (

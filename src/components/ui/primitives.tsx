@@ -25,7 +25,7 @@ export function Panel({ title, icon: I, actions, children, className, bodyClassN
             {I && <I size={16} aria-hidden className="shrink-0 text-ink-3" />}
             <span className="truncate">{title}</span>
           </h2>
-          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+          {actions && <div className="flex shrink-0 items-center gap-2 [&_form>div]:!mt-0">{actions}</div>}
         </div>
       )}
       <div className={cn("panel-body", bodyClassName)}>{children}</div>
@@ -40,7 +40,7 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
         <h1 className="flex items-center gap-3 text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink"><SectionTile /><span className="min-w-0">{title}</span></h1>
         {subtitle && <p className="mt-1 max-w-[70ch] text-[13px] text-ink-3">{subtitle}</p>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 [&_form>div]:!mt-0">{actions}</div>}
     </div>
   );
 }

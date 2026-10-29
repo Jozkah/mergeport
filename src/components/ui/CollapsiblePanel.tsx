@@ -40,7 +40,7 @@ export function CollapsiblePanel({ id, defaultOpen = true, head, actions, classN
             {head}
           </button>
         </h2>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        {actions && <div className="flex shrink-0 items-center gap-2 [&_form>div]:!mt-0">{actions}</div>}
       </div>
       <Collapse open={open} id={`${id}-body`}>
         <div className={`panel-body ${bodyClassName ?? ""}`}>{children}</div>

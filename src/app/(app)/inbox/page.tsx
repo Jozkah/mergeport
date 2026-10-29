@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { inbox, type InboxStatus } from "@/lib/services/inbox";
 import { formatInstant } from "@/lib/format";
-import { EmptyState, Mono, PageHeader, Panel, Segmented, StatusPill, Avatar } from "@/components/ui/primitives";
+import { EmptyState, PageHeader, Panel, Segmented, StatusPill, Avatar } from "@/components/ui/primitives";
+import { RepoChip } from "@/components/ui/RepoChip";
 import { Inbox } from "@/components/ui/icons";
 import { itemHref } from "@/components/work/WorkTable";
 import { InboxRowActions, ReadAllButton } from "@/components/inbox/InboxActions";
@@ -45,10 +46,10 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     {e.unread && tab === "open" && <span aria-label="Unread" title="New since you last looked" className="size-2 shrink-0 rounded-full" style={{ background: "var(--sec)" }} />}
-                    <Link href={itemHref(e.item)} className="text-[13.5px] font-medium leading-snug underline-offset-2 hover:underline [overflow-wrap:anywhere]">{e.item.title}</Link>
+                    <Link data-row href={itemHref(e.item)} className="text-[13.5px] font-medium leading-snug underline-offset-2 hover:underline [overflow-wrap:anywhere]">{e.item.title}</Link>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-3">
-                    <Mono title={e.item.repository.fullName}>{e.item.repository.fullName}#{e.item.number}</Mono>
+                    <RepoChip fullName={e.item.repository.fullName} number={e.item.number} />
                     <span className="inline-flex items-center gap-1"><Avatar login={e.item.authorLogin ?? "?"} size={14} />{e.item.authorLogin ?? "unknown"}</span>
                     {e.reasons.map((r) => <span key={r} className="text-ink-2">{REASON[r]}</span>)}
                     <StatusPill status={e.derived.derivation.primary} />

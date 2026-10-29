@@ -80,7 +80,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
               const overdue = isOverdue(t.dueDate, t.column.key, today);
               return (
                 <li key={t.id} data-ctx={ctx([{ label: "Copy task title", copy: t.title }])}>
-                  <OpenCardLink id={t.id} href={`/tasks/${t.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-hover">
+                  <OpenCardLink data-row id={t.id} href={`/tasks/${t.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-hover">
                     <span className="mt-0.5 shrink-0 text-ink-3" aria-hidden><ListChecks size={16} /></span>
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">

@@ -20,7 +20,7 @@ type Detail = {
   comments: { id: string; author: string; kind: string; body: string; at: string }[];
 };
 
-export function OpenCardLink({ id, href, className, children }: { id: string; href: string; className?: string; children: ReactNode }) {
+export function OpenCardLink({ id, href, className, children, ...rest }: { id: string; href: string; className?: string; children: ReactNode; "data-row"?: boolean }) {
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
@@ -28,6 +28,7 @@ export function OpenCardLink({ id, href, className, children }: { id: string; hr
     <Link
       href={href}
       className={className}
+      {...(rest["data-row"] ? { "data-row": "" } : {})}
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // keep "open in new tab" working
         e.preventDefault();

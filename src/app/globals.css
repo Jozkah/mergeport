@@ -693,3 +693,6 @@ select.select optgroup {
   overflow-y: auto;
   /* default chaining: at the end of the list (or when it is empty) the wheel scrolls the page */
 }
+
+/* Keyboard key caps in the shortcuts list. */
+.kbd { display: inline-block; min-width: 1.4em; padding: 0 0.4em; border: 1px solid var(--color-line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--color-surface); font: 500 11.5px/1.55 var(--font-mono, ui-monospace, monospace); text-align: center; }

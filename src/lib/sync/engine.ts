@@ -65,6 +65,9 @@ const PERMISSION_RECHECK_MS = 5 * 60_000;
 const PUSH_PERMISSION_RECHECK_MS = 60_000;
 const isBlocked = (se: { meta: unknown } | null | undefined) => !!(se?.meta as { newer?: boolean } | null)?.newer;
 
+/** How long an operation may stay SENT before it is treated as orphaned by a crash. */
+const STALE_SENT_MS = 2 * 60_000;
+
 export class SyncEngine {
   private syncing = new Set<string>();
   private readonly now: () => Date;
@@ -406,6 +409,10 @@ export class SyncEngine {
       }
       if (!space.canWrite || space.access !== "OK") return { sent };
     }
+    // An operation is SENT only while its commit is in flight. One that has been SENT for a long time belongs to a process that died
+    // between "sending" and learning the result: it goes back to PENDING. This is safe because the entity file records the operation id,
+    // so if the commit did land the retry finds it and deletes the operation instead of sending it twice.
+    await this.db.outboxOp.updateMany({ where: { spaceId: space.id, status: "SENT", updatedAt: { lt: new Date(this.now().getTime() - STALE_SENT_MS) } }, data: { status: "PENDING", error: "Recovered after the app stopped while sending" } });
     for (let attempt = 0; attempt < 5; attempt++) {
       const ops0 = await this.db.outboxOp.findMany({ where: { spaceId: space.id, status: "PENDING" }, orderBy: { createdAt: "asc" } });
       if (ops0.length === 0) return { sent };
@@ -454,7 +461,7 @@ export class SyncEngine {
           await this.db.syncEntity.upsert({ where: key, create: { spaceId: space.id, type: op.entityType, entityId: op.entityId, ...row }, update: row });
         }
         await this.db.outboxOp.deleteMany({ where: { id: { in: ops.map((o) => o.id) } } });
-        await this.db.space.update({ where: { id: space.id }, data: { headSha: sha, etag: null, lastChangedAt: this.now(), lastError: null } });
+        await this.db.space.update({ where: { id: space.id }, data: { headSha: sha, etag: null, lastChangedAt: this.now(), lastPushedAt: this.now(), lastError: null } });
         space = await this.db.space.findUniqueOrThrow({ where: { id: space.id } });
         sent += ops.length;
         this.emit(space.id, "pushed");
