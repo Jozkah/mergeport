@@ -39,6 +39,7 @@ export function authRoutes(): Route<HubContext>[] {
     route<HubContext>("POST", "/auth/logout", (ctx, req, res) => {
       const s = requireSession(ctx, req);
       revokeSession(ctx.db, s.idHash);
+      ctx.notify.dropSession(s.idHash);
       res.writeHead(204);
       res.end();
     }),

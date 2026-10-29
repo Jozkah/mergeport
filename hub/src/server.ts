@@ -4,6 +4,8 @@ import type { HubConfig } from "./config";
 import type { HubDb } from "./db";
 import { adminRoutes } from "./admin-routes";
 import { authRoutes } from "./auth-routes";
+import { createNotifier, type Notifier } from "./notify";
+import { findSession } from "./auth";
 import { entityRoutes, startPruneTimer } from "./entities";
 import { HttpError, json, matchRoute, route, type Route } from "./http";
 import { createLogger, type Logger } from "./log";
@@ -17,6 +19,7 @@ export type HubContext = {
   log: Logger;
   /** Public base URL: config value, or the listened URL when config leaves it empty. */
   publicUrl: () => string;
+  notify: Notifier;
 };
 
 export type Hub = { listen(port?: number): Promise<{ port: number; url: string }>; close(): Promise<void> };
@@ -34,14 +37,16 @@ export function coreRoutes(): Route<HubContext>[] {
   ];
 }
 
-export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => number; log?: Logger; routes?: Route<HubContext>[] }): Hub {
+export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => number; log?: Logger; routes?: Route<HubContext>[]; ws?: { silenceMs?: number; coalesceMs?: number } }): Hub {
   let listened = "";
+  const now = opts.now ?? Date.now;
   const ctx: HubContext = {
     config: opts.config,
     db: opts.db,
-    now: opts.now ?? Date.now,
+    now,
     log: opts.log ?? createLogger(),
     publicUrl: () => opts.config.publicUrl || listened,
+    notify: createNotifier({ db: opts.db, now, findSession, ...opts.ws }),
   };
   const routes = [...coreRoutes(), ...(opts.routes ?? [])];
 
@@ -66,6 +71,7 @@ export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => numb
     })();
   });
 
+  ctx.notify.attach(server);
   let stopPrune: (() => void) | null = null;
 
   return {
@@ -83,10 +89,13 @@ export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => numb
     close() {
       stopPrune?.();
       stopPrune = null;
-      return new Promise((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections();
-      });
+      return ctx.notify.shutdown().then(
+        () =>
+          new Promise<void>((resolve) => {
+            server.close(() => resolve());
+            server.closeAllConnections();
+          }),
+      );
     },
   };
 }

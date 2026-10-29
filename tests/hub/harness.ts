@@ -116,7 +116,7 @@ export type TestHub = {
   api(token?: string): (method: string, path: string, body?: unknown) => Promise<ApiResult>;
 };
 
-export async function startTestHub(o: { now?: () => number; dataDir?: string } = {}): Promise<TestHub> {
+export async function startTestHub(o: { now?: () => number; dataDir?: string; ws?: { silenceMs?: number; coalesceMs?: number } } = {}): Promise<TestHub> {
   const github = new FakeGitHubOAuth();
   await github.start();
   const dataDir = o.dataDir ?? mkdtempSync(path.join(tmpdir(), "hub-"));
@@ -133,7 +133,7 @@ export async function startTestHub(o: { now?: () => number; dataDir?: string } =
   };
   const db = openHubDb(dataDir);
   const logs: string[] = [];
-  const hub = createHub({ config, db, now: o.now, log: createLogger((l) => logs.push(l)) });
+  const hub = createHub({ config, db, now: o.now, ws: o.ws, log: createLogger((l) => logs.push(l)) });
   const { url } = await hub.listen(0);
   return {
     url,

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSession, revokeSessions, toMember, type Member } from "./auth";
 import { memberJson } from "./auth-routes";
 import { requireRole, ROLES } from "./authz";
+import type { AccessAction } from "./notify";
 import { HttpError, json, readJson, route, type Route } from "./http";
 import type { HubContext } from "./server";
 
@@ -10,11 +11,36 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_GITHUB_ID = 9223372036854775807n;
 
 /** What changed, for the one seam Task 5 hooks to push WebSocket notifications. */
-export type AccessChange = { kind: "member-removed"; githubId: bigint } | { kind: "member-role"; githubId: bigint } | { kind: "spaces"; spaceId: string };
+export type AccessChange =
+  | { kind: "member-removed"; githubId: bigint }
+  | { kind: "member-role"; githubId: bigint }
+  | { kind: "spaces"; spaceId: string; audience: { githubId: bigint; action: AccessAction }[] };
 
-/** Single place called after every committed removal, role change or space change. Task 5 notifies live sockets here. */
+/** Single place called after every committed removal, role change or space change: pushes the WebSocket events. */
 function accessChanged(ctx: HubContext, change: AccessChange): void {
-  ctx.log.info("access changed", { ...change });
+  ctx.log.info("access changed", change.kind === "spaces" ? { kind: change.kind, spaceId: change.spaceId } : { kind: change.kind, githubId: change.githubId });
+  if (change.kind === "member-removed") {
+    ctx.notify.kick(change.githubId, "removed");
+    ctx.notify.team("member");
+  } else if (change.kind === "member-role") {
+    ctx.notify.team("role");
+  } else {
+    for (const a of change.audience) ctx.notify.access(a.githubId, change.spaceId, a.action);
+  }
+}
+
+/** Who sees what in a restricted space (githubId -> canWrite). */
+function spaceMemberMap(ctx: HubContext, spaceId: string): Map<bigint, boolean> {
+  const rows = ctx.db.prepare("SELECT github_id, can_write FROM space_member WHERE space_id = ?").safeIntegers(true).all(spaceId) as { github_id: bigint; can_write: bigint }[];
+  return new Map(rows.map((r) => [r.github_id, r.can_write === 1n]));
+}
+
+/** Members newly in the space, or whose write flag changed, get "added" (the client refreshes /me); members gone get "removed". */
+function diffAudience(before: Map<bigint, boolean>, after: Map<bigint, boolean>): { githubId: bigint; action: AccessAction }[] {
+  const out: { githubId: bigint; action: AccessAction }[] = [];
+  for (const [id, w] of after) if (before.get(id) !== w) out.push({ githubId: id, action: "added" });
+  for (const id of before.keys()) if (!after.has(id)) out.push({ githubId: id, action: "removed" });
+  return out;
 }
 
 /** Parses a GitHub id from a path segment or body string as BigInt; 400 on anything but a positive 63-bit integer. */
@@ -160,7 +186,7 @@ export function adminRoutes(): Route<HubContext>[] {
         ctx.db.prepare("INSERT INTO space (id, kind, name, created_at, created_by) VALUES (?, 'RESTRICTED', ?, ?, ?)").run(id, body.name, new Date(ctx.now()).toISOString(), actor.githubId);
         replaceSpaceMembers(ctx, id, body.members);
       })();
-      accessChanged(ctx, { kind: "spaces", spaceId: id });
+      accessChanged(ctx, { kind: "spaces", spaceId: id, audience: diffAudience(new Map(), spaceMemberMap(ctx, id)) });
       json(res, 201, { space: spaceJson(ctx, getSpace(ctx, id)) });
     }),
 
@@ -169,11 +195,12 @@ export function adminRoutes(): Route<HubContext>[] {
       const body = await readJson(req, z.object({ name: spaceName.optional(), members: spaceMembers.optional() }));
       const space = getSpace(ctx, params.id);
       if (space.kind === "COMMON" && body.members !== undefined) throw new HttpError(400, "common space membership is implicit");
+      const before = spaceMemberMap(ctx, space.id);
       ctx.db.transaction(() => {
         if (body.name !== undefined) ctx.db.prepare("UPDATE space SET name = ? WHERE id = ?").run(body.name, space.id);
         if (body.members !== undefined) replaceSpaceMembers(ctx, space.id, body.members);
       })();
-      accessChanged(ctx, { kind: "spaces", spaceId: space.id });
+      accessChanged(ctx, { kind: "spaces", spaceId: space.id, audience: diffAudience(before, spaceMemberMap(ctx, space.id)) });
       json(res, 200, { space: spaceJson(ctx, getSpace(ctx, space.id)) });
     }),
 
@@ -181,11 +208,12 @@ export function adminRoutes(): Route<HubContext>[] {
       admin(ctx, req);
       const space = getSpace(ctx, params.id);
       if (space.kind === "COMMON") throw new HttpError(409, "common space cannot be deleted");
+      const before = spaceMemberMap(ctx, space.id);
       ctx.db.transaction(() => {
         for (const t of ["entity_event", "entity", "space_member"]) ctx.db.prepare(`DELETE FROM ${t} WHERE space_id = ?`).run(space.id);
         ctx.db.prepare("DELETE FROM space WHERE id = ?").run(space.id);
       })();
-      accessChanged(ctx, { kind: "spaces", spaceId: space.id });
+      accessChanged(ctx, { kind: "spaces", spaceId: space.id, audience: [...before.keys()].map((githubId) => ({ githubId, action: "deleted" as const })) });
       noContent(res);
     }),
   ];

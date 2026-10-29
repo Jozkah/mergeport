@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireSession } from "./auth";
+import { getMember, requireSession } from "./auth";
 import { spaceAccess, type SpaceAccess } from "./authz";
 import type { HubDb } from "./db";
 import { HttpError, json, readJson, route, type Route } from "./http";
@@ -75,6 +75,10 @@ export function applyOps(db: HubDb, spaceId: string, actor: { githubId: bigint; 
   );
 
   return db.transaction((): { results: OpResult[]; seq: bigint } => {
+    // The route authorized before it awaited the body; a removal or demotion may have committed since. SQLite serializes writers,
+    // so what this transaction reads is what stays true until it commits: no event is ever written for a member who no longer may write.
+    const current = getMember(db, actor.githubId);
+    if (!current || !spaceAccess(db, current, spaceId).canWrite) throw new HttpError(403, "forbidden");
     const results: OpResult[] = [];
     for (const op of ops) {
       const row = getEntity.get(spaceId, op.type, op.entityId) as EntityRow | undefined;
@@ -99,7 +103,7 @@ export function applyOps(db: HubDb, spaceId: string, actor: { githubId: bigint; 
     }
     const seq = (readSeq.get(spaceId) as { seq: bigint } | undefined)?.seq ?? 0n;
     return { results, seq };
-  })();
+  }).immediate();
 }
 
 function currentSeq(db: HubDb, spaceId: string): bigint {
@@ -198,9 +202,10 @@ export function prune(db: HubDb, now: number): number {
   })();
 }
 
-/** Seam: called after every committed ops request that changed a space. Task 5 pushes WebSocket notifications here. */
+/** Called after every committed ops request that changed a space: queues the WebSocket `changed` notification. */
 export function entitiesChanged(ctx: HubContext, spaceId: string, seq: bigint): void {
   ctx.log.info("entities changed", { spaceId, seq: seq.toString() });
+  ctx.notify.changed(spaceId, seq);
 }
 
 const opSchema = z.object({
