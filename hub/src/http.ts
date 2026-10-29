@@ -19,7 +19,10 @@ export async function readJson<T>(req: IncomingMessage, schema: ZodType<T>, limi
   for await (const chunk of req) {
     const buf = chunk as Buffer;
     size += buf.length;
-    if (size > limitBytes) throw new HttpError(413, "body too large");
+    if (size > limitBytes) {
+      req.resume();
+      throw new HttpError(413, "body too large", { connection: "close" });
+    }
     chunks.push(buf);
   }
   let raw: unknown;

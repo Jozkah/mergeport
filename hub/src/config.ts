@@ -17,7 +17,7 @@ export type HubConfig = {
 const bool = z.enum(["true", "false"]).transform((v) => v === "true");
 
 const schema = z.object({
-  MERGEPORT_HUB_PORT: z.string().regex(/^\d+$/, "must be a port number").default("8787").transform(Number),
+  MERGEPORT_HUB_PORT: z.string().regex(/^\d+$/, "must be a port number").default("8787").transform(Number).refine((n) => n <= 65535, "must be 0-65535"),
   MERGEPORT_HUB_DATA: z.string().min(1),
   MERGEPORT_HUB_PUBLIC_URL: z.string().url(),
   MERGEPORT_HUB_GITHUB_CLIENT_ID: z.string().min(1),
