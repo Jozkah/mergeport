@@ -21,6 +21,7 @@ import { POST } from "@/app/api/local/switch/route";
 vi.mock("@/lib/local/switch-client", async (orig) => ({ ...(await orig<typeof import("@/lib/local/switch-client")>()), requestSwitch: sw.requestSwitch }));
 
 const HUB = hubBackendId("https://hub.example.com");
+const ready = (host = "127.0.0.1:3000") => new Request("http://127.0.0.1:3000/api/local/ready", { headers: { host } });
 let home: string;
 const post = (body: unknown, headers: Record<string, string> = { origin: "http://127.0.0.1:3000" }) =>
   new Request("http://127.0.0.1:3000/api/local/switch", { method: "POST", headers: { host: "127.0.0.1:3000", "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
@@ -57,18 +58,26 @@ describe("requestSwitch", () => {
 
 describe("GET /api/local/ready", () => {
   it("returns the same bootId every call", async () => {
-    const a = await readyGet().json();
-    const b = await readyGet().json();
+    const a = await readyGet(ready()).json();
+    const b = await readyGet(ready()).json();
     expect(a.bootId).toBeTruthy();
     expect(a.backend).toBe("github");
     process.env.MERGEPORT_BACKEND = HUB;
-    expect((await readyGet().json()).backend).toBe(HUB);
+    expect((await readyGet(ready()).json()).backend).toBe(HUB);
     delete process.env.MERGEPORT_BACKEND;
     expect(b.bootId).toBe(a.bootId);
   });
 });
 
 describe("POST /api/local/switch", () => {
+  it("refuses a Host that is not this loopback server even when Origin matches it (DNS rebinding)", async () => {
+    for (const host of ["evil.example", "evil.example:3000", "127.0.0.1:3001"]) {
+      expect((await POST(post({ backend: "github" }, { host, origin: `http://${host}` }))).status).toBe(403);
+      expect(readyGet(ready(host)).status).toBe(403);
+    }
+    expect(sw.requestSwitch).not.toHaveBeenCalled();
+  });
+
   it("refuses a cross-origin request", async () => {
     expect((await POST(post({ backend: HUB }, { origin: "http://evil.example" }))).status).toBe(403);
     expect(sw.requestSwitch).not.toHaveBeenCalled();

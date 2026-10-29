@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { isDemo } from "@/lib/env";
-import { sameOrigin } from "@/lib/http";
+import { localRequest } from "@/lib/http";
 import { ValidationError } from "@/lib/errors";
 
-/** Shared by the three /api/local/hub routes. They run before sign-in, so they check only the Origin and demo mode, never a session. */
+/** Shared by the three /api/local/hub routes. They run before sign-in, so they check only the Origin, the loopback Host and demo mode, never a session. */
 export function guardConnect(req: Request): NextResponse | null {
-  if (!sameOrigin(req)) return new NextResponse("Bad origin", { status: 403 });
+  if (!localRequest(req)) return new NextResponse("Bad origin", { status: 403 });
   if (isDemo()) return new NextResponse("Not available in demo mode", { status: 403 });
   return null;
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { SESSION_COOKIE, findSession } from "@/lib/auth/session";
-import { sameOrigin } from "@/lib/http";
+import { localRequest } from "@/lib/http";
 import { isHubBackend, type Backend } from "@/lib/local/backends";
 import { requestSwitch } from "@/lib/local/switch-client";
 
@@ -13,7 +13,7 @@ import { requestSwitch } from "@/lib/local/switch-client";
  * backend means it failed and the previous workspace was restored.
  */
 export async function POST(req: Request) {
-  if (!sameOrigin(req)) return new NextResponse("Bad origin", { status: 403 });
+  if (!localRequest(req)) return new NextResponse("Bad origin", { status: 403 });
   const s = await findSession(db, (await cookies()).get(SESSION_COOKIE)?.value);
   if (!s) return new NextResponse("Unauthorized", { status: 401 });
   const body = (await req.json().catch(() => ({}))) as { backend?: unknown };

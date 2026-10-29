@@ -55,6 +55,15 @@ describe("hub connect routes", () => {
     expect(h.requests.length).toBe(0);
   });
 
+  it("refuse a Host that is not this loopback server even when Origin matches it (DNS rebinding)", async () => {
+    const h = await hub();
+    for (const host of ["evil.example", "evil.example:3000", "127.0.0.1:3001", "localhost"]) {
+      for (const r of [check, start, poll]) expect((await r(req("x", { url: h.origin, deviceCode: "d" }, { host, origin: `http://${host}` }))).status).toBe(403);
+    }
+    for (const host of ["localhost:3000", "[::1]:3000"]) expect((await check(req("check", { url: h.origin }, { host, origin: `http://${host}` }))).status).toBe(200);
+    expect(h.requests.filter((r) => r.path !== "/health").length).toBe(0);
+  });
+
   it("check returns team and origin; mismatched publicUrl and bad input give ok:false", async () => {
     const h = await hub();
     expect(await (await check(req("check", { url: h.origin + "/" }))).json()).toEqual({ ok: true, teamName: "Fake Team", origin: h.origin });
