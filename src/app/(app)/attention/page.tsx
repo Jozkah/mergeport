@@ -1,4 +1,8 @@
 import Link from "next/link";
+import { readScope, scopeKey } from "@/lib/scope";
+import { ScopeNote } from "@/components/shell/ScopeNote";
+import { ViewBar } from "@/components/views/ViewBar";
+import { listViews } from "@/lib/services/views";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { attentionFor } from "@/lib/services/request-cache";
@@ -79,7 +83,8 @@ export default async function Attention({ searchParams }: { searchParams: Promis
   const { viewer } = await requireViewer();
   const sp = await searchParams;
   const now = new Date();
-  const q = await attentionFor(viewer);
+  const scope = await readScope(db, viewer);
+  const q = await attentionFor(viewer, scopeKey(scope));
   const lists = { "needs-me": q.needsMyReview, team: q.needsTeamReview, waiting: q.waitingExternal, changes: q.changesRequested, blocked: q.blocked } as const;
   const active = (QUEUES.find((x) => x.key === sp.queue)?.key ?? "needs-me") as keyof typeof lists;
   const meta = QUEUES.find((x) => x.key === active)!;
@@ -96,6 +101,8 @@ export default async function Attention({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="My attention" subtitle="Review waiting is tracked separately from open or closed state. Each item says who is expected to act, why, and since when." />
+      <ScopeNote scope={scope} />
+      <ViewBar scope="attention" views={await listViews(db, viewer, "attention")} />
       <div className="mb-4"><Segmented label="Queues" items={QUEUES.map((x) => ({ href: `/attention?queue=${x.key}`, label: x.label, active: x.key === active, count: lists[x.key].length }))} /></div>
       <Panel title={meta.label} icon={BellRing} id="queue">
         <p className="border-b border-line px-4 py-2.5 text-[12.5px] text-ink-3">{meta.help}</p>

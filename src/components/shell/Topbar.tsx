@@ -24,6 +24,7 @@ const LABELS: Record<string, string> = {
   branches: "Branches",
   admin: "Admin",
   team: "Team",
+  capacity: "Review capacity",
   sync: "Sync status",
   join: "Join a space",
   projects: "Projects",
@@ -33,7 +34,7 @@ const LABELS: Record<string, string> = {
   search: "Search",
 };
 
-export function Topbar({ unread, menu, syncNote, theme, sync }: { unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
+export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker }: { scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
   const path = usePathname();
   const parts = path.split("/").filter(Boolean);
   const crumbs = parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
@@ -60,6 +61,7 @@ export function Topbar({ unread, menu, syncNote, theme, sync }: { unread: number
           ))}
         </ol>
       </nav>
+      {scopePicker}
       {syncNote && <span className="hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
       {sync && <SyncBadge {...sync} href="/sync" />}
       <ThemeToggle initial={theme} />

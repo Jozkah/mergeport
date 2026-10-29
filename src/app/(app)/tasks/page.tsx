@@ -1,4 +1,8 @@
 import Link from "next/link";
+import { readScope } from "@/lib/scope";
+import { ScopeNote } from "@/components/shell/ScopeNote";
+import { ViewBar } from "@/components/views/ViewBar";
+import { listViews } from "@/lib/services/views";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { listProjects } from "@/lib/services/queries";
@@ -26,7 +30,8 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
   const scope = (SCOPES.find((s) => s.key === sp.scope)?.key ?? "mine") as TaskScope;
   const status = sp.status === "done" || sp.status === "all" ? sp.status : "open";
   const projects = await listProjects(db, viewer);
-  const project = projects.find((p) => p.id === sp.project);
+  const workScope = await readScope(db, viewer);
+  const project = projects.find((p) => p.id === (sp.project || (workScope.kind === "project" ? workScope.id : "")));
   const [tasks, counts] = await Promise.all([listTasks(db, viewer, { scope, projectId: project?.id, status, label: sp.label || undefined, q: sp.q }), taskCounts(db, viewer)]);
   const peopleByProject: Record<string, string[]> = {};
   for (const p of projects) peopleByProject[p.id] = await assigneeCandidates(db, viewer, p.id);
@@ -48,6 +53,8 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
         subtitle="Create a task, give it to someone, and talk about it. Tasks are the same cards as on the planning board and sync to everyone in the project's team."
         actions={projects.length > 0 ? <NewTask projects={projects.map((p) => ({ id: p.id, name: p.name }))} peopleByProject={peopleByProject} me={viewer.login} defaultProjectId={project?.id ?? projects[0].id} /> : undefined}
       />
+      <ScopeNote scope={workScope} />
+      <ViewBar scope="tasks" views={await listViews(db, viewer, "tasks")} />
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <Segmented label="Whose tasks" items={SCOPES.map((s) => ({ href: href({ scope: s.key }), label: `${s.label} (${countFor(s.key)})`, active: s.key === scope }))} />
         <Segmented label="Status" items={(["open", "done", "all"] as const).map((s) => ({ href: href({ status: s === "open" ? undefined : s }), label: s[0].toUpperCase() + s.slice(1), active: s === status }))} />

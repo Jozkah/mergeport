@@ -1,4 +1,6 @@
 import { ForkMapFields } from "@/components/forms/ForkMapFields";
+import { ViewBar } from "@/components/views/ViewBar";
+import { listViews } from "@/lib/services/views";
 import { WatchlistForm } from "@/components/forms/WatchlistForm";
 import { UpstreamIssues } from "@/components/forks/UpstreamIssues";
 import { UpstreamPrs } from "@/components/forks/UpstreamPrs";
@@ -53,6 +55,7 @@ export default async function Forks() {
   return (
     <>
       <PageHeader title="Forks" subtitle="Commit divergence, upstream pull requests and upstream issues are separate questions with separate evidence." />
+      <ViewBar scope="forks" views={await listViews(db, viewer, "forks")} />
       {unmappedForks > 0 && <div className="mb-4"><Banner title={`${unmappedForks} fork${unmappedForks === 1 ? "" : "s"} without a mapped upstream you can see`}>Upstream content is only shown when the upstream repository is also shared with you.</Banner></div>}
 
       {mappings.length === 0 ? (

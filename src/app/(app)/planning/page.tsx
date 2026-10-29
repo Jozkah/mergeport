@@ -1,4 +1,8 @@
 import { Select } from "@/components/ui/Select";
+import { readScope } from "@/lib/scope";
+import { ScopeNote } from "@/components/shell/ScopeNote";
+import { ViewBar } from "@/components/views/ViewBar";
+import { listViews } from "@/lib/services/views";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -22,7 +26,8 @@ export default async function Planning({ searchParams }: { searchParams: Promise
   const sp = await searchParams;
   const projects = await listProjects(db, viewer);
   const view = sp.view === "list" || sp.view === "roadmap" ? sp.view : "board";
-  const project = projects.find((p) => p.id === sp.project) ?? projects[0];
+  const scope = await readScope(db, viewer);
+  const project = projects.find((p) => p.id === (sp.project || (scope.kind === "project" ? scope.id : ""))) ?? projects[0];
   const href = (over: Search) => {
     const u = new URLSearchParams({ view, ...(project ? { project: project.id } : {}), ...over } as Record<string, string>);
     return `/planning?${u.toString()}`;
@@ -88,6 +93,8 @@ export default async function Planning({ searchParams }: { searchParams: Promise
           </>
         }
       />
+      <ScopeNote scope={scope} />
+        <ViewBar scope="planning" views={await listViews(db, viewer, "planning")} />
       <div className="mb-4 flex flex-wrap items-center gap-3">{projects.length > 1 && projectsSeg}{viewSeg}</div>
 
       {view === "board" && (

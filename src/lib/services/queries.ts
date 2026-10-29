@@ -122,6 +122,16 @@ function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<type
 
 const prInclude = { repository: { include: { owner: true } }, comments: true, reviewRequests: true, waiting: true } as const;
 
+/** Every open item with its derivation, for views that look across people (capacity) rather than at one person's queues. */
+export async function derivedOpen(db: Db, v: Viewer, opts: { now?: Date; repositoryIds?: string[] } = {}): Promise<DerivedItem[]> {
+  const now = opts.now ?? new Date();
+  const rc = await loadRuleContext(db, v);
+  const where: Prisma.WorkItemWhereInput = { ...viaRepo(v), state: "OPEN" };
+  if (opts.repositoryIds) where.repositoryId = { in: opts.repositoryIds };
+  const rows = await db.workItem.findMany({ where, include: prInclude });
+  return rows.map((r) => deriveFor(r, v, now, rc));
+}
+
 export type AttentionQueues = {
   needsMyReview: DerivedItem[];
   needsTeamReview: DerivedItem[];

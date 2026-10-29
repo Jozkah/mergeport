@@ -44,11 +44,11 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 | 1 | Actionable inbox | done (personal done / unread / snooze, reopens on a new commit, comment or review request; `/inbox`, sidebar count; `tests/inbox.test.ts`; checked in the rendered demo, dark and light). Not done: reopening on a new check result is deliberately excluded; no mobile-width pass; Activity events are not yet inbox inputs |
 | 2 | Staged waiting | done (stage on waiting rules and manual records: internal review, external review, maintainer merge, upstream release; derived with owner, reason, age and next action; approval does not satisfy a maintainer-merge stage; shown on attention rows and PR detail; `tests/domain/stages.test.ts`, `tests/inbox.test.ts`; checked in the rendered demo). Not done: stages are not yet a filter/queue of their own; older clients drop `stage` if they edit and re-push a rule (no entity schema bump) |
 | 3 | PR readiness panel | done ("Ready to merge?" on PR detail: head, reviews, stale approvals, checks, conflicts, planning dependencies, discussions; each row labelled GitHub fact / dashboard advice / not known; next responsible person; `tests/domain/readiness.test.ts`; rendered check). Not done: unresolved review threads are shown as "unknown" because resolution is not synchronised; required-vs-optional checks are not read (labelled as such) |
-| 4 | Shared views | not started |
-| 5 | Persistent scope | not started |
+| 4 | Shared views | done (one saved-view bar on Attention, Tasks, Planning, Forks, PRs and Issues: filters, grouping and sort are the query; optional sharing as a definition-only synced entity `view`; results computed under each viewer's access; `tests/views.test.ts`; rendered check). Not done: PR/issue lists still also have their older filter UI; density/visible-column choices are only saved if the page puts them in its query |
+| 5 | Persistent scope | done (Global / Project / Repository in the top bar, cookie-persisted, validated against what the viewer can see; narrows Attention, nav counts, Overview, Tasks, Planning, PR and issue lists; page note says what it is narrowed to; `tests/scope.test.ts`; rendered check). Not done: Activity, Forks and Branches ignore the scope; the Radix picker was not driven with the mouse in my browser check (cookie path was) |
 | 6 | Since I last looked | done for PR/issue detail (personal baseline on first look, lists new commits, comments from others, reviewer decisions, checks, conflicts, state, title until "Mark as seen"; `tests/seen.test.ts`; rendered check). Not done: no per-file "changed files" detail, not shown in lists or Inbox rows |
-| 7 | Review capacity | not started |
-| 8 | Notification preferences | not started |
+| 7 | Review capacity | done (`/capacity`: queued reviews and oldest wait per member, availability windows and configured backups as shared synced entity `availability`, suggestion only, no reassignment or notification; `tests/capacity.test.ts`; rendered check). Not done: capacity ignores team-review routing (only named users) |
+| 8 | Notification preferences | done (Settings: per-event in-app and desktop, quiet hours across midnight in the person's time zone; new "changes requested" notification; grouped on Activity; desktop pop-ups only while the app is open and only if the browser allowed them; `tests/notify.test.ts`). Not done: desktop pop-ups were not exercised in a real browser, and only two event kinds exist |
 | 9 | Named boards, WIP limits | not started |
 | 10 | Swimlanes | not started |
 | 11 | Epics | not started |
@@ -76,10 +76,10 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 
 ## Phase 2 progress
 
-Ideas 1, 2, 3 and 6 done. Ideas 4, 5, 7, 8 not started. The inbox is built on the existing Attention queues (no second source of truth) and its state table `InboxState` is personal and never synced.
+Phase 2 complete (ideas 1-8). The inbox is built on the existing Attention queues (no second source of truth) and its state table `InboxState` is personal and never synced.
 
 ## Suggested order for the next session
 
-1. Finish Phase 2: 4 (shared views), 5 (persistent scope), 7 (review capacity), 8 (notification preferences).
+1. Phase 3 (ideas 9-18).
 2. Crash recovery around SENT outbox operations; quota/scheduler investigation.
 3. Idea 17's event capture can be added early and cheaply so history accumulates while other work proceeds.

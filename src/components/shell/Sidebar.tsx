@@ -55,6 +55,7 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
   ];
   const team: Item[] = [
     { href: "/team", label: "Team", icon: Users },
+    { href: "/capacity", label: "Review capacity", icon: Route },
     { href: "/sync", label: "Sync status", icon: RefreshCw },
     { href: "/help", label: "Help", icon: CircleHelp },
   ];

@@ -725,6 +725,9 @@ model SavedFilter {
   scope  String
   name   String
   query  String
+  /// A shared view is synchronised as a definition only; every viewer's results are computed under their own access.
+  shared     Boolean @default(false)
+  ownerLogin String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -966,4 +969,25 @@ model SeenState {
   seenAt     DateTime @default(now()) @updatedAt
 
   @@id([userId, workItemId])
+}
+
+/// Who is unavailable and who covers for them. Shared team configuration: it suggests a backup, it never reassigns anything.
+model ReviewerAvailability {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  login            String // lower case
+  unavailableFrom  DateTime?
+  unavailableUntil DateTime?
+  backupLogin      String?
+  note             String?
+  createdAt        DateTime  @default(now())
+
+  @@unique([workspaceId, login])
+}
+
+/// Personal notification preferences (JSON). Never synchronised.
+model NotificationPref {
+  userId    String   @id
+  prefs     Json
+  updatedAt DateTime @default(now()) @updatedAt
 }

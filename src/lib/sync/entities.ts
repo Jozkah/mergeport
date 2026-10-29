@@ -300,6 +300,50 @@ const waitrule: EntityDef = {
   },
 };
 
+// ---------- shared views (definitions only) ----------
+
+const view: EntityDef = {
+  type: "view",
+  order: 9,
+  async list(db, { commonSpaceId }) {
+    // Received copies are listed too, unchanged, so they round-trip: leaving them out would make this computer look like it deleted them.
+    // The service refuses to edit a view that belongs to someone else, so a received copy never produces a new version.
+    const me = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
+    if (!me) return [];
+    const rows = await db.savedFilter.findMany({ where: { shared: true, userId: me.id } });
+    return rows.map((r) => ({ id: r.id, spaceId: commonSpaceId, data: { scope: r.scope, name: r.name, query: r.query, ownerLogin: r.ownerLogin ?? me.login } }));
+  },
+  async apply(db, ctx, id, data) {
+    if (!data) {
+      await db.savedFilter.deleteMany({ where: { id, shared: true } });
+      return;
+    }
+    const member = await db.member.findUnique({ where: { id: ctx.localMemberId } });
+    if (!member) return false;
+    const f = { userId: member.userId, scope: String(data.scope), name: String(data.name), query: String(data.query ?? ""), shared: true, ownerLogin: String(data.ownerLogin ?? "") || null };
+    await db.savedFilter.upsert({ where: { id }, create: { id, ...f }, update: f });
+  },
+};
+
+// ---------- reviewer availability and configured backups ----------
+
+const availability: EntityDef = {
+  type: "availability",
+  order: 9,
+  async list(db, { commonSpaceId }) {
+    const rows = await db.reviewerAvailability.findMany();
+    return rows.map((a) => ({ id: a.id, spaceId: commonSpaceId, data: { login: a.login, from: iso(a.unavailableFrom), until: iso(a.unavailableUntil), backup: a.backupLogin, note: a.note } }));
+  },
+  async apply(db, ctx, id, data) {
+    if (!data) {
+      await db.reviewerAvailability.deleteMany({ where: { id } });
+      return;
+    }
+    const f = { unavailableFrom: toDate(data.from), unavailableUntil: toDate(data.until), backupLogin: (data.backup as string | null) ?? null, note: (data.note as string | null) ?? null };
+    await db.reviewerAvailability.upsert({ where: { workspaceId_login: { workspaceId: ctx.workspaceId, login: String(data.login) } }, create: { id, workspaceId: ctx.workspaceId, login: String(data.login), ...f }, update: { id, ...f } });
+  },
+};
+
 // ---------- fork mappings and upstream triage ----------
 
 const forkmap: EntityDef = {
@@ -379,7 +423,7 @@ const waiting: EntityDef = {
   },
 };
 
-export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, card, taskcomment, checkitem, rule, waitrule, forkmap, triage, waiting];
+export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, card, taskcomment, checkitem, rule, waitrule, forkmap, triage, waiting, view, availability];
 export const entityDef = (type: string) => ENTITY_TYPES.find((t) => t.type === type);
 export const entityPath = (type: string, id: string) => `entities/${type}/${id}.json`;
 export const parseEntityPath = (path: string): { type: string; id: string } | null => {

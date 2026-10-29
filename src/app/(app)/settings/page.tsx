@@ -12,7 +12,9 @@ import { KeyRound, Settings } from "@/components/ui/icons";
 import { autoSetupAction, setTimezoneAction } from "@/app/actions";
 import { planAutoSetup } from "@/lib/services/auto-setup";
 import { db } from "@/lib/db";
-import { Wand2 } from "@/components/ui/icons";
+import { Bell, Wand2 } from "@/components/ui/icons";
+import { NotificationSettings } from "@/components/settings/NotificationSettings";
+import { getPrefs } from "@/lib/services/notification-prefs";
 
 export const metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
@@ -28,6 +30,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader title="Settings" subtitle={`Signed in as @${user.login}${viewer.isAdmin ? " (administrator of the team space)" : ""}. These settings belong to this computer.`} />
       <div className="fit-grid" style={{ "--fit-min": "520px" } as React.CSSProperties}>
+        <Panel title="Notifications" icon={Bell} id="notifications">
+          <NotificationSettings initial={await getPrefs(db, user.id)} />
+        </Panel>
         <Panel title="Display" icon={Settings} id="display">
           <div className="grid gap-5 p-4">
             <ThemeSelect initial={theme} />

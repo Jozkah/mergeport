@@ -1,3 +1,4 @@
+import { readScope, scopeKey } from "@/lib/scope";
 import Link from "next/link";
 import { requireViewer } from "@/lib/authz-page";
 import { db } from "@/lib/db";
@@ -31,7 +32,7 @@ export default async function Overview() {
   const now = new Date();
   const [o, q, days, activity, forks, milestones] = await Promise.all([
     overview(db, viewer, now),
-    attentionFor(viewer),
+    attentionFor(viewer, scopeKey(await readScope(db, viewer))),
     openedPerDay(db, viewer, 14, now),
     recentActivity(db, viewer, 8),
     visibleForkMappings(db, viewer),

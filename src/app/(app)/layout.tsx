@@ -2,7 +2,10 @@ import { processStartedAt } from "@/lib/local/boot";
 import { Suspense } from "react";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
-import { repoWhere } from "@/lib/authz/viewer";
+import { projectWhere, repoWhere } from "@/lib/authz/viewer";
+import { readScope, scopeKey } from "@/lib/scope";
+import { DesktopNotifier } from "@/components/shell/DesktopNotifier";
+import { ScopePicker } from "@/components/shell/ScopePicker";
 import { inbox } from "@/lib/services/inbox";
 import { attentionFor } from "@/lib/services/request-cache";
 import { planningWhere, unreadNotificationCount } from "@/lib/services/queries";
@@ -28,12 +31,15 @@ export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { viewer, user } = await requireViewer();
-  const [q, unread, ws, lastSync, demoRepos] = await Promise.all([
-    attentionFor(viewer),
+  const scope = await readScope(db, viewer);
+  const [q, unread, ws, lastSync, demoRepos, scopeProjects, scopeRepos] = await Promise.all([
+    attentionFor(viewer, scopeKey(scope)),
     unreadNotificationCount(db, viewer),
     db.workspace.findUniqueOrThrow({ where: { id: viewer.workspaceId } }),
     db.repository.aggregate({ where: repoWhere(viewer), _max: { lastSyncedAt: true } }),
     db.repository.count({ where: { ...repoWhere(viewer), isDemo: true } }),
+    db.project.findMany({ where: projectWhere(viewer), select: { id: true, name: true }, orderBy: { name: "asc" }, take: 200 }),
+    db.repository.findMany({ where: repoWhere(viewer), select: { id: true, fullName: true }, orderBy: { fullName: "asc" }, take: 300 }),
   ]);
   const counts = {
     needsMyReview: q.needsMyReview.length,
@@ -94,7 +100,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </Suspense>
       <div className="flex min-w-0 flex-1 flex-col">
         <Suspense fallback={<div className="h-14" />}>
-          <Topbar unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
+          <DesktopNotifier />
+          <Topbar scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "mismatch" && (
           <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">

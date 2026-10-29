@@ -6,6 +6,7 @@ import { classifyCompare, classifyUpstreamMerge } from "@/lib/domain/forks";
 import { GithubError, type GithubPort, type RemoteWorkItem } from "@/lib/github/port";
 import { mapLimit } from "@/lib/util";
 import { indexList, sameLogin } from "@/lib/domain/text-index";
+import { parsePrefs, wantsInApp } from "@/lib/domain/notify-prefs";
 
 /**
  * Repository synchronization. Runs in the worker, with the installation's/connection's broad credential.
@@ -94,6 +95,8 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
   if (i.type !== "PULL_REQUEST") return;
   const [reviews, requested] = await Promise.all([port.listReviews(owner, repo, i.number), port.listRequestedReviewers(owner, repo, i.number)]);
   for (const r of reviews) {
+    const seen = await db.workItemComment.findUnique({ where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "REVIEW", githubId: r.githubId } }, select: { id: true } });
+    if (!seen && r.state === "CHANGES_REQUESTED" && i.state === "OPEN") await notifyAuthorChanges(db, wi.id, r.login, i.title);
     await db.workItemComment.upsert({
       where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "REVIEW", githubId: r.githubId } },
       create: { workItemId: wi.id, githubId: r.githubId, kind: "REVIEW", authorLogin: r.login, body: r.body, reviewState: r.state, commitSha: r.commitSha, createdAtGh: r.submittedAt, updatedAtGh: r.submittedAt },
@@ -124,7 +127,24 @@ async function notifyReviewer(db: Db, workItemId: string, login: string, title: 
   const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: login } } }, include: { user: true } });
   const member = candidates.find((m) => sameLogin(m.user.login, login));
   if (!member) return;
-  await db.notification.create({ data: { workspaceId: wi.repository.workspaceId, userId: member.userId, repositoryId: wi.repositoryId, kind: "review-requested", title: `Review requested: ${title}`, href: `/pull-requests/${wi.id}` } });
+  await notifyUser(db, member.userId, wi, "review-requested", `Review requested: ${title}`);
+}
+
+/** Creates the in-app notification unless this person turned that kind off. Personal preferences are read here, never shared. */
+async function notifyUser(db: Db, userId: string, wi: { id: string; repositoryId: string; repository: { workspaceId: string } }, kind: string, title: string) {
+  const pref = await db.notificationPref.findUnique({ where: { userId } });
+  if (!wantsInApp(parsePrefs(pref?.prefs), kind)) return;
+  await db.notification.create({ data: { workspaceId: wi.repository.workspaceId, userId, repositoryId: wi.repositoryId, kind, title, href: `/pull-requests/${wi.id}` } });
+}
+
+/** The author of an open pull request hears when a reviewer asks for changes (once per review). */
+async function notifyAuthorChanges(db: Db, workItemId: string, reviewer: string | null, title: string) {
+  const wi = await db.workItem.findUniqueOrThrow({ where: { id: workItemId }, include: { repository: true } });
+  if (wi.state !== "OPEN" || !wi.authorLogin || (reviewer && sameLogin(reviewer, wi.authorLogin))) return;
+  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: wi.authorLogin } } }, include: { user: true } });
+  const member = candidates.find((m) => sameLogin(m.user.login, wi.authorLogin!));
+  if (!member) return;
+  await notifyUser(db, member.userId, wi, "changes-requested", `Changes requested${reviewer ? ` by ${reviewer}` : ""}: ${title}`);
 }
 
 export async function syncRepository(db: Db, port: GithubPort, repositoryId: string, opts: { full?: boolean; now?: Date } = {}): Promise<SyncResult> {
