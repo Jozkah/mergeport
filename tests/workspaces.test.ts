@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { hubBackendId } from "@/lib/local/backends";
 import { upsertHub, writeActive } from "@/lib/local/registry";
-import { listWorkspaces } from "@/lib/local/workspaces";
+import { currentBackend, listWorkspaces } from "@/lib/local/workspaces";
 
 const dirs: string[] = [];
 const home = () => {
@@ -62,5 +62,39 @@ describe("listWorkspaces", () => {
     expect(listWorkspaces(h, "github.com", "7").active).toBe("github");
     writeActive(h, { host: "ghe.example.com", accountId: "7", backend: b });
     expect(listWorkspaces(h, "github.com", "7").active).toBe("github");
+  });
+});
+
+describe("currentBackend", () => {
+  const saved = { b: process.env.MERGEPORT_BACKEND, h: process.env.MERGEPORT_HOME };
+  afterEach(() => {
+    for (const [k, v] of [["MERGEPORT_BACKEND", saved.b], ["MERGEPORT_HOME", saved.h]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("the running process wins over an active.json that already names the hub", async () => {
+    const h = home();
+    const b = hubBackendId("https://a.example.com");
+    upsertHub(h, hub("https://a.example.com", "Alpha", "7", "2026-01-01T00:00:00Z"));
+    writeActive(h, { host: "github.com", accountId: "7", backend: b });
+    process.env.MERGEPORT_HOME = h;
+    process.env.MERGEPORT_BACKEND = "github";
+    expect(await currentBackend()).toBe("github");
+    expect(listWorkspaces(h, "github.com", "7").active).toBe("github");
+    process.env.MERGEPORT_BACKEND = b;
+    expect(await currentBackend()).toBe(b);
+  });
+
+  it("without MERGEPORT_BACKEND it reads active.json", async () => {
+    const h = home();
+    const b = hubBackendId("https://a.example.com");
+    upsertHub(h, hub("https://a.example.com", "Alpha", "7", "2026-01-01T00:00:00Z"));
+    writeActive(h, { host: "github.com", accountId: "7", backend: b });
+    process.env.MERGEPORT_HOME = h;
+    delete process.env.MERGEPORT_BACKEND;
+    expect(await currentBackend()).toBe(b);
+    expect(listWorkspaces(h, "github.com", "7").active).toBe(b);
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ControlClient, Supervisor, type ChildHandle, type ChildSpec, type SupervisorDeps } from "@/lib/local/supervisor";
+import { ControlClient, NOT_RESTORED, Supervisor, type ChildHandle, type ChildSpec, type SupervisorDeps } from "@/lib/local/supervisor";
 import type { Backend } from "@/lib/local/backends";
 
 const HUB: Backend = "hub-0123456789abcdef";
@@ -299,5 +299,64 @@ describe("killDelayMs", () => {
     expect(killedAt).toHaveLength(0);
     await vi.waitFor(() => expect(killedAt).toHaveLength(1));
     expect(killedAt[0] - got).toBeGreaterThanOrEqual(150); // 200 ms minus timer slack between send and receive
+  });
+});
+
+describe("switch-failed", () => {
+  it("is emitted when a switch fails after the 202, with the restored message", async () => {
+    const f = makeDeps({ failReadyFor: (spec) => spec.dbFile === `/db/${HUB}` });
+    const s = sup(f.deps);
+    const errs: string[] = [];
+    s.on("switch-failed", (e) => errs.push(e.message));
+    await s.start({ dbFile: "/db/a" });
+    await expect(s.switchTo({ backend: HUB }, () => {})).rejects.toThrow();
+    expect(errs).toEqual(["Could not start the other workspace; the previous one was restored"]);
+  });
+
+  it("carries the NOT_RESTORED message when no child is left", async () => {
+    const f = makeDeps({ failReadyFor: () => f.spawned.length >= 2 });
+    const s = sup(f.deps);
+    const errs: string[] = [];
+    s.on("switch-failed", (e) => errs.push(e.message));
+    await s.start({ dbFile: "/db/a" });
+    await expect(s.switchTo({ backend: HUB }, () => {})).rejects.toThrow();
+    expect(errs).toEqual([NOT_RESTORED]);
+  });
+
+  it("is not emitted for a switch refused before the 202", async () => {
+    const f = makeDeps();
+    f.deps.resolveTarget = async () => {
+      throw new Error("nope");
+    };
+    const s = sup(f.deps);
+    const errs: Error[] = [];
+    s.on("switch-failed", (e) => errs.push(e));
+    await s.start({ dbFile: "/db/a" });
+    await expect(s.switchTo({ backend: HUB }, () => {})).rejects.toThrow("nope");
+    expect(errs).toEqual([]);
+  });
+});
+
+describe("a child that cannot be killed", () => {
+  it("keeps the handle, reports it, and refuses later switches instead of spawning a second child", async () => {
+    const f = makeDeps();
+    let hung = true;
+    const spawn = f.deps.spawnChild;
+    f.deps.spawnChild = (spec) => {
+      const h = spawn(spec);
+      return {
+        onExit: h.onExit,
+        kill: () => (hung ? Promise.reject(new Error("kill timed out")) : h.kill()),
+      };
+    };
+    const s = sup(f.deps);
+    const errs: string[] = [];
+    s.on("switch-failed", (e) => errs.push(e.message));
+    await s.start({ dbFile: "/db/a" });
+    await expect(s.switchTo({ backend: HUB }, () => {})).rejects.toThrow("The previous workspace did not stop");
+    expect(errs).toEqual(["The previous workspace did not stop"]);
+    await expect(s.switchTo({ backend: HUB })).rejects.toThrow("The previous workspace did not stop");
+    expect(f.spawned).toHaveLength(1);
+    hung = false; // let afterEach stop() clean up
   });
 });

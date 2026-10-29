@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Backend } from "@/lib/local/backends";
+import { isHubBackend, type Backend } from "@/lib/local/backends";
 
 /** Which profile the launcher opens, and which hub servers this computer knows. Never holds tokens or sessions. */
 export type Active = { host: string; accountId: string; backend: Backend };
@@ -26,7 +26,7 @@ function writeJson(file: string, value: unknown) {
 }
 
 const isStr = (v: unknown): v is string => typeof v === "string" && v.length > 0;
-const isBackend = (v: unknown): v is Backend => v === "github" || (typeof v === "string" && /^hub-[0-9a-f]{16}$/.test(v));
+const isBackend = (v: unknown): v is Backend => v === "github" || (typeof v === "string" && isHubBackend(v));
 
 export function readActive(home: string): Active | null {
   const j = readJson(activeFile(home)) as Partial<Active> | null;

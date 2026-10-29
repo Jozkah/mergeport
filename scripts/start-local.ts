@@ -18,7 +18,7 @@ import { writeActive } from "../src/lib/local/registry";
 import { resolveStartProfile, resolveSwitchTarget } from "../src/lib/local/start-profile";
 import { spawnNext, waitForReady } from "../src/lib/local/child-process";
 import type { Backend } from "../src/lib/local/backends";
-import { Supervisor } from "../src/lib/local/supervisor";
+import { NOT_RESTORED, Supervisor } from "../src/lib/local/supervisor";
 import { looksOffline, savedProfiles } from "../src/lib/local/saved-profiles";
 import { seedDemo } from "../src/lib/demo/seed";
 
@@ -105,6 +105,11 @@ async function main() {
   process.on("SIGTERM", stop);
   // A child that dies outside a switch ends the launcher, as before.
   supervisor.on("child-exit", (c) => process.exit(c ?? 0));
+  // A switch that failed after the browser was told it was accepted has no other way to be reported.
+  supervisor.on("switch-failed", (err) => {
+    console.error(err.message);
+    if (err.message === NOT_RESTORED) void supervisor.stop().finally(() => process.exit(1)); // no child is running any more
+  });
 
   const started = Date.now();
   const { launchUrl: url } = await supervisor.start({ dbFile, backend: startBackend }).catch(async (e) => {

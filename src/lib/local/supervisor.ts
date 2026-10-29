@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import type { Backend } from "@/lib/local/backends";
+import { isHubBackend, type Backend } from "@/lib/local/backends";
 
 export type ChildSpec = { dbFile: string; token: string; port: number; demo: boolean; backend?: Backend };
 export type ChildHandle = { kill(): Promise<void>; onExit(cb: (code: number | null) => void): void };
@@ -17,17 +17,17 @@ export type SupervisorDeps = {
 type Started = { launchUrl: string; bootId: string };
 type Announced = { launchUrl: string; previousBootId: string | null };
 
-const BACKEND_RE = /^(github|hub-[0-9a-f]{16})$/;
 const SECRET_HEADER = "x-mergeport-control";
-const NOT_RESTORED = "Could not start the other workspace, and the previous one could not be restored";
+export const NOT_RESTORED = "Could not start the other workspace, and the previous one could not be restored";
 const RESTORED = "Could not start the other workspace; the previous one was restored";
+const NOT_STOPPED = "The previous workspace did not stop";
 
 /** The target cannot be opened; answered as 409 on the control channel. */
 class TargetUnavailableError extends Error {}
 /** A different switch is already running; answered as 409 too. */
 class SwitchBusyError extends Error {}
 
-type Running = { spec: ChildSpec; handle: ChildHandle; expectedExit: boolean; bootId: string | null };
+type Running = { spec: ChildSpec; handle: ChildHandle; expectedExit: boolean; bootId: string | null; killFailed?: boolean };
 
 /** Owns the one app child process. A switch kills it and starts another, so two children never share the port. */
 export class Supervisor {
@@ -36,12 +36,19 @@ export class Supervisor {
   private control: Server | null = null;
   private stopping = new AbortController();
   private listeners: Array<(code: number | null) => void> = [];
+  private failListeners: Array<(err: Error) => void> = [];
 
   constructor(private deps: SupervisorDeps, private opts: { port: number; demo: boolean; /** Pause between answering a switch request and killing the old child, so its response reaches the browser. Default 400. */ killDelayMs?: number }) {}
 
-  /** Only event: "child-exit", for a child that died outside a switch. The supervisor does not respawn it. */
-  on(event: "child-exit", cb: (code: number | null) => void) {
-    if (event === "child-exit") this.listeners.push(cb);
+  /**
+   * "child-exit": a child died outside a switch (the supervisor does not respawn it).
+   * "switch-failed": a switch failed AFTER its 202 was sent, so nobody got an HTTP error. The error is NOT_RESTORED when no child is running any more.
+   */
+  on(event: "child-exit", cb: (code: number | null) => void): void;
+  on(event: "switch-failed", cb: (err: Error) => void): void;
+  on(event: "child-exit" | "switch-failed", cb: ((code: number | null) => void) | ((err: Error) => void)) {
+    if (event === "child-exit") this.listeners.push(cb as (code: number | null) => void);
+    else this.failListeners.push(cb as (err: Error) => void);
   }
 
   start(initial: { dbFile: string; backend?: Backend }): Promise<Started> {
@@ -51,6 +58,7 @@ export class Supervisor {
   /** `announce` fires once the target is accepted and BEFORE the current child is killed, so a caller living in that child still gets an answer. */
   switchTo(req: { backend: Backend }, announce?: (a: Announced) => void): Promise<Started> {
     return this.serialized(req.backend, async () => {
+      if (this.current?.killFailed) throw new SwitchBusyError(NOT_STOPPED);
       let target: { dbFile: string };
       try {
         target = await this.deps.resolveTarget(req);
@@ -59,30 +67,38 @@ export class Supervisor {
       }
       const previous = this.current?.spec ?? null;
       const next: ChildSpec = { dbFile: target.dbFile, backend: req.backend, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo };
+      let announced = false;
       if (announce) {
         announce({ launchUrl: launchUrl(next), previousBootId: this.current?.bootId ?? null });
-        await new Promise((r) => setTimeout(r, this.opts.killDelayMs ?? 400));
+        announced = true;
       }
-      await this.killCurrent();
       try {
-        const started = await this.boot(next, true);
-        try {
-          this.deps.onSwitched?.(req.backend);
-        } catch {
-          /* recording the choice must not undo a working switch */
-        }
-        return started;
-      } catch {
+        if (announced) await new Promise((r) => setTimeout(r, this.opts.killDelayMs ?? 400));
         await this.killCurrent();
-        if (previous && !this.stopping.signal.aborted) {
+        try {
+          const started = await this.boot(next, true);
           try {
-            await this.boot(previous, true);
+            this.deps.onSwitched?.(req.backend);
           } catch {
-            await this.killCurrent();
-            throw new Error(NOT_RESTORED);
+            /* recording the choice must not undo a working switch */
           }
+          return started;
+        } catch {
+          await this.killCurrent();
+          if (previous && !this.stopping.signal.aborted) {
+            try {
+              await this.boot(previous, true);
+            } catch {
+              await this.killCurrent();
+              throw new Error(NOT_RESTORED);
+            }
+          }
+          throw new Error(RESTORED);
         }
-        throw new Error(RESTORED);
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        if (announced) this.failListeners.forEach((cb) => cb(err));
+        throw err;
       }
     });
   }
@@ -90,7 +106,7 @@ export class Supervisor {
   async stop(): Promise<void> {
     this.stopping.abort();
     await this.inflight?.promise.catch(() => undefined);
-    await this.killCurrent();
+    await this.killCurrent().catch(() => undefined); // best effort: shutting down anyway
     const control = this.control;
     this.control = null;
     if (control) await new Promise<void>((resolve) => control.close(() => resolve()));
@@ -186,8 +202,14 @@ export class Supervisor {
     const run = this.current;
     if (!run) return;
     run.expectedExit = true;
-    this.current = null;
-    await run.handle.kill();
+    try {
+      await run.handle.kill();
+    } catch {
+      // The old process may still hold the port: keep the handle and refuse further switches until it is gone.
+      run.killFailed = true;
+      throw new Error(NOT_STOPPED);
+    }
+    if (this.current === run) this.current = null;
   }
 }
 
@@ -203,7 +225,7 @@ function sameSecret(got: string | string[] | undefined, secret: string): boolean
 function parseBackend(raw: string): Backend | null {
   try {
     const b = (JSON.parse(raw) as { backend?: unknown }).backend;
-    return typeof b === "string" && BACKEND_RE.test(b) ? (b as Backend) : null;
+    return typeof b === "string" && (b === "github" || isHubBackend(b)) ? (b as Backend) : null;
   } catch {
     return null;
   }
