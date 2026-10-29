@@ -1,11 +1,12 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { z } from "zod";
 import type { HubConfig } from "./config";
 import type { HubDb } from "./db";
-import { HttpError, json, matchRoute, readJson, route, type Route } from "./http";
+import { authRoutes } from "./auth-routes";
+import { HttpError, json, matchRoute, route, type Route } from "./http";
+import { createLogger, type Logger } from "./log";
 
-export type Logger = (line: string) => void;
+export type { Logger };
 
 export type HubContext = {
   config: HubConfig;
@@ -25,11 +26,7 @@ export function coreRoutes(): Route<HubContext>[] {
       const team = ctx.db.prepare("SELECT name FROM team LIMIT 1").get() as { name: string } | undefined;
       json(res, 200, { ok: true, team: team ? { name: team.name } : null, schema: 1, publicUrl: ctx.publicUrl(), githubHost: "github.com" });
     }),
-    // Stub: full behaviour arrives with device auth.
-    route<HubContext>("POST", "/auth/device/poll", async (_ctx, req, res) => {
-      await readJson(req, z.object({}).passthrough());
-      json(res, 501, { error: "not implemented" });
-    }),
+    ...authRoutes(),
   ];
 }
 
@@ -39,7 +36,7 @@ export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => numb
     config: opts.config,
     db: opts.db,
     now: opts.now ?? Date.now,
-    log: opts.log ?? ((l) => console.log(l)),
+    log: opts.log ?? createLogger(),
     publicUrl: () => opts.config.publicUrl || listened,
   };
   const routes = [...coreRoutes(), ...(opts.routes ?? [])];
@@ -58,7 +55,7 @@ export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => numb
         }
         if (e instanceof HttpError) json(res, e.status, { error: e.message }, e.headers);
         else {
-          ctx.log(`500 ${req.method} ${req.url?.split("?")[0]}: ${e instanceof Error ? e.message : "unknown error"}`);
+          ctx.log.error("unhandled", { method: req.method, path: req.url?.split("?")[0], error: e instanceof Error ? e.message : "unknown error" });
           json(res, 500, { error: "internal" });
         }
       }

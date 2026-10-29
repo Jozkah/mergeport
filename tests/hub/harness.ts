@@ -6,6 +6,7 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import type { HubConfig } from "../../hub/src/config";
 import { openHubDb, type HubDb } from "../../hub/src/db";
+import { createLogger } from "../../hub/src/log";
 import { createHub } from "../../hub/src/server";
 
 export type FakeUser = { id: bigint; login: string; name?: string; avatarUrl?: string };
@@ -108,6 +109,8 @@ export type ApiResult = { status: number; body: any; headers: Headers };
 export type TestHub = {
   url: string;
   db: HubDb;
+  /** Captured log lines. */
+  logs: string[];
   github: FakeGitHubOAuth;
   close(): Promise<void>;
   api(token?: string): (method: string, path: string, body?: unknown) => Promise<ApiResult>;
@@ -129,11 +132,13 @@ export async function startTestHub(o: { now?: () => number; dataDir?: string } =
     bindHost: "127.0.0.1",
   };
   const db = openHubDb(dataDir);
-  const hub = createHub({ config, db, now: o.now, log: () => {} });
+  const logs: string[] = [];
+  const hub = createHub({ config, db, now: o.now, log: createLogger((l) => logs.push(l)) });
   const { url } = await hub.listen(0);
   return {
     url,
     db,
+    logs,
     github,
     async close() {
       await hub.close();
