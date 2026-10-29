@@ -44,6 +44,30 @@ describe("HubTeamService", () => {
     expect(admin(hub.requests)).toHaveLength(0);
   });
 
+  it("promoted after a cached MEMBER overview still succeeds", async () => {
+    const { hub, svc } = await setup("3");
+    expect((await svc.overview()).canAdmin).toBe(false);
+    hub.members.find((m) => m.githubId === "3")!.role = "ADMIN";
+    await svc.invite("someone");
+    expect(hub.requests.some((r) => r.path === "/admin/invites")).toBe(true);
+  });
+
+  it("clears the cache after a mutation", async () => {
+    const { hub, svc } = await setup("1");
+    await svc.invite("one");
+    const n = () => hub.requests.filter((r) => r.path === "/me").length;
+    const before = n();
+    await svc.invite("two");
+    expect(n()).toBe(before + 1);
+  });
+
+  it("rejects an unknown role and a blank space name", async () => {
+    const { hub, svc } = await setup("1");
+    await expect(svc.invite("x", "OWNER" as never)).rejects.toThrow(ValidationError);
+    await expect(svc.updateSpace("s1", { name: "  " })).rejects.toThrow(ValidationError);
+    expect(admin(hub.requests)).toHaveLength(0);
+  });
+
   it("ADMIN invites @Octo-Cat as octo-cat", async () => {
     const { hub, svc } = await setup("2");
     await svc.invite("  @Octo-Cat ");
@@ -81,9 +105,9 @@ describe("HubTeamService", () => {
   it("deleteSpace needs confirmation", async () => {
     const { hub, svc } = await setup("1");
     const sp = await svc.createSpace("Secret", []);
-    const before = hub.requests.length;
+    const before = admin(hub.requests).length;
     await expect(svc.deleteSpace(sp.id, { confirmed: false })).rejects.toThrow("Deleting this space removes its projects, cards and tasks from every member's computer.");
-    expect(hub.requests.length).toBe(before);
+    expect(admin(hub.requests)).toHaveLength(before);
     await svc.deleteSpace(sp.id, { confirmed: true });
     expect(hub.requests.at(-1)).toMatchObject({ method: "DELETE", path: `/admin/spaces/${sp.id}` });
   });

@@ -23,53 +23,81 @@ export class HubTeamService {
     return (this.last = { teamName: r.team.name, me: r.member, members: r.members, spaces: r.spaces, canAdmin: r.member.role === "OWNER" || r.member.role === "ADMIN" });
   }
 
+  // Local checks are UX only. A cached "no" is re-checked against the hub once, so a promotion is never blocked here.
   private async requireAdmin(what: string): Promise<HubOverview> {
-    // reuse the last overview so a refused action sends nothing; the hub still decides
-    const o = this.last ?? (await this.overview());
+    let o = this.last ?? (await this.overview());
+    if (!o.canAdmin && this.last === o) o = await this.overview();
     if (!o.canAdmin) throw new ValidationError(`Only admins can ${what}.`);
     return o;
+  }
+
+  private async roleOf(o: HubOverview, githubId: string): Promise<HubMember["role"] | undefined> {
+    const found = o.members.find((m) => m.githubId === githubId);
+    if (found) return found.role;
+    return (await this.overview()).members.find((m) => m.githubId === githubId)?.role;
+  }
+
+  private async mutate<T>(f: () => Promise<T>): Promise<T> {
+    try {
+      return await f();
+    } finally {
+      this.last = null;
+    }
+  }
+
+  private static role(role: string): "ADMIN" | "MEMBER" | "READER" {
+    if (role !== "ADMIN" && role !== "MEMBER" && role !== "READER") throw new ValidationError("Choose Admin, Member or Reader.");
+    return role;
   }
 
   async invite(login: string, role: "ADMIN" | "MEMBER" | "READER" = "MEMBER"): Promise<void> {
     await this.requireAdmin("invite people");
     const l = login.trim().replace(/^@/, "").toLowerCase();
     if (!l || !LOGIN.test(l)) throw new ValidationError("Enter a valid GitHub username.");
-    await this.api.invite(l, role);
+    const r = HubTeamService.role(role);
+    await this.mutate(() => this.api.invite(l, r));
   }
 
   async changeRole(githubId: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void> {
     const o = await this.requireAdmin("change roles");
+    const r = HubTeamService.role(role);
     if (githubId === this.actorGithubId) throw new ValidationError("You cannot change your own role.");
-    if (o.members.find((m) => m.githubId === githubId)?.role === "OWNER") throw new ValidationError("The owner's role cannot be changed.");
-    await this.api.setRole(githubId, role);
+    if ((await this.roleOf(o, githubId)) === "OWNER") throw new ValidationError("The owner's role cannot be changed.");
+    await this.mutate(() => this.api.setRole(githubId, r));
   }
 
   async removeMember(githubId: string): Promise<void> {
     const o = await this.requireAdmin("remove people");
-    if (o.members.find((m) => m.githubId === githubId)?.role === "OWNER") throw new ValidationError("The owner cannot be removed.");
-    await this.api.removeMember(githubId);
+    if ((await this.roleOf(o, githubId)) === "OWNER") throw new ValidationError("The owner cannot be removed.");
+    await this.mutate(() => this.api.removeMember(githubId));
   }
 
   async createSpace(name: string, members: { githubId: string; canWrite: boolean }[]): Promise<HubSpaceInfo> {
     await this.requireAdmin("create spaces");
     const n = name.trim();
     if (!n) throw new ValidationError("Give the space a name.");
-    return this.api.createSpace(n, members);
+    return this.mutate(() => this.api.createSpace(n, members));
   }
 
   async updateSpace(id: string, p: { name?: string; members?: { githubId: string; canWrite: boolean }[] }): Promise<void> {
     await this.requireAdmin("change spaces");
-    await this.api.updateSpace(id, p);
+    const patch = { ...p };
+    if (p.name !== undefined) {
+      patch.name = p.name.trim();
+      if (!patch.name) throw new ValidationError("Give the space a name.");
+    }
+    await this.mutate(() => this.api.updateSpace(id, patch));
   }
 
   async deleteSpace(id: string, opts: { confirmed: boolean }): Promise<void> {
     await this.requireAdmin("delete spaces");
     if (opts.confirmed !== true) throw new ValidationError("Deleting this space removes its projects, cards and tasks from every member's computer.");
-    await this.api.deleteSpace(id);
+    await this.mutate(() => this.api.deleteSpace(id));
   }
 
   /** Ends the session on the hub (a down hub does not block it), then forgets it locally. */
   async signOut(dbFile: string, session: Pick<HubSessionPort, "remove"> = hubSessionPort): Promise<{ switchTo: "github" }> {
+    this.last = null;
     try {
       await this.api.logout();
     } catch {

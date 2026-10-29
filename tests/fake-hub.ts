@@ -109,6 +109,7 @@ export async function startFakeHub(opts: FakeHubOpts = {}) {
   return {
     origin,
     requests,
+    members,
     stop: () =>
       new Promise<void>((r) => {
         server.closeAllConnections();
