@@ -45,13 +45,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const last = lastSync._max.lastSyncedAt;
   const profile = await checkProfile(); // last known answer; refreshed in the background, never waits on gh
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
-  const [spaceCount, openConflicts, quarantined, pendingOps, offlineSpaces] = await Promise.all([
+  const [spaceCount, conflictRows, restoreRows, quarantined, pendingOps, offlineSpaces] = await Promise.all([
     db.space.count(),
     db.syncConflict.count({ where: { status: "OPEN" } }),
+    // A restored server needs a decision (send my copies again, or keep the server's), like a conflict does.
+    db.hubRestore.count({ where: { status: "OPEN" } }),
     db.outboxOp.count({ where: { status: "QUARANTINED" } }),
     db.outboxOp.count({ where: { status: { in: ["PENDING", "SENT", "FAILED"] } } }),
     db.space.count({ where: { lastError: "offline" } }),
   ]);
+  const openConflicts = conflictRows + restoreRows;
   // The single state shown in the top bar is the MOST SEVERE one across spaces (what needs a person comes first).
   const SEVERITY: SyncStateName[] = ["conflict", "revoked", "signin", "schema", "rate-limited", "offline", "reconnecting", "syncing", "pending", "read-only", "synced"];
   let aggregate: SyncStateName = openConflicts ? "conflict" : quarantined ? "revoked" : offlineSpaces ? "offline" : pendingOps ? "pending" : "synced";
@@ -60,6 +63,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     const states = await Promise.all((await db.space.findMany()).map(async (s) => (await engine.stateFor(s)).state as SyncStateName));
     aggregate = states.sort((x, y) => SEVERITY.indexOf(x) - SEVERITY.indexOf(y))[0] ?? aggregate;
   }
+  if (restoreRows) aggregate = "conflict";
   // Refreshing tracked source repositories is real work too, and it exists with no team space at all.
   // A job still marked RUNNING by a process that died is not work in progress; it is reclaimed on a timer.
   const bootAt = processStartedAt();

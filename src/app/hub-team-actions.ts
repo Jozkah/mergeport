@@ -70,6 +70,16 @@ export async function hubRemoveMemberAction(fd: FormData): Promise<ActionResult>
   });
 }
 
+export async function hubReinstateMemberAction(fd: FormData): Promise<ActionResult> {
+  return hubRun(async () => {
+    await requireViewer();
+    const { svc } = await hubService();
+    await svc.reinstateMember(str(fd, "githubId"), str(fd, "role"));
+    revalidatePath("/team");
+    return { ok: true, message: "Reinstated. They sign in to the server again; restricted spaces are granted separately." };
+  });
+}
+
 export async function hubCreateSpaceAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
     await requireViewer();

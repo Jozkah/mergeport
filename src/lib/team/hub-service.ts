@@ -72,6 +72,20 @@ export class HubTeamService {
     await this.mutate(() => this.api.removeMember(githubId));
   }
 
+  /** Removed members, for the owner's "Removed" list. Empty for everyone else: the hub does not tell them. */
+  async removedMembers(): Promise<HubMember[]> {
+    const o = this.last ?? (await this.overview());
+    return o.me.role === "OWNER" ? this.api.removedMembers() : [];
+  }
+
+  /** Removal can be undone by the owner only (the hub re-checks). */
+  async reinstateMember(githubId: string, role: string): Promise<void> {
+    const o = this.last ?? (await this.overview());
+    if (o.me.role !== "OWNER") throw new ValidationError("Only the owner can reinstate someone.");
+    const r = HubTeamService.role(role);
+    await this.mutate(() => this.api.reinstateMember(githubId, r));
+  }
+
   /** Spaces with their members. Admins only; the hub re-checks. */
   async adminSpaces(): Promise<HubAdminSpace[]> {
     await this.requireAdmin("see space members");

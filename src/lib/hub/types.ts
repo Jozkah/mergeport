@@ -16,8 +16,9 @@ export type Me = {
 
 export interface HubClient {
   me(): Promise<Me>;
-  pull(spaceId: string, since: bigint): Promise<{ seq: bigint; events: EntityEvent[]; more?: boolean } | "gone">;
-  snapshot(spaceId: string): Promise<{ seq: bigint; entities: EntityFile[] }>;
+  /** `after` is the op this client last read at `since`; "history" means the hub holds a different op there (it was restored from a backup). */
+  pull(spaceId: string, since: bigint, after?: string): Promise<{ epoch?: string; seq: bigint; seqOp?: string; events: EntityEvent[]; more?: boolean } | "gone" | "history">;
+  snapshot(spaceId: string): Promise<{ epoch?: string; seq: bigint; seqOp?: string; entities: EntityFile[] }>;
   push(spaceId: string, ops: Op[]): Promise<{ results: OpResult[]; seq: bigint }>;
 }
 

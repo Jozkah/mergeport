@@ -129,13 +129,13 @@ export function adminRoutes(): Route<HubContext>[] {
       const active = ctx.db.prepare("SELECT 1 FROM member WHERE lower(login) = lower(?) AND status = 'ACTIVE'").get(body.githubLogin);
       if (active) throw new HttpError(409, "already a member");
       const removed = ctx.db.prepare("SELECT 1 FROM member WHERE lower(login) = lower(?) AND status = 'REMOVED'").get(body.githubLogin);
-      if (removed) throw new HttpError(409, "member was removed");
+      if (removed) throw new HttpError(409, "member was removed; the owner can reinstate them");
       // Bind the invite to the numeric id now: a login can be renamed or reassigned, an id cannot.
       const gh = await lookupGithubUser(ctx.config, body.githubLogin);
       if (!gh) throw new HttpError(404, "GitHub user not found");
       const byId = getMember(ctx.db, gh.id);
       if (byId?.status === "ACTIVE") throw new HttpError(409, "already a member");
-      if (byId?.status === "REMOVED") throw new HttpError(409, "member was removed");
+      if (byId?.status === "REMOVED") throw new HttpError(409, "member was removed; the owner can reinstate them");
       const now = ctx.now();
       const invite = {
         id: randomUUID(),
@@ -165,6 +165,27 @@ export function adminRoutes(): Route<HubContext>[] {
       })();
       accessChanged(ctx, { kind: "member-removed", githubId: target.githubId });
       noContent(res);
+    }),
+
+    /**
+     * Removal is not permanent: a mistaken one must be recoverable without editing the database. Only the owner reinstates (an ADMIN may remove
+     * a MEMBER, but giving access back is the higher-trust call). The person returns with the role the owner picks, in the common space only:
+     * removal dropped their restricted-space memberships and sessions, and those are granted again on purpose, never implied.
+     */
+    route<HubContext>("POST", "/admin/members/:githubId/reinstate", async (ctx, req, res, params) => {
+      const first = requireSession(ctx, req).member;
+      requireRole(first, "OWNER");
+      const { role } = await readJson(req, z.object({ role: z.enum(["READER", "MEMBER", "ADMIN"]).default("MEMBER") }));
+      const target = ctx.db.transaction(() => {
+        fresh(ctx, first.githubId, "OWNER");
+        const target = targetMember(ctx, params.githubId);
+        if (target.status !== "REMOVED") throw new HttpError(409, "member is not removed");
+        ctx.db.prepare("UPDATE member SET status = 'ACTIVE', role = ? WHERE github_id = ?").run(role, target.githubId);
+        return target;
+      })();
+      accessChanged(ctx, { kind: "member-role", githubId: target.githubId });
+      const row = ctx.db.prepare("SELECT * FROM member WHERE github_id = ?").safeIntegers(true).get(target.githubId) as Parameters<typeof toMember>[0];
+      json(res, 200, { member: memberJson(toMember(row)) });
     }),
 
     route<HubContext>("PATCH", "/admin/members/:githubId", async (ctx, req, res, params) => {

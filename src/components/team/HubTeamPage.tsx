@@ -21,5 +21,6 @@ export async function HubTeamPage({ backend }: { backend: string }) {
   // Members of each space are an admin-only extra; if it fails the page keeps the name-only list.
   let spaceMembers: HubAdminSpace[] | null = null;
   if (overview?.canAdmin) spaceMembers = await svc.adminSpaces().catch(() => null);
-  return <HubTeamPanel origin={origin} status={status} overview={overview} error={error} spaceMembers={spaceMembers} />;
+  const removedMembers = overview ? await svc.removedMembers().catch(() => []) : [];
+  return <HubTeamPanel origin={origin} status={status} overview={overview} error={error} spaceMembers={spaceMembers} removedMembers={removedMembers} />;
 }

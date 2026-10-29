@@ -38,7 +38,7 @@ describe("GET /spaces/:id/entities", () => {
     expect(next.body.events).toHaveLength(1);
     expect(next.body.events[0]).toMatchObject({ seq: "3", id: "t1", version: 2, opId: "c" });
     const none = await api("GET", "/spaces/common/entities?since=3");
-    expect(none.body).toEqual({ seq: "3", events: [], more: false });
+    expect(none.body).toEqual({ epoch: expect.any(String), seq: "3", seqOp: "c", events: [], more: false });
   });
 
   it("pages with limit and more", async () => {
@@ -153,3 +153,21 @@ describe("entity_event op index", () => {
   });
 });
 
+
+describe("GET /spaces/:id/entities?after= (restored history)", () => {
+  it("answers 410 reason history when the op at `since` is not the one the client read, and gives seqOp otherwise", async () => {
+    await post(api, "common", up("op-a", "t1"));
+    await post(api, "common", up("op-b", "t2"));
+    const ok = await api("GET", "/spaces/common/entities?since=2&after=op-b");
+    expect(ok.status).toBe(200);
+    expect(ok.body.seqOp).toBe("op-b");
+    expect((await api("GET", "/spaces/common/entities?since=1&after=op-a")).status).toBe(200); // a prefix of this history
+    const other = await api("GET", "/spaces/common/entities?since=2&after=op-elsewhere");
+    expect(other.status).toBe(410);
+    expect(other.body).toEqual({ error: "gone", reason: "history" });
+    expect((await api("GET", "/spaces/common/entities?since=2")).status).toBe(200); // older clients do not send it
+    expect((await api("GET", "/spaces/common/entities?since=0&after=anything")).status).toBe(200); // nothing at position 0
+    expect((await api("GET", `/spaces/common/entities?since=2&after=${"x".repeat(129)}`)).status).toBe(400);
+    expect((await api("GET", "/spaces/common/snapshot")).body.seqOp).toBe("op-b");
+  });
+});

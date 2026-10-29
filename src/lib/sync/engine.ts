@@ -39,6 +39,10 @@ export function parseManifest(text: string): Manifest | { error: string } {
   return m as Manifest;
 }
 
+/** One local copy a hub restore replaced. */
+export type RestoreEntry = { type: string; entityId: string; deleted: boolean; data: Data; resend: boolean; /** The hub's version of the entity when the restore was detected (0: absent). */ hubVersion: number };
+const RESTORE_DETAIL_CAP = 100;
+
 export type EntityFile = { schema: number; type: string; id: string; version: number; deleted: boolean; appliedOps: string[]; updatedAt: string; updatedBy: { id: string; login: string }; data: Data };
 
 function parseEntity(text: string, expect: { type: string; id: string }): EntityFile | { error: string } {
@@ -179,30 +183,43 @@ export class SyncEngine {
     // A revoked space is reopened by syncHubSpaces (the hub's member list), never by a pull that happens to succeed.
     if (space.access === "REVOKED") return { changed: false, applied: 0 };
     const start = space.hubCursor;
-    // The cursor is a position in THIS hub's history. A hub that answers with an older position (restored from a backup, rebuilt)
-    // or that no longer holds our position (pruned) cannot be followed by events: start over from a full snapshot.
+    // The cursor is a position in THIS hub's history. A hub that answers with an older position or with a different op at our position
+    // (restored from a backup, then moved on) is not the history we followed: `restored`, and local state is compared with the hub's before it is replaced.
+    // A hub that no longer holds our position because it pruned it is not a restore: the snapshot only moves forward.
     let since = start;
     let cursor = start;
+    let cursorOp = space.hubCursorOp;
+    let restored: false | "certain" | "suspected" = false;
+    let epoch = space.hubEpoch;
     const events: EntityEvent[] = [];
-    let snapshot: { seq: bigint; entities: EntityFile[] } | null = null;
+    let snapshot: { epoch?: string; seq: bigint; seqOp?: string; entities: EntityFile[] } | null = null;
     try {
       for (;;) {
-        const r = await client.pull(space.hubSpaceId, since);
+        const r = await client.pull(space.hubSpaceId, since, cursorOp || undefined);
         if (await this.revokedMeanwhile(space.id)) return { changed: false, applied: 0 };
-        if (r === "gone" || r.seq < since) {
+        // A different hub process than the one this cursor came from may be serving a database restored from a backup: its history can look
+        // like a continuation of ours without being one (our own pushes are not in our cursor). Compare with a snapshot instead of trusting events.
+        const newProcess = r !== "gone" && r !== "history" && !!space.hubEpoch && !!r.epoch && r.epoch !== space.hubEpoch;
+        if (r === "gone" || r === "history" || r.seq < since || newProcess) {
+          restored = r === "history" || (r !== "gone" && r.seq < since) ? "certain" : newProcess ? "suspected" : false;
           snapshot = await client.snapshot(space.hubSpaceId);
           if (await this.revokedMeanwhile(space.id)) return { changed: false, applied: 0 };
           cursor = snapshot.seq;
+          cursorOp = snapshot.seqOp ?? "";
+          epoch = snapshot.epoch ?? epoch;
           break;
         }
+        epoch = r.epoch ?? epoch;
         events.push(...r.events);
         const last = r.events[r.events.length - 1];
         if (r.more && last) {
           since = last.seq;
           cursor = last.seq;
+          cursorOp = last.opId;
           continue;
         }
         cursor = r.seq;
+        cursorOp = r.seqOp ?? last?.opId ?? "";
         break;
       }
     } catch (e) {
@@ -231,11 +248,21 @@ export class SyncEngine {
     }
 
     const ctx = await this.ctx(space);
+    const replaced = restored && snapshot ? await this.collectRestoreLoss(ctx, snapshot.entities, restored === "certain") : null;
     const { applied, skipped, failedSeq } = await this.applyHubEntities(ctx, items, vanished);
     if (failedSeq !== null) {
       // The cursor stays before the first entity that could not be applied, so the next pull retries it.
-      if (snapshot) cursor = start;
-      else if (failedSeq - 1n < cursor) cursor = failedSeq - 1n < start ? start : failedSeq - 1n;
+      if (snapshot) {
+        cursor = start;
+        cursorOp = space.hubCursorOp;
+      } else if (failedSeq - 1n < cursor) {
+        cursor = failedSeq - 1n < start ? start : failedSeq - 1n;
+        // The op at a cursor this far back is not known here; the hub skips the position check when it is not given one.
+        cursorOp = cursor === start ? space.hubCursorOp : "";
+      }
+    } else if (replaced && (replaced.rolledBack > 0 || replaced.kept > 0)) {
+      await this.db.hubRestore.create({ data: { spaceId: space.id, rolledBack: replaced.rolledBack, kept: replaced.kept, detail: replaced.detail as Prisma.InputJsonValue } });
+      this.emit(space.id, "state");
     }
 
     const now = this.now();
@@ -243,7 +270,7 @@ export class SyncEngine {
     await this.db.space.update({
       where: { id: space.id },
       data: {
-        hubCursor: cursor, lastPolledAt: now, ...(applied || moved ? { lastChangedAt: now, unchangedPolls: 0 } : {}),
+        hubCursor: cursor, hubCursorOp: cursorOp, hubEpoch: failedSeq !== null && snapshot ? space.hubEpoch : epoch, lastPolledAt: now, ...(applied || moved ? { lastChangedAt: now, unchangedPolls: 0 } : {}),
         rateLimitedUntil: null,
         lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity(ies): ${skipped[0]}` : null,
       },
@@ -251,6 +278,70 @@ export class SyncEngine {
     await this.schedule({ ...space, unchangedPolls: applied || moved ? 0 : space.unchangedPolls }, applied || moved ? "changed" : "unchanged");
     if (applied) this.emit(space.id, "pulled");
     return { changed: applied > 0 || moved, applied };
+  }
+
+  /**
+   * The hub's history is not the one this computer followed. Before the hub's state replaces local state, record which clean local copies are about to
+   * be replaced (`kept` counts entities with unsent edits: reconcile merges those against the restored state and never drops them).
+   * `resend` marks a copy that is provably newer than what the hub now holds (higher version, or gone from the hub): those can be sent back on request.
+   */
+  private async collectRestoreLoss(ctx: Ctx, entities: EntityFile[], certain: boolean): Promise<{ rolledBack: number; kept: number; detail: RestoreEntry[] }> {
+    const space = ctx.space;
+    const hub = new Map(entities.map((f) => [`${f.type}/${f.id}`, f]));
+    let rolledBack = 0;
+    const detail: RestoreEntry[] = [];
+    const unsent = new Set((await this.db.outboxOp.findMany({ where: { spaceId: space.id, status: { in: ["PENDING", "SENT", "CONFLICT"] } }, select: { entityType: true, entityId: true } })).map((o) => `${o.entityType}/${o.entityId}`));
+    for (const def of ENTITY_TYPES) {
+      const local = await this.localMap(def, ctx.commonSpaceId);
+      for (const se of await this.db.syncEntity.findMany({ where: { spaceId: space.id, type: def.type } })) {
+        const row = local.get(se.entityId);
+        if (row?.spaceId && row.spaceId !== space.id) continue;
+        if (unsent.has(`${def.type}/${se.entityId}`)) continue;
+        const h = hub.get(`${def.type}/${se.entityId}`);
+        const base = (se.baseData as Data | null) ?? {};
+        const differs = h ? h.deleted !== se.deleted || (!h.deleted && !same(h.data, base)) : !se.deleted;
+        if (!differs) continue;
+        // Only when the hub's history is known to differ from ours is a hub entity that is ahead of our copy a loss; a restarted hub whose
+        // history may simply be a continuation is expected to be ahead, and that is an ordinary remote edit.
+        const resend = h ? h.version <= se.baseVersion : true;
+        if (!certain && !resend) continue;
+        rolledBack++;
+        if (detail.length >= RESTORE_DETAIL_CAP) continue;
+        detail.push({ type: def.type, entityId: se.entityId, deleted: se.deleted || !row, data: row?.data ?? base, resend, hubVersion: h?.version ?? 0 });
+      }
+    }
+    return { rolledBack, kept: unsent.size, detail };
+  }
+
+  /** Puts the local copies a restore replaced back as ordinary unsent edits, against the hub's current versions. */
+  async resendRestored(restoreId: string): Promise<{ queued: number }> {
+    const rec = await this.db.hubRestore.findUniqueOrThrow({ where: { id: restoreId } });
+    if (rec.status !== "OPEN") return { queued: 0 };
+    const space = await this.db.space.findUniqueOrThrow({ where: { id: rec.spaceId } });
+    const ctx = await this.ctx(space);
+    let queued = 0;
+    for (const e of rec.detail as unknown as RestoreEntry[]) {
+      const def = entityDef(e.type);
+      if (!def || !e.resend) continue;
+      const key = { spaceId_type_entityId: { spaceId: space.id, type: e.type, entityId: e.entityId } };
+      const se = await this.db.syncEntity.findUnique({ where: key });
+      // Anything done to this entity since the restore wins over the old copy.
+      if (await this.db.outboxOp.count({ where: { spaceId: space.id, entityType: e.type, entityId: e.entityId, status: { in: ["PENDING", "SENT", "CONFLICT", "QUARANTINED"] } } })) continue;
+      const local = (await this.localMap(def, ctx.commonSpaceId)).get(e.entityId);
+      const base = (se?.baseData as Data | null) ?? {};
+      if (local && !same(local.data, base)) continue;
+      // Against the hub's version when the restore was seen: if it has moved since, the push answers stale and the ordinary merge decides.
+      if (!e.deleted) await def.apply(this.db, ctx, e.entityId, e.data, e.hubVersion);
+      await this.db.outboxOp.create({ data: { id: this.opId(), spaceId: space.id, entityType: e.type, entityId: e.entityId, kind: e.deleted ? "DELETE" : "UPSERT", ...(e.deleted ? {} : { data: e.data as Prisma.InputJsonValue }), baseVersion: e.hubVersion } });
+      queued++;
+    }
+    await this.db.hubRestore.update({ where: { id: restoreId }, data: { status: "RESENT" } });
+    this.emit(space.id, "state");
+    return { queued };
+  }
+
+  async dismissRestored(restoreId: string): Promise<void> {
+    await this.db.hubRestore.updateMany({ where: { id: restoreId, status: "OPEN" }, data: { status: "DISMISSED" } });
   }
 
   /** The per-entity apply loop for hub events and snapshots: same guards as a GitHub pull, in ENTITY_TYPES order. */

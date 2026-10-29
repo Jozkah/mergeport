@@ -104,6 +104,18 @@ sqlite3 hub.db ".backup hub-$(date +%F).db"
 
 Run it from `MERGEPORT_HUB_DATA`. Back up that file; it is the whole state.
 
+### Restoring
+
+Stop the hub, delete `hub.db`, `hub.db-wal` and `hub.db-shm`, copy the backup to `hub.db`, start the hub. **Everything written after the backup is gone from the hub**, including the sessions and members added since, so people sign in again and removed members may be back.
+
+Clients do not silently follow a restored hub. Each hub process has its own id, and a client that sees a different one compares its data with the hub's before replacing anything:
+
+- Local edits that were not sent yet are kept, merged against the restored data, and sent.
+- Saved copies that were newer than the restored hub are replaced by the hub's version, and each person sees a notice on the Sync page ("Server restored from a backup") listing what was replaced. From there they can send their newer copies back to the server or keep the server's version.
+- A restart of the same database (no restore) also makes each client compare once, and shows nothing when nothing differs.
+
+Tell your team before you restore: whatever they did after the backup has to be re-sent by them if you want it back.
+
 ## Upgrade
 
 Stop the hub, `git pull`, `npm ci`, start it. Migrations apply at start. A database written by a newer hub is refused, so roll back the code rather than the data.
@@ -113,7 +125,8 @@ Stop the hub, `git pull`, `npm ci`, start it. Migrations apply at start. A datab
 - **Sessions** last 30 days and slide: every authenticated request extends them.
 - **Rate limits**: 60 requests per 10 s per session; 10 device-flow starts per minute per IP. Over the limit answers `429` with `Retry-After` (seconds).
 - **Ops body cap**: a push request body is capped at 16 MiB; larger answers `413`. Clients should batch ops by byte size.
-- **Reading events**: `GET /spaces/:id/entities?since=<seq>` returns `{ seq, events, more }`, in pages of 500 (`limit` can lower that). A client must loop until `more` is `false`, using the returned `seq` as the next `since`.
+- **Reading events**: `GET /spaces/:id/entities?since=<seq>` returns `{ epoch, seq, seqOp, events, more }`, in pages of 500 (`limit` can lower that). A client must loop until `more` is `false`, using the returned `seq` as the next `since`.
+- **Removed members**: removing a member revokes their sessions and their restricted-space access. The owner can reinstate them later (Team page, or `POST /admin/members/:githubId/reinstate {"role":"MEMBER"}`); they return to the common space only and are added to restricted spaces again on purpose.
 - **Event log pruning**: old events are pruned. Sessions with no cursor for a space do not hold pruning back. A client whose `since` has been pruned gets `410` and re-snapshots that space.
 - **Logs**: one JSON line per request (`method`, `path`, `status`, `ms`, `member` when known). Never bodies, query strings, session tokens, GitHub tokens, device codes or user codes.
 

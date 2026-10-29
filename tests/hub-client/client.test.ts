@@ -76,7 +76,7 @@ describe("HttpHubClient against FakeHub", () => {
   it("pull returns events with bigint seq, gone after prune", async () => {
     await client.push("common", [op("o1", 0)]);
     const p = await client.pull("common", 0n);
-    if (p === "gone") throw new Error("unexpected gone");
+    if (p === "gone" || p === "history") throw new Error("unexpected " + p);
     expect(p.seq).toBe(1n);
     expect(p.events[0].seq).toBe(1n);
     expect(p.events[0].opId).toBe("o1");

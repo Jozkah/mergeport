@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createPrisma, resolveDbFile, type Db } from "@/lib/db";
-import { HubForbidden, HubRequestError, HubUnauthorized, type HubAdminApi, type HubAdminSpace, type HubLinkStatus, type HubSessionPort } from "@/lib/hub/ports";
+import { HubForbidden, HubRequestError, HubUnauthorized, type HubAdminApi, type HubAdminSpace, type HubLinkStatus, type HubMember, type HubSessionPort } from "@/lib/hub/ports";
 import { clearHubSession, loadHubSession, openVault, saveHubSession } from "@/lib/hub/session-vault";
 import type { HubLinkState } from "@/lib/hub/link";
 
@@ -94,6 +94,14 @@ export function httpHubAdmin(origin: string, token: () => Promise<string | null>
     invite: async (login, role) => void (await call("POST", "/admin/invites", { githubLogin: login, role })),
     // DELETE /admin/members/:githubId -> 204
     removeMember: async (id) => void (await call("DELETE", `/admin/members/${seg(id)}`)),
+    // GET /admin/members -> { members: [{ githubId, login, name, avatarUrl, role, status }] } (all statuses; ADMIN+)
+    removedMembers: async () => {
+      const list = ((await call("GET", "/admin/members")) as { members?: unknown } | null)?.members;
+      if (!Array.isArray(list)) throw new HubRequestError("The server sent an unreadable answer", 200);
+      return (list as HubMember[]).filter((m) => m && typeof m.githubId === "string" && typeof m.login === "string" && m.status === "REMOVED");
+    },
+    // POST /admin/members/:githubId/reinstate { role } -> 200 { member } (OWNER)
+    reinstateMember: async (id, role) => void (await call("POST", `/admin/members/${seg(id)}/reinstate`, { role })),
     // PATCH /admin/members/:githubId { role } -> 200 { member }
     setRole: async (id, role) => void (await call("PATCH", `/admin/members/${seg(id)}`, { role })),
     adminSpaces: async () => parseAdminSpaces(await call("GET", "/admin/spaces")),

@@ -162,3 +162,31 @@ describe("HubTeamService", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe("HubTeamService reinstatement", () => {
+  const stub = (role: "OWNER" | "ADMIN") => {
+    const calls: string[] = [];
+    const self = { githubId: "1", login: "boss", name: null, avatarUrl: null, role, status: "ACTIVE" as const };
+    const api = {
+      me: async () => ({ member: self, team: { name: "T" }, members: [self], spaces: [] }),
+      removedMembers: async () => [{ githubId: "9", login: "gone", name: null, avatarUrl: null, role: "MEMBER" as const, status: "REMOVED" as const }],
+      reinstateMember: async (id: string, r: string) => void calls.push(`reinstate:${id}:${r}`),
+    } as unknown as import("@/lib/hub/ports").HubAdminApi;
+    return { svc: new HubTeamService(api, "1"), calls };
+  };
+
+  it("the owner sees removed members and reinstates one with a chosen role", async () => {
+    const { svc, calls } = stub("OWNER");
+    expect((await svc.removedMembers()).map((m) => m.login)).toEqual(["gone"]);
+    await svc.reinstateMember("9", "READER");
+    expect(calls).toEqual(["reinstate:9:READER"]);
+    await expect(svc.reinstateMember("9", "OWNER")).rejects.toThrow(ValidationError);
+  });
+
+  it("an admin sees nothing and cannot reinstate, before any request is sent", async () => {
+    const { svc, calls } = stub("ADMIN");
+    expect(await svc.removedMembers()).toEqual([]);
+    await expect(svc.reinstateMember("9", "MEMBER")).rejects.toThrow(ValidationError);
+    expect(calls).toEqual([]);
+  });
+});

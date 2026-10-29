@@ -25,7 +25,7 @@ export async function syncHubSpaces(db: Db, engine: SyncEngine, me: Me, origin?:
     }
     // Access that came back after a revocation starts from a clean position: the purge dropped everything this cursor referred to.
     const reopened = existing.access === "REVOKED";
-    await db.space.update({ where: { id: existing.id }, data: { ...fields, access: "OK", ...(reopened ? { hubCursor: 0n, lastError: null, nextPollAt: null } : {}) } });
+    await db.space.update({ where: { id: existing.id }, data: { ...fields, access: "OK", ...(reopened ? { hubCursor: 0n, hubCursorOp: "", hubEpoch: "", lastError: null, nextPollAt: null } : {}) } });
     if (reopened) added.push(hs.id);
     if (hs.kind === "COMMON") commonId = existing.id;
   }

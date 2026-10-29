@@ -79,6 +79,41 @@ describe("invites", () => {
     expect((await hub.api(t.olive)("DELETE", "/admin/members/3")).status).toBe(204);
     const r = await hub.api(t.olive)("POST", "/admin/invites", { githubLogin: "mia", role: "MEMBER" });
     expect(r.status).toBe(409);
-    expect(r.body).toEqual({ error: "member was removed" });
+    expect(r.body).toEqual({ error: "member was removed; the owner can reinstate them" });
+  });
+});
+
+describe("reinstating a removed member", () => {
+  it("only the owner can; the person signs in again as the chosen role, in the common space only", async () => {
+    const t = await team();
+    const restricted = (await hub.api(t.olive)("POST", "/admin/spaces", { name: "Secret", members: [{ githubId: "3", canWrite: true }] })).body.space.id as string;
+    expect((await hub.api(t.mia)("GET", `/spaces/${restricted}/snapshot`)).status).toBe(200);
+    expect((await hub.api(t.adam)("DELETE", "/admin/members/3")).status).toBe(204); // an admin removed a member
+    expect((await hub.api(t.mia)("GET", "/me")).status).toBe(401); // sessions revoked
+    expect((await hub.api(t.olive)("GET", "/admin/members")).body.members.find((m: { githubId: string }) => m.githubId === "3").status).toBe("REMOVED");
+
+    // not the removing admin, not the person, not a plain member
+    for (const who of [t.adam, t.max]) expect((await hub.api(who)("POST", "/admin/members/3/reinstate", { role: "MEMBER" })).status).toBe(403);
+    expect((await hub.api(t.olive)("POST", "/admin/members/4/reinstate", {})).status).toBe(409); // not removed
+    expect((await hub.api(t.olive)("POST", "/admin/members/3/reinstate", { role: "OWNER" })).status).toBe(400);
+
+    const r = await hub.api(t.olive)("POST", "/admin/members/3/reinstate", { role: "READER" });
+    expect(r.status).toBe(200);
+    expect(r.body.member).toMatchObject({ githubId: "3", status: "ACTIVE", role: "READER" });
+
+    // the old session stays dead; signing in again works, with the chosen role and without the restricted space
+    expect((await hub.api(t.mia)("GET", "/me")).status).toBe(401);
+    const again = await signInAs(hub, 3n, "mia");
+    const me = (await hub.api(again)("GET", "/me")).body;
+    expect(me.member).toMatchObject({ role: "READER", status: "ACTIVE" });
+    expect(me.spaces.map((s: { kind: string }) => s.kind)).toEqual(["COMMON"]);
+    expect((await hub.api(again)("GET", `/spaces/${restricted}/snapshot`)).status).toBe(404);
+    expect((await hub.api(t.olive)("POST", "/admin/members/3/reinstate", {})).status).toBe(409); // already active
+  });
+
+  it("defaults to MEMBER, and an invite for a removed person points at it", async () => {
+    const t = await team();
+    expect((await hub.api(t.olive)("DELETE", "/admin/members/3")).status).toBe(204);
+    expect((await hub.api(t.olive)("POST", "/admin/members/3/reinstate", {})).body.member.role).toBe("MEMBER");
   });
 });

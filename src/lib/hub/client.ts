@@ -49,13 +49,16 @@ export class HttpHubClient implements HubClient {
     this.origin = normalizeHubOrigin(origin);
   }
 
-  private async call(path: string, init: RequestInit = {}, allow410 = false): Promise<Response | "gone"> {
+  private async call(path: string, init: RequestInit = {}, allow410 = false): Promise<Response | "gone" | "history"> {
     const token = await this.getToken();
     if (!token) throw new HubError("auth", "Not signed in");
     const headers: Record<string, string> = { authorization: `Bearer ${token}`, accept: "application/json" };
     if (init.body) headers["content-type"] = "application/json";
     const res = await send(this.fetchImpl, this.origin + path, { ...init, headers, redirect: "error" });
-    if (res.status === 410 && allow410) return "gone";
+    if (res.status === 410 && allow410) {
+      const b = (await res.json().catch(() => null)) as { reason?: string } | null;
+      return b?.reason === "history" ? "history" : "gone";
+    }
     if (!res.ok) throw failure(res);
     return res;
   }
@@ -64,17 +67,17 @@ export class HttpHubClient implements HubClient {
     return json<Me>((await this.call("/me")) as Response);
   }
 
-  async pull(spaceId: string, since: bigint) {
-    const res = await this.call(`/spaces/${encodeURIComponent(spaceId)}/entities?since=${since}`, {}, true);
-    if (res === "gone") return "gone" as const;
-    const b = await json<{ seq: string; events: EventJson[]; more?: boolean }>(res);
+  async pull(spaceId: string, since: bigint, after?: string) {
+    const res = await this.call(`/spaces/${encodeURIComponent(spaceId)}/entities?since=${since}${after ? `&after=${encodeURIComponent(after)}` : ""}`, {}, true);
+    if (res === "gone" || res === "history") return res;
+    const b = await json<{ epoch?: string; seq: string; seqOp?: string; events: EventJson[]; more?: boolean }>(res);
     const events: EntityEvent[] = b.events.map((e) => ({ ...e, seq: BigInt(e.seq) }));
-    return { seq: BigInt(b.seq), events, more: b.more };
+    return { epoch: b.epoch, seq: BigInt(b.seq), seqOp: b.seqOp, events, more: b.more };
   }
 
   async snapshot(spaceId: string) {
-    const b = await json<{ seq: string; entities: EntityFile[] }>((await this.call(`/spaces/${encodeURIComponent(spaceId)}/snapshot`)) as Response);
-    return { seq: BigInt(b.seq), entities: b.entities };
+    const b = await json<{ epoch?: string; seq: string; seqOp?: string; entities: EntityFile[] }>((await this.call(`/spaces/${encodeURIComponent(spaceId)}/snapshot`)) as Response);
+    return { epoch: b.epoch, seq: BigInt(b.seq), seqOp: b.seqOp, entities: b.entities };
   }
 
   async push(spaceId: string, ops: Op[]) {

@@ -34,6 +34,8 @@ function fakeApi(me: string, over: Partial<HubAdminApi> = {}) {
     me: async () => ({ member: people.find((p) => p.githubId === me)!, team: { name: "Fake Team" }, members: people, spaces }),
     invite: async (l) => void calls.push(`invite:${l}`),
     removeMember: async (id) => void calls.push(`remove:${id}`),
+    removedMembers: async () => [member("9", "gone", "MEMBER", "REMOVED")],
+    reinstateMember: async (id, r) => void calls.push(`reinstate:${id}:${r}`),
     setRole: async (id, r) => void calls.push(`role:${id}:${r}`),
     adminSpaces: async () => [{ id: "c", kind: "COMMON", name: "Common", members: [] }, { id: "r1", kind: "RESTRICTED", name: "Secret", members: [{ githubId: "2", canWrite: true }, { githubId: "3", canWrite: false }] }],
     createSpace: async (n, m) => (calls.push(`space:${n}:${JSON.stringify(m)}`), spaces[1]),
@@ -115,6 +117,16 @@ describe("HubTeamPage rendering", () => {
     expect(html).toContain("Sign out of this server");
     expect(html).toContain("Live");
     expect(html).not.toContain("pending");
+  });
+
+  it("the owner sees removed people with a Reinstate control; an admin does not", async () => {
+    const owner = (await render("1")).html;
+    expect(owner).toContain("@gone");
+    expect(owner).toContain("Reinstate");
+    expect(owner).toContain("restricted spaces are granted again on purpose");
+    const adm = (await render("2")).html;
+    expect(adm).not.toContain("@gone");
+    expect(adm).not.toContain("Reinstate");
   });
 
   it("admin sees each restricted space's members with their access", async () => {

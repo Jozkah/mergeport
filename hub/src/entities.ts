@@ -116,9 +116,24 @@ function minRetainedSeq(db: HubDb, spaceId: string, spaceSeq: bigint): bigint {
   return r.m === null ? spaceSeq : r.m - 1n;
 }
 
-export function eventsSince(db: HubDb, spaceId: string, since: bigint, limit = 500): { seq: bigint; events: EventJson[]; more: boolean } | "gone" {
+/** The op that produced the event at `seq` ("" when there is none: seq 0, or an event already pruned). */
+function opAt(db: HubDb, spaceId: string, seq: bigint): string {
+  if (seq <= 0n) return "";
+  const r = db.prepare("SELECT op_id FROM entity_event WHERE space_id = ? AND seq = ?").get(spaceId, seq) as { op_id: string | null } | undefined;
+  return r?.op_id ?? "";
+}
+
+/**
+ * `after` is the op the client last read at `since`. If this log holds a different op at that position, the client's history is not a prefix
+ * of ours (the hub was restored from a backup and then moved on): events cannot reconcile it, only a snapshot plus the client's own decision.
+ */
+export function eventsSince(db: HubDb, spaceId: string, since: bigint, limit = 500, after?: string): { seq: bigint; seqOp: string; events: EventJson[]; more: boolean } | "gone" | "history" {
   const spaceSeq = currentSeq(db, spaceId);
   if (since < minRetainedSeq(db, spaceId, spaceSeq) && since < spaceSeq) return "gone";
+  if (after) {
+    const here = opAt(db, spaceId, since);
+    if (here && here !== after) return "history";
+  }
   const rows = q(
     db,
     `SELECT ev.seq, ev.type, ev.entity_id, ev.version, ev.deleted, ev.data, ev.op_id, ev.actor_github_id, ev.at, m.login
@@ -132,13 +147,14 @@ export function eventsSince(db: HubDb, spaceId: string, since: bigint, limit = 5
     opId: r.op_id ?? "",
   }));
   const seq = more ? BigInt(events[events.length - 1].seq) : spaceSeq;
-  return { seq, events, more };
+  return { seq, seqOp: more ? events[events.length - 1].opId : opAt(db, spaceId, seq), events, more };
 }
 
-export function snapshot(db: HubDb, spaceId: string): { seq: bigint; entities: EntityJson[] } {
+export function snapshot(db: HubDb, spaceId: string): { seq: bigint; seqOp: string; entities: EntityJson[] } {
   return db.transaction(() => {
     const rows = q(db, `${ENTITY_SELECT} WHERE e.space_id = ? ORDER BY e.type, e.entity_id`).all(spaceId) as EntityRow[];
-    return { seq: currentSeq(db, spaceId), entities: rows.map(entityJson) };
+    const seq = currentSeq(db, spaceId);
+    return { seq, seqOp: opAt(db, spaceId, seq), entities: rows.map(entityJson) };
   })();
 }
 
@@ -243,17 +259,20 @@ export function entityRoutes(): Route<HubContext>[] {
         if (!/^[0-9]{1,4}$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 500) throw new HttpError(400, "invalid limit");
         limit = Number(rawLimit);
       }
+      const rawAfter = url.searchParams.get("after") ?? "";
+      if (rawAfter.length > 128) throw new HttpError(400, "invalid after");
       const since = BigInt(rawSince);
-      const r = eventsSince(ctx.db, params.id, since, limit);
+      const r = eventsSince(ctx.db, params.id, since, limit, rawAfter || undefined);
       if (r === "gone") return json(res, 410, { error: "gone" });
+      if (r === "history") return json(res, 410, { error: "gone", reason: "history" });
       recordCursor(ctx.db, session.idHash, params.id, since);
-      json(res, 200, { seq: r.seq.toString(), events: r.events, more: r.more });
+      json(res, 200, { epoch: ctx.epoch, seq: r.seq.toString(), seqOp: r.seqOp, events: r.events, more: r.more });
     }),
 
     route<HubContext>("GET", "/spaces/:id/snapshot", (ctx, req, res, params) => {
       access(ctx, req, params.id);
       const s = snapshot(ctx.db, params.id);
-      json(res, 200, { seq: s.seq.toString(), entities: s.entities });
+      json(res, 200, { epoch: ctx.epoch, seq: s.seq.toString(), seqOp: s.seqOp, entities: s.entities });
     }),
 
     route<HubContext>("POST", "/spaces/:id/ops", async (ctx, req, res, params) => {

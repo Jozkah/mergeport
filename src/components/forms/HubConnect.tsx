@@ -91,7 +91,7 @@ export function HubConnect() {
           return false;
         }
         if (r.status === "ok" && r.switch) setStep({ s: "switching", sw: r.switch });
-        else if (r.status === "refused") reset(r.reason === "removed" ? "You were removed from that server. Ask its owner to invite you again." : "That GitHub account is not invited to this server. Ask its owner to invite you.");
+        else if (r.status === "refused") reset(r.reason === "removed" ? "You were removed from that server. Ask its owner to reinstate you." : "That GitHub account is not invited to this server. Ask its owner to invite you.");
         else if (r.status === "expired") reset("The code expired. Start again.");
         else reset(r.message ?? POLL_ERRORS[r.error ?? ""] ?? "Could not finish connecting.");
         return true;

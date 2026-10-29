@@ -7,7 +7,7 @@ import { HttpHubClient } from "@/lib/hub/client";
 import type { SocketLike } from "@/lib/hub/link";
 import { startHubLive } from "@/lib/hub/live";
 import { syncHubSpaces } from "@/lib/hub/spaces";
-import type { Op } from "@/lib/hub/types";
+import { HubError, type Op } from "@/lib/hub/types";
 import { ensureLocalProfile } from "@/lib/local/profile";
 import { createColumnsForProject } from "@/lib/services/planning";
 import { SyncEngine } from "@/lib/sync/engine";
@@ -238,5 +238,157 @@ describe("two clients against the real hub", () => {
     expect(await alice.db.project.findUnique({ where: { id: "s1" } })).toBeNull();
     await expect(alice.client.pull(secretId, 0n)).rejects.toMatchObject({ kind: "not-found" });
     expect((await olive.db.project.findUnique({ where: { id: "s1" } }))?.name).toBe("Hidden");
+  });
+});
+
+/**
+ * The hub's database is replaced by an older copy of itself (a real file-level restore: stop the hub, put the backup file back, start it again on
+ * the same address), with the clients' sessions restored along with it. No client may silently diverge, and nothing unsent may be dropped.
+ */
+describe("hub restored from a backup", () => {
+  async function backupHub(): Promise<string> {
+    const copy = path.join(hub.dataDir, "backup.db");
+    await hub.db.backup(copy);
+    return copy;
+  }
+  async function restoreHub(backup: string): Promise<void> {
+    const port = Number(new URL(hub.url).port);
+    const dataDir = hub.dataDir;
+    await hub.close();
+    for (const sfx of ["-wal", "-shm"]) fs.rmSync(path.join(dataDir, "hub.db" + sfx), { force: true });
+    fs.copyFileSync(backup, path.join(dataDir, "hub.db"));
+    hub = await startTestHub({ dataDir, port });
+  }
+  /** The first request on a connection the old process held open fails once, as it would for a real client; the retry is the client's own backoff. */
+  const resync = async (c: Client) => {
+    try {
+      await c.sync();
+    } catch (e) {
+      if (!(e instanceof HubError) || e.kind !== "network") throw e;
+      await c.sync();
+    }
+  };
+  const hubTitle = (id: string) => (JSON.parse((hub.db.prepare("SELECT data FROM entity WHERE space_id = 'common' AND type = 'card' AND entity_id = ?").get(id) as { data: string }).data) as { title: string }).title;
+  const records = (c: Client) => c.db.hubRestore.findMany({ orderBy: { at: "asc" } });
+
+  it("clean clients that were newer than the backup are rolled back to it, explicitly, and the old copy can be sent again", async () => {
+    await seedBoard();
+    const backup = await backupHub();
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Newer" } });
+    await olive.engine.syncSpace(await olive.space("common"));
+    await resync(alice);
+    expect(await title(alice, "c1")).toBe("Newer");
+
+    await restoreHub(backup);
+    expect(hubTitle("c1")).toBe("One");
+    await resync(olive);
+    await resync(alice);
+
+    expect(await title(olive, "c1")).toBe("One");
+    expect(await title(alice, "c1")).toBe("One");
+    for (const c of [olive, alice]) {
+      const [rec] = await records(c);
+      expect(rec).toMatchObject({ status: "OPEN", rolledBack: 1, kept: 0 });
+      expect(rec.detail).toEqual([expect.objectContaining({ type: "card", entityId: "c1", resend: true, data: expect.objectContaining({ title: "Newer" }) })]);
+    }
+
+    const [rec] = await records(alice);
+    expect(await alice.engine.resendRestored(rec.id)).toEqual({ queued: 1 });
+    await alice.engine.syncSpace(await alice.space("common"));
+    expect(hubTitle("c1")).toBe("Newer");
+    await resync(olive);
+    expect(await title(olive, "c1")).toBe("Newer");
+    expect((await records(alice))[0].status).toBe("RESENT");
+    await olive.engine.dismissRestored((await records(olive))[0].id);
+    expect((await records(olive))[0].status).toBe("DISMISSED");
+  });
+
+  it("an offline client whose cursor the restored hub has moved past is not left on its own history", async () => {
+    await seedBoard();
+    const backup = await backupHub();
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Newer-after-backup" } });
+    await olive.engine.syncSpace(await olive.space("common"));
+    await resync(alice);
+    expect(await title(alice, "c1")).toBe("Newer-after-backup");
+    const aliceCursor = (await alice.space("common")).hubCursor;
+
+    await restoreHub(backup);
+    await resync(olive); // olive notices first: the hub is behind her cursor
+    expect(await title(olive, "c1")).toBe("One");
+    for (const t of ["x1", "x2", "x3"]) {
+      await olive.db.planningItem.update({ where: { id: "c2" }, data: { title: t } });
+      await olive.engine.syncSpace(await olive.space("common"));
+    }
+    // the restored hub has moved PAST alice's cursor, so a bare event pull would have looked normal
+    expect(BigInt((hub.db.prepare("SELECT seq FROM space WHERE id = 'common'").get() as { seq: number }).seq)).toBeGreaterThan(aliceCursor);
+
+    await resync(alice);
+    expect(await title(alice, "c1")).toBe("One");
+    expect(await title(alice, "c2")).toBe("x3");
+    expect(await alice.db.hubRestore.count({ where: { status: "OPEN", rolledBack: { gte: 1 } } })).toBe(1);
+  });
+
+  it("unsent edits survive a restore: kept, merged against the restored state and sent", async () => {
+    await seedBoard();
+    const backup = await backupHub();
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Newer" } });
+    await olive.engine.syncSpace(await olive.space("common"));
+    await resync(alice);
+    await alice.db.planningItem.update({ where: { id: "c2" }, data: { title: "Mine" } });
+    await alice.engine.capture();
+    expect(await alice.db.outboxOp.count({ where: { entityId: "c2", status: "PENDING" } })).toBe(1);
+
+    await restoreHub(backup);
+    await resync(alice);
+
+    expect(await title(alice, "c2")).toBe("Mine");
+    expect(await title(alice, "c1")).toBe("One");
+    expect(hubTitle("c2")).toBe("Mine");
+    expect(await alice.db.outboxOp.count({ where: { status: { in: ["FAILED", "QUARANTINED", "CONFLICT"] } } })).toBe(0);
+    const [rec] = await records(alice);
+    expect(rec).toMatchObject({ status: "OPEN", rolledBack: 1, kept: 1 });
+  });
+
+  it("a card created after the backup is gone from the restored hub: listed as replaced, and sendable again against version 0", async () => {
+    await seedBoard();
+    const backup = await backupHub();
+    await makeCard(olive, "p1", "c3", "Created later");
+    await olive.engine.syncSpace(await olive.space("common"));
+    await alice.sync();
+    expect(await title(alice, "c3")).toBe("Created later");
+
+    await restoreHub(backup);
+    await resync(alice);
+    expect(await alice.db.planningItem.findUnique({ where: { id: "c3" } })).toBeNull();
+    const [rec] = await records(alice);
+    expect(rec.detail).toEqual([expect.objectContaining({ type: "card", entityId: "c3", resend: true, hubVersion: 0, data: expect.objectContaining({ title: "Created later" }) })]);
+
+    expect(await alice.engine.resendRestored(rec.id)).toEqual({ queued: 1 });
+    await alice.engine.syncSpace(await alice.space("common"));
+    expect(hubTitle("c3")).toBe("Created later");
+    expect(await alice.db.syncConflict.count()).toBe(0);
+  });
+
+  it("an ordinary restart of the same database is not reported as a restore, even when a client is behind", async () => {
+    await seedBoard();
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Ahead" } });
+    await olive.engine.syncSpace(await olive.space("common"));
+    const port = Number(new URL(hub.url).port);
+    const dataDir = hub.dataDir;
+    await hub.close();
+    hub = await startTestHub({ dataDir, port });
+    await resync(alice);
+    expect(await title(alice, "c1")).toBe("Ahead");
+    expect(await alice.db.hubRestore.count()).toBe(0);
+  });
+
+  it("a restore that loses nothing local leaves no record, and an ordinary prune is not treated as a restore", async () => {
+    await seedBoard();
+    const backup = await backupHub();
+    await restoreHub(backup);
+    await resync(olive);
+    await resync(alice);
+    expect(await olive.db.hubRestore.count()).toBe(0);
+    expect(await alice.db.hubRestore.count()).toBe(0);
   });
 });

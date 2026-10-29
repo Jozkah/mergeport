@@ -4,7 +4,7 @@ import { Select } from "@/components/ui/Select";
 import { Sheet } from "@/components/ui/dialog";
 import { Avatar, Banner, EmptyState, Mono, PageHeader, Panel, SimplePill } from "@/components/ui/primitives";
 import { Lock, ShieldCheck, Trash2, Users } from "@/components/ui/icons";
-import { hubChangeRoleAction, hubCreateSpaceAction, hubDeleteSpaceAction, hubInviteAction, hubRemoveMemberAction, hubSignOutAction } from "@/app/hub-team-actions";
+import { hubChangeRoleAction, hubCreateSpaceAction, hubDeleteSpaceAction, hubInviteAction, hubReinstateMemberAction, hubRemoveMemberAction, hubSignOutAction } from "@/app/hub-team-actions";
 import { HubSignOut } from "@/components/team/HubSignOut";
 import type { HubAdminSpace, HubLinkStatus, HubMember, HubSpaceMember } from "@/lib/hub/ports";
 import type { HubOverview } from "@/lib/team/hub-service";
@@ -62,7 +62,7 @@ const ROLE_OPTIONS = (
 );
 
 /** Presentational: everything it shows was already decided by the page. Writes go through server actions, which the hub re-checks. */
-export function HubTeamPanel({ origin, status, overview, error, spaceMembers = null }: { origin: string | null; status: HubLinkStatus; overview: HubOverview | null; error: HubTeamError | null; spaceMembers?: HubAdminSpace[] | null }) {
+export function HubTeamPanel({ origin, status, overview, error, spaceMembers = null, removedMembers = [] }: { origin: string | null; status: HubLinkStatus; overview: HubOverview | null; error: HubTeamError | null; spaceMembers?: HubAdminSpace[] | null; removedMembers?: HubMember[] }) {
   const removed = error?.kind === "forbidden";
   const needsSignIn = (status.needsSignIn || error?.kind === "unauthorized") && !removed;
   const o = removed ? null : overview;
@@ -75,7 +75,7 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
         subtitle={origin ? <>Hosted on <Mono>{hubHost(origin)}</Mono>. Planning data is shared through this server.</> : "Planning data is shared through a team server."}
         actions={<ConnectionPill status={status} />}
       />
-      {removed && <div className="mb-5"><Banner tone="error" title="You were removed from this team.">Ask an admin to invite you again, or sign out to go back to GitHub.</Banner></div>}
+      {removed && <div className="mb-5"><Banner tone="error" title="You were removed from this team.">Ask the owner of the server to reinstate you, or sign out to go back to GitHub.</Banner></div>}
       {needsSignIn && (
         <div className="mb-5">
           <Banner tone="warn" title="Sign in to the server again" action={<Link href="/sign-in?connect=1" className="btn btn-primary !h-10 shrink-0 self-center">Sign in to the server again</Link>}>
@@ -117,6 +117,22 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
                 );
               })}
             </ul>
+            {removedMembers.length > 0 && (
+              <div className="border-t border-line p-4">
+                <p className="mb-2 text-[12.5px] text-ink-3">Removed people can be reinstated by the owner. They return to the common space only; restricted spaces are granted again on purpose.</p>
+                <ul>
+                  {removedMembers.map((m) => (
+                    <li key={m.githubId} className="flex flex-wrap items-center justify-between gap-3 py-2">
+                      <span className="truncate">@{m.login} <span className="text-ink-3">(removed)</span></span>
+                      <ActionForm action={hubReinstateMemberAction} submitLabel="Reinstate" pendingLabel="Reinstating…" submitClassName="btn !h-10" submitAriaLabel={`Reinstate @${m.login}`} className="flex flex-wrap items-center gap-2">
+                        <input type="hidden" name="githubId" value={m.githubId} />
+                        <Select name="role" aria-label={`Role for @${m.login} when reinstated`} defaultValue="MEMBER" className="select !h-10 !w-32">{ROLE_OPTIONS}</Select>
+                      </ActionForm>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {o.canAdmin && (
               <div className="border-t border-line p-4">
                 <ActionForm action={hubInviteAction} submitLabel="Invite" pendingLabel="Inviting…" submitClassName="btn btn-primary !h-10" className="flex flex-wrap items-end gap-3">

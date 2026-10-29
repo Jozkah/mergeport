@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { HubConfig } from "./config";
@@ -22,6 +23,8 @@ export type HubContext = {
   publicUrl: () => string;
   notify: Notifier;
   limiter: Limiter;
+  /** Fresh per process. A database restored from a backup can only be served by a new process, so clients that see it change compare their state with the hub's. */
+  epoch: string;
 };
 
 export type Hub = { listen(port?: number): Promise<{ port: number; url: string }>; close(): Promise<void> };
@@ -49,6 +52,7 @@ export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => numb
     log: opts.log ?? createLogger(),
     publicUrl: () => opts.config.publicUrl || listened,
     limiter: createLimiter(now),
+    epoch: randomUUID(),
     notify: createNotifier({ db: opts.db, now, findSession, ...opts.ws }),
   };
   const routes = [...coreRoutes(), ...(opts.routes ?? [])];

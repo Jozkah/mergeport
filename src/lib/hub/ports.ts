@@ -28,6 +28,10 @@ export type HubAdminApi = {
   me(): Promise<{ member: HubMember; team: { name: string }; members: HubMember[]; spaces: HubSpaceInfo[] }>;
   invite(login: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void>;
   removeMember(githubId: string): Promise<void>;
+  /** OWNER only: removed members, who /me no longer lists. */
+  removedMembers(): Promise<HubMember[]>;
+  /** OWNER only: gives a removed member access again, as `role`, in the common space only. */
+  reinstateMember(githubId: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void>;
   setRole(githubId: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void>;
   /** ADMIN+ only: every space with its members. */
   adminSpaces(): Promise<HubAdminSpace[]>;

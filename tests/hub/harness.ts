@@ -125,6 +125,7 @@ export class FakeGitHubOAuth {
 export type ApiResult = { status: number; body: any; headers: Headers };
 export type TestHub = {
   url: string;
+  dataDir: string;
   db: HubDb;
   /** Captured log lines. */
   logs: string[];
@@ -133,7 +134,7 @@ export type TestHub = {
   api(token?: string): (method: string, path: string, body?: unknown) => Promise<ApiResult>;
 };
 
-export async function startTestHub(o: { now?: () => number; dataDir?: string; trustProxy?: boolean; /** Login allowed to bootstrap the empty hub; default `olive`. */ ownerLogin?: string; ws?: { silenceMs?: number; coalesceMs?: number } } = {}): Promise<TestHub> {
+export async function startTestHub(o: { now?: () => number; dataDir?: string; /** Fixed port (a hub restarted on the address its clients already know). */ port?: number; trustProxy?: boolean; /** Login allowed to bootstrap the empty hub; default `olive`. */ ownerLogin?: string; ws?: { silenceMs?: number; coalesceMs?: number } } = {}): Promise<TestHub> {
   const github = new FakeGitHubOAuth();
   await github.start();
   const dataDir = o.dataDir ?? mkdtempSync(path.join(tmpdir(), "hub-"));
@@ -152,9 +153,10 @@ export async function startTestHub(o: { now?: () => number; dataDir?: string; tr
   const db = openHubDb(dataDir);
   const logs: string[] = [];
   const hub = createHub({ config, db, now: o.now, ws: o.ws, log: createLogger((l) => logs.push(l)) });
-  const { url } = await hub.listen(0);
+  const { url } = await hub.listen(o.port ?? 0);
   return {
     url,
+    dataDir,
     db,
     logs,
     github,
