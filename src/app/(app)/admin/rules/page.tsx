@@ -9,9 +9,8 @@ import { Route } from "@/components/ui/icons";
 import { asStrings } from "@/lib/services/queries";
 import { deleteRuleAction, deleteWaitingRuleAction, saveRuleAction, saveWaitingRuleAction, toggleWaitingRuleAction } from "@/app/actions";
 import { Clock } from "@/components/ui/icons";
-import { STAGES, stageLabel } from "@/lib/domain/stages";
 
-export const metadata = { title: "Who reviews what" };
+export const metadata = { title: "Review routing" };
 
 export default async function Rules() {
   const { viewer } = await requireAdminViewer();
@@ -36,12 +35,11 @@ export default async function Rules() {
 
   return (
     <>
-      <PageHeader title="Who reviews what" subtitle="Say who must review which work. Precedence: repository override, then project rule, then owner default, then workspace default. Labels route attention; they never grant permission." />
+      <PageHeader title="Review routing" subtitle="Say who must review which work. Precedence: repository override, then project rule, then owner default, then workspace default. Labels route attention; they never grant permission." />
       {conflicts.length > 0 && (
         <div className="mb-4"><Banner tone="warn" title="Rule conflicts">{conflicts.map((c) => c.fullName).join(", ")} {conflicts.length === 1 ? "is" : "are"} in several projects with different review rules. Add a repository override, or reviewers will see a conflict instead of a guess.</Banner></div>
       )}
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
-        <div className="flex min-w-0 flex-col gap-5">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
         <Panel title="Rules" icon={Route} id="rules">
           {rules.length === 0 ? <EmptyState icon={Route} title="No routing rules">Without rules, review waiting comes only from GitHub review requests.</EmptyState> : (
             <ul>
@@ -58,31 +56,6 @@ export default async function Rules() {
             </ul>
           )}
         </Panel>
-          <div>
-      <h2 className="mb-1 mt-8 text-[15px] font-medium">Waiting rules</h2>
-      <p className="mb-3 max-w-[760px] text-[13px] text-ink-3">Review rules say who must approve. A waiting rule says who the work is <em>waiting on until it is merged or closed</em>, whatever its review state and even when that person opened it. Everything that matches appears under &ldquo;Waiting on others&rdquo; (or team review if they are dashboard members). Nothing is built in: every rule below is yours.</p>
-          </div>
-        <Panel title={`Waiting rules (${waiting.length})`} icon={Clock} id="waiting">
-          {waiting.length === 0 ? <EmptyState icon={Clock} title="No waiting rules">For example: every open pull request in a repository whose owner merges everything waits on that owner.</EmptyState> : (
-            <ul>
-              {waiting.map((r) => (
-                <li key={r.id} className={`flex flex-wrap items-start justify-between gap-3 border-b border-line p-4 last:border-b-0 ${r.enabled ? "" : "opacity-60"}`}>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2"><SimplePill tone={r.enabled ? "needs" : "unknown"}>{SCOPE[r.scope]}</SimplePill><span className="text-[13px] font-medium">{r.repository?.fullName ?? r.project?.name ?? r.ownerLogin ?? "Everything"}</span>{!r.enabled && <span className="text-[12px] text-ink-3">off</span>}</div>
-                    <p className="mt-1 text-[13px]">{r.reason}</p>
-                    <p className="mt-1 text-[12.5px] text-ink-3">{r.stage ? `${stageLabel(r.stage)} · ` : ""}Waits on {(r.waitingOn as unknown as Reviewer[]).map((x) => x.ref).join(", ")} · {r.itemType === "ANY" ? "pull requests and issues" : r.itemType === "ISSUE" ? "issues" : "pull requests"}{asStrings(r.authors).length ? ` opened by ${asStrings(r.authors).join(", ")}` : " opened by anyone"}{asStrings(r.labels).length ? ` · labelled ${asStrings(r.labels).join(", ")}` : ""}{r.includeDrafts ? " · drafts included" : ""}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <ActionForm action={toggleWaitingRuleAction} submitLabel={r.enabled ? "Turn off" : "Turn on"} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={r.id} /></ActionForm>
-                    <ActionForm action={deleteWaitingRuleAction} submitLabel="Delete" submitClassName="btn btn-danger"><input type="hidden" name="id" value={r.id} /></ActionForm>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-        </div>
-        <div className="flex flex-col gap-5">
         <Panel title="Add a rule" icon={Route} id="add">
           <ActionForm action={saveRuleAction} submitLabel="Save rule" className="p-4">
             <div className="flex flex-col gap-3">
@@ -97,6 +70,30 @@ export default async function Rules() {
             </div>
           </ActionForm>
         </Panel>
+      </div>
+
+      <h2 className="mb-1 mt-8 text-[15px] font-medium">Waiting rules</h2>
+      <p className="mb-3 max-w-[760px] text-[13px] text-ink-3">Review rules say who must approve. A waiting rule says who the work is <em>waiting on until it is merged or closed</em>, whatever its review state and even when that person opened it. Everything that matches appears under &ldquo;Waiting on others&rdquo; (or team review if they are dashboard members). Nothing is built in: every rule below is yours.</p>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
+        <Panel title={`Waiting rules (${waiting.length})`} icon={Clock} id="waiting">
+          {waiting.length === 0 ? <EmptyState icon={Clock} title="No waiting rules">For example: every open pull request in a repository whose owner merges everything waits on that owner.</EmptyState> : (
+            <ul>
+              {waiting.map((r) => (
+                <li key={r.id} className={`flex flex-wrap items-start justify-between gap-3 border-b border-line p-4 last:border-b-0 ${r.enabled ? "" : "opacity-60"}`}>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2"><SimplePill tone={r.enabled ? "needs" : "unknown"}>{SCOPE[r.scope]}</SimplePill><span className="text-[13px] font-medium">{r.repository?.fullName ?? r.project?.name ?? r.ownerLogin ?? "Everything"}</span>{!r.enabled && <span className="text-[12px] text-ink-3">off</span>}</div>
+                    <p className="mt-1 text-[13px]">{r.reason}</p>
+                    <p className="mt-1 text-[12.5px] text-ink-3">Waits on {(r.waitingOn as unknown as Reviewer[]).map((x) => x.ref).join(", ")} · {r.itemType === "ANY" ? "pull requests and issues" : r.itemType === "ISSUE" ? "issues" : "pull requests"}{asStrings(r.authors).length ? ` opened by ${asStrings(r.authors).join(", ")}` : " opened by anyone"}{asStrings(r.labels).length ? ` · labelled ${asStrings(r.labels).join(", ")}` : ""}{r.includeDrafts ? " · drafts included" : ""}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <ActionForm action={toggleWaitingRuleAction} submitLabel={r.enabled ? "Turn off" : "Turn on"} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={r.id} /></ActionForm>
+                    <ActionForm action={deleteWaitingRuleAction} submitLabel="Delete" submitClassName="btn btn-danger"><input type="hidden" name="id" value={r.id} /></ActionForm>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
         <Panel title="Add a waiting rule" icon={Clock} id="add-waiting">
           <ActionForm action={saveWaitingRuleAction} submitLabel="Save waiting rule" className="p-4">
             <div className="flex flex-col gap-3">
@@ -109,7 +106,6 @@ export default async function Rules() {
                 <div><label className="label" htmlFor="w-type">Items</label><Select id="w-type" name="itemType" className="select"><option value="PULL_REQUEST">Pull requests</option><option value="ISSUE">Issues</option><option value="ANY">Both</option></Select></div>
                 <div><label className="label" htmlFor="w-kind">Who</label><Select id="w-kind" name="kind" className="select"><option value="">GitHub user / team</option><option value="EXTERNAL_ROLE">External role</option></Select></div>
               </div>
-              <div><label className="label" htmlFor="w-stage">Stage</label><Select id="w-stage" name="stage" className="select"><option value="">Infer from who it waits on</option>{STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</Select></div>
               <div><label className="label" htmlFor="w-authors">Only when opened by (empty = anyone)</label><input id="w-authors" name="authors" className="input" placeholder="login1, login2" /></div>
               <div><label className="label" htmlFor="w-labels">Only when labelled (empty = any)</label><input id="w-labels" name="labels" className="input" /></div>
               <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" name="includeDrafts" /> Include draft pull requests</label>
@@ -117,7 +113,6 @@ export default async function Rules() {
             </div>
           </ActionForm>
         </Panel>
-        </div>
       </div>
     </>
   );

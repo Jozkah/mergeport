@@ -1,25 +1,23 @@
 "use client";
 
-import { sectionFor } from "@/lib/section";
 import { Avatar } from "@/components/ui/Avatar";
 import { Logo } from "@/components/ui/Logo";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useId, useState, type ComponentType, type SVGProps } from "react";
 import * as D from "@radix-ui/react-dialog";
-import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, PanelLeft, RefreshCw, Route, Search, Settings, Users, X } from "@/components/ui/icons";
+import { Activity, BellRing, ChevronDown, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Kanban, Layers, ListChecks, LayoutDashboard, PanelLeft, RefreshCw, Route, Search, Settings, Users, X } from "@/components/ui/icons";
 import { Collapse } from "@/components/ui/Collapse";
 import { Metric } from "@/components/ui/Metric";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 type Item = { href: string; label: string; icon: Icon; count?: number; children?: { href: string; label: string; count?: number }[] };
 
-export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number; inbox?: number };
+export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number };
 
 function buildNav(c: NavCounts, isAdmin: boolean) {
   const main: Item[] = [
     { href: "/", label: "Overview", icon: LayoutDashboard },
-    { href: "/inbox", label: "Inbox", icon: Inbox, count: c.inbox },
     {
       href: "/attention",
       label: "My attention",
@@ -50,20 +48,17 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
   ];
   const source: Item[] = [
     { href: "/repositories", label: "Repositories", icon: FolderGit2 },
-    { href: "/forks", label: "Forks", icon: GitFork },
-    { href: "/branches", label: "Branches", icon: GitBranch },
+    { href: "/forks", label: "Forks & upstream", icon: GitFork },
+    { href: "/branches", label: "Branches & worktrees", icon: GitBranch },
   ];
   const team: Item[] = [
     { href: "/team", label: "Team", icon: Users },
-    { href: "/capacity", label: "Review capacity", icon: Route },
-    { href: "/sync", label: "Sync status", icon: RefreshCw },
-    { href: "/help", label: "Help", icon: CircleHelp },
+    { href: "/sync", label: "Sync", icon: RefreshCw },
   ];
   const admin: Item[] = isAdmin
     ? [
         { href: "/admin/projects", label: "Projects", icon: Layers },
-        { href: "/admin/rules", label: "Who reviews what", icon: Route },
-        { href: "/admin/labels", label: "Label taxonomy", icon: Tag },
+        { href: "/admin/rules", label: "Review routing", icon: Route },
       ]
     : [];
   return { main, source, team, admin };
@@ -85,7 +80,7 @@ function NavList({ items, onNavigate }: { items: Item[]; onNavigate?: () => void
         return (
           <li key={it.href}>
             <div className="relative">
-              <Link href={it.href} className="nav-item" data-section={sectionFor(it.href)} aria-current={active && !it.children ? "page" : undefined} onClick={onNavigate}>
+              <Link href={it.href} className="nav-item" aria-current={active && !it.children ? "page" : undefined} onClick={onNavigate}>
                 <I size={16} aria-hidden className="shrink-0 text-ink-3" />
                 <span className="min-w-0 flex-1 truncate">{it.label}</span>
                 {!it.children && it.count ? <span className="rounded-full bg-ink px-1.5 text-[11px] leading-[18px] text-ink-invert"><Metric value={it.count} /></span> : null}

@@ -12,16 +12,11 @@ All screenshots use the built-in synthetic demo data (`npm run local:demo`): mad
 
 | | |
 | --- | --- |
-| ![Overview](docs/screenshots/overview.png) **Overview**: what needs you, what waits on others, what is blocked. | ![Inbox](docs/screenshots/inbox.png) **Inbox**: pull requests waiting on you; done, snooze, and they return when something new happens. |
-| ![My attention](docs/screenshots/attention.png) **My attention**: queues grouped by repository, the reason behind each behind "Why". | ![Ready to merge?](docs/screenshots/pr-readiness.png) **Ready to merge?**: evidence per row, who acts next, and CODEOWNERS routing beside the review state. |
-| ![Planning board](docs/screenshots/planning-board.png) **Planning board**: cross-repository cards; dragging never changes GitHub. | ![Named boards](docs/screenshots/planning-named-board.png) **Named boards**: chosen columns, renamed labels and work-in-progress limits over the same cards. |
-| ![Epics](docs/screenshots/planning-epics.png) **Epics**: a shallow hierarchy with progress, owner and dates. | ![Dependencies](docs/screenshots/planning-dependencies.png) **Dependencies**: blockers across projects, critical blockers, hidden ends stay anonymous. |
-| ![Delivery analytics](docs/screenshots/planning-insights.png) **Delivery analytics**: cycle time and aging work, only from recorded history. | ![Review in place](docs/screenshots/pr-files.png) **Review in place**: diffs, inline comments, a pending review sent once, and changes since your last review. |
-| ![Pull requests](docs/screenshots/pull-requests.png) **Pull requests**: review state, checks and mergeability. | ![Review capacity](docs/screenshots/capacity.png) **Review capacity**: who has how much waiting, and a configured backup suggestion. |
+| ![Overview](docs/screenshots/overview.png) **Overview**: what needs you, what waits on others, what is blocked. | ![My attention](docs/screenshots/attention.png) **My attention**: queues grouped by repository, the reason behind each behind "Why". |
+| ![Planning board](docs/screenshots/planning-board.png) **Planning board**: cross-repository cards; dragging never changes GitHub. | ![Pull requests](docs/screenshots/pull-requests.png) **Pull requests**: review state, checks and mergeability. |
 | ![Projects](docs/screenshots/projects.png) **Projects**: group repositories, required reviewers, sharing. | ![Review routing](docs/screenshots/review-routing.png) **Review routing**: who must review, and who work waits on. |
-| ![Repositories](docs/screenshots/repositories.png) **Repositories**: owner type, access, sync state. | ![Forks and upstream](docs/screenshots/forks.png) **Forks and upstream**: real commit divergence, relevance subscriptions, backports. |
-| ![Sync status](docs/screenshots/sync.png) **Sync status**: where each change is: saved here, queued, published, waiting for teammates. | ![Settings](docs/screenshots/settings.png) **Settings**: notifications, backup and restore, theme and GitHub account. |
-| ![Light theme](docs/screenshots/overview-light.png) **Light theme**: light, dark or system. | <img src="docs/screenshots/phone-overview.png" alt="Phone layout" width="260"> **Phone layout.** |
+| ![Repositories](docs/screenshots/repositories.png) **Repositories**: owner type, access, sync state. | ![Forks](docs/screenshots/forks.png) **Forks and upstream**: real commit divergence. |
+| ![Light theme](docs/screenshots/overview-light.png) **Light, dark or system theme.** | <img src="docs/screenshots/phone-overview.png" alt="Phone layout" width="260"> **Phone layout.** |
 
 ## What you need
 

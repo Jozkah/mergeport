@@ -5,15 +5,6 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { capabilitiesFor } from "@/lib/authz/viewer";
-import { STAGES, stageLabel } from "@/lib/domain/stages";
-import { sinceLastLooked } from "@/lib/services/seen";
-import { SinceYouLooked } from "@/components/review/SinceYouLooked";
-import { OwnersPanel } from "@/components/code/ReviewTools";
-import { WorktreePanel } from "@/components/work/WorktreePanel";
-import { linksForPull } from "@/lib/services/work-links";
-import { deriveReadiness } from "@/lib/domain/readiness";
-import { ReadinessPanel } from "@/components/review/ReadinessPanel";
-import { StageList } from "@/components/review/StageList";
 import { derivedDetail, getWorkItemDetail, asLabels, asStrings } from "@/lib/services/queries";
 import { NotFoundError } from "@/lib/errors";
 import { renderMarkdown } from "@/lib/markdown";
@@ -48,11 +39,8 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   const labels = asLabels(item.labels);
   const d = derived.derivation;
   const isPr = item.type === "PULL_REQUEST";
-  const readiness = isPr ? deriveReadiness({ state: item.state, draft: item.draft, authorLogin: item.authorLogin, headSha: item.headSha, checksState: item.checksState, mergeable: item.mergeable, derivation: d, stages: derived.stages, dependencyBlockers: derived.dependencyBlockers }) : null;
   const backHref = from && safeReturnTo(from) !== "/" ? safeReturnTo(from) : isPr ? "/pull-requests" : "/issues";
   const manualOpen = derived.manualWaiting;
-  const sinceLooked = await sinceLastLooked(db, viewer, item.id);
-  const localLinks = isPr ? await linksForPull(db, viewer, item.id) : null;
   const writeBlocked = !hasConnection ? "Sign in with the GitHub CLI (gh auth login) to make changes on GitHub." : undefined;
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
@@ -102,16 +90,6 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   const asideEl = (
     <aside className="flex min-w-0 flex-col gap-5" aria-label="Review and actions">
       {isPr && (
-        <Panel title="Who should review (CODEOWNERS)" icon={Eye} id="owners">
-          <OwnersPanel itemId={item.id} />
-        </Panel>
-      )}
-      {isPr && readiness && (
-        <Panel title="Ready to merge?" icon={CircleAlert} id="readiness">
-          <ReadinessPanel readiness={readiness} />
-        </Panel>
-      )}
-      {isPr && (
         <Panel title="Review" icon={Eye} id="review">
           <div className="flex flex-col gap-3 p-4">
             <div className="flex flex-wrap items-center gap-2"><StatusPill status={d.primary} />{d.waiting && <span className="tnum text-[12px] text-ink-3">waiting {formatDuration(d.waiting.elapsedMs)}</span>}</div>
@@ -135,7 +113,6 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         </Panel>
       )}
 
-      {isPr && localLinks && <WorktreePanel links={localLinks} tz={viewer.timezone} repositoryId={item.repositoryId} />}
       {isPr && item.state === "OPEN" && (
         <Panel title="Actions" icon={CircleAlert} id="actions">
           <div className="flex flex-col gap-4 p-4">
@@ -183,11 +160,10 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
 
       <Panel title="Waiting on someone" icon={Hourglass} id="waiting">
         <div className="flex flex-col gap-3 p-4">
-          {derived.stages.length > 0 && <StageList stages={derived.stages} />}
           {manualOpen.length === 0 && <p className="text-[12.5px] text-ink-3">No manual waiting record. {isPr ? "Pull requests derive this from review requests and rules." : "Use this when an issue needs another person's decision."}</p>}
           {manualOpen.map((w) => (
             <div key={w.id} className="rounded-[10px] border border-line p-2.5 text-[12.5px]">
-              <p className="font-medium">{w.reviewerRef} <span className="font-normal text-ink-3">· {w.reviewerKind === "EXTERNAL_ROLE" ? "external role" : "person"}{w.stage ? ` · ${stageLabel(w.stage)}` : ""}</span></p>
+              <p className="font-medium">{w.reviewerRef} <span className="font-normal text-ink-3">· {w.reviewerKind === "EXTERNAL_ROLE" ? "external role" : "person"}</span></p>
               <p className="text-ink-3">{w.reason}</p>
               <p className="mt-0.5 text-ink-3">since <Time value={w.startedAt} formatted={formatInstant(w.startedAt, viewer.timezone)} /> · {formatDuration(now.getTime() - w.startedAt.getTime())}</p>
               {(viewer.isAdmin || w.reviewerRef.toLowerCase() === viewer.login.toLowerCase()) && (
@@ -204,7 +180,6 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
               <div className="flex flex-col gap-2">
                 <div><label className="label" htmlFor="mw-ref">Who needs to decide</label><input id="mw-ref" name="ref" className="input" required placeholder="GitHub username or role" /></div>
                 <div><label className="label" htmlFor="mw-kind">Kind</label><Select id="mw-kind" name="kind" className="select"><option value="USER">A GitHub person</option><option value="EXTERNAL_ROLE">An external role</option></Select></div>
-                <div><label className="label" htmlFor="mw-stage">Stage</label><Select id="mw-stage" name="stage" className="select"><option value="">No particular stage</option>{STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</Select></div>
                 <div><label className="label" htmlFor="mw-reason">Why</label><input id="mw-reason" name="reason" className="input" required /></div>
               </div>
               <p className="mt-2 text-[11.5px] text-ink-3">A dashboard record only. Nothing is posted to GitHub or sent to anyone.</p>
@@ -218,7 +193,6 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   return (
     <>
       <Link href={backHref} className="mb-3 inline-flex items-center gap-1.5 text-[13px] text-ink-3 hover:text-ink"><ArrowLeft size={14} aria-hidden /> Back to {isPr ? "pull requests" : "issues"}</Link>
-      {sinceLooked.changes.length > 0 && <div className="mb-4"><SinceYouLooked itemId={item.id} changes={sinceLooked.changes} seenLabel={sinceLooked.seenAt ? formatInstant(sinceLooked.seenAt, viewer.timezone) : null} /></div>}
       <header className="mb-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="min-w-0 max-w-[80ch] text-[22px] font-medium leading-7 tracking-[-0.01em] [overflow-wrap:anywhere]">{item.title} <span className="font-normal text-ink-3 tnum">#{item.number}</span></h1>
@@ -239,7 +213,6 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         <PrTabs
           itemId={item.id}
           repoId={item.repositoryId}
-          version={`${item.headSha ?? "-"}:${item.baseRef ?? "-"}`}
           initial={tab}
           fileCount={item.changedFiles}
           githubUrl={item.htmlUrl}

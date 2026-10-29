@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { CommitView } from "@/lib/services/git-view";
 import { DiffViewer, type FilesData } from "@/components/code/DiffViewer";
-import { PendingReview, ThreadNav } from "@/components/code/ReviewTools";
-import { Select } from "@/components/ui/Select";
 import { Avatar } from "@/components/ui/Avatar";
 import { ArrowLeft, Check, Copy, GitCommitHorizontal } from "@/components/ui/icons";
 
@@ -47,12 +45,10 @@ function useJson<T>(url: string, on: boolean) {
   return { ...state, reload: () => setN((x) => x + 1) };
 }
 
-export function PrTabs({ itemId, repoId, version, initial, fileCount, conversation, aside, githubUrl }: { itemId: string; repoId: string; version: string; initial: Tab; fileCount: number | null; conversation: ReactNode; aside: ReactNode; githubUrl: string }) {
+export function PrTabs({ itemId, repoId, initial, fileCount, conversation, aside, githubUrl }: { itemId: string; repoId: string; initial: Tab; fileCount: number | null; conversation: ReactNode; aside: ReactNode; githubUrl: string }) {
   const [tab, setTab] = useState<Tab>(initial);
   const [visited, setVisited] = useState<Record<Tab, boolean>>({ conversation: true, files: initial === "files", commits: initial === "commits" });
   const [commitCount, setCommitCount] = useState<number | null>(null);
-  // Responses are remembered per URL, so the URL carries the PR's head and base: when a refresh moves either, the old answers are not reused.
-  const q = `?v=${encodeURIComponent(version)}`;
 
   const go = useCallback((t: Tab) => {
     setTab(t);
@@ -70,12 +66,12 @@ export function PrTabs({ itemId, repoId, version, initial, fileCount, conversati
   // Warm the cache once the page has settled, so the first click on Files or Commits is instant.
   useEffect(() => {
     const warm = () => {
-      void getJson(`/api/pr/${itemId}/files${q}`).catch(() => {});
-      void getJson<{ commits: CommitView[] }>(`/api/pr/${itemId}/commits${q}`).then((c) => setCommitCount(c.commits.length)).catch(() => {});
+      void getJson(`/api/pr/${itemId}/files`).catch(() => {});
+      void getJson<{ commits: CommitView[] }>(`/api/pr/${itemId}/commits`).then((c) => setCommitCount(c.commits.length)).catch(() => {});
     };
     const t = setTimeout(warm, 600);
     return () => clearTimeout(t);
-  }, [itemId, q]);
+  }, [itemId]);
 
   const tabs: { key: Tab; label: string; count?: number | null }[] = [
     { key: "conversation", label: "Conversation" },
@@ -98,7 +94,7 @@ export function PrTabs({ itemId, repoId, version, initial, fileCount, conversati
                 aria-selected={tab === t.key}
                 aria-controls={`pane-${t.key}`}
                 onClick={() => go(t.key)}
-                onMouseEnter={() => t.key !== "conversation" && void getJson(`/api/pr/${itemId}/${t.key === "files" ? "files" : "commits"}${q}`).catch(() => {})}
+                onMouseEnter={() => t.key !== "conversation" && void getJson(`/api/pr/${itemId}/${t.key === "files" ? "files" : "commits"}`).catch(() => {})}
                 className={`h-8 rounded-[7px] px-3 text-[13px] font-medium ${tab === t.key ? "bg-ink text-ink-invert" : "text-ink-2 hover:bg-hover"}`}
               >
                 {t.label}
@@ -110,10 +106,10 @@ export function PrTabs({ itemId, repoId, version, initial, fileCount, conversati
         </div>
 
         <div id="pane-conversation" role="tabpanel" aria-labelledby="tab-conversation" hidden={tab !== "conversation"} className="flex min-w-0 flex-col gap-5">{conversation}</div>
-        {visited.files && <div id="pane-files" role="tabpanel" aria-labelledby="tab-files" hidden={tab !== "files"}><FilesPane itemId={itemId} repoId={repoId} githubFilesUrl={`${githubUrl}/files`} active={tab === "files"} q={q} /></div>}
-        {visited.commits && <div id="pane-commits" role="tabpanel" aria-labelledby="tab-commits" hidden={tab !== "commits"}><CommitsPane itemId={itemId} repoId={repoId} githubUrl={githubUrl} onCount={setCommitCount} q={q} /></div>}
+        {visited.files && <div id="pane-files" role="tabpanel" aria-labelledby="tab-files" hidden={tab !== "files"}><FilesPane itemId={itemId} repoId={repoId} githubFilesUrl={`${githubUrl}/files`} active={tab === "files"} /></div>}
+        {visited.commits && <div id="pane-commits" role="tabpanel" aria-labelledby="tab-commits" hidden={tab !== "commits"}><CommitsPane itemId={itemId} repoId={repoId} githubUrl={githubUrl} onCount={setCommitCount} /></div>}
       </div>
-      <div id="review" className={wide ? "xl:[&>aside]:grid xl:[&>aside]:grid-cols-[repeat(auto-fit,minmax(340px,1fr))] xl:[&>aside]:items-start xl:[&>aside]:gap-5" : ""}>{aside}</div>
+      <div id="review" className={wide ? "grid gap-5 xl:grid-cols-3" : ""}>{wide ? aside : <div className="flex flex-col gap-5">{aside}</div>}</div>
     </div>
   );
 }
@@ -141,57 +137,15 @@ function Failed({ message, onRetry, href }: { message: string; onRetry: () => vo
   );
 }
 
-function FilesPane({ itemId, repoId, githubFilesUrl, active, q }: { itemId: string; repoId: string; githubFilesUrl: string; active: boolean; q: string }) {
-  const { data, error, loading, reload } = useJson<FilesData>(`/api/pr/${itemId}/files${q}`, true);
-  const [mode, setMode] = useState<"all" | "since" | "between">("all");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const commits = useJson<{ commits: CommitView[] }>(`/api/pr/${itemId}/commits${q}`, mode === "between");
-  const since = mode === "since" && data?.lastReviewedSha && data.headSha ? { from: data.lastReviewedSha, to: data.headSha } : null;
-  const between = mode === "between" && from && to ? { from, to } : null;
-  const range = since ?? between;
-  const cmp = useJson<FilesData>(range ? `/api/pr/${itemId}/compare?from=${range.from}&to=${range.to}` : `/api/pr/${itemId}/compare`, !!range);
+function FilesPane({ itemId, repoId, githubFilesUrl, active }: { itemId: string; repoId: string; githubFilesUrl: string; active: boolean }) {
+  const { data, error, loading, reload } = useJson<FilesData>(`/api/pr/${itemId}/files`, true);
   if (error) return <Failed message={error} onRetry={reload} href={githubFilesUrl} />;
   if (loading || !data) return active ? <Skeleton /> : null;
-  const short = (s: string) => s.slice(0, 7);
-  const list = commits.data?.commits ?? [];
-  return (
-    <div>
-      <ThreadNav itemId={itemId} version={q} />
-      <PendingReview itemId={itemId} canReview={!!data.canComment} />
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-[12.5px]" role="group" aria-label="Which changes to show">
-        <label htmlFor="cmp-mode" className="text-ink-3">Show</label>
-        <Select id="cmp-mode" className="select !h-8 w-64" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-          <option value="all">All changes in this pull request</option>
-          <option value="since" disabled={!data.lastReviewedSha || data.lastReviewedSha === data.headSha}>{data.lastReviewedSha ? `Since my last review (${short(data.lastReviewedSha)})` : "Since my last review (you have not reviewed it)"}</option>
-          <option value="between">Between two commits</option>
-        </Select>
-        {mode === "between" && (
-          <>
-            <label className="sr-only" htmlFor="cmp-from">From commit</label>
-            <Select id="cmp-from" className="select !h-8 w-56" value={from} onChange={(e) => setFrom(e.target.value)}><option value="">From…</option>{list.map((c) => <option key={c.sha} value={c.sha}>{short(c.sha)} {c.message.slice(0, 30)}</option>)}</Select>
-            <label className="sr-only" htmlFor="cmp-to">To commit</label>
-            <Select id="cmp-to" className="select !h-8 w-56" value={to} onChange={(e) => setTo(e.target.value)}><option value="">To…</option>{list.map((c) => <option key={c.sha} value={c.sha}>{short(c.sha)} {c.message.slice(0, 30)}</option>)}</Select>
-          </>
-        )}
-        {data.lastReviewedSha && <span className="text-ink-3">Your last review was on {short(data.lastReviewedSha)}{data.lastReviewedSha === data.headSha ? " (the current version)" : ""}.</span>}
-      </div>
-      {range ? (
-        cmp.error ? <Failed message={cmp.error} onRetry={cmp.reload} href={githubFilesUrl} /> : cmp.loading || !cmp.data ? <Skeleton /> : (
-          <>
-            <p className="mb-2 rounded-[8px] border border-line bg-surface px-3 py-2 text-[12.5px]" role="status">Showing only what changed between <span className="font-mono">{short(range.from)}</span> and <span className="font-mono">{short(range.to)}</span>. Comments cannot be added in this view; switch to all changes to comment.</p>
-            <DiffViewer itemId={itemId} data={{ ...cmp.data, canComment: false }} storeKey={`cmp-${itemId}-${range.from}-${range.to}`} repoId={repoId} githubFilesUrl={githubFilesUrl} />
-          </>
-        )
-      ) : (
-        <DiffViewer itemId={itemId} data={data} storeKey={`pr-${itemId}`} repoId={repoId} githubFilesUrl={githubFilesUrl} onPosted={() => { memo.delete(`/api/pr/${itemId}/files${q}`); reload(); }} />
-      )}
-    </div>
-  );
+  return <DiffViewer itemId={itemId} data={data} storeKey={`pr-${itemId}-${data.headSha ?? "x"}`} repoId={repoId} githubFilesUrl={githubFilesUrl} onPosted={() => { memo.delete(`/api/pr/${itemId}/files`); reload(); }} />;
 }
 
-function CommitsPane({ itemId, repoId, githubUrl, onCount, q }: { itemId: string; repoId: string; githubUrl: string; onCount: (n: number) => void; q: string }) {
-  const { data, error, loading, reload } = useJson<{ commits: CommitView[]; truncated: boolean }>(`/api/pr/${itemId}/commits${q}`, true);
+function CommitsPane({ itemId, repoId, githubUrl, onCount }: { itemId: string; repoId: string; githubUrl: string; onCount: (n: number) => void }) {
+  const { data, error, loading, reload } = useJson<{ commits: CommitView[]; truncated: boolean }>(`/api/pr/${itemId}/commits`, true);
   const [open, setOpen] = useState<CommitView | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const counted = useRef(false);
@@ -202,7 +156,7 @@ function CommitsPane({ itemId, repoId, githubUrl, onCount, q }: { itemId: string
     }
   }, [data, onCount]);
 
-  if (open) return <OneCommit itemId={itemId} repoId={repoId} commit={open} githubUrl={githubUrl} onBack={() => setOpen(null)} q={q} />;
+  if (open) return <OneCommit itemId={itemId} repoId={repoId} commit={open} githubUrl={githubUrl} onBack={() => setOpen(null)} />;
   if (error) return <Failed message={error} onRetry={reload} href={`${githubUrl}/commits`} />;
   if (loading || !data) return <Skeleton />;
   if (data.commits.length === 0) return <p className="p-6 text-[13px] text-ink-3">No commits are available for this pull request.</p>;
@@ -239,8 +193,8 @@ function CommitsPane({ itemId, repoId, githubUrl, onCount, q }: { itemId: string
   );
 }
 
-function OneCommit({ itemId, repoId, commit, githubUrl, onBack, q }: { itemId: string; repoId: string; commit: CommitView; githubUrl: string; onBack: () => void; q: string }) {
-  const { data, error, loading, reload } = useJson<FilesData>(`/api/pr/${itemId}/commit/${commit.sha}${q}`, true);
+function OneCommit({ itemId, repoId, commit, githubUrl, onBack }: { itemId: string; repoId: string; commit: CommitView; githubUrl: string; onBack: () => void }) {
+  const { data, error, loading, reload } = useJson<FilesData>(`/api/pr/${itemId}/commit/${commit.sha}`, true);
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-[8px] border border-line bg-surface p-4">

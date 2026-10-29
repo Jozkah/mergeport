@@ -264,15 +264,9 @@ model Project {
   slug        String
   description String?
   spaceId     String? // null = local only
-  /// off | suggest. Suggestions never move anything by themselves and never write to GitHub.
-  automation  String   @default("off")
   createdAt   DateTime @default(now())
 
   workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  boards       PlanBoard[]
-  epics        Epic[]
-  iterations   Iteration[]
-  events       PlanEvent[]
   repositories ProjectRepository[]
   members      ProjectMember[]
   columns      PlanningColumn[]
@@ -378,8 +372,6 @@ model WorkItemComment {
   path       String?
   line       Int?
   threadKey  String?
-  /// Whether GitHub marks this review thread resolved. Null means it was never read, which is not the same as unresolved.
-  threadResolved Boolean?
   createdAtGh DateTime
   updatedAtGh DateTime
 
@@ -431,8 +423,6 @@ model WaitingRule {
   includeDrafts Boolean   @default(false)
   waitingOn     Json // [{kind:USER|TEAM|EXTERNAL_ROLE, ref}]
   reason        String
-  /// INTERNAL_REVIEW | EXTERNAL_REVIEW | MAINTAINER_MERGE | UPSTREAM_RELEASE, or empty to infer from who is waited on.
-  stage         String    @default("")
   enabled       Boolean   @default(true)
   createdAt     DateTime  @default(now())
 
@@ -474,7 +464,6 @@ model WaitingRecord {
   reviewerKind   ReviewerKind
   reviewerRef    String
   reason         String
-  stage          String        @default("")
   status         WaitingStatus @default(PENDING)
   startedAt      DateTime      @default(now())
   clearedAt      DateTime?
@@ -519,10 +508,6 @@ model PlanningItem {
   priority     Int      @default(0)
   dueDate      DateTime?
   milestoneId  String?
-  epicId       String?
-  iterationId  String?
-  /// A local branch name this card is worked on in; matched against the branch/worktree snapshot on this computer.
-  branchRef    String?
   createdById  String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -540,8 +525,6 @@ model PlanningItem {
 
   @@index([projectId, columnId])
   @@index([assigneeLogin])
-  @@index([epicId])
-  @@index([iterationId])
 }
 
 /// Immutable GitHub answers keyed by commit (diffs, file contents, commit lists), so reopening a pull request or a file costs
@@ -588,10 +571,8 @@ model TaskComment {
 }
 
 model PlanningLink {
-  fromId String // blocker (or the first item of a related / duplicate pair)
+  fromId String // blocker
   toId   String // blocked
-  /// blocks | related | duplicates. Only "blocks" holds work back and is cycle-checked.
-  kind   String @default("blocks")
 
   from PlanningItem @relation("LinkFrom", fields: [fromId], references: [id], onDelete: Cascade)
   to   PlanningItem @relation("LinkTo", fields: [toId], references: [id], onDelete: Cascade)
@@ -609,10 +590,6 @@ model DashboardMilestone {
   startDate   DateTime?
   targetDate  DateTime?
   status      String    @default("OPEN")
-  /// Work finished is not the same as released: shipping is recorded separately, with an optional tag and link.
-  releaseTag  String?
-  releaseUrl  String?
-  shippedAt   DateTime?
   createdAt   DateTime  @default(now())
 
   workspace Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -635,7 +612,6 @@ model MilestoneRepoLink {
 
 model ForkMapping {
   id             String  @id @default(cuid())
-  backports      BackportRecord[]
   forkRepoId     String
   upstreamRepoId String
   forkBranch     String
@@ -746,9 +722,6 @@ model SavedFilter {
   scope  String
   name   String
   query  String
-  /// A shared view is synchronised as a definition only; every viewer's results are computed under their own access.
-  shared     Boolean @default(false)
-  ownerLogin String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -897,10 +870,6 @@ model Space {
   nextPollAt     DateTime?
   lastError      String?
   rateLimitedUntil DateTime?
-  /// Entities seen but not applicable yet (a referenced source item is not synchronised here). While above zero, an unchanged head is re-read.
-  deferredCount  Int         @default(0)
-  /// Last time this computer published to the space. Teammates only see it on their next poll.
-  lastPushedAt   DateTime?
   createdAt      DateTime    @default(now())
   backend        SpaceBackend @default(GITHUB)
   /// Hub space id (empty for GitHub spaces).
@@ -1017,192 +986,4 @@ model HubSession {
   login     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-}
-
-/// Personal inbox state per item. Never synchronised: what you have read, finished or snoozed is yours alone.
-/// Each marker stores the "version" of the item it was set against; a newer version (a new review request, commit or comment) reopens it.
-model InboxState {
-  userId        String
-  subjectType   String // "work-item"
-  subjectId     String
-  readVersion   String?
-  doneVersion   String?
-  snoozeUntil   DateTime?
-  snoozeVersion String?
-  updatedAt     DateTime  @default(now()) @updatedAt
-
-  @@id([userId, subjectType, subjectId])
-}
-
-/// What a person last looked at on an item, to show "since you last looked". Personal and never synchronised.
-model SeenState {
-  userId     String
-  workItemId String
-  snapshot   Json
-  seenAt     DateTime @default(now()) @updatedAt
-
-  @@id([userId, workItemId])
-}
-
-/// Who is unavailable and who covers for them. Shared team configuration: it suggests a backup, it never reassigns anything.
-model ReviewerAvailability {
-  id               String    @id @default(cuid())
-  workspaceId      String
-  login            String // lower case
-  unavailableFrom  DateTime?
-  unavailableUntil DateTime?
-  backupLogin      String?
-  note             String?
-  createdAt        DateTime  @default(now())
-
-  @@unique([workspaceId, login])
-}
-
-/// Personal notification preferences (JSON). Never synchronised.
-model NotificationPref {
-  userId    String   @id
-  prefs     Json
-  updatedAt DateTime @default(now()) @updatedAt
-}
-
-/// A named view of a project's cards: which columns, in what order, with what labels and optional work-in-progress limits.
-/// Boards never copy cards; they show the same planning items. WIP limits are advice (a column over its limit is flagged, not locked).
-model PlanBoard {
-  id        String   @id @default(cuid())
-  projectId String
-  name      String
-  template  String   @default("")
-  /// [{ key, name?, wip? }] where key is a column key of the project.
-  columns   Json
-  /// none | repository | assignee | milestone | epic
-  groupBy   String   @default("none")
-  density   String   @default("comfortable")
-  position  Int      @default(0)
-  createdAt DateTime @default(now())
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-}
-
-/// A shallow parent of cards (and linked GitHub issues): one level, no epics inside epics.
-model Epic {
-  id          String    @id @default(cuid())
-  projectId   String
-  title       String
-  description String?
-  ownerLogin  String?
-  startDate   DateTime?
-  targetDate  DateTime?
-  status      String    @default("OPEN") // OPEN | DONE
-  decisions   String?
-  createdAt   DateTime  @default(now())
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-}
-
-/// A short timebox. A milestone is the delivery goal; an iteration is the cycle currently funding part of it.
-model Iteration {
-  id        String    @id @default(cuid())
-  projectId String
-  name      String
-  startDate DateTime
-  endDate   DateTime
-  closedAt  DateTime?
-  createdAt DateTime  @default(now())
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-}
-
-/// Append-only planning history (created, moved, milestone/iteration/epic changes, carry-overs). Analytics read only this table.
-model PlanEvent {
-  id         String   @id @default(cuid())
-  projectId  String
-  itemId     String
-  kind       String
-  fromKey    String?
-  toKey      String?
-  refId      String?
-  actorLogin String?
-  at         DateTime @default(now())
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId, at])
-  @@index([itemId])
-}
-
-/// A pending review being assembled on this computer. Personal: it is only sent to GitHub when the person submits it.
-model ReviewDraft {
-  id         String   @id @default(cuid())
-  userId     String
-  workItemId String
-  path       String
-  line       Int
-  side       String   @default("RIGHT")
-  body       String
-  commitSha  String
-  createdAt  DateTime @default(now())
-
-  @@index([userId, workItemId])
-}
-
-/// Which files a person has viewed, with a signature of their content then. A file whose content changed shows as unviewed again.
-model ViewedFile {
-  userId     String
-  workItemId String
-  path       String
-  sig        String
-  viewedAt   DateTime @default(now())
-
-  @@id([userId, workItemId, path])
-}
-
-/// "This spelling means this concept" (for example P1 means priority::high), globally or for one repository. Reading only: labels on GitHub are never rewritten.
-model LabelMap {
-  id          String   @id @default(cuid())
-  workspaceId String
-  concept     String
-  spelling    String
-  /// Repository id, or empty for every repository.
-  repoKey     String   @default("")
-  createdAt   DateTime @default(now())
-
-  @@unique([workspaceId, spelling, repoKey])
-}
-
-/// Saved interest in upstream changes: any criterion that hits makes an upstream item relevant, with the reason shown.
-model UpstreamSubscription {
-  id          String   @id @default(cuid())
-  workspaceId String
-  mappingId   String?
-  name        String
-  criteria    Json
-  muted       Boolean  @default(false)
-  createdAt   DateTime @default(now())
-}
-
-/// An explicit record that an upstream change is being (or was) brought to a branch. Evidence is kept apart from the person's decision.
-model BackportRecord {
-  id             String   @id @default(cuid())
-  mappingId      String
-  upstreamNumber Int
-  targetBranch   String
-  /// planned | done
-  state          String   @default("planned")
-  /// ancestry | patch-equivalent | manual | unknown
-  evidence       String   @default("unknown")
-  localSha       String?
-  note           String?
-  byLogin        String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @default(now()) @updatedAt
-
-  mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
-
-  @@unique([mappingId, upstreamNumber, targetBranch])
 }

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 import { leaveTeamLocally } from "@/lib/team/leave";
-import { ensureLocalProfile } from "@/lib/local/profile";
 import { clock, makeClient, seedProject, type Client } from "./harness";
 
 let server: FakeGitHubServer;
@@ -46,16 +45,6 @@ describe("losing a space", () => {
     expect(await alice.db.project.count({ where: { id: seed.project.id } })).toBe(1);
     await alice.engine.revokeSpace(aliceCommon.id, "removed");
     expect(await alice.db.project.count({ where: { id: seed.project.id } })).toBe(0);
-  });
-
-  it("leaving a team gives the person back their personal administrator role, also after a restart (B11)", async () => {
-    const { olive } = await team();
-    await olive.db.member.update({ where: { id: olive.profile.member.id }, data: { role: "MEMBER" } });
-    expect((await olive.viewer()).isAdmin).toBe(false);
-    await leaveTeamLocally(olive.db);
-    expect((await olive.viewer()).isAdmin).toBe(true);
-    const again = await ensureLocalProfile(olive.db, { id: olive.actor.id, login: olive.login, name: olive.login, avatarUrl: null, host: "github.com" });
-    expect(again.member.role).toBe("ADMIN");
   });
 
   it("leaving a team keeps projects, cards and repositories", async () => {

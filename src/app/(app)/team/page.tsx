@@ -4,9 +4,6 @@ import { requireViewer } from "@/lib/authz-page";
 import { isDemo } from "@/lib/env";
 import { getEngine, getTeamService } from "@/lib/local/runtime";
 import { KEY_CANDIDATES, KEY_INVITATIONS, cached, keyInvitationStatus, refreshing, teamWithDeadline } from "@/lib/local/discovery-jobs";
-import { ContextsPanel } from "@/components/team/ContextsPanel";
-import { AccessPreviewPanel } from "@/components/team/AccessPreviewPanel";
-import { accessPreview } from "@/lib/services/access-preview";
 import { Freshness } from "@/components/sync/Freshness";
 import { CandidateCard } from "@/components/team/CandidateCard";
 import { expectedConsistencyDelaySeconds } from "@/lib/sync/engine";
@@ -59,13 +56,6 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   const delay = expectedConsistencyDelaySeconds(cfg?.pollSeconds ?? 30);
 
   const invitePlanSpace = sp.invite ? spaces.find((s) => s.id === sp.invite) : undefined;
-  // The only live GitHub calls here happen because the person just asked to review an invitation, and they have a hard deadline.
-  const accessPreviewData = team && invitePlanSpace && sp.users && viewer.isAdmin
-    ? await Promise.race([
-        accessPreview(db, viewer, { spaceId: invitePlanSpace.id, logins: sp.users.split(/[,\s]+/), permission: sp.perm === "pull" ? "pull" : "push" }, (repo, login) => team.sourcePermission(repo, login)),
-        new Promise<null>((r) => setTimeout(() => r(null), 9000)),
-      ]).catch(() => null)
-    : null;
   const invitePlan = team && invitePlanSpace && sp.users ? (() => { try { return team.planInvite(invitePlanSpace, sp.users!.split(/[,\s]+/), sp.perm === "pull" ? "pull" : "push"); } catch { return null; } })() : null;
   const statusBySpace = new Map<string, Awaited<ReturnType<typeof cached.invitationStatus>>>();
   if (team) for (const sp2 of spaces.filter((x) => x.canAdmin && x.access === "OK")) statusBySpace.set(sp2.id, await cached.invitationStatus(sp2.id));
@@ -138,7 +128,6 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
         </div>
       )}
 
-      <div className="mb-5"><ContextsPanel tz={viewer.timezone} /></div>
       {team && (
         <details className="mb-5 rounded-[10px] border border-line p-3 text-[13px]">
           <summary className="cursor-pointer font-medium">Stop using this team on this computer</summary>
@@ -184,7 +173,6 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                               <ul className="mt-1 list-disc space-y-1 pl-5 text-ink-2">{invitePlan.explanation.map((x) => <li key={x}>{x}</li>)}</ul>
                               <p className="mt-2 text-waiting">{SOURCE_ACCESS_NOTE}</p>
                             </div>
-                            {accessPreviewData && <AccessPreviewPanel preview={accessPreviewData} />}
                             <label className="mt-2 flex items-start gap-2 text-[13px]"><input type="checkbox" name="confirm" required className="mt-1" /> <span>Send these GitHub invitations now.</span></label>
                           </ActionForm>
                         )}

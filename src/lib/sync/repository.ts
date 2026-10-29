@@ -6,7 +6,6 @@ import { classifyCompare, classifyUpstreamMerge } from "@/lib/domain/forks";
 import { GithubError, type GithubPort, type RemoteWorkItem } from "@/lib/github/port";
 import { mapLimit } from "@/lib/util";
 import { indexList, sameLogin } from "@/lib/domain/text-index";
-import { parsePrefs, wantsInApp } from "@/lib/domain/notify-prefs";
 
 /**
  * Repository synchronization. Runs in the worker, with the installation's/connection's broad credential.
@@ -65,19 +64,9 @@ export async function applyWorkItem(db: Db, repositoryId: string, i: RemoteWorkI
   return true;
 }
 
-const COMMENT_FETCH_CAP = 3000; // the adapter reads at most 30 pages of 100
-
 async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: string, repositoryId: string, i: RemoteWorkItem, now: Date) {
   const wi = await db.workItem.findUniqueOrThrow({ where: { repositoryId_number: { repositoryId, number: i.number } } });
   const [issueComments, reviewComments] = await Promise.all([port.listIssueComments(owner, repo, i.number), i.type === "PULL_REQUEST" ? port.listReviewComments(owner, repo, i.number) : Promise.resolve([])]);
-  // Comments deleted on GitHub must disappear here too. Only a complete fetch can prove a deletion: a fetch that hit the paging
-  // bound might be missing comments that still exist, so it never deletes anything.
-  const reconcile = async (kind: "ISSUE_COMMENT" | "REVIEW_COMMENT", remote: { githubId: bigint }[]) => {
-    if (remote.length >= COMMENT_FETCH_CAP) return;
-    await db.workItemComment.deleteMany({ where: { workItemId: wi.id, kind, githubId: { notIn: remote.map((c) => c.githubId) } } });
-  };
-  await reconcile("ISSUE_COMMENT", issueComments);
-  if (i.type === "PULL_REQUEST") await reconcile("REVIEW_COMMENT", reviewComments);
   for (const c of issueComments) {
     await db.workItemComment.upsert({
       where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "ISSUE_COMMENT", githubId: c.githubId } },
@@ -92,16 +81,9 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
       update: { body: c.body, updatedAtGh: c.updatedAt },
     });
   }
-  if (i.type === "PULL_REQUEST") {
-    // Thread resolution lives only in GitHub's GraphQL API. If it cannot be read, the flag stays as it was (unknown stays unknown).
-    const threads = await port.listReviewThreads(owner, repo, i.number).catch(() => null);
-    if (threads) for (const t of threads) await db.workItemComment.updateMany({ where: { workItemId: wi.id, kind: "REVIEW_COMMENT", threadKey: t.rootCommentId.toString() }, data: { threadResolved: t.resolved } });
-  }
   if (i.type !== "PULL_REQUEST") return;
   const [reviews, requested] = await Promise.all([port.listReviews(owner, repo, i.number), port.listRequestedReviewers(owner, repo, i.number)]);
   for (const r of reviews) {
-    const seen = await db.workItemComment.findUnique({ where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "REVIEW", githubId: r.githubId } }, select: { id: true } });
-    if (!seen && r.state === "CHANGES_REQUESTED" && i.state === "OPEN") await notifyAuthorChanges(db, wi.id, r.login, i.title);
     await db.workItemComment.upsert({
       where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "REVIEW", githubId: r.githubId } },
       create: { workItemId: wi.id, githubId: r.githubId, kind: "REVIEW", authorLogin: r.login, body: r.body, reviewState: r.state, commitSha: r.commitSha, createdAtGh: r.submittedAt, updatedAtGh: r.submittedAt },
@@ -132,24 +114,7 @@ async function notifyReviewer(db: Db, workItemId: string, login: string, title: 
   const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: login } } }, include: { user: true } });
   const member = candidates.find((m) => sameLogin(m.user.login, login));
   if (!member) return;
-  await notifyUser(db, member.userId, wi, "review-requested", `Review requested: ${title}`);
-}
-
-/** Creates the in-app notification unless this person turned that kind off. Personal preferences are read here, never shared. */
-async function notifyUser(db: Db, userId: string, wi: { id: string; repositoryId: string; repository: { workspaceId: string } }, kind: string, title: string) {
-  const pref = await db.notificationPref.findUnique({ where: { userId } });
-  if (!wantsInApp(parsePrefs(pref?.prefs), kind)) return;
-  await db.notification.create({ data: { workspaceId: wi.repository.workspaceId, userId, repositoryId: wi.repositoryId, kind, title, href: `/pull-requests/${wi.id}` } });
-}
-
-/** The author of an open pull request hears when a reviewer asks for changes (once per review). */
-async function notifyAuthorChanges(db: Db, workItemId: string, reviewer: string | null, title: string) {
-  const wi = await db.workItem.findUniqueOrThrow({ where: { id: workItemId }, include: { repository: true } });
-  if (wi.state !== "OPEN" || !wi.authorLogin || (reviewer && sameLogin(reviewer, wi.authorLogin))) return;
-  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: wi.authorLogin } } }, include: { user: true } });
-  const member = candidates.find((m) => sameLogin(m.user.login, wi.authorLogin!));
-  if (!member) return;
-  await notifyUser(db, member.userId, wi, "changes-requested", `Changes requested${reviewer ? ` by ${reviewer}` : ""}: ${title}`);
+  await db.notification.create({ data: { workspaceId: wi.repository.workspaceId, userId: member.userId, repositoryId: wi.repositoryId, kind: "review-requested", title: `Review requested: ${title}`, href: `/pull-requests/${wi.id}` } });
 }
 
 export async function syncRepository(db: Db, port: GithubPort, repositoryId: string, opts: { full?: boolean; now?: Date } = {}): Promise<SyncResult> {
@@ -164,15 +129,9 @@ export async function syncRepository(db: Db, port: GithubPort, repositoryId: str
   try {
     // Refresh canonical metadata first: handles rename, transfer, default-branch change and archive.
     const meta = await port.getRepository(owner, name);
-    // A transfer changes the owner too; later requests are built from owner + name, so both move together. The REMOVED guard stays.
-    const newOwner = await db.githubOwner.upsert({
-      where: { githubId: meta.owner.githubId },
-      create: { githubId: meta.owner.githubId, login: meta.owner.login, type: meta.owner.type, avatarUrl: meta.owner.avatarUrl ?? null },
-      update: { login: meta.owner.login, type: meta.owner.type, ...(meta.owner.avatarUrl ? { avatarUrl: meta.owner.avatarUrl } : {}) },
-    });
     await db.repository.updateMany({
       where: { id: repo.id, trackingStatus: { not: "REMOVED" } },
-      data: { ownerId: newOwner.id, htmlUrl: meta.htmlUrl, fullName: meta.fullName, name: meta.name, defaultBranch: meta.defaultBranch, archived: meta.archived, visibility: meta.visibility, isFork: meta.isFork, parentGithubId: meta.parentGithubId ?? null, parentFullName: meta.parentFullName ?? null, permissions: (meta.permissions ?? undefined) as Prisma.InputJsonValue | undefined },
+      data: { fullName: meta.fullName, name: meta.name, defaultBranch: meta.defaultBranch, archived: meta.archived, visibility: meta.visibility, isFork: meta.isFork, parentGithubId: meta.parentGithubId ?? null, parentFullName: meta.parentFullName ?? null, permissions: (meta.permissions ?? undefined) as Prisma.InputJsonValue | undefined },
     });
 
     const touched: RemoteWorkItem[] = [];
@@ -244,12 +203,7 @@ export async function syncItem(db: Db, port: GithubPort, repositoryId: string, n
     if (e instanceof GithubError && e.kind === "not-found") return null; // may be an issue
     throw e;
   });
-  const base =
-    pr ??
-    (await port.getIssue(repo.owner.login, repo.name, number).catch((e) => {
-      if (e instanceof GithubError && e.kind === "not-found") return null;
-      throw e;
-    }));
+  const base = pr ?? (await port.listIssuesAndPulls(repo.owner.login, repo.name, { page: 1 })).items.find((i) => i.number === number);
   if (!base) return false;
   const checks = pr?.headSha ? await port.getChecksState(repo.owner.login, repo.name, pr.headSha) : undefined;
   const applied = await applyWorkItem(db, repo.id, base, pr ? { ...pr, checks } : undefined);

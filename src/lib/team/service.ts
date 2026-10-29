@@ -198,33 +198,6 @@ export class TeamService {
     };
   }
 
-  /** GitHub's own report of this account's request budget. Asking is free: /rate_limit does not count against it. Null when it cannot be read. */
-  async rateLimit(): Promise<{ limit: number; remaining: number; resetsAt: Date } | null> {
-    try {
-      const r = await this.rest.request("GET", "/rate_limit");
-      const c = (r.data as { resources?: { core?: { limit: number; remaining: number; reset: number } } })?.resources?.core;
-      return c ? { limit: c.limit, remaining: c.remaining, resetsAt: new Date(c.reset * 1000) } : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * What `login` may do on `repoFullName`, as GitHub reports it to the acting person (who needs push access to ask). A refusal or an
-   * error is "unknown": it is never reported as "none", because not being able to ask is not the same as not having access.
-   */
-  async sourcePermission(repoFullName: string, login: string): Promise<"admin" | "write" | "read" | "none" | "unknown"> {
-    const [owner, name] = repoFullName.split("/");
-    if (!owner || !name) return "unknown";
-    try {
-      const r = await this.rest.request("GET", `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/collaborators/${encodeURIComponent(login)}/permission`);
-      const p = String((r.data as { permission?: string } | null)?.permission ?? "");
-      return p === "admin" || p === "write" || p === "read" || p === "none" ? p : p === "maintain" ? "write" : p === "triage" ? "read" : "unknown";
-    } catch {
-      return "unknown";
-    }
-  }
-
   /** Uses GitHub's own collaborator API as the acting person. A non-admin gets GitHub's 403, whatever the local role says. */
   async invite(space: Space, plan: InvitePlan, opts: { confirmed: boolean }): Promise<InviteOutcome[]> {
     if (!opts.confirmed) throw new ValidationError("Confirm the invitation before it is sent");

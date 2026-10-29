@@ -1,10 +1,4 @@
-import { TemplateButton } from "@/components/tasks/TemplatePanels";
-import { OpenCardLink } from "@/components/planning/TaskDrawer";
 import Link from "next/link";
-import { readScope } from "@/lib/scope";
-import { ScopeNote } from "@/components/shell/ScopeNote";
-import { ViewBar } from "@/components/views/ViewBar";
-import { listViews } from "@/lib/services/views";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { listProjects } from "@/lib/services/queries";
@@ -13,7 +7,6 @@ import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { formatDateOnly, relativeTime } from "@/lib/format";
 import { Avatar, EmptyState, LabelChip, PageHeader, Panel, Segmented } from "@/components/ui/primitives";
 import { CalendarDays, Flag, ListChecks, MessageSquare } from "@/components/ui/icons";
-import { ctx } from "@/lib/ctx";
 import { NewTask } from "@/components/tasks/NewTask";
 
 export const metadata = { title: "Tasks" };
@@ -32,8 +25,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
   const scope = (SCOPES.find((s) => s.key === sp.scope)?.key ?? "mine") as TaskScope;
   const status = sp.status === "done" || sp.status === "all" ? sp.status : "open";
   const projects = await listProjects(db, viewer);
-  const workScope = await readScope(db, viewer);
-  const project = projects.find((p) => p.id === (sp.project || (workScope.kind === "project" ? workScope.id : "")));
+  const project = projects.find((p) => p.id === sp.project);
   const [tasks, counts] = await Promise.all([listTasks(db, viewer, { scope, projectId: project?.id, status, label: sp.label || undefined, q: sp.q }), taskCounts(db, viewer)]);
   const peopleByProject: Record<string, string[]> = {};
   for (const p of projects) peopleByProject[p.id] = await assigneeCandidates(db, viewer, p.id);
@@ -53,10 +45,8 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
       <PageHeader
         title="Tasks"
         subtitle="Create a task, give it to someone, and talk about it. Tasks are the same cards as on the planning board and sync to everyone in the project's team."
-        actions={projects.length > 0 ? <><TemplateButton projects={projects.map((p) => ({ id: p.id, name: p.name }))} /><NewTask projects={projects.map((p) => ({ id: p.id, name: p.name }))} peopleByProject={peopleByProject} me={viewer.login} defaultProjectId={project?.id ?? projects[0].id} /></> : undefined}
+        actions={projects.length > 0 ? <NewTask projects={projects.map((p) => ({ id: p.id, name: p.name }))} peopleByProject={peopleByProject} me={viewer.login} defaultProjectId={project?.id ?? projects[0].id} /> : undefined}
       />
-      <ScopeNote scope={workScope} />
-      <ViewBar scope="tasks" views={await listViews(db, viewer, "tasks")} />
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <Segmented label="Whose tasks" items={SCOPES.map((s) => ({ href: href({ scope: s.key }), label: `${s.label} (${countFor(s.key)})`, active: s.key === scope }))} />
         <Segmented label="Status" items={(["open", "done", "all"] as const).map((s) => ({ href: href({ status: s === "open" ? undefined : s }), label: s[0].toUpperCase() + s.slice(1), active: s === status }))} />
@@ -79,8 +69,8 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
             {tasks.map((t) => {
               const overdue = isOverdue(t.dueDate, t.column.key, today);
               return (
-                <li key={t.id} data-ctx={ctx([{ label: "Copy task title", copy: t.title }])}>
-                  <OpenCardLink data-row id={t.id} href={`/tasks/${t.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-hover">
+                <li key={t.id}>
+                  <Link href={`/tasks/${t.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-hover">
                     <span className="mt-0.5 shrink-0 text-ink-3" aria-hidden><ListChecks size={16} /></span>
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -91,7 +81,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
                         <span>{t.project.name}</span>
                         <span>{t.column.name}</span>
                         {t.workItem && <span>{t.workItem.repository.fullName}#{t.workItem.number}</span>}
-                        {t.priority > 0 && <span className={`inline-flex items-center gap-1 prio-${t.priority}`}><Flag size={12} aria-hidden />{priorityName(t.priority)}</span>}
+                        {t.priority > 0 && <span className="inline-flex items-center gap-1"><Flag size={12} aria-hidden />{priorityName(t.priority)}</span>}
                         {t.dueDate && <span className={overdue ? "inline-flex items-center gap-1 text-blocked" : "inline-flex items-center gap-1"}><CalendarDays size={12} aria-hidden />{overdue ? "Overdue " : "Due "}{formatDateOnly(t.dueDate)}</span>}
                         {t.checklist.total > 0 && <span className={`inline-flex items-center gap-1 ${t.checklist.done === t.checklist.total ? "text-ok" : ""}`}><ListChecks size={12} aria-hidden /><span className="sr-only">Checklist </span>{t.checklist.done}/{t.checklist.total}</span>}
                         {t._count.comments > 0 && <span className="inline-flex items-center gap-1"><MessageSquare size={12} aria-hidden />{t._count.comments}</span>}
@@ -103,7 +93,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
                     ) : (
                       <span className="shrink-0 text-[12.5px] text-ink-3">Unassigned</span>
                     )}
-                  </OpenCardLink>
+                  </Link>
                 </li>
               );
             })}

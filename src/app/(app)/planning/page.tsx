@@ -1,8 +1,4 @@
 import { Select } from "@/components/ui/Select";
-import { readScope } from "@/lib/scope";
-import { ScopeNote } from "@/components/shell/ScopeNote";
-import { ViewBar } from "@/components/views/ViewBar";
-import { listViews } from "@/lib/services/views";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -15,27 +11,20 @@ import { Sheet } from "@/components/ui/dialog";
 import { EmptyState, Mono, PageHeader, Panel, Segmented, LabelChip } from "@/components/ui/primitives";
 import { CalendarDays, Kanban, Milestone, Plus, ListChecks } from "@/components/ui/icons";
 import { Board } from "@/components/planning/Board";
-import { BoardsManager, EpicsView, InsightsView, IterationsView, MapView, ReleaseView, SuggestionsPanel } from "@/components/planning/PlanningPanels";
-import { groupCards, type GroupBy } from "@/lib/domain/boards";
-import { boardColumns, listBoards } from "@/lib/services/planning-ext";
 import { addDependencyAction, createCardAction, createMilestoneAction } from "@/app/actions";
 
 export const metadata = { title: "Planning" };
 
-type Search = { project?: string; view?: string; board?: string };
-const VIEWS = ["board", "list", "roadmap", "epics", "iterations", "release", "map", "insights"] as const;
-type View = (typeof VIEWS)[number];
+type Search = { project?: string; view?: string };
 
 export default async function Planning({ searchParams }: { searchParams: Promise<Search> }) {
   const { viewer } = await requireViewer();
   const sp = await searchParams;
   const projects = await listProjects(db, viewer);
-  const view: View = (VIEWS as readonly string[]).includes(sp.view ?? "") ? (sp.view as View) : "board";
-  const scope = await readScope(db, viewer);
-  const project = projects.find((p) => p.id === (sp.project || (scope.kind === "project" ? scope.id : ""))) ?? projects[0];
+  const view = sp.view === "list" || sp.view === "roadmap" ? sp.view : "board";
+  const project = projects.find((p) => p.id === sp.project) ?? projects[0];
   const href = (over: Search) => {
-    const u = new URLSearchParams({ view, ...(project ? { project: project.id } : {}), ...(sp.board ? { board: sp.board } : {}), ...over } as Record<string, string>);
-    for (const [k, val] of [...u]) if (!val) u.delete(k);
+    const u = new URLSearchParams({ view, ...(project ? { project: project.id } : {}), ...over } as Record<string, string>);
     return `/planning?${u.toString()}`;
   };
 
@@ -52,14 +41,7 @@ export default async function Planning({ searchParams }: { searchParams: Promise
   const milestoneOptions = ms.filter((m) => !m.projectId || m.projectId === project.id);
   const colName = new Map(columns.map((c) => [c.key, c.name]));
   const projectsSeg = <Segmented label="Project" items={projects.map((p) => ({ href: href({ project: p.id }), label: p.name, active: p.id === project.id }))} />;
-  const viewSeg = <Segmented label="View" items={VIEWS.map((v) => ({ href: href({ view: v, board: "" }), label: v === "map" ? "Dependencies" : v[0].toUpperCase() + v.slice(1), active: v === view }))} />;
-  const automation = (await db.project.findUnique({ where: { id: project.id }, select: { automation: true } }))?.automation ?? "off";
-  const boards = view === "board" ? await listBoards(db, viewer, project.id) : [];
-  const board = boards.find((b) => b.id === sp.board) ?? null;
-  const boardCols = board ? boardColumns(board) : null;
-  const shownColumns = boardCols ? boardCols.flatMap((bc) => { const c = columns.find((x) => x.key === bc.key); return c ? [{ id: c.id, key: c.key, name: bc.name ?? c.name, wip: bc.wip ?? null, total: cards.filter((x) => x.columnKey === c.key).length }] : []; }) : columns.map((c) => ({ id: c.id, key: c.key, name: c.name, wip: null as number | null, total: undefined as number | undefined }));
-  const shownCards = boardCols ? cards.filter((c) => boardCols.some((bc) => bc.key === c.columnKey)) : cards;
-  const lanes = groupCards(shownCards, (board?.groupBy ?? "none") as GroupBy);
+  const viewSeg = <Segmented label="View" items={(["board", "list", "roadmap"] as const).map((v) => ({ href: href({ view: v }), label: v[0].toUpperCase() + v.slice(1), active: v === view }))} />;
 
   const progresses = view === "roadmap" ? await Promise.all(ms.map(async (m) => ({ id: m.id, p: (await milestoneProgress(db, viewer, m.id)).progress }))) : [];
   const dated = ms.filter((m) => m.startDate || m.targetDate);
@@ -106,35 +88,14 @@ export default async function Planning({ searchParams }: { searchParams: Promise
           </>
         }
       />
-      <ScopeNote scope={scope} />
-        <ViewBar scope="planning" views={await listViews(db, viewer, "planning")} />
       <div className="mb-4 flex flex-wrap items-center gap-3">{projects.length > 1 && projectsSeg}{viewSeg}</div>
 
       {view === "board" && (
         <Panel title="Board" icon={Kanban} id="board" bodyClassName="p-3">
-          {boards.length > 0 && (
-            <div className="mb-3"><Segmented label="Board" items={[{ href: href({ board: "" }), label: "All columns", active: !board }, ...boards.map((b) => ({ href: href({ board: b.id }), label: b.name, active: b.id === board?.id }))]} /></div>
-          )}
           {cards.length === 0 && <EmptyState icon={Kanban} title="No cards yet">Add a card to start planning this project.</EmptyState>}
-          {lanes.map((lane) => (
-            <section key={lane.key} aria-label={lane.title || "Cards"} className={lane.title ? "mb-5" : ""}>
-              {lane.title && <h3 className="mb-2 flex items-center gap-2 text-[13px] font-medium text-ink-2">{lane.title}<span className="tnum rounded-full bg-muted px-2 text-[11.5px] leading-5">{lane.cards.length}</span></h3>}
-              <Board columns={shownColumns} initial={lane.cards} compact={board?.density === "compact"} />
-            </section>
-          ))}
+          <Board columns={columns.map((c) => ({ id: c.id, key: c.key, name: c.name }))} initial={cards} />
         </Panel>
       )}
-      {view === "board" && (
-        <div className="mt-5 flex flex-col gap-5">
-          <SuggestionsPanel db={db} viewer={viewer} projectId={project.id} automation={automation} />
-          <BoardsManager db={db} viewer={viewer} projectId={project.id} columns={columns.map((c) => ({ key: c.key, name: c.name }))} />
-        </div>
-      )}
-      {view === "epics" && <EpicsView db={db} viewer={viewer} projectId={project.id} cards={cards} />}
-      {view === "iterations" && <IterationsView db={db} projectId={project.id} cards={cards} />}
-      {view === "release" && <ReleaseView db={db} viewer={viewer} projectId={project.id} />}
-      {view === "map" && <MapView db={db} viewer={viewer} projectId={project.id} cards={cards} />}
-      {view === "insights" && <InsightsView db={db} viewer={viewer} projectId={project.id} />}
 
       {view === "list" && (
         <Panel title="List" icon={ListChecks} id="list">
@@ -185,7 +146,7 @@ export default async function Planning({ searchParams }: { searchParams: Promise
         </Panel>
       )}
 
-      {cards.length > 1 && (view === "list") && (
+      {cards.length > 1 && view !== "roadmap" && (
         <div className="mt-5">
           <Panel title="Dependencies" icon={ListChecks} id="deps">
             <div className="p-4">

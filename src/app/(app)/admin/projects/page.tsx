@@ -40,7 +40,7 @@ export default async function Projects() {
           </Sheet>
         }
       />
-      {projects.length === 0 ? <Panel title="Projects" icon={Layers}><EmptyState icon={Layers} title="No projects yet">A project groups repositories you plan together, for example “Website” or “Mobile app”. Use <strong>New project</strong> at the top right to make your first one.</EmptyState></Panel> : (
+      {projects.length === 0 ? <Panel title="Projects" icon={Layers}><EmptyState icon={Layers} title="No projects yet" /></Panel> : (
         <div className="fit-grid" style={{ "--fit-min": "720px" } as React.CSSProperties}>
           {projects.map((p) => (
             <Panel key={p.id} title={p.name} icon={Layers} id={`p-${p.id}`} actions={<span className="hidden text-[12px] text-ink-3 sm:inline">{p.repositories.length} repositories · {p.members.length} people{reviewerText.get(p.id) ? ` · reviewers: ${reviewerText.get(p.id)}` : ""} · {p.spaceId ? "shared" : "only on this computer"}</span>}>

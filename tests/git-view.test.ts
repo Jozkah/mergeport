@@ -16,21 +16,10 @@ describe("pull request files, commits and file contents", () => {
     expect(first.files.length).toBeGreaterThan(0);
     expect(first.files[0].hunks[0].lines.some((l) => l.t === "add")).toBe(true);
     expect(first.canComment).toBe(true);
-    expect(await db.gitCache.count({ where: { key: { startsWith: "prfiles:2:" } } })).toBe(1);
+    expect(await db.gitCache.count({ where: { key: { startsWith: "prfiles:1:" } } })).toBe(1);
     const again = await pullFilesView(db, a, ids.items.web9.id, false);
     expect(again.files).toEqual(first.files);
     expect(await db.gitCache.count()).toBe(1);
-  });
-
-  it("re-reads the diff when the PR is retargeted at the same head (B02)", async () => {
-    const { db, a, ids } = S;
-    await db.workItem.update({ where: { id: ids.items.web9.id }, data: { headSha: "a".repeat(40), baseRef: "main" } });
-    await pullFilesView(db, a, ids.items.web9.id, false);
-    await pullFilesView(db, a, ids.items.web9.id, false);
-    expect(await db.gitCache.count({ where: { key: { startsWith: "prfiles:" } } })).toBe(1);
-    await db.workItem.update({ where: { id: ids.items.web9.id }, data: { baseRef: "release/1.0" } });
-    await pullFilesView(db, a, ids.items.web9.id, false);
-    expect(await db.gitCache.count({ where: { key: { startsWith: "prfiles:" } } })).toBe(2); // fetched again, not served from the old base
   });
 
   it("does not look up a pull request the viewer cannot see, and rejects ids that are not commits", async () => {

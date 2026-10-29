@@ -1,4 +1,3 @@
-import { readScope, scopeKey } from "@/lib/scope";
 import Link from "next/link";
 import { requireViewer } from "@/lib/authz-page";
 import { db } from "@/lib/db";
@@ -13,16 +12,14 @@ import { itemHref } from "@/components/work/WorkTable";
 import { OpenedChart } from "@/components/work/OpenedChart";
 import { Metric as AnimatedNumber } from "@/components/ui/Metric";
 import { todayIn } from "@/lib/domain/planning";
-import { GettingStarted } from "@/components/onboarding/GettingStarted";
-import { gettingStarted } from "@/lib/services/getting-started";
 
 export const metadata = { title: "Overview" };
 
-function Metric({ href, title, icon: I, value, note, tone }: { href: string; title: string; icon: typeof BellRing; value: number; note: string; tone: "needs" | "waiting" | "blocked" }) {
+function Metric({ href, title, icon: I, value, note }: { href: string; title: string; icon: typeof BellRing; value: number; note: string }) {
   return (
-    <Link href={href} className="panel spot-card block transition-shadow duration-[var(--duration-feedback)] hover:shadow-hair focus-visible:shadow-hair">
+    <Link href={href} className="panel block transition-shadow duration-[var(--duration-feedback)] hover:shadow-hair focus-visible:shadow-hair">
       <div className="panel-head !min-h-9"><span className="flex items-center gap-2 text-[14px] font-medium text-ink-2"><I size={16} aria-hidden className="text-ink-3" />{title}</span><ArrowRight size={14} aria-hidden className="text-ink-3" /></div>
-      <div className="panel-body px-4 py-4"><p className={`text-[32px] font-medium leading-9 ${value > 0 ? (tone === "needs" ? "text-needs" : tone === "waiting" ? "text-waiting" : "text-blocked") : "text-ink-3"}`}><AnimatedNumber value={value} /></p><p className="mt-1 text-[12.5px] text-ink-3">{note}</p></div>
+      <div className="panel-body px-4 py-4"><p className="text-[32px] font-medium leading-9"><AnimatedNumber value={value} /></p><p className="mt-1 text-[12.5px] text-ink-3">{note}</p></div>
     </Link>
   );
 }
@@ -32,7 +29,7 @@ export default async function Overview() {
   const now = new Date();
   const [o, q, days, activity, forks, milestones] = await Promise.all([
     overview(db, viewer, now),
-    attentionFor(viewer, scopeKey(await readScope(db, viewer))),
+    attentionFor(viewer),
     openedPerDay(db, viewer, 14, now),
     recentActivity(db, viewer, 8),
     visibleForkMappings(db, viewer),
@@ -42,7 +39,6 @@ export default async function Overview() {
   const behind = forks.filter((m) => (m.comparisons[0]?.behindBy ?? 0) > 0);
   const repoCount = await db.repository.count({ where: repoWhere(viewer) });
   const none = o.openIssues + o.openPrs === 0 && q.needsMyReview.length === 0;
-  const steps = await gettingStarted(db, viewer);
 
   return (
     <>
@@ -51,12 +47,10 @@ export default async function Overview() {
         <p className="mt-1 text-[13px] text-ink-3">What needs you, and what is waiting on someone else, across the repositories you can see.</p>
       </div>
 
-      <GettingStarted steps={steps} />
-
       <div className="grid gap-3 sm:grid-cols-3">
-        <Metric href="/attention?queue=needs-me" title="Needs my review" icon={BellRing} value={o.needsMyReview} note="Pull requests expecting you" tone="needs" />
-        <Metric href="/attention?queue=waiting" title="Waiting on others" icon={Hourglass} value={o.waitingOnOthers} note="Review pending with someone else" tone="waiting" />
-        <Metric href="/attention?queue=blocked" title="Blocked or overdue" icon={CircleAlert} value={o.blockedOrOverdue} note="Checks, conflicts, blocked or overdue planning" tone="blocked" />
+        <Metric href="/attention?queue=needs-me" title="Needs my review" icon={BellRing} value={o.needsMyReview} note="Pull requests expecting you" />
+        <Metric href="/attention?queue=waiting" title="Waiting on others" icon={Hourglass} value={o.waitingOnOthers} note="Review pending with someone else" />
+        <Metric href="/attention?queue=blocked" title="Blocked or overdue" icon={CircleAlert} value={o.blockedOrOverdue} note="Checks, conflicts, blocked or overdue planning" />
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1fr)_minmax(340px,28%)]">

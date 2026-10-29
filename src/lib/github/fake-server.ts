@@ -177,12 +177,6 @@ export class FakeGitHubServer {
 
     // collaborators / invitations
     if (sub === "/collaborators" && method === "GET") return p === "push" || p === "admin" ? json(200, [{ login: r.owner, permissions: { admin: true } }, ...[...r.collaborators].map(([login, perm]) => ({ login, permissions: { admin: perm === "admin", push: perm !== "pull", pull: true } }))]) : json(403, { message: "Must have push access to view repository collaborators." });
-    if ((m = /^\/collaborators\/([^/]+)\/permission$/.exec(sub)) && method === "GET") {
-      if (p !== "push" && p !== "admin") return json(403, { message: "Must have push access to view repository collaborators." });
-      const who = decodeURIComponent(m[1]);
-      const lvl = this.perm(r, who);
-      return json(200, { permission: lvl === "admin" ? "admin" : lvl === "push" ? "write" : lvl === "pull" || !r.private ? "read" : "none" });
-    }
     if ((m = /^\/collaborators\/([^/]+)$/.exec(sub))) {
       const who = decodeURIComponent(m[1]);
       if (p !== "admin") return json(403, { message: "Must have admin rights to Repository." });

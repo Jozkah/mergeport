@@ -6,14 +6,11 @@ import type { BlobView, InlineComment } from "@/lib/services/git-view";
 import type { DiffFile, DiffLine } from "@/lib/diff";
 import { toSplitRows } from "@/lib/diff";
 import { inlineCommentAction } from "@/app/actions";
-import { addDraftAction } from "@/app/phase4-actions";
-import { DRAFTS_CHANGED } from "@/components/code/ReviewTools";
 import { Avatar } from "@/components/ui/Avatar";
-import { ctx } from "@/lib/ctx";
 import { Tokens } from "@/components/code/Code";
 import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, Plus } from "@/components/ui/icons";
 
-export type FilesData = { lastReviewedSha?: string | null; headSha: string | null; files: DiffFile[]; truncated: boolean; inline?: Record<string, InlineComment[]>; canComment?: boolean };
+export type FilesData = { headSha: string | null; files: DiffFile[]; truncated: boolean; inline?: Record<string, InlineComment[]>; canComment?: boolean };
 
 const EXPAND_STEP = 20;
 
@@ -380,7 +377,7 @@ function FileDiff({ file, itemId, repoId, headSha, githubFilesUrl, mode, wrap, c
 
   return (
     <section className={`diff-file ${collapsed ? "is-collapsed" : ""}`} aria-label={file.filename}>
-      <div className="diff-file-head" data-ctx={ctx([{ label: "Copy file path", copy: file.filename }, { label: "Copy file name", copy: file.filename.split("/").pop() ?? file.filename }])}>
+      <div className="diff-file-head">
         <button type="button" className="btn btn-quiet btn-icon !h-7 !w-7" aria-expanded={!collapsed} aria-label={`${collapsed ? "Expand" : "Collapse"} ${file.filename}`} onClick={onToggle}>{collapsed ? <ChevronRight size={15} aria-hidden /> : <ChevronDown size={15} aria-hidden />}</button>
         <span className="min-w-0 truncate font-mono text-[12.5px]" title={label}>{label}</span>
         <button type="button" className="btn btn-quiet btn-icon !h-7 !w-7" aria-label="Copy file path" onClick={() => navigator.clipboard?.writeText(file.filename).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}>{copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}</button>
@@ -453,7 +450,7 @@ function Thread({ comments, flat }: { comments: InlineComment[]; flat?: boolean 
   return (
     <div className={flat ? "" : "cthread"}>
       {comments.map((c) => (
-        <div key={c.id} id={`cmt-${c.id}`} tabIndex={-1} className="border-b border-line p-3 outline-none last:border-b-0">
+        <div key={c.id} className="border-b border-line p-3 last:border-b-0">
           <p className="mb-1 flex items-center gap-2 text-[12.5px] text-ink-3"><Avatar login={c.author ?? "?"} size={18} /><strong className="font-medium text-ink">{c.author ?? "unknown"}</strong><span>commented {new Date(c.createdAt).toLocaleString()}</span></p>
           <div className="md" dangerouslySetInnerHTML={{ __html: c.html }} />
         </div>
@@ -475,18 +472,6 @@ function Composer({ itemId, path, side, line, onClose, onPosted }: { itemId: str
     if (r.ok) onPosted();
     else setErr(r.error);
   };
-  // Collect the comment into a pending review instead of sending it: nothing reaches GitHub until the person submits the review.
-  const draft = async () => {
-    if (!body.trim() || busy) return;
-    setBusy(true);
-    setErr(null);
-    const r = await addDraftAction({ id: itemId, path, line, side, body });
-    setBusy(false);
-    if (r.ok) {
-      window.dispatchEvent(new Event(DRAFTS_CHANGED));
-      onClose();
-    } else setErr(r.error);
-  };
   return (
     <div className="cthread">
       <div className="p-3">
@@ -494,9 +479,8 @@ function Composer({ itemId, path, side, line, onClose, onPosted }: { itemId: str
         <textarea id={`ic-${path}-${side}-${line}`} className="textarea min-h-20" autoFocus value={body} onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void submit(); if (e.key === "Escape") onClose(); }} />
         {err && <p className="mt-2 text-[12.5px] text-blocked" role="alert">{err}</p>}
         <div className="mt-2 flex items-center justify-end gap-2">
-          <span className="mr-auto text-[12px] text-ink-3">&ldquo;Comment&rdquo; posts to GitHub as you now. &ldquo;Add to review&rdquo; keeps it private until you submit the review.</span>
+          <span className="mr-auto text-[12px] text-ink-3">Posted to GitHub as you. Ctrl+Enter sends.</span>
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn" disabled={!body.trim() || busy} onClick={draft}>Add to review</button>
           <button type="button" className="btn btn-primary" disabled={!body.trim() || busy} onClick={submit}>{busy ? "Posting…" : "Comment"}</button>
         </div>
       </div>

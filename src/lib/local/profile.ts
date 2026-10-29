@@ -30,11 +30,6 @@ export async function ensureLocalProfile(db: Db, who: LocalIdentity) {
   const workspace = (await db.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ?? (await db.workspace.create({ data: { name: "Personal workspace" } }));
   const user = await db.user.upsert({ where: { githubId: who.id }, create: { githubId: who.id, login: who.login, name: who.name, avatarUrl: who.avatarUrl }, update: { login: who.login, name: who.name, avatarUrl: who.avatarUrl } });
   const member = await db.member.upsert({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } }, create: { workspaceId: workspace.id, userId: user.id, role: "ADMIN" }, update: { status: "ACTIVE" } });
-  const team = await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "PERSONAL" }, update: {} });
-  // Personal mode means the person administers their own workspace. (In team mode the role comes from GitHub permissions.)
-  if (team.mode === "PERSONAL" && member.role !== "ADMIN") {
-    const fixed = await db.member.update({ where: { id: member.id }, data: { role: "ADMIN" } });
-    return { workspace, user, member: fixed };
-  }
+  await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "PERSONAL" }, update: {} });
   return { workspace, user, member };
 }

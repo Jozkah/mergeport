@@ -8,9 +8,6 @@ import { resolveRule, type RuleRow } from "@/lib/domain/rules";
 import { applyWaitingRules, matchingWaitingRules, type WaitingRuleRow } from "@/lib/domain/waiting-rules";
 import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { indexNeedle } from "@/lib/domain/text-index";
-import { deriveStages, type StageEntry } from "@/lib/domain/stages";
-import { blockerFinished } from "@/lib/domain/deps";
-import { labelFilter } from "./label-taxonomy";
 
 /**
  * Every query here starts from the viewer's repository filter. Counts, charts, search and
@@ -58,22 +55,9 @@ async function loadRuleContext(db: Db, v: Viewer) {
     includeDrafts: r.includeDrafts,
     waitingOn: (r.waitingOn as unknown as Reviewer[]) ?? [],
     reason: r.reason,
-    stage: r.stage,
     enabled: r.enabled,
   }));
-  // Unfinished planning blockers per GitHub item. Hidden blockers count too (the count discloses nothing about them).
-  // Policy: a blocker only holds back the item in the project where the link lives, so a project-scoped view counts that project's links only.
-  const blockerLinks = await db.planningLink.findMany({
-    where: { kind: "blocks", to: { workItemId: { not: null }, project: { workspaceId: v.workspaceId } } },
-    select: { from: { select: { column: { select: { key: true } }, workItem: { select: { type: true, state: true } } } }, to: { select: { workItemId: true, projectId: true } } },
-  });
-  const blockers = new Map<string, { projectId: string }[]>();
-  for (const l of blockerLinks) {
-    // A closed, unmerged pull request did not deliver what it blocked on, so it keeps blocking.
-    if (blockerFinished({ columnKey: l.from.column.key, workType: l.from.workItem?.type ?? null, workState: l.from.workItem?.state ?? null })) continue;
-    (blockers.get(l.to.workItemId!) ?? blockers.set(l.to.workItemId!, []).get(l.to.workItemId!)!).push({ projectId: l.to.projectId });
-  }
-  return { ruleRows, waitingRows, internalLogins, projectsByRepo, blockers };
+  return { ruleRows, waitingRows, internalLogins, projectsByRepo };
 }
 
 type PrRow = Prisma.WorkItemGetPayload<{ include: { repository: { include: { owner: true } }; comments: true; reviewRequests: true; waiting: true } }>;
@@ -83,10 +67,6 @@ export type DerivedItem = {
   derivation: ReviewDerivation;
   ruleConflict: string | null;
   manualWaiting: PrRow["waiting"];
-  /** Hand-off stages (internal review, external review, maintainer merge, upstream release), in order, each with its owner and age. */
-  stages: StageEntry[];
-  /** Unfinished planning blockers counted for this item (hidden ones included). */
-  dependencyBlockers: number;
 };
 
 function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<typeof loadRuleContext>>, contextProjectId?: string | null): DerivedItem {
@@ -116,27 +96,15 @@ function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<type
     rule: res.kind === "rule" ? res.rule : null,
     readyAt: row.createdAtGh,
     internalLogins: rc.internalLogins,
-    blockedByDependencies: (rc.blockers.get(row.id) ?? []).filter((b) => !contextProjectId || b.projectId === contextProjectId).length,
     manuallyCleared: new Set(row.waiting.filter((w) => w.status === "SATISFIED" && w.reviewerKind === "EXTERNAL_ROLE").map((w) => w.reviewerRef)),
     now,
   };
   const matched = matchingWaitingRules(rc.waitingRows, { repositoryId: row.repositoryId, ownerLogin: row.repository.owner.login, projectIds: rc.projectsByRepo.get(row.repositoryId) ?? [], labels, authorLogin: row.authorLogin, type: row.type, draft: row.draft });
   const derivation = applyWaitingRules(deriveReview(input, v.login), input, matched, v.login);
-  const stages = deriveStages({ derivation, input, matched, manual: row.waiting.map((w) => ({ stage: w.stage, reviewerKind: w.reviewerKind, reviewerRef: w.reviewerRef, reason: w.reason, startedAt: w.startedAt, status: w.status, source: w.source })), now });
-  return { item: row, derivation, ruleConflict: res.kind === "conflict" ? res.message : null, manualWaiting, stages, dependencyBlockers: input.blockedByDependencies ?? 0 };
+  return { item: row, derivation, ruleConflict: res.kind === "conflict" ? res.message : null, manualWaiting };
 }
 
 const prInclude = { repository: { include: { owner: true } }, comments: true, reviewRequests: true, waiting: true } as const;
-
-/** Every open item with its derivation, for views that look across people (capacity) rather than at one person's queues. */
-export async function derivedOpen(db: Db, v: Viewer, opts: { now?: Date; repositoryIds?: string[] } = {}): Promise<DerivedItem[]> {
-  const now = opts.now ?? new Date();
-  const rc = await loadRuleContext(db, v);
-  const where: Prisma.WorkItemWhereInput = { ...viaRepo(v), state: "OPEN" };
-  if (opts.repositoryIds) where.repositoryId = { in: opts.repositoryIds };
-  const rows = await db.workItem.findMany({ where, include: prInclude });
-  return rows.map((r) => deriveFor(r, v, now, rc));
-}
 
 export type AttentionQueues = {
   needsMyReview: DerivedItem[];
@@ -248,7 +216,7 @@ export async function listWorkItems(db: Db, v: Viewer, p: WorkItemListParams) {
   if (state !== "ALL") and.push({ state });
   if (p.repositoryIds?.length) and.push({ repositoryId: { in: p.repositoryIds } }); // intersected with viaRepo above
   if (p.projectId) and.push({ repository: { projects: { some: { projectId: p.projectId } } } });
-  if (p.label) and.push(await labelFilter(db, v, p.label));
+  if (p.label) and.push({ labelNames: { contains: indexNeedle(p.label) } });
   if (p.assignee) and.push({ assigneeLogins: { contains: indexNeedle(p.assignee) } });
   if (p.author) and.push({ authorLogin: { contains: p.author } }); // SQLite LIKE: case-insensitive substring
   if (p.q) and.push({ OR: [{ title: { contains: p.q } }, ...(Number.isInteger(Number(p.q)) ? [{ number: Number(p.q) }] : [])] });

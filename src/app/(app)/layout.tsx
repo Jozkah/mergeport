@@ -1,24 +1,14 @@
 import { processStartedAt } from "@/lib/local/boot";
+import { Suspense } from "react";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
-import { projectWhere, repoWhere } from "@/lib/authz/viewer";
-import { readScope, scopeKey } from "@/lib/scope";
-import { Suspense } from "react";
-import { CommandPalette } from "@/components/shell/CommandPalette";
-import { TaskDrawer } from "@/components/planning/TaskDrawer";
-import { Shortcuts } from "@/components/shell/Shortcuts";
-import { DesktopNotifier } from "@/components/shell/DesktopNotifier";
-import { ScopePicker } from "@/components/shell/ScopePicker";
-import { inbox } from "@/lib/services/inbox";
+import { repoWhere } from "@/lib/authz/viewer";
 import { attentionFor } from "@/lib/services/request-cache";
 import { planningWhere, unreadNotificationCount } from "@/lib/services/queries";
 import { formatInstant } from "@/lib/format";
 import { MobileNav, Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
 import { LiveRefresh } from "@/components/sync/LiveRefresh";
-import { SectionMain } from "@/components/shell/SectionMain";
-import { ContextMenuProvider } from "@/components/ui/ContextMenu";
-import { SpotlightProvider } from "@/components/ui/SpotlightProvider";
 import { SyncAnnouncer } from "@/components/sync/SyncAnnouncer";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { TooltipProvider } from "@/components/ui/Tooltip";
@@ -37,15 +27,12 @@ export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { viewer, user } = await requireViewer();
-  const scope = await readScope(db, viewer);
-  const [q, unread, ws, lastSync, demoRepos, scopeProjects, scopeRepos] = await Promise.all([
-    attentionFor(viewer, scopeKey(scope)),
+  const [q, unread, ws, lastSync, demoRepos] = await Promise.all([
+    attentionFor(viewer),
     unreadNotificationCount(db, viewer),
     db.workspace.findUniqueOrThrow({ where: { id: viewer.workspaceId } }),
     db.repository.aggregate({ where: repoWhere(viewer), _max: { lastSyncedAt: true } }),
     db.repository.count({ where: { ...repoWhere(viewer), isDemo: true } }),
-    db.project.findMany({ where: projectWhere(viewer), select: { id: true, name: true }, orderBy: { name: "asc" }, take: 200 }),
-    db.repository.findMany({ where: repoWhere(viewer), select: { id: true, fullName: true }, orderBy: { fullName: "asc" }, take: 300 }),
   ]);
   const counts = {
     needsMyReview: q.needsMyReview.length,
@@ -53,8 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     waiting: q.waitingExternal.length,
     changes: q.changesRequested.length,
     blocked: q.blocked.length,
-    inbox: (await inbox(db, viewer, { queues: q })).unread,
-    tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login.toLowerCase(), column: { key: { not: "done" } } }] } }),
+    tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login, column: { key: { not: "done" } } }] } }),
   };
   const last = lastSync._max.lastSyncedAt;
   const profile = await checkProfile(); // last known answer; refreshed in the background, never waits on gh
@@ -106,18 +92,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <ToastProvider>
     <div className="mx-auto flex min-h-dvh max-w-[3200px]">
       <LiveRefresh />
-      <ContextMenuProvider />
-      <SpotlightProvider />
       <SyncAnnouncer state={sync?.state ?? null} />
       <Suspense fallback={<aside className="hidden w-[250px] shrink-0 lg:block" />}>
         <Sidebar {...navProps} />
       </Suspense>
       <div className="flex min-w-0 flex-1 flex-col">
         <Suspense fallback={<div className="h-14" />}>
-          <DesktopNotifier />
-          <Shortcuts />
-          <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
-          <Topbar workspaces={workspaces} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
+          <Topbar workspaces={workspaces} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "mismatch" && (
           <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">
@@ -134,7 +115,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             Demo mode: {demoRepos} repositor{demoRepos === 1 ? "y" : "ies"} hold synthetic data. Actions change the demo database only; nothing is sent to GitHub.
           </div>
         )}
-        <SectionMain>{children}</SectionMain>
+        <main id="main" className="min-w-0 flex-1 px-4 pb-16 pt-6 lg:px-6">{children}</main>
       </div>
     </div>
     </ToastProvider>

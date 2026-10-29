@@ -6,7 +6,6 @@ import { notifyChange } from "@/lib/local/runtime";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { STAGE_KEYS } from "@/lib/domain/stages";
 import { run, type ActionResult } from "@/lib/action-result";
 import { requireAdminViewer, requireViewer } from "@/lib/auth/current";
 import { NotFoundError, ValidationError } from "@/lib/errors";
@@ -16,8 +15,7 @@ import * as work from "@/lib/services/work-actions";
 import { addDependency, assertSameAudience, createCard, moveCard, requestManualReview, resolveManualReview, createColumnsForProject } from "@/lib/services/planning";
 import { mapLocalRoot, scanWorktrees, unmapLocalRoot } from "@/lib/services/worktrees";
 import { audit } from "@/lib/services/audit";
-import { portForDiscovery, publicPort } from "@/lib/github/factory";
-import { applyWatchlist } from "@/lib/services/watchlist";
+import { publicPort } from "@/lib/github/factory";
 import { readCached } from "@/lib/local/discovery";
 import type { Discovery } from "@/lib/github/port";
 import { GithubError } from "@/lib/github/port";
@@ -242,7 +240,6 @@ export async function manualWaitingAction(fd: FormData): Promise<ActionResult> {
       reviewerKind: z.enum(["USER", "EXTERNAL_ROLE"]).parse(str(fd, "kind")),
       reviewerRef: str(fd, "ref"),
       reason: str(fd, "reason"),
-      stage: str(fd, "stage"),
     });
     revalidatePath("/attention");
     return { ok: true, message: "Marked as waiting. This is a dashboard record; nothing was posted to GitHub." };
@@ -375,7 +372,7 @@ export async function saveWaitingRuleAction(fd: FormData): Promise<ActionResult>
     if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a project");
     if (scope === "OWNER" && !ownerLogin) throw new ValidationError("Enter the GitHub owner");
     const t = str(fd, "itemType");
-    const rule = await db.waitingRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, itemType: t === "ISSUE" || t === "ANY" ? t : "PULL_REQUEST", labels: csv(str(fd, "labels")), authors: csv(str(fd, "authors")).map((a) => a.replace(/^@/, "")), includeDrafts: str(fd, "includeDrafts") === "on", waitingOn, reason, stage: STAGE_KEYS.includes(str(fd, "stage")) ? str(fd, "stage") : "" } });
+    const rule = await db.waitingRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, itemType: t === "ISSUE" || t === "ANY" ? t : "PULL_REQUEST", labels: csv(str(fd, "labels")), authors: csv(str(fd, "authors")).map((a) => a.replace(/^@/, "")), includeDrafts: str(fd, "includeDrafts") === "on", waitingOn, reason } });
     await audit(db, viewer, "waitingRule.create", { type: "WaitingRule", id: rule.id });
     revalidatePath("/admin/rules");
     revalidatePath("/attention");
@@ -441,19 +438,6 @@ export async function mapForkAction(fd: FormData): Promise<ActionResult> {
   });
 }
 
-/** Many repositories at once: one address tracks it and its parent, two addresses ("fork upstream") map them. */
-export async function watchlistAction(input: { text: string }): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireAdminViewer();
-    const port = await portForDiscovery(db, { id: viewer.githubId.toString(), login: viewer.login });
-    const results = await applyWatchlist(db, viewer, port, String(input.text ?? ""));
-    revalidatePath("/forks");
-    revalidatePath("/repositories");
-    const ok = results.filter((r) => r.ok).length;
-    return { ok: true, message: `${ok} of ${results.length} added. Comparisons are queued.`, data: { results } };
-  });
-}
-
 export async function refreshForkAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireViewer();
@@ -478,48 +462,6 @@ export async function triageAction(fd: FormData): Promise<ActionResult> {
     await audit(db, viewer, "triage.set", { type: "UpstreamIssueTriage", id: row.id }, { status });
     revalidatePath("/forks");
     return { ok: true, message: "Triage saved" };
-  });
-}
-
-const TRIAGE = ["UNTRIAGED", "WATCHING", "RELEVANT", "ADDRESSED", "IGNORED"] as const;
-
-/** Sets the status (and optionally the note) of many upstream issues at once. Every mapping touched must be one the person may manage. */
-export async function triageManyAction(input: { ids: string[]; status: (typeof TRIAGE)[number]; note?: string | null }): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireViewer();
-    const status = z.enum(TRIAGE).parse(input.status);
-    const ids = [...new Set((input.ids ?? []).map(String))].slice(0, 500);
-    if (ids.length === 0) throw new ValidationError("Pick at least one issue");
-    const rows = await db.upstreamIssueTriage.findMany({ where: { id: { in: ids } }, include: { mapping: true } });
-    if (rows.length !== ids.length) throw new NotFoundError();
-    for (const m of new Map(rows.map((r) => [r.mappingId, r.mapping])).values()) {
-      await requireRepo(db, viewer, m.forkRepoId, "manageWork");
-      await requireRepo(db, viewer, m.upstreamRepoId, "view");
-    }
-    const note = input.note === undefined ? undefined : (String(input.note ?? "").trim().slice(0, 500) || null);
-    await db.upstreamIssueTriage.updateMany({ where: { id: { in: ids } }, data: { status, decidedById: viewer.userId, ...(note !== undefined ? { note } : {}) } });
-    await audit(db, viewer, "triage.set", { type: "UpstreamIssueTriage", id: ids[0] }, { status, count: ids.length });
-    revalidatePath("/forks");
-    return { ok: true, message: ids.length === 1 ? "Saved" : `${ids.length} issues updated` };
-  });
-}
-
-/** Acknowledges many merged upstream pull requests at once: a decision by a person, not proof. */
-export async function ackManyAction(input: { ids: string[] }): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireViewer();
-    const ids = [...new Set((input.ids ?? []).map(String))].slice(0, 500);
-    if (ids.length === 0) throw new ValidationError("Pick at least one pull request");
-    const rows = await db.upstreamPrState.findMany({ where: { id: { in: ids } }, include: { mapping: true } });
-    if (rows.length !== ids.length) throw new NotFoundError();
-    for (const m of new Map(rows.map((r) => [r.mappingId, r.mapping])).values()) {
-      await requireRepo(db, viewer, m.forkRepoId, "manageWork");
-      await requireRepo(db, viewer, m.upstreamRepoId, "view");
-    }
-    await db.upstreamPrState.updateMany({ where: { id: { in: ids }, state: "merged", evidence: { not: "ANCESTRY_EXACT" } }, data: { ackedById: viewer.memberId, evidence: "MANUAL_ACK", evidenceNote: "Acknowledged manually by a person. This is a decision, not Git evidence." } });
-    await audit(db, viewer, "upstream.ack", { type: "UpstreamPrState", id: ids[0] }, { count: ids.length });
-    revalidatePath("/forks");
-    return { ok: true, message: ids.length === 1 ? "Acknowledged" : `${ids.length} acknowledged` };
   });
 }
 

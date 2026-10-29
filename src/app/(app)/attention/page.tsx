@@ -1,8 +1,4 @@
 import Link from "next/link";
-import { readScope, scopeKey } from "@/lib/scope";
-import { ScopeNote } from "@/components/shell/ScopeNote";
-import { ViewBar } from "@/components/views/ViewBar";
-import { listViews } from "@/lib/services/views";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { attentionFor } from "@/lib/services/request-cache";
@@ -11,8 +7,6 @@ import { formatDuration, formatInstant } from "@/lib/format";
 import { listTasks } from "@/lib/services/tasks";
 import { EmptyState, Mono, PageHeader, Panel, Segmented, StatusPill, Time, Avatar } from "@/components/ui/primitives";
 import { BellRing, Hourglass, ListChecks } from "@/components/ui/icons";
-import { RepoChip } from "@/components/ui/RepoChip";
-import { StageList } from "@/components/review/StageList";
 import { itemHref } from "@/components/work/WorkTable";
 
 export const metadata = { title: "My attention" };
@@ -36,19 +30,18 @@ function Row({ d, tz, now, queue }: { d: DerivedItem; tz: string; now: Date; que
   return (
     <li className="flex flex-col gap-1.5 px-4 py-3">
       <div className="flex items-start justify-between gap-3">
-        <Link data-row href={itemHref(d.item)} className="min-w-0 text-[13.5px] font-medium leading-snug underline-offset-2 hover:underline [overflow-wrap:anywhere]">{d.item.title}</Link>
+        <Link href={itemHref(d.item)} className="min-w-0 text-[13.5px] font-medium leading-snug underline-offset-2 hover:underline [overflow-wrap:anywhere]">{d.item.title}</Link>
         <div className="flex shrink-0 items-center gap-2">
           {showStatus && <StatusPill status={x.primary} />}
           {x.waiting && <span className="tnum whitespace-nowrap text-[12px] text-ink-3" title={`since ${x.waiting.since.toISOString()}`}>{formatDuration(x.waiting.elapsedMs)}</span>}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-3">
-        <RepoChip fullName={d.item.repository.fullName} number={d.item.number} />
+        <Mono title={d.item.repository.fullName}>#{d.item.number}</Mono>
         <span className="inline-flex items-center gap-1"><Avatar login={d.item.authorLogin ?? "?"} size={14} />{d.item.authorLogin ?? "unknown"}</span>
         {first && <span className="inline-flex items-center gap-1 text-ink-2"><Hourglass size={12} aria-hidden />{queue === "changes" ? "Changes asked by" : "Waiting on"} <Avatar login={first.actor.ref} size={14} /><span className="font-medium">{first.actor.display ?? first.actor.ref}</span>{pending.length > 1 && <span className="text-ink-3">+{pending.length - 1}</span>}</span>}
         {d.ruleConflict && <span className="text-waiting">Rule conflict</span>}
       </div>
-      {d.stages.length > 0 && <StageList stages={d.stages} compact />}
       <details className="group text-[12px] text-ink-3">
         <summary className="inline-flex cursor-pointer list-none items-center gap-1 hover:text-ink-2 [&::-webkit-details-marker]:hidden"><span className="underline decoration-dotted underline-offset-2">Why</span></summary>
         <div className="mt-1.5 flex flex-col gap-1 border-l border-line pl-3">
@@ -84,8 +77,7 @@ export default async function Attention({ searchParams }: { searchParams: Promis
   const { viewer } = await requireViewer();
   const sp = await searchParams;
   const now = new Date();
-  const scope = await readScope(db, viewer);
-  const q = await attentionFor(viewer, scopeKey(scope));
+  const q = await attentionFor(viewer);
   const lists = { "needs-me": q.needsMyReview, team: q.needsTeamReview, waiting: q.waitingExternal, changes: q.changesRequested, blocked: q.blocked } as const;
   const active = (QUEUES.find((x) => x.key === sp.queue)?.key ?? "needs-me") as keyof typeof lists;
   const meta = QUEUES.find((x) => x.key === active)!;
@@ -102,19 +94,17 @@ export default async function Attention({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="My attention" subtitle="Review waiting is tracked separately from open or closed state. Each item says who is expected to act, why, and since when." />
-      <ScopeNote scope={scope} />
-      <ViewBar scope="attention" views={await listViews(db, viewer, "attention")} />
       <div className="mb-4"><Segmented label="Queues" items={QUEUES.map((x) => ({ href: `/attention?queue=${x.key}`, label: x.label, active: x.key === active, count: lists[x.key].length }))} /></div>
       <Panel title={meta.label} icon={BellRing} id="queue">
         <p className="border-b border-line px-4 py-2.5 text-[12.5px] text-ink-3">{meta.help}</p>
-        {rows.length === 0 ? <EmptyState icon={BellRing} title="You are all caught up" action={<Link href="/pull-requests" className="btn">See all pull requests</Link>}>Nothing is in this list for the repositories you can see. When someone asks for your review, it shows up here.</EmptyState> : <Grouped rows={rows} tz={viewer.timezone} now={now} queue={active} />}
+        {rows.length === 0 ? <EmptyState icon={BellRing} title="Nothing here">This queue is empty for the repositories you can see.</EmptyState> : <Grouped rows={rows} tz={viewer.timezone} now={now} queue={active} />}
       </Panel>
 
       {myTasks.length > 0 && (
         <Panel title={`Tasks assigned to you (${myTasks.length})`} icon={ListChecks} className="mt-5">
           <ul className="divide-y divide-line">
             {myTasks.slice(0, 8).map((t) => (
-              <li key={t.id}><Link href={`/tasks/${t.id}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-[13px] hover:bg-hover"><span className="font-medium">{t.title}</span><span className="text-[12px] text-ink-3">{t.project.name} · {t.column.name}{t.assignedByLogin && t.assignedByLogin !== viewer.login.toLowerCase() ? ` · from @${t.assignedByLogin}` : ""}</span></Link></li>
+              <li key={t.id}><Link href={`/tasks/${t.id}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-[13px] hover:bg-hover"><span className="font-medium">{t.title}</span><span className="text-[12px] text-ink-3">{t.project.name} · {t.column.name}{t.assignedByLogin && t.assignedByLogin !== viewer.login ? ` · from @${t.assignedByLogin}` : ""}</span></Link></li>
             ))}
           </ul>
           {myTasks.length > 8 && <p className="border-t border-line px-4 py-2 text-[12.5px]"><Link href="/tasks" className="link">See all {myTasks.length}</Link></p>}
