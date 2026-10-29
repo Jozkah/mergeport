@@ -106,6 +106,18 @@ export class FakeGitHubOAuth {
       res.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(text) });
       return void res.end(text);
     }
+    const userByLogin = /^\/users\/([^/]+)$/.exec(pathname);
+    if (req.method === "GET" && userByLogin) {
+      // api.github.com/users/{login}: public profile; the hub sends the OAuth App's Basic credentials, anything else is refused.
+      const auth = req.headers.authorization ?? "";
+      if (auth !== `Basic ${Buffer.from("test-client:test-secret").toString("base64")}`) return send(401, { message: "Bad credentials" });
+      const login = decodeURIComponent(userByLogin[1]).toLowerCase();
+      const u = [...this.users.values()].find((x) => x.login.toLowerCase() === login);
+      if (!u) return send(404, { message: "Not Found" });
+      const text = `{"id":${u.id},"login":${JSON.stringify(u.login)},"name":${JSON.stringify(u.name ?? null)},"avatar_url":${JSON.stringify(u.avatarUrl ?? null)}}`;
+      res.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(text) });
+      return void res.end(text);
+    }
     send(404, { message: "Not Found" });
   }
 }

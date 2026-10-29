@@ -93,10 +93,17 @@ export function bootstrapOrAdmit(db: HubDb, user: GithubIdentity, now: number, o
       return { ok: true, member: getMember(db, user.id)!, joined: false };
     }
     if (existing?.status === "REMOVED") return { ok: false, reason: "removed" };
-    const invite = db
-      .prepare("SELECT id, role, created_by, created_at FROM invite WHERE lower(github_login) = lower(?) AND used_at IS NULL AND expires_at > ? ORDER BY created_at LIMIT 1")
-      .safeIntegers(true)
-      .get(user.login, at) as { id: string; role: string; created_by: bigint; created_at: string } | undefined;
+    type InviteRow = { id: string; role: string; created_by: bigint; created_at: string };
+    // An invite bound to this numeric id wins; the login is matched only for legacy rows (github_id NULL) created before invites resolved ids.
+    const invite =
+      (db
+        .prepare("SELECT id, role, created_by, created_at FROM invite WHERE github_id = ? AND used_at IS NULL AND expires_at > ? ORDER BY created_at LIMIT 1")
+        .safeIntegers(true)
+        .get(user.id, at) as InviteRow | undefined) ??
+      (db
+        .prepare("SELECT id, role, created_by, created_at FROM invite WHERE github_id IS NULL AND lower(github_login) = lower(?) AND used_at IS NULL AND expires_at > ? ORDER BY created_at LIMIT 1")
+        .safeIntegers(true)
+        .get(user.login, at) as InviteRow | undefined);
     if (!invite) return { ok: false, reason: "not-invited" };
     db.prepare("DELETE FROM member WHERE github_id = ?").run(user.id);
     db.prepare("INSERT INTO member (github_id, login, name, avatar_url, role, status, invited_by, invited_at, joined_at) VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)").run(

@@ -61,6 +61,7 @@ async function connect(token: string): Promise<Client> {
   return c;
 }
 async function addMember(id: bigint, login: string, role = "MEMBER"): Promise<string> {
+  hub.github.addUser({ id, login });
   expect((await api("POST", "/admin/invites", { githubLogin: login, role })).status).toBe(201);
   return signInAs(hub, id, login);
 }

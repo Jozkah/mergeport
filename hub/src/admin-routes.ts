@@ -6,6 +6,7 @@ import { requireRole, ROLES } from "./authz";
 import type { AccessAction } from "./notify";
 import { HttpError, json, readJson, route, type Route } from "./http";
 import type { HubContext } from "./server";
+import { lookupGithubUser } from "./github-oauth";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_GITHUB_ID = 9223372036854775807n;
@@ -129,17 +130,24 @@ export function adminRoutes(): Route<HubContext>[] {
       if (active) throw new HttpError(409, "already a member");
       const removed = ctx.db.prepare("SELECT 1 FROM member WHERE lower(login) = lower(?) AND status = 'REMOVED'").get(body.githubLogin);
       if (removed) throw new HttpError(409, "member was removed");
+      // Bind the invite to the numeric id now: a login can be renamed or reassigned, an id cannot.
+      const gh = await lookupGithubUser(ctx.config, body.githubLogin);
+      if (!gh) throw new HttpError(404, "GitHub user not found");
+      const byId = getMember(ctx.db, gh.id);
+      if (byId?.status === "ACTIVE") throw new HttpError(409, "already a member");
+      if (byId?.status === "REMOVED") throw new HttpError(409, "member was removed");
       const now = ctx.now();
       const invite = {
         id: randomUUID(),
-        githubLogin: body.githubLogin,
+        githubLogin: gh.login,
+        githubId: gh.id.toString(),
         role: body.role,
         createdAt: new Date(now).toISOString(),
         expiresAt: new Date(now + INVITE_TTL_MS).toISOString(),
       };
       ctx.db
-        .prepare("INSERT INTO invite (id, github_login, role, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(invite.id, invite.githubLogin, invite.role, actor.githubId, invite.createdAt, invite.expiresAt);
+        .prepare("INSERT INTO invite (id, github_login, github_id, role, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(invite.id, invite.githubLogin, gh.id, invite.role, actor.githubId, invite.createdAt, invite.expiresAt);
       json(res, 201, { invite });
     }),
 

@@ -106,6 +106,7 @@ let alice: Client;
 beforeEach(async () => {
   hub = await startTestHub();
   ownerToken = await signInAs(hub, 1n, "olive");
+  hub.github.addUser({ id: 2n, login: "alice" });
   const invite = await hub.api(ownerToken)("POST", "/admin/invites", { githubLogin: "alice", role: "MEMBER" });
   expect(invite.status).toBe(201);
   const aliceToken = await signInAs(hub, 2n, "alice");

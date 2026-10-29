@@ -53,6 +53,8 @@ describe("invites and roles", () => {
 
   it("ADMIN cannot invite ADMIN, OWNER can", async () => {
     const t = await setup([2n, "adam", "ADMIN"]);
+    hub.github.addUser({ id: 30n, login: "bob" });
+    hub.github.addUser({ id: 31n, login: "carol" });
     expect((await hub.api(t.adam)("POST", "/admin/invites", { githubLogin: "bob", role: "ADMIN" })).status).toBe(403);
     const okMember = await hub.api(t.adam)("POST", "/admin/invites", { githubLogin: "bob", role: "MEMBER" });
     expect(okMember.status).toBe(201);

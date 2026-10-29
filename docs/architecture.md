@@ -100,7 +100,7 @@ Two small registry files live in the Mergeport home (`src/lib/local/registry.ts`
 The hub UI was built against ports (`src/lib/hub/ports.ts`); `src/lib/hub/ports-impl.ts` now implements them on the real storage and the real hub API:
 
 - `hubSessionPort` keeps the token encrypted in the profile's `HubSession` row (`src/lib/hub/session-vault.ts`, key file `key` beside the db) and `markProfile` writes `TeamConfig { mode: TEAM, backend: HUB, hubOrigin }`.
-- `httpHubAdmin` speaks `hub/src/{auth-routes,admin-routes}.ts` (`POST /admin/invites { githubLogin, role }`, `POST /admin/spaces` answers `{ space }`).
+- `httpHubAdmin` speaks `hub/src/{auth-routes,admin-routes}.ts` (`POST /admin/invites { githubLogin, role }` resolves the login to its numeric GitHub id through `GET /users/{login}` with the OAuth App's Basic credentials and stores `invite.github_id`; sign-in matches an invite by id, by login only for legacy rows with no id; `POST /admin/spaces` answers `{ space }`).
 - `hubLinkStatus` reads the running process's `HubLink` state (registered by `getEngine()` in `src/lib/local/runtime.ts`) plus the count of `PENDING`/`CONFLICT` outbox ops in hub spaces.
 - `getEngine()` reads `TeamConfig`: on `backend = HUB` it builds the engine with an `HttpHubClient` and starts `startHubLive`; a GitHub profile keeps the GitHub store unchanged.
 - `tests/hub-e2e.test.ts` runs two local clients against the real in-process hub (`tests/hub/harness.ts`).

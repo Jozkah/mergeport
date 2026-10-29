@@ -91,6 +91,51 @@ describe("device-flow sign-in", () => {
     expect(hub.db.prepare("SELECT used_at FROM invite WHERE id = ?").get(inv.body.invite.id)).toEqual({ used_at: new Date(clock).toISOString() });
   });
 
+  it("an invite is bound to the numeric id: a renamed account cannot claim it, the invited id is admitted under a new login", async () => {
+    hub.github.addUser({ id: 101n, login: "olive" });
+    hub.github.addUser({ id: 202n, login: "alice" });
+    hub.github.addUser({ id: 303n, login: "mallory" });
+    const owner = (await signIn(101n)).body.session as string;
+    const inv = await hub.api(owner)("POST", "/admin/invites", { githubLogin: "ALICE", role: "MEMBER" });
+    expect(inv.status).toBe(201);
+    expect(inv.body.invite).toMatchObject({ githubLogin: "alice", githubId: "202" });
+    expect(hub.db.prepare("SELECT github_id FROM invite WHERE id = ?").safeIntegers(true).get(inv.body.invite.id)).toEqual({ github_id: 202n });
+    const lookup = hub.github.requests.find((r) => r.path === "/users/ALICE");
+    expect(lookup?.method).toBe("GET");
+    // alice gives up her login; mallory takes it and tries the invite.
+    hub.github.addUser({ id: 202n, login: "alice-renamed" });
+    hub.github.addUser({ id: 303n, login: "alice" });
+    const stolen = await signIn(303n);
+    expect(stolen.status).toBe(403);
+    expect(stolen.body).toEqual({ reason: "not-invited" });
+    const ok = await signIn(202n);
+    expect(ok.status).toBe(200);
+    expect(ok.body.member).toMatchObject({ githubId: "202", login: "alice-renamed", role: "MEMBER" });
+  });
+
+  it("a legacy invite without github_id still matches by login", async () => {
+    hub.github.addUser({ id: 101n, login: "olive" });
+    hub.github.addUser({ id: 202n, login: "alice" });
+    await signIn(101n);
+    hub.db
+      .prepare("INSERT INTO invite (id, github_login, role, created_by, created_at, expires_at) VALUES ('legacy', 'Alice', 'READER', 101, ?, ?)")
+      .run(new Date(clock).toISOString(), new Date(clock + DAY).toISOString());
+    const r = await signIn(202n);
+    expect(r.status).toBe(200);
+    expect(r.body.member).toMatchObject({ githubId: "202", role: "READER" });
+  });
+
+  it("inviting an unknown login is 404; an unreachable GitHub is 502", async () => {
+    hub.github.addUser({ id: 101n, login: "olive" });
+    const owner = (await signIn(101n)).body.session as string;
+    const missing = await hub.api(owner)("POST", "/admin/invites", { githubLogin: "nobody", role: "MEMBER" });
+    expect(missing.status).toBe(404);
+    expect(missing.body).toEqual({ error: "GitHub user not found" });
+    expect(hub.db.prepare("SELECT COUNT(*) AS n FROM invite").get()).toEqual({ n: 0 });
+    await hub.github.close();
+    expect((await hub.api(owner)("POST", "/admin/invites", { githubLogin: "alice", role: "MEMBER" })).status).toBe(502);
+  });
+
   it("an expired invite does not admit", async () => {
     hub.github.addUser({ id: 101n, login: "olive" });
     hub.github.addUser({ id: 202n, login: "alice" });

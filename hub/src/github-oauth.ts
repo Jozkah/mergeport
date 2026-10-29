@@ -3,6 +3,7 @@ import type { HubConfig } from "./config";
 import { HttpError } from "./http";
 
 type OauthCfg = Pick<HubConfig, "githubClientId" | "githubOauthBase" | "githubApiBase">;
+type LookupCfg = Pick<HubConfig, "githubClientId" | "githubClientSecret" | "githubApiBase">;
 
 export type DeviceStart = { deviceCode: string; userCode: string; verificationUri: string; interval: number; expiresIn: number };
 export type DevicePoll = { kind: "pending" } | { kind: "slow_down" } | { kind: "expired" } | { kind: "denied" } | { kind: "token"; accessToken: string };
@@ -80,6 +81,36 @@ export async function fetchGithubUser(cfg: OauthCfg, accessToken: string): Promi
   } catch {
     throw new HttpError(502, "github unreachable");
   }
+  if (!r.ok) throw new HttpError(502, "github error");
+  const text = await r.text();
+  const idMatch = /"id"\s*:\s*(\d+)/.exec(text);
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new HttpError(502, "github error");
+  }
+  const parsed = z.object({ login: z.string(), name: z.string().nullable().optional(), avatar_url: z.string().nullable().optional() }).safeParse(body);
+  if (!parsed.success || !idMatch) throw new HttpError(502, "github error");
+  return { id: BigInt(idMatch[1]), login: parsed.data.login, name: parsed.data.name ?? null, avatarUrl: parsed.data.avatar_url ?? null };
+}
+
+/**
+ * Public profile of a login, resolved at invite time so the invite is bound to the numeric id.
+ * Authenticated with the OAuth App's client id and secret (Basic), which GitHub rates at 5000/h instead of 60/h.
+ * Returns null when no such user exists; throws 502 when GitHub cannot be reached or answers unexpectedly.
+ */
+export async function lookupGithubUser(cfg: LookupCfg, login: string): Promise<GithubUser | null> {
+  const basic = Buffer.from(`${cfg.githubClientId}:${cfg.githubClientSecret}`).toString("base64");
+  let r: Response;
+  try {
+    r = await fetch(`${cfg.githubApiBase}/users/${encodeURIComponent(login)}`, {
+      headers: { accept: "application/vnd.github+json", authorization: `Basic ${basic}`, "user-agent": "mergeport-hub" },
+    });
+  } catch {
+    throw new HttpError(502, "github unreachable");
+  }
+  if (r.status === 404) return null;
   if (!r.ok) throw new HttpError(502, "github error");
   const text = await r.text();
   const idMatch = /"id"\s*:\s*(\d+)/.exec(text);
