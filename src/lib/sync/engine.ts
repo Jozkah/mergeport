@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, Space } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { GithubError } from "@/lib/github/port";
+import type { Backend, HubClient } from "@/lib/hub/types";
 import { mapLimit } from "@/lib/util";
 import { ENTITY_SCHEMA, ENTITY_TYPES, entityDef, entityPath, parseEntityPath, type Ctx, type EntityDef, type Listed } from "./entities";
 import { same, threeWayMerge, type Data } from "./merge";
@@ -59,6 +60,8 @@ export type EngineDeps = {
   random?: () => number;
   newOpId?: () => string;
   onChange?: (e: { spaceId: string; reason: "pulled" | "pushed" | "state" }) => void;
+  hub?: (space: Space) => HubClient;
+  hubLive?: () => boolean;
 };
 
 const PERMISSION_RECHECK_MS = 5 * 60_000;
@@ -82,6 +85,13 @@ export class SyncEngine {
   }
   private emit(spaceId: string, reason: "pulled" | "pushed" | "state") {
     this.d.onChange?.({ spaceId, reason });
+  }
+  private backendOf(space: Space): Backend {
+    if (space.backend === "HUB") {
+      if (!this.d.hub) throw new Error("No hub client configured");
+      return { kind: "hub", client: this.d.hub(space) };
+    }
+    return { kind: "github", store: this.d.store(space) };
   }
 
   // ---------- context ----------
@@ -157,6 +167,16 @@ export class SyncEngine {
   // ---------- pull ----------
 
   async pullSpace(space0: Space): Promise<{ changed: boolean; applied: number }> {
+    if (space0.backend === "HUB") return this.pullHub(space0);
+    return this.pullGithub(space0);
+  }
+
+  private async pullHub(space0: Space): Promise<{ changed: boolean; applied: number }> {
+    this.backendOf(space0); // throws when no hub client is configured; the transport is filled in by a later task
+    return { changed: false, applied: 0 };
+  }
+
+  private async pullGithub(space0: Space): Promise<{ changed: boolean; applied: number }> {
     let space = space0;
     const store = this.d.store(space);
     const now = this.now();
@@ -388,6 +408,16 @@ export class SyncEngine {
   // ---------- push ----------
 
   async pushSpace(space0: Space): Promise<{ sent: number }> {
+    if (space0.backend === "HUB") return this.pushHub(space0);
+    return this.pushGithub(space0);
+  }
+
+  private async pushHub(space0: Space): Promise<{ sent: number }> {
+    this.backendOf(space0); // throws when no hub client is configured; the transport is filled in by a later task
+    return { sent: 0 };
+  }
+
+  private async pushGithub(space0: Space): Promise<{ sent: number }> {
     let space = await this.db.space.findUniqueOrThrow({ where: { id: space0.id } });
     if (!space.canWrite || space.access !== "OK") return { sent: 0 };
     const store = this.d.store(space);
@@ -487,6 +517,7 @@ export class SyncEngine {
     const spaces = await this.db.space.findMany({ where: { OR: [{ nextPollAt: null }, { nextPollAt: { lte: now } }] } });
     let polled = 0;
     for (const s of spaces) {
+      if (s.backend === "HUB" && this.d.hubLive?.()) continue; // the live stream drives hub spaces
       if (s.rateLimitedUntil && s.rateLimitedUntil > now) continue;
       if (s.access === "REVOKED" || s.access === "SCHEMA_NEWER") {
         if (s.lastPolledAt && now.getTime() - s.lastPolledAt.getTime() < REVOKED_RECHECK_MS) continue;
