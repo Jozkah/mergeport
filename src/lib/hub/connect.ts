@@ -92,7 +92,7 @@ export function safeVerificationUri(uri: string, githubHost: string): string | n
   } catch {
     return null;
   }
-  if (u.protocol !== "https:" || u.username || u.password) return null;
+  if (u.protocol !== "https:" || u.username || u.password || u.port !== "") return null;
   if (u.hostname !== "github.com" && u.hostname !== githubHost) return null;
   return u.toString();
 }

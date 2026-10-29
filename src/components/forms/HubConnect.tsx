@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Banner } from "@/components/ui/primitives";
 import { LoaderCircle } from "@/components/ui/icons";
 import { SwitchingOverlay } from "@/components/shell/SwitchingOverlay";
+import { runPollLoop } from "@/lib/hub/poll-loop";
 
 type Switch = { launchUrl: string; previousBootId: string | null; expectedBackend: string };
 type Step =
@@ -20,8 +21,10 @@ const POLL_ERRORS: Record<string, string> = {
   "bad-request": "Something went wrong. Start again.",
 };
 
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`/api/local/hub/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+type PollReply = { status: string; reason?: string; error?: string; message?: string; switch?: Switch };
+
+async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`/api/local/hub/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
   return (await res.json()) as T;
 }
 
@@ -74,23 +77,21 @@ export function HubConnect() {
   useEffect(() => {
     if (!codeStep) return;
     const { origin, deviceCode } = codeStep;
-    const every = Math.max(1, codeStep.interval) * 1000;
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = async () => {
-      try {
-        const r = await post<{ status: string; reason?: string; error?: string; message?: string; switch?: Switch }>("poll", { url: origin, deviceCode });
-        if (!alive.current) return;
-        if (r.status === "pending") timer = setTimeout(tick, every);
-        else if (r.status === "ok" && r.switch) setStep({ s: "switching", sw: r.switch });
+    const ac = new AbortController();
+    void runPollLoop({
+      poll: (signal) => post<PollReply>("poll", { url: origin, deviceCode }, signal),
+      intervalMs: Math.max(1, codeStep.interval) * 1000,
+      signal: ac.signal,
+      onResult: (r) => {
+        if (r.status === "pending") return false;
+        if (r.status === "ok" && r.switch) setStep({ s: "switching", sw: r.switch });
         else if (r.status === "refused") reset(r.reason === "removed" ? "You were removed from that server. Ask its owner to invite you again." : "That GitHub account is not invited to this server. Ask its owner to invite you.");
         else if (r.status === "expired") reset("The code expired. Start again.");
         else reset(r.message ?? POLL_ERRORS[r.error ?? ""] ?? "Could not finish connecting.");
-      } catch {
-        if (alive.current) timer = setTimeout(tick, every);
-      }
-    };
-    timer = setTimeout(tick, every);
-    return () => clearTimeout(timer);
+        return true;
+      },
+    });
+    return () => ac.abort();
   }, [codeStep]);
 
   if (step.s === "switching") return <SwitchingOverlay launchUrl={step.sw.launchUrl} previousBootId={step.sw.previousBootId} expectedBackend={step.sw.expectedBackend} />;

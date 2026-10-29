@@ -135,6 +135,6 @@ describe("safeVerificationUri", () => {
   it("allows https github.com and the profile host only", () => {
     expect(safeVerificationUri("https://github.com/login/device", "github.com")).toBe("https://github.com/login/device");
     expect(safeVerificationUri("https://ghe.example.com/login/device", "ghe.example.com")).toBe("https://ghe.example.com/login/device");
-    for (const bad of ["http://github.com/login/device", "https://evil.example/login/device", "https://github.com.evil.example/x", "javascript:alert(1)", "https://u:p@github.com/x", "nope", "https://ghe.example.com/x"]) expect(safeVerificationUri(bad, "github.com")).toBeNull();
+    for (const bad of ["http://github.com/login/device", "https://evil.example/login/device", "https://github.com.evil.example/x", "javascript:alert(1)", "https://u:p@github.com/x", "nope", "https://github.com:8443/x", "https://ghe.example.com/x"]) expect(safeVerificationUri(bad, "github.com")).toBeNull();
   });
 });
