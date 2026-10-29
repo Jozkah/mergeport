@@ -40,7 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     waiting: q.waitingExternal.length,
     changes: q.changesRequested.length,
     blocked: q.blocked.length,
-    tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login, column: { key: { not: "done" } } }] } }),
+    tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login.toLowerCase(), column: { key: { not: "done" } } }] } }),
   };
   const last = lastSync._max.lastSyncedAt;
   const profile = await checkProfile(); // last known answer; refreshed in the background, never waits on gh

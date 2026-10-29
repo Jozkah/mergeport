@@ -71,6 +71,9 @@ export class DemoPort implements GithubPort {
   async getPull(owner: string, name: string, number: number) {
     return this.toRemote((await this.item(owner, name, number)).i);
   }
+  async getIssue(owner: string, name: string, number: number) {
+    return this.toRemote((await this.item(owner, name, number)).i);
+  }
   async listReviews(owner: string, name: string, number: number): Promise<RemoteReview[]> {
     const { i } = await this.item(owner, name, number);
     const rows = await this.db.workItemComment.findMany({ where: { workItemId: i.id, kind: "REVIEW" } });

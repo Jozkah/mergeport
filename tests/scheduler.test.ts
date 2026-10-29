@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GithubError } from "@/lib/github/port";
 import { enqueue, ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs";
 import { truncateAll } from "@/lib/demo/seed";
@@ -164,5 +164,28 @@ describe("background job progress reaches open pages", () => {
     await enqueue(db, { type: "down", payload: {}, dedupeKey: "b" });
     expect(await drainJobs(h, (r) => events.push(r))).toBe(2);
     expect(events).toEqual(["state", "state"]);
+  });
+
+  it("an enqueue that lands just before the final completion write is not lost (B09)", async () => {
+    await enqueue(db, { type: "refresh", payload: { n: 1 }, dedupeKey: "refresh", runAt: T0 });
+    const real = db.job.updateMany.bind(db.job);
+    let injected = false;
+    const spy = vi.spyOn(db.job, "updateMany").mockImplementation(((args: Parameters<typeof real>[0]) => {
+      // The first write the runner makes after the handler is the completion write: let a second request arrive right before it.
+      if (!injected && (args.data as { status?: string }).status === "DONE") {
+        injected = true;
+        return enqueue(db, { type: "refresh", payload: { n: 2 }, dedupeKey: "refresh", runAt: T0 }).then(() => real(args));
+      }
+      return real(args);
+    }) as unknown as typeof db.job.updateMany);
+    const seen: number[] = [];
+    const h = { refresh: (async (p: { n: number }) => { seen.push(p.n); }) as unknown as Handler };
+    expect(await runOne(db, h, T0)).toBe("requeued");
+    spy.mockRestore();
+    const j = await db.job.findFirstOrThrow();
+    expect(j.status).toBe("QUEUED");
+    expect(j.dirty).toBe(false);
+    expect(await runOne(db, h, T0)).toBe("done");
+    expect(seen).toEqual([1, 2]);
   });
 });

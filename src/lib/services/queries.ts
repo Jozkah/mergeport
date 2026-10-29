@@ -57,7 +57,15 @@ async function loadRuleContext(db: Db, v: Viewer) {
     reason: r.reason,
     enabled: r.enabled,
   }));
-  return { ruleRows, waitingRows, internalLogins, projectsByRepo };
+  // Unfinished planning blockers per GitHub item. Hidden blockers count too (the count discloses nothing about them).
+  // Policy: a blocker only holds back the item in the project where the link lives, so a project-scoped view counts that project's links only.
+  const blockerLinks = await db.planningLink.findMany({
+    where: { from: { column: { key: { not: "done" } } }, to: { workItemId: { not: null }, project: { workspaceId: v.workspaceId } } },
+    select: { to: { select: { workItemId: true, projectId: true } } },
+  });
+  const blockers = new Map<string, { projectId: string }[]>();
+  for (const l of blockerLinks) (blockers.get(l.to.workItemId!) ?? blockers.set(l.to.workItemId!, []).get(l.to.workItemId!)!).push({ projectId: l.to.projectId });
+  return { ruleRows, waitingRows, internalLogins, projectsByRepo, blockers };
 }
 
 type PrRow = Prisma.WorkItemGetPayload<{ include: { repository: { include: { owner: true } }; comments: true; reviewRequests: true; waiting: true } }>;
@@ -96,6 +104,7 @@ function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<type
     rule: res.kind === "rule" ? res.rule : null,
     readyAt: row.createdAtGh,
     internalLogins: rc.internalLogins,
+    blockedByDependencies: (rc.blockers.get(row.id) ?? []).filter((b) => !contextProjectId || b.projectId === contextProjectId).length,
     manuallyCleared: new Set(row.waiting.filter((w) => w.status === "SATISFIED" && w.reviewerKind === "EXTERNAL_ROLE").map((w) => w.reviewerRef)),
     now,
   };

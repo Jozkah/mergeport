@@ -4,7 +4,7 @@ import { requireProject, type Viewer } from "@/lib/authz/viewer";
 import { positionBetween } from "@/lib/domain/planning";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { audit } from "./audit";
-import { createCard } from "./planning";
+import { createCard, listDependencies } from "./planning";
 import { planningWhere } from "./queries";
 
 /**
@@ -23,7 +23,7 @@ export const cleanLogin = (raw: string | null | undefined): string | null => {
   const v = (raw ?? "").trim().replace(/^@/, "");
   if (!v) return null;
   if (!LOGIN.test(v)) throw new ValidationError("That is not a GitHub username");
-  return v;
+  return v.toLowerCase(); // GitHub logins are case-insensitive: one canonical spelling
 };
 
 export const cleanLabels = (raw: string[] | string | undefined): string[] => {
@@ -46,11 +46,11 @@ export async function loadTask(db: Db, v: Viewer, id: string) {
 
 export async function listTasks(db: Db, v: Viewer, f: TaskFilter = {}) {
   const and: Prisma.PlanningItemWhereInput[] = [await planningWhere(db, v, f.projectId)];
-  const me = v.login;
+  const me = v.login.toLowerCase();
   if (f.scope === "mine") and.push({ assigneeLogin: { equals: me } });
   else if (f.scope === "by-me") and.push({ assignedByLogin: { equals: me }, NOT: { assigneeLogin: { equals: me } } });
   else if (f.scope === "unassigned") and.push({ assigneeLogin: null });
-  if (f.assignee) and.push({ assigneeLogin: f.assignee });
+  if (f.assignee) and.push({ assigneeLogin: f.assignee.toLowerCase().replace(/^@/, "") });
   if (f.openItems) and.push({ checklist: { some: { done: false } } });
   if (f.column) and.push({ column: { key: f.column } });
   else if ((f.status ?? "open") === "open") and.push({ column: { key: { not: "done" } } });
@@ -74,8 +74,8 @@ export async function taskCounts(db: Db, v: Viewer) {
   const base = await planningWhere(db, v);
   const open = { column: { key: { not: "done" } } };
   const [mine, byMe, unassigned, all] = await Promise.all([
-    db.planningItem.count({ where: { AND: [base, open, { assigneeLogin: v.login }] } }),
-    db.planningItem.count({ where: { AND: [base, open, { assignedByLogin: v.login, NOT: { assigneeLogin: v.login } }] } }),
+    db.planningItem.count({ where: { AND: [base, open, { assigneeLogin: v.login.toLowerCase() }] } }),
+    db.planningItem.count({ where: { AND: [base, open, { assignedByLogin: v.login.toLowerCase(), NOT: { assigneeLogin: v.login.toLowerCase() } }] } }),
     db.planningItem.count({ where: { AND: [base, open, { assigneeLogin: null }] } }),
     db.planningItem.count({ where: { AND: [base, open] } }),
   ]);
@@ -123,9 +123,9 @@ export async function createTask(
   const card = await createCard(db, v, { projectId: input.projectId, title, columnKey: input.columnKey, priority: input.priority, dueDate: input.dueDate, assigneeLogin: assignee, milestoneId: input.milestoneId });
   const task = await db.planningItem.update({
     where: { id: card.id },
-    data: { description: input.description?.trim() || null, authorLogin: v.login, labels, assignedByLogin: assignee ? v.login : null },
+    data: { description: input.description?.trim() || null, authorLogin: v.login, labels, assignedByLogin: assignee ? v.login.toLowerCase() : null },
   });
-  await event(db, task.id, v.login, assignee ? (assignee === v.login ? "created this task and took it" : `created this task and assigned it to @${assignee}`) : "created this task");
+  await event(db, task.id, v.login, assignee ? (assignee === v.login.toLowerCase() ? "created this task and took it" : `created this task and assigned it to @${assignee}`) : "created this task");
   return task;
 }
 
@@ -155,8 +155,8 @@ export async function updateTask(db: Db, v: Viewer, id: string, patch: TaskPatch
     const a = cleanLogin(patch.assigneeLogin);
     if ((a ?? null) !== (t.assigneeLogin ?? null)) {
       data.assigneeLogin = a;
-      data.assignedByLogin = a ? v.login : null;
-      said.push(a ? (a === v.login ? "took this task" : `assigned this to @${a}`) : `unassigned @${t.assigneeLogin}`);
+      data.assignedByLogin = a ? v.login.toLowerCase() : null;
+      said.push(a ? (a === v.login.toLowerCase() ? "took this task" : `assigned this to @${a}`) : `unassigned @${t.assigneeLogin}`);
     }
   }
   if (patch.priority !== undefined) {
@@ -202,13 +202,14 @@ export async function updateTask(db: Db, v: Viewer, id: string, patch: TaskPatch
 
 export async function getTask(db: Db, v: Viewer, id: string) {
   const t = await loadTask(db, v, id);
-  const [comments, columns, full] = await Promise.all([
+  const [comments, columns, full, dependencies] = await Promise.all([
     db.taskComment.findMany({ where: { itemId: id }, orderBy: { createdAt: "asc" }, take: 500 }),
     db.planningColumn.findMany({ where: { projectId: t.projectId }, orderBy: { position: "asc" } }),
-    db.planningItem.findUniqueOrThrow({ where: { id }, include: { workItem: { include: { repository: { select: { fullName: true, htmlUrl: true } } } }, milestone: true, blockedBy: { include: { from: { select: { id: true, title: true } } } }, blocks: { include: { to: { select: { id: true, title: true } } } } } }),
+    db.planningItem.findUniqueOrThrow({ where: { id }, include: { workItem: { include: { repository: { select: { fullName: true, htmlUrl: true } } } }, milestone: true } }),
+    listDependencies(db, v, id),
   ]);
   const checklist = await db.taskCheckItem.findMany({ where: { itemId: id }, orderBy: [{ position: "asc" }, { createdAt: "asc" }] });
-  return { task: t, full, comments, columns, checklist };
+  return { task: t, full, comments, columns, checklist, dependencies };
 }
 
 export async function addComment(db: Db, v: Viewer, taskId: string, body: string) {

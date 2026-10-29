@@ -187,7 +187,7 @@ const card: EntityDef = {
     const f = {
       projectId, columnId: col.id, position: Number(data.position), title: String(data.title), description: (data.description as string | null) ?? null,
       workItemId: wi?.id ?? null, workRepoGithubId: bigOrNull(data.workRepoGithubId), workNumber: data.workNumber === null || data.workNumber === undefined ? null : Number(data.workNumber),
-      assigneeLogin: (data.assigneeLogin as string | null) ?? null, assignedByLogin: (data.assignedByLogin as string | null) ?? null, authorLogin: (data.authorLogin as string | null) ?? null,
+      assigneeLogin: ((data.assigneeLogin as string | null) ?? null)?.toLowerCase() ?? null, assignedByLogin: ((data.assignedByLogin as string | null) ?? null)?.toLowerCase() ?? null, authorLogin: (data.authorLogin as string | null) ?? null,
       labels: (data.labels ?? []) as Prisma.InputJsonValue, priority: Number(data.priority ?? 0), dueDate: toDate(data.due), milestoneId: ms ? ms.id : null, version,
     };
     await db.planningItem.upsert({ where: { id }, create: { id, createdById: ctx.localMemberId, ...f }, update: f });

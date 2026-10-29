@@ -81,6 +81,8 @@ export interface GithubPort {
 
   listIssuesAndPulls(owner: string, repo: string, o: { since?: Date; page: number }): Promise<Page<RemoteWorkItem>>;
   getPull(owner: string, repo: string, number: number): Promise<RemoteWorkItem>;
+  /** One issue (or PR, by number) straight from its own endpoint, never found by paging through a list. */
+  getIssue(owner: string, repo: string, number: number): Promise<RemoteWorkItem>;
   listReviews(owner: string, repo: string, number: number): Promise<RemoteReview[]>;
   listIssueComments(owner: string, repo: string, number: number): Promise<RemoteComment[]>;
   listReviewComments(owner: string, repo: string, number: number): Promise<RemoteComment[]>;

@@ -45,10 +45,12 @@ function useJson<T>(url: string, on: boolean) {
   return { ...state, reload: () => setN((x) => x + 1) };
 }
 
-export function PrTabs({ itemId, repoId, initial, fileCount, conversation, aside, githubUrl }: { itemId: string; repoId: string; initial: Tab; fileCount: number | null; conversation: ReactNode; aside: ReactNode; githubUrl: string }) {
+export function PrTabs({ itemId, repoId, version, initial, fileCount, conversation, aside, githubUrl }: { itemId: string; repoId: string; version: string; initial: Tab; fileCount: number | null; conversation: ReactNode; aside: ReactNode; githubUrl: string }) {
   const [tab, setTab] = useState<Tab>(initial);
   const [visited, setVisited] = useState<Record<Tab, boolean>>({ conversation: true, files: initial === "files", commits: initial === "commits" });
   const [commitCount, setCommitCount] = useState<number | null>(null);
+  // Responses are remembered per URL, so the URL carries the PR's head and base: when a refresh moves either, the old answers are not reused.
+  const q = `?v=${encodeURIComponent(version)}`;
 
   const go = useCallback((t: Tab) => {
     setTab(t);
@@ -66,12 +68,12 @@ export function PrTabs({ itemId, repoId, initial, fileCount, conversation, aside
   // Warm the cache once the page has settled, so the first click on Files or Commits is instant.
   useEffect(() => {
     const warm = () => {
-      void getJson(`/api/pr/${itemId}/files`).catch(() => {});
-      void getJson<{ commits: CommitView[] }>(`/api/pr/${itemId}/commits`).then((c) => setCommitCount(c.commits.length)).catch(() => {});
+      void getJson(`/api/pr/${itemId}/files${q}`).catch(() => {});
+      void getJson<{ commits: CommitView[] }>(`/api/pr/${itemId}/commits${q}`).then((c) => setCommitCount(c.commits.length)).catch(() => {});
     };
     const t = setTimeout(warm, 600);
     return () => clearTimeout(t);
-  }, [itemId]);
+  }, [itemId, q]);
 
   const tabs: { key: Tab; label: string; count?: number | null }[] = [
     { key: "conversation", label: "Conversation" },
@@ -94,7 +96,7 @@ export function PrTabs({ itemId, repoId, initial, fileCount, conversation, aside
                 aria-selected={tab === t.key}
                 aria-controls={`pane-${t.key}`}
                 onClick={() => go(t.key)}
-                onMouseEnter={() => t.key !== "conversation" && void getJson(`/api/pr/${itemId}/${t.key === "files" ? "files" : "commits"}`).catch(() => {})}
+                onMouseEnter={() => t.key !== "conversation" && void getJson(`/api/pr/${itemId}/${t.key === "files" ? "files" : "commits"}${q}`).catch(() => {})}
                 className={`h-8 rounded-[7px] px-3 text-[13px] font-medium ${tab === t.key ? "bg-ink text-ink-invert" : "text-ink-2 hover:bg-hover"}`}
               >
                 {t.label}
@@ -106,8 +108,8 @@ export function PrTabs({ itemId, repoId, initial, fileCount, conversation, aside
         </div>
 
         <div id="pane-conversation" role="tabpanel" aria-labelledby="tab-conversation" hidden={tab !== "conversation"} className="flex min-w-0 flex-col gap-5">{conversation}</div>
-        {visited.files && <div id="pane-files" role="tabpanel" aria-labelledby="tab-files" hidden={tab !== "files"}><FilesPane itemId={itemId} repoId={repoId} githubFilesUrl={`${githubUrl}/files`} active={tab === "files"} /></div>}
-        {visited.commits && <div id="pane-commits" role="tabpanel" aria-labelledby="tab-commits" hidden={tab !== "commits"}><CommitsPane itemId={itemId} repoId={repoId} githubUrl={githubUrl} onCount={setCommitCount} /></div>}
+        {visited.files && <div id="pane-files" role="tabpanel" aria-labelledby="tab-files" hidden={tab !== "files"}><FilesPane itemId={itemId} repoId={repoId} githubFilesUrl={`${githubUrl}/files`} active={tab === "files"} q={q} /></div>}
+        {visited.commits && <div id="pane-commits" role="tabpanel" aria-labelledby="tab-commits" hidden={tab !== "commits"}><CommitsPane itemId={itemId} repoId={repoId} githubUrl={githubUrl} onCount={setCommitCount} q={q} /></div>}
       </div>
       <div id="review" className={wide ? "xl:[&>aside]:grid xl:[&>aside]:grid-cols-[repeat(auto-fit,minmax(340px,1fr))] xl:[&>aside]:items-start xl:[&>aside]:gap-5" : ""}>{aside}</div>
     </div>
@@ -137,15 +139,15 @@ function Failed({ message, onRetry, href }: { message: string; onRetry: () => vo
   );
 }
 
-function FilesPane({ itemId, repoId, githubFilesUrl, active }: { itemId: string; repoId: string; githubFilesUrl: string; active: boolean }) {
-  const { data, error, loading, reload } = useJson<FilesData>(`/api/pr/${itemId}/files`, true);
+function FilesPane({ itemId, repoId, githubFilesUrl, active, q }: { itemId: string; repoId: string; githubFilesUrl: string; active: boolean; q: string }) {
+  const { data, error, loading, reload } = useJson<FilesData>(`/api/pr/${itemId}/files${q}`, true);
   if (error) return <Failed message={error} onRetry={reload} href={githubFilesUrl} />;
   if (loading || !data) return active ? <Skeleton /> : null;
-  return <DiffViewer itemId={itemId} data={data} storeKey={`pr-${itemId}-${data.headSha ?? "x"}`} repoId={repoId} githubFilesUrl={githubFilesUrl} onPosted={() => { memo.delete(`/api/pr/${itemId}/files`); reload(); }} />;
+  return <DiffViewer itemId={itemId} data={data} storeKey={`pr-${itemId}-${data.headSha ?? "x"}`} repoId={repoId} githubFilesUrl={githubFilesUrl} onPosted={() => { memo.delete(`/api/pr/${itemId}/files${q}`); reload(); }} />;
 }
 
-function CommitsPane({ itemId, repoId, githubUrl, onCount }: { itemId: string; repoId: string; githubUrl: string; onCount: (n: number) => void }) {
-  const { data, error, loading, reload } = useJson<{ commits: CommitView[]; truncated: boolean }>(`/api/pr/${itemId}/commits`, true);
+function CommitsPane({ itemId, repoId, githubUrl, onCount, q }: { itemId: string; repoId: string; githubUrl: string; onCount: (n: number) => void; q: string }) {
+  const { data, error, loading, reload } = useJson<{ commits: CommitView[]; truncated: boolean }>(`/api/pr/${itemId}/commits${q}`, true);
   const [open, setOpen] = useState<CommitView | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const counted = useRef(false);
@@ -156,7 +158,7 @@ function CommitsPane({ itemId, repoId, githubUrl, onCount }: { itemId: string; r
     }
   }, [data, onCount]);
 
-  if (open) return <OneCommit itemId={itemId} repoId={repoId} commit={open} githubUrl={githubUrl} onBack={() => setOpen(null)} />;
+  if (open) return <OneCommit itemId={itemId} repoId={repoId} commit={open} githubUrl={githubUrl} onBack={() => setOpen(null)} q={q} />;
   if (error) return <Failed message={error} onRetry={reload} href={`${githubUrl}/commits`} />;
   if (loading || !data) return <Skeleton />;
   if (data.commits.length === 0) return <p className="p-6 text-[13px] text-ink-3">No commits are available for this pull request.</p>;
@@ -193,8 +195,8 @@ function CommitsPane({ itemId, repoId, githubUrl, onCount }: { itemId: string; r
   );
 }
 
-function OneCommit({ itemId, repoId, commit, githubUrl, onBack }: { itemId: string; repoId: string; commit: CommitView; githubUrl: string; onBack: () => void }) {
-  const { data, error, loading, reload } = useJson<FilesData>(`/api/pr/${itemId}/commit/${commit.sha}`, true);
+function OneCommit({ itemId, repoId, commit, githubUrl, onBack, q }: { itemId: string; repoId: string; commit: CommitView; githubUrl: string; onBack: () => void; q: string }) {
+  const { data, error, loading, reload } = useJson<FilesData>(`/api/pr/${itemId}/commit/${commit.sha}${q}`, true);
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-[8px] border border-line bg-surface p-4">

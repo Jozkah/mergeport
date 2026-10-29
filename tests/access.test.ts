@@ -1,3 +1,4 @@
+import { getTask } from "@/lib/services/tasks";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ForbiddenError, NotFoundError } from "@/lib/errors";
 import { loadViewer, requireRepo, requireWorkItem } from "@/lib/authz/viewer";
@@ -134,6 +135,32 @@ describe("planning scope", () => {
     expect(opaque).toHaveLength(1);
     expect(leaks(deps, ids.cards.cApiPr.id)).toBe(false);
     expect(leaks(deps, "token refresh")).toBe(false);
+  });
+
+  it("task detail hides both blocked-by and blocks endpoints the viewer cannot see (B01)", async () => {
+    const { db, admin, b, ids } = S;
+    await addDependency(db, admin, ids.cards.cApiPr.id, ids.cards.cWeb.id); // hidden blocks visible
+    const first = await getTask(db, b, ids.cards.cWeb.id);
+    expect(first.dependencies.filter((d) => d.opaque)).toEqual([{ direction: "blocked-by", opaque: true }]);
+    expect(leaks(first, ids.cards.cApiPr.id)).toBe(false);
+    expect(leaks(first, "token refresh")).toBe(false);
+    await db.planningLink.deleteMany({ where: { fromId: ids.cards.cApiPr.id, toId: ids.cards.cWeb.id } });
+    await addDependency(db, admin, ids.cards.cWeb.id, ids.cards.cApiPr2.id); // visible blocks hidden
+    const second = await getTask(db, b, ids.cards.cWeb.id);
+    expect(second.dependencies.filter((d) => d.opaque)).toEqual([{ direction: "blocks", opaque: true }]);
+    expect(leaks(second, ids.cards.cApiPr2.id)).toBe(false);
+  });
+
+  it("an unfinished planning blocker reaches the Blocked attention queue with its reason (B12)", async () => {
+    const { db, admin, ids } = S;
+    const q = await attention(db, admin);
+    const row = q.blocked.find((d) => d.item.id === ids.cards.cApiPr.workItemId);
+    expect(row?.derivation.blockedReasons.join(" ")).toMatch(/unfinished dependenc/);
+    // Finishing the blocker releases the PR.
+    const done = await db.planningColumn.findFirstOrThrow({ where: { projectId: ids.cards.cApiPr2.projectId, key: "done" } });
+    await db.planningItem.update({ where: { id: ids.cards.cApiPr2.id }, data: { columnId: done.id } });
+    const after = await attention(db, admin);
+    expect(after.blocked.find((d) => d.item.id === ids.cards.cApiPr.workItemId)?.derivation.blockedReasons.join(" ") ?? "").not.toMatch(/unfinished dependenc/);
   });
 
   it("rejects dependency cycles", async () => {

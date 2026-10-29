@@ -72,7 +72,8 @@ export async function pullFilesView(db: Db, v: Viewer, id: string, canComment: b
   const item = await loadItem(db, v, id);
   if (item.type !== "PULL_REQUEST") throw new NotFoundError();
   const port = await portFor(db, item.repositoryId);
-  const key = item.headSha ? `prfiles:1:${item.repositoryId}:${item.number}:${item.headSha}` : null;
+  // The diff depends on the base as well as the head: retargeting a PR changes its files while the head stays the same.
+  const key = item.headSha ? `prfiles:2:${item.repositoryId}:${item.number}:${item.baseRef ?? "-"}:${item.headSha}` : null;
   const load = async () => {
     const r = await port.listPullFiles(item.repository.owner.login, item.repository.name, item.number);
     return { files: r.files.map(buildDiffFile), truncated: r.truncated };
@@ -96,7 +97,7 @@ export async function pullCommitsView(db: Db, v: Viewer, id: string): Promise<{ 
     const r = await port.listPullCommits(item.repository.owner.login, item.repository.name, item.number);
     return { commits: r.commits.map(toCommitView), truncated: r.truncated };
   };
-  return item.headSha ? cached(db, `prcommits:1:${item.repositoryId}:${item.number}:${item.headSha}`, load) : load();
+  return item.headSha ? cached(db, `prcommits:2:${item.repositoryId}:${item.number}:${item.baseRef ?? "-"}:${item.headSha}`, load) : load();
 }
 
 const toCommitView = (c: RemoteCommit): CommitView => ({ sha: c.sha, message: c.message, body: c.body ?? "", author: c.author, authorAvatar: c.authorAvatar ?? null, date: c.date ? c.date.toISOString() : null });
@@ -106,7 +107,7 @@ export async function commitFilesView(db: Db, v: Viewer, id: string, sha: string
   if (!/^[0-9a-f]{7,40}$/i.test(sha)) throw new ValidationError("That is not a commit id");
   const item = await loadItem(db, v, id);
   const port = await portFor(db, item.repositoryId);
-  return cached(db, `commitfiles:1:${item.repositoryId}:${sha.toLowerCase()}`, async () => {
+  return cached(db, `commitfiles:2:${item.repositoryId}:${sha.toLowerCase()}`, async () => {
     const r = await port.listCommitFiles(item.repository.owner.login, item.repository.name, sha);
     return { files: r.files.map(buildDiffFile), truncated: r.truncated };
   });

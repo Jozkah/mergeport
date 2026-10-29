@@ -213,6 +213,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         <PrTabs
           itemId={item.id}
           repoId={item.repositoryId}
+          version={`${item.headSha ?? "-"}:${item.baseRef ?? "-"}`}
           initial={tab}
           fileCount={item.changedFiles}
           githubUrl={item.htmlUrl}

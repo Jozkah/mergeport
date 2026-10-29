@@ -63,6 +63,12 @@ export class FakeGithub implements GithubPort {
     if (!it) throw new GithubError("not-found", "Not found");
     return it;
   }
+  async getIssue(owner: string, repo: string, number: number) {
+    this.maybeFail("getIssue");
+    const it = (this.items.get(this.k(owner, repo)) ?? []).find((i) => i.number === number);
+    if (!it) throw new GithubError("not-found", "Not found");
+    return it;
+  }
   async listReviews(o: string, r: string, n: number) {
     this.maybeFail("listReviews");
     return this.reviews.get(this.kn(o, r, n)) ?? [];

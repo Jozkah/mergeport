@@ -104,7 +104,7 @@ export default async function Attention({ searchParams }: { searchParams: Promis
         <Panel title={`Tasks assigned to you (${myTasks.length})`} icon={ListChecks} className="mt-5">
           <ul className="divide-y divide-line">
             {myTasks.slice(0, 8).map((t) => (
-              <li key={t.id}><Link href={`/tasks/${t.id}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-[13px] hover:bg-hover"><span className="font-medium">{t.title}</span><span className="text-[12px] text-ink-3">{t.project.name} · {t.column.name}{t.assignedByLogin && t.assignedByLogin !== viewer.login ? ` · from @${t.assignedByLogin}` : ""}</span></Link></li>
+              <li key={t.id}><Link href={`/tasks/${t.id}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-[13px] hover:bg-hover"><span className="font-medium">{t.title}</span><span className="text-[12px] text-ink-3">{t.project.name} · {t.column.name}{t.assignedByLogin && t.assignedByLogin !== viewer.login.toLowerCase() ? ` · from @${t.assignedByLogin}` : ""}</span></Link></li>
             ))}
           </ul>
           {myTasks.length > 8 && <p className="border-t border-line px-4 py-2 text-[12.5px]"><Link href="/tasks" className="link">See all {myTasks.length}</Link></p>}

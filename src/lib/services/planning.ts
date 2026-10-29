@@ -66,7 +66,7 @@ export async function createCard(
       workItemId: input.workItemId ?? null,
       priority: input.priority ?? 0,
       dueDate: input.dueDate ?? null,
-      assigneeLogin: input.assigneeLogin ?? null,
+      assigneeLogin: input.assigneeLogin?.toLowerCase() ?? null,
       milestoneId: input.milestoneId ?? null,
       createdById: v.memberId,
     },

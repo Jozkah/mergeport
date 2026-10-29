@@ -64,9 +64,19 @@ export async function applyWorkItem(db: Db, repositoryId: string, i: RemoteWorkI
   return true;
 }
 
+const COMMENT_FETCH_CAP = 3000; // the adapter reads at most 30 pages of 100
+
 async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: string, repositoryId: string, i: RemoteWorkItem, now: Date) {
   const wi = await db.workItem.findUniqueOrThrow({ where: { repositoryId_number: { repositoryId, number: i.number } } });
   const [issueComments, reviewComments] = await Promise.all([port.listIssueComments(owner, repo, i.number), i.type === "PULL_REQUEST" ? port.listReviewComments(owner, repo, i.number) : Promise.resolve([])]);
+  // Comments deleted on GitHub must disappear here too. Only a complete fetch can prove a deletion: a fetch that hit the paging
+  // bound might be missing comments that still exist, so it never deletes anything.
+  const reconcile = async (kind: "ISSUE_COMMENT" | "REVIEW_COMMENT", remote: { githubId: bigint }[]) => {
+    if (remote.length >= COMMENT_FETCH_CAP) return;
+    await db.workItemComment.deleteMany({ where: { workItemId: wi.id, kind, githubId: { notIn: remote.map((c) => c.githubId) } } });
+  };
+  await reconcile("ISSUE_COMMENT", issueComments);
+  if (i.type === "PULL_REQUEST") await reconcile("REVIEW_COMMENT", reviewComments);
   for (const c of issueComments) {
     await db.workItemComment.upsert({
       where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "ISSUE_COMMENT", githubId: c.githubId } },
@@ -129,9 +139,15 @@ export async function syncRepository(db: Db, port: GithubPort, repositoryId: str
   try {
     // Refresh canonical metadata first: handles rename, transfer, default-branch change and archive.
     const meta = await port.getRepository(owner, name);
+    // A transfer changes the owner too; later requests are built from owner + name, so both move together. The REMOVED guard stays.
+    const newOwner = await db.githubOwner.upsert({
+      where: { githubId: meta.owner.githubId },
+      create: { githubId: meta.owner.githubId, login: meta.owner.login, type: meta.owner.type, avatarUrl: meta.owner.avatarUrl ?? null },
+      update: { login: meta.owner.login, type: meta.owner.type, ...(meta.owner.avatarUrl ? { avatarUrl: meta.owner.avatarUrl } : {}) },
+    });
     await db.repository.updateMany({
       where: { id: repo.id, trackingStatus: { not: "REMOVED" } },
-      data: { fullName: meta.fullName, name: meta.name, defaultBranch: meta.defaultBranch, archived: meta.archived, visibility: meta.visibility, isFork: meta.isFork, parentGithubId: meta.parentGithubId ?? null, parentFullName: meta.parentFullName ?? null, permissions: (meta.permissions ?? undefined) as Prisma.InputJsonValue | undefined },
+      data: { ownerId: newOwner.id, htmlUrl: meta.htmlUrl, fullName: meta.fullName, name: meta.name, defaultBranch: meta.defaultBranch, archived: meta.archived, visibility: meta.visibility, isFork: meta.isFork, parentGithubId: meta.parentGithubId ?? null, parentFullName: meta.parentFullName ?? null, permissions: (meta.permissions ?? undefined) as Prisma.InputJsonValue | undefined },
     });
 
     const touched: RemoteWorkItem[] = [];
@@ -203,7 +219,12 @@ export async function syncItem(db: Db, port: GithubPort, repositoryId: string, n
     if (e instanceof GithubError && e.kind === "not-found") return null; // may be an issue
     throw e;
   });
-  const base = pr ?? (await port.listIssuesAndPulls(repo.owner.login, repo.name, { page: 1 })).items.find((i) => i.number === number);
+  const base =
+    pr ??
+    (await port.getIssue(repo.owner.login, repo.name, number).catch((e) => {
+      if (e instanceof GithubError && e.kind === "not-found") return null;
+      throw e;
+    }));
   if (!base) return false;
   const checks = pr?.headSha ? await port.getChecksState(repo.owner.login, repo.name, pr.headSha) : undefined;
   const applied = await applyWorkItem(db, repo.id, base, pr ? { ...pr, checks } : undefined);

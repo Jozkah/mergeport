@@ -26,7 +26,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
     if (e instanceof NotFoundError) notFound();
     throw e;
   }
-  const { task, full, comments, columns, checklist } = data;
+  const { task, full, comments, columns, checklist, dependencies } = data;
   const openItems = checklist.filter((c) => !c.done).length;
   const people = await assigneeCandidates(db, viewer, task.projectId);
   const today = todayIn(viewer.timezone);
@@ -140,10 +140,18 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
                 <dd className="flex flex-wrap gap-1">{labels.length ? labels.map((l) => <Link key={l} href={`/tasks?scope=all&status=all&label=${encodeURIComponent(l)}`}><LabelChip name={l} color="7c8aa5" /></Link>) : <span className="text-ink-3">None</span>}</dd>
                 {full.milestone && (<><dt className="text-ink-3">Milestone</dt><dd>{full.milestone.name}</dd></>)}
               </dl>
-              {(full.blockedBy.length > 0 || full.blocks.length > 0) && (
+              {dependencies.length > 0 && (
                 <div className="border-t border-line pt-3 text-[12.5px]">
-                  {full.blockedBy.length > 0 && <p className="text-ink-3">Blocked by {full.blockedBy.map((l) => <Link key={l.fromId} href={`/tasks/${l.from.id}`} className="link mr-2">{l.from.title}</Link>)}</p>}
-                  {full.blocks.length > 0 && <p className="mt-1 text-ink-3">Blocks {full.blocks.map((l) => <Link key={l.toId} href={`/tasks/${l.to.id}`} className="link mr-2">{l.to.title}</Link>)}</p>}
+                  {(["blocked-by", "blocks"] as const).map((dir) => {
+                    const rows = dependencies.filter((d) => d.direction === dir);
+                    if (!rows.length) return null;
+                    return (
+                      <p key={dir} className="mt-1 text-ink-3 first:mt-0">
+                        {dir === "blocked-by" ? "Blocked by" : "Blocks"}{" "}
+                        {rows.map((d, i) => (d.opaque ? <span key={i} className="mr-2 italic">an item you cannot see</span> : <Link key={d.id} href={`/tasks/${d.id}`} className="link mr-2">{d.title}</Link>))}
+                      </p>
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -8,7 +8,10 @@ import type { Db } from "@/lib/db";
  */
 export async function leaveTeamLocally(db: Db): Promise<{ spaces: number }> {
   const spaces = await db.space.count();
+  // The person owns their personal workspace: back in personal mode they are its administrator again, not the team's MEMBER.
+  const me = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
   await db.$transaction([
+    ...(me ? [db.member.updateMany({ where: { userId: me.id }, data: { role: "ADMIN", status: "ACTIVE" } })] : []),
     db.repository.updateMany({ where: { spaceId: { not: null } }, data: { spaceId: null } }),
     db.project.updateMany({ where: { spaceId: { not: null } }, data: { spaceId: null } }),
     db.space.deleteMany({}),
