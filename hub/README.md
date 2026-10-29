@@ -42,6 +42,7 @@ MERGEPORT_HUB_TRUST_PROXY=true
 | `MERGEPORT_HUB_OWNER_LOGIN` | yes | | GitHub login of the person who becomes the team owner. Only this login (compared case-insensitively) can sign in to an empty hub; everyone else is refused as not invited until the owner has signed in and invited them. |
 | `MERGEPORT_HUB_PORT` | no | `8787` | Listen port. |
 | `MERGEPORT_HUB_TRUST_PROXY` | no | `false` | Set `true` only when a reverse proxy fronts the hub (the Caddy setup below): it binds `127.0.0.1` only and takes the client IP from the rightmost `X-Forwarded-For` entry (used for rate limits). The default `false` uses the socket address and binds `0.0.0.0` only when the public URL is https (otherwise still loopback). Never leave it `false` behind a proxy (every client would share the proxy's rate limit) and never set `true` when clients can reach the hub directly (they could spoof the header). |
+| `MERGEPORT_HUB_BIND_HOST` | no | derived | Explicit bind address, overriding the rule above. Set `0.0.0.0` inside a container that a reverse proxy reaches over a Docker network (the Docker setup below); never expose that container's port on the host. |
 | `MERGEPORT_HUB_GITHUB_API_BASE` | no | `https://api.github.com` | Tests only. Points the hub at a fake GitHub API. |
 | `MERGEPORT_HUB_GITHUB_OAUTH_BASE` | no | `https://github.com` | Tests only. Points the hub at a fake GitHub OAuth host. |
 
@@ -69,6 +70,20 @@ hub.example.com {
 Caddy gets the certificate, forwards WebSockets, and sets `X-Forwarded-For`.
 
 With nginx, set the header explicitly: `proxy_set_header X-Forwarded-For $remote_addr;` (not `$proxy_add_x_forwarded_for`, which appends to a client-supplied value and lets clients dodge the per-IP rate limit). Also forward WebSockets (`proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection upgrade;`).
+
+## 4b. Docker behind Nginx Proxy Manager (or any proxy on a Docker network)
+
+`hub/Dockerfile` and `hub/docker-compose.yml` run the hub as one container with no host port. The proxy reaches it over a shared Docker network, so the hub binds `0.0.0.0` inside the container (`MERGEPORT_HUB_BIND_HOST`) and trusts the proxy's `X-Forwarded-For`.
+
+```bash
+git clone -b <branch> https://github.com/<owner>/mergeport mergeport-hub && cd mergeport-hub/hub
+cp .env.example .env            # fill in the values; chmod 600 .env
+docker network create nginx_mergeport_network
+docker network connect nginx_mergeport_network <proxy container name>
+docker compose up -d --build
+```
+
+In Nginx Proxy Manager add a proxy host: domain = the public URL's host, scheme `http`, forward host `mergeport-hub`, port `8787`, **Websockets Support** on, **Block Common Exploits** on, SSL with a Let's Encrypt certificate and **Force SSL**. NPM sets `X-Forwarded-For` to the client address. Data lives in the `mergeport_hub_data` volume (`/data/hub.db` in the container); back up with `docker compose exec hub sqlite3 /data/hub.db ".backup /data/hub-$(date +%F).db"`.
 
 ## 5. systemd
 

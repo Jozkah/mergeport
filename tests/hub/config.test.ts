@@ -22,6 +22,12 @@ describe("hub config and health", () => {
     expect(loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "http://h.example", MERGEPORT_HUB_TRUST_PROXY: "false" }).bindHost).toBe("127.0.0.1");
     expect(loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "https://h.example", MERGEPORT_HUB_TRUST_PROXY: "false" }).bindHost).toBe("0.0.0.0");
   });
+  it("MERGEPORT_HUB_BIND_HOST overrides the derived bind address", () => {
+    const base = { MERGEPORT_HUB_GITHUB_CLIENT_ID: "a", MERGEPORT_HUB_GITHUB_CLIENT_SECRET: "b", MERGEPORT_HUB_DATA: "x", MERGEPORT_HUB_OWNER_LOGIN: "olive", MERGEPORT_HUB_PUBLIC_URL: "https://h.example", MERGEPORT_HUB_TRUST_PROXY: "true" };
+    expect(loadConfig({ ...base, MERGEPORT_HUB_BIND_HOST: "0.0.0.0" }).bindHost).toBe("0.0.0.0");
+    expect(loadConfig({ ...base, MERGEPORT_HUB_BIND_HOST: "172.18.0.5" }).bindHost).toBe("172.18.0.5");
+    expect(() => loadConfig({ ...base, MERGEPORT_HUB_BIND_HOST: "not an ip" })).toThrow(/MERGEPORT_HUB_BIND_HOST/);
+  });
   it("trustProxy defaults to false (binds 0.0.0.0 with an https public url, loopback otherwise)", () => {
     const base = { MERGEPORT_HUB_GITHUB_CLIENT_ID: "a", MERGEPORT_HUB_GITHUB_CLIENT_SECRET: "b", MERGEPORT_HUB_DATA: "x", MERGEPORT_HUB_OWNER_LOGIN: "olive" };
     const https = loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "https://h.example" });

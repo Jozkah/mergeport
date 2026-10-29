@@ -13,7 +13,7 @@ export type HubConfig = {
   githubApiBase: string;
   /** Tests only: override via MERGEPORT_HUB_GITHUB_OAUTH_BASE. */
   githubOauthBase: string;
-  bindHost: "0.0.0.0" | "127.0.0.1";
+  bindHost: string;
 };
 
 const bool = z.enum(["true", "false"]).transform((v) => v === "true");
@@ -26,6 +26,8 @@ const schema = z.object({
   MERGEPORT_HUB_GITHUB_CLIENT_SECRET: z.string().min(1),
   MERGEPORT_HUB_OWNER_LOGIN: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login"),
   MERGEPORT_HUB_TRUST_PROXY: bool.default(false),
+  /** Explicit bind address. Needed inside a container behind a proxy on a Docker network, where loopback is unreachable. */
+  MERGEPORT_HUB_BIND_HOST: z.string().regex(/^[0-9a-fA-F.:]+$/, "must be an IP address").optional(),
   MERGEPORT_HUB_GITHUB_API_BASE: z.string().url().default("https://api.github.com"),
   MERGEPORT_HUB_GITHUB_OAUTH_BASE: z.string().url().default("https://github.com"),
 });
@@ -50,6 +52,6 @@ export function loadConfig(env: Record<string, string | undefined>): HubConfig {
     trustProxy: e.MERGEPORT_HUB_TRUST_PROXY,
     githubApiBase: e.MERGEPORT_HUB_GITHUB_API_BASE.replace(/\/+$/, ""),
     githubOauthBase: e.MERGEPORT_HUB_GITHUB_OAUTH_BASE.replace(/\/+$/, ""),
-    bindHost: direct ? "0.0.0.0" : "127.0.0.1",
+    bindHost: e.MERGEPORT_HUB_BIND_HOST ?? (direct ? "0.0.0.0" : "127.0.0.1"),
   };
 }
