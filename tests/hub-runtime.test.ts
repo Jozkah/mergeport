@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db, resolveDbFile } from "@/lib/db";
+import { truncateAll } from "@/lib/demo/seed";
 import { resetEnvCache } from "@/lib/env";
 import { hubLinkStatus, hubSessionPort } from "@/lib/hub/ports-impl";
 import { ensureLocalProfile } from "@/lib/local/profile";
@@ -25,6 +26,7 @@ beforeEach(async () => {
   resetRuntime();
   calls.length = 0;
   vi.stubGlobal("fetch", fakeFetch);
+  await truncateAll(db); // the shared test database may hold another file's local account; this profile must be the only one
   await ensureLocalProfile(db, { id: 4242n, login: "runtime-user", name: null, avatarUrl: null, host: "github.com" });
 });
 afterEach(async () => {
