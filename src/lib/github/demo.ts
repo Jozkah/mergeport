@@ -124,6 +124,13 @@ export class DemoPort implements GithubPort {
     const all = (await this.listPullFiles()).files;
     return { files: sha.startsWith("0b8a") ? all.slice(1) : all.slice(0, 1), truncated: false };
   }
+  async compareCommits(_o: string, _r: string, base: string, head: string) {
+    const all = (await this.listPullFiles()).files;
+    return { files: base === head ? [] : all.slice(0, 1), truncated: false, aheadBy: base === head ? 0 : 1 };
+  }
+  async listReviewThreads() {
+    return [];
+  }
   async getContents(_o: string, _r: string, path: string): Promise<Contents> {
     const clean = path.replace(/^\/+|\/+$/g, "");
     const text = DEMO_FILES[clean];
@@ -195,7 +202,7 @@ export class DemoPort implements GithubPort {
     for (const t of r.teams ?? []) await this.db.reviewRequest.create({ data: { workItemId: i.id, kind: "TEAM", reviewerRef: t, requestedAt: now } });
     await this.touch(i.id);
   }
-  async submitReview(owner: string, name: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string }) {
+  async submitReview(owner: string, name: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string; comments?: { path: string; line: number; side: "LEFT" | "RIGHT"; body: string }[] }) {
     const { i } = await this.item(owner, name, number);
     const now = new Date();
     const state = input.event === "APPROVE" ? "APPROVED" : input.event === "REQUEST_CHANGES" ? "CHANGES_REQUESTED" : "COMMENTED";

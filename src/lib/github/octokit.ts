@@ -412,8 +412,32 @@ export class OctokitPort implements GithubPort {
   async requestReviewers(owner: string, repo: string, number: number, r: { users?: string[]; teams?: string[] }) {
     await this.send("POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers", { owner, repo, pull_number: number, reviewers: r.users ?? [], team_reviewers: r.teams ?? [] });
   }
-  async submitReview(owner: string, repo: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string }) {
-    await this.send("POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews", { owner, repo, pull_number: number, event: input.event, body: input.body, commit_id: input.commitSha });
+  async submitReview(owner: string, repo: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string; comments?: { path: string; line: number; side: "LEFT" | "RIGHT"; body: string }[] }) {
+    // One request creates the review and every pending comment together, so a batch is submitted once or not at all.
+    await this.send("POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews", { owner, repo, pull_number: number, event: input.event, body: input.body, commit_id: input.commitSha, ...(input.comments?.length ? { comments: input.comments.map((c) => ({ path: c.path, line: c.line, side: c.side, body: c.body })) } : {}) });
+  }
+
+  async compareCommits(owner: string, repo: string, base: string, head: string) {
+    const basehead = `${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+    const files: any[] = [];
+    let aheadBy = 0;
+    let truncated = false;
+    for (let page = 1; page <= COMMIT_FILE_PAGES; page++) {
+      const { data, headers } = await this.get<any>("GET /repos/{owner}/{repo}/compare/{basehead}", { owner, repo, basehead, per_page: 100, page });
+      aheadBy = data.ahead_by ?? aheadBy;
+      files.push(...(data.files ?? []));
+      if (OctokitPort.nextPage(headers.link) === null) break;
+      if (page === COMMIT_FILE_PAGES) truncated = true;
+    }
+    return { files: files.map((f) => ({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch ?? null, previousFilename: f.previous_filename ?? null })), truncated, aheadBy };
+  }
+
+  /** Thread resolution exists only in GitHub's GraphQL API. A failure means "not known", never "unresolved". */
+  async listReviewThreads(owner: string, repo: string, number: number) {
+    const query = "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{databaseId}}}}}}}";
+    const res = await this.send<any>("POST /graphql", { query, variables: { o: owner, r: repo, n: number } });
+    const nodes: any[] = res?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    return nodes.flatMap((t) => (t.comments?.nodes?.[0]?.databaseId ? [{ rootCommentId: BigInt(t.comments.nodes[0].databaseId), resolved: !!t.isResolved }] : []));
   }
   async mergePull(owner: string, repo: string, number: number, input: { method: MergeMethod; expectedHeadSha: string }) {
     // `sha` makes GitHub refuse the merge if the head moved after the user confirmed.

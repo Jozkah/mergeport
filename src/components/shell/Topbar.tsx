@@ -29,6 +29,7 @@ const LABELS: Record<string, string> = {
   join: "Join a space",
   projects: "Projects",
   rules: "Who reviews what",
+  labels: "Label taxonomy",
   settings: "Settings",
   help: "Help",
   search: "Search",

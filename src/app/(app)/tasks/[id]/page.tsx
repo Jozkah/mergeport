@@ -11,6 +11,9 @@ import { Select } from "@/components/ui/Select";
 import { Avatar, LabelChip, PageHeader, Panel, Time } from "@/components/ui/primitives";
 import { ArrowLeft, CalendarDays, ExternalLink, Flag, ListChecks, MessageSquare, Pencil, Trash2 } from "@/components/ui/icons";
 import { Checklist } from "@/components/tasks/Checklist";
+import { WorktreePanel } from "@/components/work/WorktreePanel";
+import { linksForTask } from "@/lib/services/work-links";
+import { taskBranchAction } from "@/app/phase4-actions";
 import { PromotePanel } from "@/components/tasks/TemplatePanels";
 import { TaskFields } from "@/components/tasks/TaskFields";
 import { addCommentAction, deleteCommentAction, deleteTaskAction, editCommentAction, updateTaskAction } from "@/app/task-actions";
@@ -159,6 +162,15 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
             </div>
           </Panel>
 
+          <WorktreePanel links={await linksForTask(db, viewer, task.id)} tz={viewer.timezone} repositoryId={full.workItem?.repositoryId ?? ""} note="Write the branch you work on below to match this task to a folder on your computer." />
+          <Panel title="Branch">
+            <ActionForm action={taskBranchAction} submitLabel="Save branch" submitClassName="btn" className="flex flex-col gap-2 p-4" resetOnSuccess={false}>
+              <input type="hidden" name="taskId" value={task.id} />
+              <label className="label" htmlFor="tb-branch">Branch this task is worked on in</label>
+              <input id="tb-branch" name="branch" className="input font-mono" defaultValue={task.branchRef ?? ""} placeholder="fix-login" />
+              <p className="text-[12px] text-ink-3">The branch name is shared with your team. Folder paths never are.</p>
+            </ActionForm>
+          </Panel>
           <PromotePanel db={db} viewer={viewer} taskId={task.id} linked={!!task.workItemId} promoteTo={promote} />
           <Panel title="Change">
             <ActionForm action={updateTaskAction} submitLabel="Save changes" pendingLabel="Saving…" resetOnSuccess={false} className="p-4">

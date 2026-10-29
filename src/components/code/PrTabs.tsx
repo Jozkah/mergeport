@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { CommitView } from "@/lib/services/git-view";
 import { DiffViewer, type FilesData } from "@/components/code/DiffViewer";
+import { PendingReview, ThreadNav } from "@/components/code/ReviewTools";
+import { Select } from "@/components/ui/Select";
 import { Avatar } from "@/components/ui/Avatar";
 import { ArrowLeft, Check, Copy, GitCommitHorizontal } from "@/components/ui/icons";
 
@@ -141,9 +143,51 @@ function Failed({ message, onRetry, href }: { message: string; onRetry: () => vo
 
 function FilesPane({ itemId, repoId, githubFilesUrl, active, q }: { itemId: string; repoId: string; githubFilesUrl: string; active: boolean; q: string }) {
   const { data, error, loading, reload } = useJson<FilesData>(`/api/pr/${itemId}/files${q}`, true);
+  const [mode, setMode] = useState<"all" | "since" | "between">("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const commits = useJson<{ commits: CommitView[] }>(`/api/pr/${itemId}/commits${q}`, mode === "between");
+  const since = mode === "since" && data?.lastReviewedSha && data.headSha ? { from: data.lastReviewedSha, to: data.headSha } : null;
+  const between = mode === "between" && from && to ? { from, to } : null;
+  const range = since ?? between;
+  const cmp = useJson<FilesData>(range ? `/api/pr/${itemId}/compare?from=${range.from}&to=${range.to}` : `/api/pr/${itemId}/compare`, !!range);
   if (error) return <Failed message={error} onRetry={reload} href={githubFilesUrl} />;
   if (loading || !data) return active ? <Skeleton /> : null;
-  return <DiffViewer itemId={itemId} data={data} storeKey={`pr-${itemId}-${data.headSha ?? "x"}`} repoId={repoId} githubFilesUrl={githubFilesUrl} onPosted={() => { memo.delete(`/api/pr/${itemId}/files${q}`); reload(); }} />;
+  const short = (s: string) => s.slice(0, 7);
+  const list = commits.data?.commits ?? [];
+  return (
+    <div>
+      <ThreadNav itemId={itemId} version={q} />
+      <PendingReview itemId={itemId} canReview={!!data.canComment} />
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[12.5px]" role="group" aria-label="Which changes to show">
+        <label htmlFor="cmp-mode" className="text-ink-3">Show</label>
+        <Select id="cmp-mode" className="select !h-8 w-64" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+          <option value="all">All changes in this pull request</option>
+          <option value="since" disabled={!data.lastReviewedSha || data.lastReviewedSha === data.headSha}>{data.lastReviewedSha ? `Since my last review (${short(data.lastReviewedSha)})` : "Since my last review (you have not reviewed it)"}</option>
+          <option value="between">Between two commits</option>
+        </Select>
+        {mode === "between" && (
+          <>
+            <label className="sr-only" htmlFor="cmp-from">From commit</label>
+            <Select id="cmp-from" className="select !h-8 w-56" value={from} onChange={(e) => setFrom(e.target.value)}><option value="">From…</option>{list.map((c) => <option key={c.sha} value={c.sha}>{short(c.sha)} {c.message.slice(0, 30)}</option>)}</Select>
+            <label className="sr-only" htmlFor="cmp-to">To commit</label>
+            <Select id="cmp-to" className="select !h-8 w-56" value={to} onChange={(e) => setTo(e.target.value)}><option value="">To…</option>{list.map((c) => <option key={c.sha} value={c.sha}>{short(c.sha)} {c.message.slice(0, 30)}</option>)}</Select>
+          </>
+        )}
+        {data.lastReviewedSha && <span className="text-ink-3">Your last review was on {short(data.lastReviewedSha)}{data.lastReviewedSha === data.headSha ? " (the current version)" : ""}.</span>}
+      </div>
+      {range ? (
+        cmp.error ? <Failed message={cmp.error} onRetry={cmp.reload} href={githubFilesUrl} /> : cmp.loading || !cmp.data ? <Skeleton /> : (
+          <>
+            <p className="mb-2 rounded-[8px] border border-line bg-surface px-3 py-2 text-[12.5px]" role="status">Showing only what changed between <span className="font-mono">{short(range.from)}</span> and <span className="font-mono">{short(range.to)}</span>. Comments cannot be added in this view; switch to all changes to comment.</p>
+            <DiffViewer itemId={itemId} data={{ ...cmp.data, canComment: false }} storeKey={`cmp-${itemId}-${range.from}-${range.to}`} repoId={repoId} githubFilesUrl={githubFilesUrl} />
+          </>
+        )
+      ) : (
+        <DiffViewer itemId={itemId} data={data} storeKey={`pr-${itemId}`} repoId={repoId} githubFilesUrl={githubFilesUrl} onPosted={() => { memo.delete(`/api/pr/${itemId}/files${q}`); reload(); }} />
+      )}
+    </div>
+  );
 }
 
 function CommitsPane({ itemId, repoId, githubUrl, onCount, q }: { itemId: string; repoId: string; githubUrl: string; onCount: (n: number) => void; q: string }) {

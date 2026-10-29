@@ -4,6 +4,7 @@ import { listViews } from "@/lib/services/views";
 import { WatchlistForm } from "@/components/forms/WatchlistForm";
 import { UpstreamIssues } from "@/components/forks/UpstreamIssues";
 import { UpstreamPrs } from "@/components/forks/UpstreamPrs";
+import { MappingTools, SubscriptionsPanel } from "@/components/forks/UpstreamTools";
 import { byOwnerFirst } from "@/lib/domain/ordering";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -29,8 +30,9 @@ const STATUS = {
   unknown: { tone: "unknown", label: "Unknown" },
 } as const;
 
-export default async function Forks() {
+export default async function Forks({ searchParams }: { searchParams: Promise<{ adopt?: string; items?: string; branch?: string; project?: string }> }) {
   const { viewer } = await requireViewer();
+  const sp = await searchParams;
   const mappings = await visibleForkMappings(db, viewer);
   const [forkRepos, allRepos, unmappedForks] = await Promise.all([
     db.repository.findMany({ where: repoWhere(viewer), orderBy: [{ isFork: "desc" }, { fullName: "asc" }], select: { id: true, fullName: true, defaultBranch: true, parentGithubId: true, parentFullName: true } }),
@@ -56,6 +58,7 @@ export default async function Forks() {
     <>
       <PageHeader title="Forks" subtitle="Commit divergence, upstream pull requests and upstream issues are separate questions with separate evidence." />
       <ViewBar scope="forks" views={await listViews(db, viewer, "forks")} />
+      {mappings.length > 0 && <div className="mb-4"><SubscriptionsPanel db={db} viewer={viewer} mappings={mappings.map((m) => ({ id: m.id, label: m.upstream.fullName }))} /></div>}
       {unmappedForks > 0 && <div className="mb-4"><Banner title={`${unmappedForks} fork${unmappedForks === 1 ? "" : "s"} without a mapped upstream you can see`}>Upstream content is only shown when the upstream repository is also shared with you.</Banner></div>}
 
       {mappings.length === 0 ? (
@@ -109,6 +112,7 @@ export default async function Forks() {
                     <p className="mb-2 text-[12px] text-ink-3">Issues are discussions, not commits. Decide per fork whether each matters here. A status saves as soon as you pick it.</p>
                     <UpstreamIssues canEdit={caps.manageWork} rows={issues.map((i) => ({ id: i.id, number: i.issueNumber, title: i.title, url: i.htmlUrl, status: i.status, note: i.note }))} />
                   </section>
+                  <MappingTools db={db} viewer={viewer} mappingId={m.id} forkBranch={m.forkBranch} upstreamName={m.upstream.fullName} adopt={sp.adopt === m.id && sp.items && sp.branch && sp.project ? { items: sp.items, branch: sp.branch, project: sp.project } : null} />
                 </div>
               </Panel>
             );

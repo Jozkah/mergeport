@@ -92,6 +92,11 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
       update: { body: c.body, updatedAtGh: c.updatedAt },
     });
   }
+  if (i.type === "PULL_REQUEST") {
+    // Thread resolution lives only in GitHub's GraphQL API. If it cannot be read, the flag stays as it was (unknown stays unknown).
+    const threads = await port.listReviewThreads(owner, repo, i.number).catch(() => null);
+    if (threads) for (const t of threads) await db.workItemComment.updateMany({ where: { workItemId: wi.id, kind: "REVIEW_COMMENT", threadKey: t.rootCommentId.toString() }, data: { threadResolved: t.resolved } });
+  }
   if (i.type !== "PULL_REQUEST") return;
   const [reviews, requested] = await Promise.all([port.listReviews(owner, repo, i.number), port.listRequestedReviewers(owner, repo, i.number)]);
   for (const r of reviews) {

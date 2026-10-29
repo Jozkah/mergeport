@@ -7,7 +7,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useId, useState, type ComponentType, type SVGProps } from "react";
 import * as D from "@radix-ui/react-dialog";
-import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Layers, ListChecks, LayoutDashboard, PanelLeft, RefreshCw, Route, Search, Settings, Users, X } from "@/components/ui/icons";
+import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, PanelLeft, RefreshCw, Route, Search, Settings, Users, X } from "@/components/ui/icons";
 import { Collapse } from "@/components/ui/Collapse";
 import { Metric } from "@/components/ui/Metric";
 
@@ -63,6 +63,7 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
     ? [
         { href: "/admin/projects", label: "Projects", icon: Layers },
         { href: "/admin/rules", label: "Who reviews what", icon: Route },
+        { href: "/admin/labels", label: "Label taxonomy", icon: Tag },
       ]
     : [];
   return { main, source, team, admin };

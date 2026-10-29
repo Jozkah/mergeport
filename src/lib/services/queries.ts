@@ -10,6 +10,7 @@ import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { indexNeedle } from "@/lib/domain/text-index";
 import { deriveStages, type StageEntry } from "@/lib/domain/stages";
 import { blockerFinished } from "@/lib/domain/deps";
+import { labelFilter } from "./label-taxonomy";
 
 /**
  * Every query here starts from the viewer's repository filter. Counts, charts, search and
@@ -247,7 +248,7 @@ export async function listWorkItems(db: Db, v: Viewer, p: WorkItemListParams) {
   if (state !== "ALL") and.push({ state });
   if (p.repositoryIds?.length) and.push({ repositoryId: { in: p.repositoryIds } }); // intersected with viaRepo above
   if (p.projectId) and.push({ repository: { projects: { some: { projectId: p.projectId } } } });
-  if (p.label) and.push({ labelNames: { contains: indexNeedle(p.label) } });
+  if (p.label) and.push(await labelFilter(db, v, p.label));
   if (p.assignee) and.push({ assigneeLogins: { contains: indexNeedle(p.assignee) } });
   if (p.author) and.push({ authorLogin: { contains: p.author } }); // SQLite LIKE: case-insensitive substring
   if (p.q) and.push({ OR: [{ title: { contains: p.q } }, ...(Number.isInteger(Number(p.q)) ? [{ number: Number(p.q) }] : [])] });

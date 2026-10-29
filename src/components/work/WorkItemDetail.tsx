@@ -8,6 +8,9 @@ import { capabilitiesFor } from "@/lib/authz/viewer";
 import { STAGES, stageLabel } from "@/lib/domain/stages";
 import { sinceLastLooked } from "@/lib/services/seen";
 import { SinceYouLooked } from "@/components/review/SinceYouLooked";
+import { OwnersPanel } from "@/components/code/ReviewTools";
+import { WorktreePanel } from "@/components/work/WorktreePanel";
+import { linksForPull } from "@/lib/services/work-links";
 import { deriveReadiness } from "@/lib/domain/readiness";
 import { ReadinessPanel } from "@/components/review/ReadinessPanel";
 import { StageList } from "@/components/review/StageList";
@@ -49,6 +52,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   const backHref = from && safeReturnTo(from) !== "/" ? safeReturnTo(from) : isPr ? "/pull-requests" : "/issues";
   const manualOpen = derived.manualWaiting;
   const sinceLooked = await sinceLastLooked(db, viewer, item.id);
+  const localLinks = isPr ? await linksForPull(db, viewer, item.id) : null;
   const writeBlocked = !hasConnection ? "Sign in with the GitHub CLI (gh auth login) to make changes on GitHub." : undefined;
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
@@ -97,6 +101,11 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   );
   const asideEl = (
     <aside className="flex min-w-0 flex-col gap-5" aria-label="Review and actions">
+      {isPr && (
+        <Panel title="Who should review (CODEOWNERS)" icon={Eye} id="owners">
+          <OwnersPanel itemId={item.id} />
+        </Panel>
+      )}
       {isPr && readiness && (
         <Panel title="Ready to merge?" icon={CircleAlert} id="readiness">
           <ReadinessPanel readiness={readiness} />
@@ -126,6 +135,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         </Panel>
       )}
 
+      {isPr && localLinks && <WorktreePanel links={localLinks} tz={viewer.timezone} repositoryId={item.repositoryId} />}
       {isPr && item.state === "OPEN" && (
         <Panel title="Actions" icon={CircleAlert} id="actions">
           <div className="flex flex-col gap-4 p-4">

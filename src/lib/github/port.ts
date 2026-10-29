@@ -97,6 +97,10 @@ export interface GithubPort {
   getContents(owner: string, repo: string, path: string, ref?: string): Promise<Contents>;
   /** Files changed by one commit. */
   listCommitFiles(owner: string, repo: string, sha: string): Promise<{ files: RemoteFile[]; truncated: boolean }>;
+  /** The files that differ between two commits of one repository (three-dot: what `head` adds on top of `base`). */
+  compareCommits(owner: string, repo: string, base: string, head: string): Promise<{ files: RemoteFile[]; truncated: boolean; aheadBy: number }>;
+  /** Review threads with whether GitHub marks them resolved, keyed by the id of the thread's first comment. */
+  listReviewThreads(owner: string, repo: string, number: number): Promise<{ rootCommentId: bigint; resolved: boolean }[]>;
 
   /** BASE = upstream branch, HEAD = fork branch. */
   compare(upstream: { owner: string; repo: string; branch: string }, fork: { owner: string; branch: string }): Promise<CompareOutcome>;
@@ -113,7 +117,7 @@ export interface GithubPort {
   requestReviewers(owner: string, repo: string, number: number, reviewers: { users?: string[]; teams?: string[] }): Promise<void>;
   /** An inline review comment on one line of the pull request's diff (`side` RIGHT = the new file). */
   createReviewComment(owner: string, repo: string, number: number, input: { body: string; commitSha: string; path: string; line: number; side: "LEFT" | "RIGHT" }): Promise<RemoteComment>;
-  submitReview(owner: string, repo: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string }): Promise<void>;
+  submitReview(owner: string, repo: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string; comments?: { path: string; line: number; side: "LEFT" | "RIGHT"; body: string }[] }): Promise<void>;
   mergePull(owner: string, repo: string, number: number, input: { method: MergeMethod; expectedHeadSha: string }): Promise<{ merged: boolean; message: string }>;
   mergeUpstream(owner: string, repo: string, branch: string): Promise<{ result: "merged" | "fast-forward" | "up-to-date" | "conflict"; message: string }>;
 }

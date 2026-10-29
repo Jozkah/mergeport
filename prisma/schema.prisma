@@ -378,6 +378,8 @@ model WorkItemComment {
   path       String?
   line       Int?
   threadKey  String?
+  /// Whether GitHub marks this review thread resolved. Null means it was never read, which is not the same as unresolved.
+  threadResolved Boolean?
   createdAtGh DateTime
   updatedAtGh DateTime
 
@@ -519,6 +521,8 @@ model PlanningItem {
   milestoneId  String?
   epicId       String?
   iterationId  String?
+  /// A local branch name this card is worked on in; matched against the branch/worktree snapshot on this computer.
+  branchRef    String?
   createdById  String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -631,6 +635,7 @@ model MilestoneRepoLink {
 
 model ForkMapping {
   id             String  @id @default(cuid())
+  backports      BackportRecord[]
   forkRepoId     String
   upstreamRepoId String
   forkBranch     String
@@ -1077,4 +1082,75 @@ model PlanEvent {
 
   @@index([projectId, at])
   @@index([itemId])
+}
+
+/// A pending review being assembled on this computer. Personal: it is only sent to GitHub when the person submits it.
+model ReviewDraft {
+  id         String   @id @default(cuid())
+  userId     String
+  workItemId String
+  path       String
+  line       Int
+  side       String   @default("RIGHT")
+  body       String
+  commitSha  String
+  createdAt  DateTime @default(now())
+
+  @@index([userId, workItemId])
+}
+
+/// Which files a person has viewed, with a signature of their content then. A file whose content changed shows as unviewed again.
+model ViewedFile {
+  userId     String
+  workItemId String
+  path       String
+  sig        String
+  viewedAt   DateTime @default(now())
+
+  @@id([userId, workItemId, path])
+}
+
+/// "This spelling means this concept" (for example P1 means priority::high), globally or for one repository. Reading only: labels on GitHub are never rewritten.
+model LabelMap {
+  id          String   @id @default(cuid())
+  workspaceId String
+  concept     String
+  spelling    String
+  /// Repository id, or empty for every repository.
+  repoKey     String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@unique([workspaceId, spelling, repoKey])
+}
+
+/// Saved interest in upstream changes: any criterion that hits makes an upstream item relevant, with the reason shown.
+model UpstreamSubscription {
+  id          String   @id @default(cuid())
+  workspaceId String
+  mappingId   String?
+  name        String
+  criteria    Json
+  muted       Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+/// An explicit record that an upstream change is being (or was) brought to a branch. Evidence is kept apart from the person's decision.
+model BackportRecord {
+  id             String   @id @default(cuid())
+  mappingId      String
+  upstreamNumber Int
+  targetBranch   String
+  /// planned | done
+  state          String   @default("planned")
+  /// ancestry | patch-equivalent | manual | unknown
+  evidence       String   @default("unknown")
+  localSha       String?
+  note           String?
+  byLogin        String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@unique([mappingId, upstreamNumber, targetBranch])
 }

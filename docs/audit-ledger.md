@@ -59,14 +59,14 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 | 16 | Templates, promotion | done (bug, feature, review, release templates with checklists; promote a task: destination choice, exact preview, one issue created as the person, same record linked, never twice; tested against the fake port). Not done: promotion not exercised against real GitHub |
 | 17 | Delivery analytics | done (append-only `PlanEvent` recorded on create, move, milestone, epic, iteration, carry-over; synced entity `planevent`; cycle time, aging WIP, review wait from real review facts, scope added; says since when recording began and what is left out). Not done: events before this release do not exist, so history starts at upgrade |
 | 18 | Detail drawer | done (`?card=<id>` side drawer from board cards and the Tasks list; keeps filters, scroll and focus; same authorization as the task page; comment and checklist quick actions; open-full-page link). Not done: not wired into PR/issue lists or Attention rows |
-| 19 | CODEOWNERS routing | not started |
-| 20 | Draft review batches | not started |
-| 21 | Review version compare | not started |
-| 22 | Scoped labels | not started |
-| 23 | Upstream subscriptions | not started |
-| 24 | Backport tracking | not started |
-| 25 | Adoption planner | not started |
-| 26 | Branch/worktree links | not started |
+| 19 | CODEOWNERS routing | done (parser/matcher with GitHub semantics, read from the PR base branch, routed over the changed files; shown beside existing reviewer sources; teams reported as membership-unknown; explicitly not a GitHub requirement; `tests/domain/phase4.test.ts`, `tests/phase4.test.ts`; rendered check shows the no-file case). Not done: not combined into the review derivation itself (kept separate on purpose); not verified against a real CODEOWNERS file on GitHub |
+| 20 | Draft review batches and threads | done (personal `ReviewDraft`, "Add to review" in the diff, one submit request carrying all comments, stale drafts refused, drafts kept on failure; thread resolved flag synced via GraphQL and navigable with next/previous; resolve links to GitHub because REST cannot). Not done: the GraphQL read and batched review POST were tested against fakes only (unverified against real GitHub); no reply-in-thread from the dashboard
+| 21 | Compare review versions | done (since my last review, or between two commits, via the compare API; viewed marks keyed by content signature so only changed files reset; comparison shown in a banner). Not done: approval does not yet display which comparison it was based on beyond the review commit already shown in Reviews
+| 22 | Scoped label taxonomy | done (`family::value` parsing, global and per-repository spellings as synced `labelmap`, list filters expand a concept to all spellings, preview as counts, never rewrites labels; `/admin/labels`)
+| 23 | Upstream subscriptions | done (shared `upstreamsub`: labels, paths, milestone, authors, title words; any hit selects, reasons shown, mute; path criteria use cached PR files and say "not checked" otherwise). Not done: path matching needs the PR files to have been opened once
+| 24 | Backport/cherry-pick tracking | done (explicit `backport` records; evidence kinds kept apart: ancestry, possible patch equivalence, manual, not checked; local check runs read-only git in the mapped clone, tested with real temporary git repos; manual never overwrites verified evidence)
+| 25 | Upstream adoption planner | done (preview, then milestone + one task per change + planned backport records + final sync task blocked by all of them; the existing fork sync stays the explicit last action). Not done: it does not run the sync itself
+| 26 | Branch/worktree work links | done (PR by repo + head branch, task by shared branch name or its PR; facts only; copy path, open folder, open in editor restricted to this computer's recorded worktrees; paths never synced). Not verified: open folder/editor were not exercised
 | 27 | Access preview | not started |
 | 28 | Team switching | not started |
 | 29 | Sync centre | not started |
@@ -76,10 +76,10 @@ None of the 32 ideas has been implemented in this change. Existing pieces that a
 
 ## Phase 2 progress
 
-Phase 2 complete (ideas 1-8). Phase 3 complete (ideas 9-18). The inbox is built on the existing Attention queues (no second source of truth) and its state table `InboxState` is personal and never synced.
+Phase 2 complete (ideas 1-8). Phase 3 complete (ideas 9-18). Phase 4 complete (ideas 19-26). The inbox is built on the existing Attention queues (no second source of truth) and its state table `InboxState` is personal and never synced.
 
 ## Suggested order for the next session
 
-1. Phase 4 (ideas 19-26).
+1. Phase 5 (ideas 27-32).
 2. Crash recovery around SENT outbox operations; quota/scheduler investigation.
 3. Idea 17's event capture can be added early and cheaply so history accumulates while other work proceeds.

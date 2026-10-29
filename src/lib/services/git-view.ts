@@ -58,14 +58,14 @@ async function loadItem(db: Db, v: Viewer, id: string) {
   return item;
 }
 
-async function portFor(db: Db, repositoryId: string) {
+export async function portFor(db: Db, repositoryId: string) {
   const port = await portForSync(db, repositoryId);
   if (!port) throw new ValidationError("No credential can read this repository right now.");
   return port;
 }
 
-export type InlineComment = { id: string; author: string | null; html: string; createdAt: string; line: number; commitSha: string | null };
-export type PrFilesView = { headSha: string | null; files: DiffFile[]; truncated: boolean; inline: Record<string, InlineComment[]>; canComment: boolean };
+export type InlineComment = { id: string; author: string | null; html: string; createdAt: string; line: number; commitSha: string | null; resolved?: boolean | null };
+export type PrFilesView = { /** The commit this viewer last submitted a review on, for "changes since my last review". */ lastReviewedSha: string | null; headSha: string | null; files: DiffFile[]; truncated: boolean; inline: Record<string, InlineComment[]>; canComment: boolean };
 
 /** All changed files of a pull request, highlighted and ready to draw, with the review comments already on it. */
 export async function pullFilesView(db: Db, v: Viewer, id: string, canComment: boolean): Promise<PrFilesView> {
@@ -82,9 +82,10 @@ export async function pullFilesView(db: Db, v: Viewer, id: string, canComment: b
   const inline: Record<string, InlineComment[]> = {};
   for (const c of item.comments) {
     if (!c.path || !c.line) continue;
-    (inline[c.path] ??= []).push({ id: c.id, author: c.authorLogin, html: renderMarkdown(c.body), createdAt: c.createdAtGh.toISOString(), line: c.line, commitSha: c.commitSha });
+    (inline[c.path] ??= []).push({ id: c.id, author: c.authorLogin, html: renderMarkdown(c.body), createdAt: c.createdAtGh.toISOString(), line: c.line, commitSha: c.commitSha, resolved: c.threadResolved });
   }
-  return { headSha: item.headSha, files, truncated, inline, canComment };
+  const mine = await db.workItemComment.findFirst({ where: { workItemId: item.id, kind: "REVIEW", authorLogin: { equals: v.login }, commitSha: { not: null } }, orderBy: { createdAtGh: "desc" }, select: { commitSha: true } });
+  return { lastReviewedSha: mine?.commitSha ?? null, headSha: item.headSha, files, truncated, inline, canComment };
 }
 
 export type CommitView = { sha: string; message: string; body: string; author: string | null; authorAvatar: string | null; date: string | null };
@@ -111,6 +112,25 @@ export async function commitFilesView(db: Db, v: Viewer, id: string, sha: string
     const r = await port.listCommitFiles(item.repository.owner.login, item.repository.name, sha);
     return { files: r.files.map(buildDiffFile), truncated: r.truncated };
   });
+}
+
+const SHA = /^[0-9a-f]{7,40}$/i;
+
+/**
+ * What changed between two commits of this pull request's repository, for "since my last review" or "between these two versions".
+ * Two full commit ids never change what they mean, so the answer is kept; short ids are looked up each time.
+ */
+export async function compareFilesView(db: Db, v: Viewer, id: string, from: string, to: string): Promise<{ files: DiffFile[]; truncated: boolean; from: string; to: string }> {
+  if (!SHA.test(from) || !SHA.test(to)) throw new ValidationError("That is not a commit id");
+  const item = await loadItem(db, v, id);
+  if (item.type !== "PULL_REQUEST") throw new NotFoundError();
+  const port = await portFor(db, item.repositoryId);
+  const immutable = from.length === 40 && to.length === 40;
+  const r = await cached(db, `cmp:1:${item.repositoryId}:${from.toLowerCase()}:${to.toLowerCase()}`, async () => {
+    const c = await port.compareCommits(item.repository.owner.login, item.repository.name, from, to);
+    return { files: c.files.map(buildDiffFile), truncated: c.truncated };
+  }, { cache: immutable });
+  return { ...r, from, to };
 }
 
 export type BlobView = { path: string; binary: boolean; tooLarge: boolean; size: number; lines: Tok[][]; palette: string[]; htmlUrl: string | null; lang: string | null };

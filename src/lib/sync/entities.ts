@@ -172,7 +172,7 @@ const card: EntityDef = {
         blockedBy: c.blockedBy.filter((l) => l.kind === "blocks").map((l) => l.fromId).sort(),
         related: c.blockedBy.filter((l) => l.kind === "related").map((l) => l.fromId).sort(),
         duplicates: c.blockedBy.filter((l) => l.kind === "duplicates").map((l) => l.fromId).sort(),
-        epicId: c.epicId, iterationId: c.iterationId,
+        epicId: c.epicId, iterationId: c.iterationId, branchRef: c.branchRef,
       },
     }));
   },
@@ -193,7 +193,7 @@ const card: EntityDef = {
       projectId, columnId: col.id, position: Number(data.position), title: String(data.title), description: (data.description as string | null) ?? null,
       workItemId: wi?.id ?? null, workRepoGithubId: bigOrNull(data.workRepoGithubId), workNumber: data.workNumber === null || data.workNumber === undefined ? null : Number(data.workNumber),
       assigneeLogin: ((data.assigneeLogin as string | null) ?? null)?.toLowerCase() ?? null, assignedByLogin: ((data.assignedByLogin as string | null) ?? null)?.toLowerCase() ?? null, authorLogin: (data.authorLogin as string | null) ?? null,
-      labels: (data.labels ?? []) as Prisma.InputJsonValue, priority: Number(data.priority ?? 0), dueDate: toDate(data.due), milestoneId: ms ? ms.id : null, epicId: epic?.id ?? null, iterationId: iteration?.id ?? null, version,
+      labels: (data.labels ?? []) as Prisma.InputJsonValue, priority: Number(data.priority ?? 0), dueDate: toDate(data.due), milestoneId: ms ? ms.id : null, epicId: epic?.id ?? null, iterationId: iteration?.id ?? null, branchRef: (data.branchRef as string | null) ?? null, version,
     };
     await db.planningItem.upsert({ where: { id }, create: { id, createdById: ctx.localMemberId, ...f }, update: f });
   },
@@ -411,6 +411,70 @@ const planevent: EntityDef = {
 };
 void projectSpace;
 
+// ---------- label mappings, upstream subscriptions and backport records ----------
+
+const labelmap: EntityDef = {
+  type: "labelmap",
+  order: 9,
+  async list(db, { commonSpaceId }) {
+    const rows = await db.labelMap.findMany();
+    const repos = new Map((await db.repository.findMany({ where: { id: { in: rows.flatMap((r) => (r.repoKey ? [r.repoKey] : [])) } }, select: { id: true, githubId: true } })).map((r) => [r.id, r.githubId.toString()]));
+    return rows.map((m) => ({ id: m.id, spaceId: commonSpaceId, data: { concept: m.concept, spelling: m.spelling, repoGithubId: m.repoKey ? (repos.get(m.repoKey) ?? null) : null } }));
+  },
+  async apply(db, ctx, id, data) {
+    if (!data) {
+      await db.labelMap.deleteMany({ where: { id } });
+      return;
+    }
+    let repoKey = "";
+    if (data.repoGithubId) {
+      const r = await repoByGithubId(db, ctx.workspaceId, data.repoGithubId);
+      if (!r) return false;
+      repoKey = r.id;
+    }
+    const f = { concept: String(data.concept), spelling: String(data.spelling), repoKey };
+    await db.labelMap.upsert({ where: { id }, create: { id, workspaceId: ctx.workspaceId, ...f }, update: f });
+  },
+};
+
+const upstreamsub: EntityDef = {
+  type: "upstreamsub",
+  order: 9,
+  async list(db, { commonSpaceId }) {
+    const rows = await db.upstreamSubscription.findMany();
+    const maps = new Map((await db.forkMapping.findMany({ where: { id: { in: rows.flatMap((r) => (r.mappingId ? [r.mappingId] : [])) } } })).map((m) => [m.id, m]));
+    return rows.map((s) => ({ id: s.id, spaceId: commonSpaceId, data: { name: s.name, mappingId: s.mappingId && maps.has(s.mappingId) ? s.mappingId : null, criteria: s.criteria, muted: s.muted } }));
+  },
+  async apply(db, ctx, id, data) {
+    if (!data) {
+      await db.upstreamSubscription.deleteMany({ where: { id } });
+      return;
+    }
+    const mappingId = (data.mappingId as string | null) ?? null;
+    if (mappingId && !(await db.forkMapping.findUnique({ where: { id: mappingId }, select: { id: true } }))) return false;
+    const f = { name: String(data.name), mappingId, criteria: (data.criteria ?? {}) as Prisma.InputJsonValue, muted: !!data.muted };
+    await db.upstreamSubscription.upsert({ where: { id }, create: { id, workspaceId: ctx.workspaceId, ...f }, update: f });
+  },
+};
+
+const backport: EntityDef = {
+  type: "backport",
+  order: 7,
+  async list(db) {
+    const rows = await db.backportRecord.findMany({ include: { mapping: { include: { fork: true } } } });
+    return rows.map((b) => ({ id: b.id, spaceId: b.mapping.fork.spaceId, data: { mappingId: b.mappingId, upstreamNumber: b.upstreamNumber, targetBranch: b.targetBranch, state: b.state, evidence: b.evidence, localSha: b.localSha, note: b.note, byLogin: b.byLogin } }));
+  },
+  async apply(db, _ctx, id, data) {
+    if (!data) {
+      await db.backportRecord.deleteMany({ where: { id } });
+      return;
+    }
+    if (!(await db.forkMapping.findUnique({ where: { id: String(data.mappingId) }, select: { id: true } }))) return false;
+    const f = { mappingId: String(data.mappingId), upstreamNumber: Number(data.upstreamNumber), targetBranch: String(data.targetBranch), state: String(data.state ?? "planned"), evidence: String(data.evidence ?? "unknown"), localSha: (data.localSha as string | null) ?? null, note: (data.note as string | null) ?? null, byLogin: (data.byLogin as string | null) ?? null };
+    await db.backportRecord.upsert({ where: { id }, create: { id, ...f }, update: f });
+  },
+};
+
 // ---------- reviewer availability and configured backups ----------
 
 const availability: EntityDef = {
@@ -509,7 +573,7 @@ const waiting: EntityDef = {
   },
 };
 
-export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, epic, iteration, card, board, planevent, taskcomment, checkitem, rule, waitrule, forkmap, triage, waiting, view, availability];
+export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, epic, iteration, card, board, planevent, taskcomment, checkitem, rule, waitrule, forkmap, triage, waiting, view, availability, labelmap, upstreamsub, backport];
 export const entityDef = (type: string) => ENTITY_TYPES.find((t) => t.type === type);
 export const entityPath = (type: string, id: string) => `entities/${type}/${id}.json`;
 export const parseEntityPath = (path: string): { type: string; id: string } | null => {
