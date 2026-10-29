@@ -1,3 +1,16 @@
+/**
+ * Encrypted store for the hub session token: one `HubSession` row in the profile database, AES-256-GCM under a random
+ * 32-byte key kept in the profile directory (`key`, beside `mergeport.db`).
+ *
+ * What the key file buys, honestly: it protects the token against accidental disclosure only. Copying the database on its
+ * own, a backup of the database alone, or a log or bug report that includes it cannot reveal the token without the key.
+ * It does NOT protect against another process running as the same OS user: that process can read both files, exactly
+ * as this module does. The upgrade path with real isolation is the operating system keychain (Keychain, Credential
+ * Manager, Secret Service), not adopted so far because it needs a native dependency.
+ *
+ * The key file must stay out of anything that copies or exports a profile; nothing in the project copies profile
+ * directories (saved-profiles.ts reads mergeport.db read-only, migrate-from-postgres.ts writes a fresh database).
+ */
 import { execFileSync } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import fs from "node:fs";
