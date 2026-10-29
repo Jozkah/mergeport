@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { isHubBackend, type Backend } from "@/lib/local/backends";
 
 export type ChildSpec = { dbFile: string; token: string; port: number; demo: boolean; backend?: Backend };
@@ -17,7 +17,8 @@ export type SupervisorDeps = {
 type Started = { launchUrl: string; bootId: string };
 type Announced = { launchUrl: string; previousBootId: string | null };
 
-const SECRET_HEADER = "x-mergeport-control";
+/** Carries the caller's own MERGEPORT_LAUNCH_TOKEN; only the current child's token is accepted. */
+const TOKEN_HEADER = "x-mergeport-control";
 export const NOT_RESTORED = "Could not start the other workspace, and the previous one could not be restored";
 const RESTORED = "Could not start the other workspace; the previous one was restored";
 const NOT_STOPPED = "The previous workspace did not stop";
@@ -32,6 +33,8 @@ type Running = { spec: ChildSpec; handle: ChildHandle; expectedExit: boolean; bo
 /** Owns the one app child process. A switch kills it and starts another, so two children never share the port. */
 export class Supervisor {
   private current: Running | null = null;
+  /** The child a running switch is replacing: it may still be alive and asking, so its token stays valid until the switch settles. */
+  private replacing: ChildSpec | null = null;
   private inflight: { key: string; promise: Promise<Started> } | null = null;
   private control: Server | null = null;
   private stopping = new AbortController();
@@ -66,6 +69,7 @@ export class Supervisor {
         throw new TargetUnavailableError(e instanceof Error ? e.message : "That workspace is not available.");
       }
       const previous = this.current?.spec ?? null;
+      this.replacing = previous;
       const next: ChildSpec = { dbFile: target.dbFile, backend: req.backend, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo };
       let announced = false;
       if (announce) {
@@ -99,6 +103,8 @@ export class Supervisor {
         const err = e instanceof Error ? e : new Error(String(e));
         if (announced) this.failListeners.forEach((cb) => cb(err));
         throw err;
+      } finally {
+        this.replacing = null;
       }
     });
   }
@@ -112,10 +118,12 @@ export class Supervisor {
     if (control) await new Promise<void>((resolve) => control.close(() => resolve()));
   }
 
-  /** Loopback-only HTTP endpoint the app child calls to ask for a switch. */
-  listenControl(): Promise<{ url: string; secret: string }> {
+  /**
+   * Loopback-only HTTP endpoint the app child calls to ask for a switch. The child authenticates with its own launch token,
+   * so a previous child (or anything that captured an old token) cannot switch once a newer child is running.
+   */
+  listenControl(): Promise<{ url: string }> {
     if (this.control) return Promise.reject(new Error("Control channel already listening"));
-    const secret = randomBytes(24).toString("hex");
     const server = createServer((req, res) => {
       const reply = (status: number, body: unknown) => {
         res.statusCode = status;
@@ -123,7 +131,7 @@ export class Supervisor {
         res.end(JSON.stringify(body));
       };
       if (req.method !== "POST" || req.url !== "/switch") return reply(404, { error: "Not found" });
-      if (!sameSecret(req.headers[SECRET_HEADER], secret)) return reply(401, { error: "Unauthorized" });
+      if (!this.isCurrentToken(req.headers[TOKEN_HEADER])) return reply(403, { error: "Forbidden" });
       let raw = "";
       let tooBig = false;
       req.on("data", (c: Buffer) => {
@@ -157,9 +165,22 @@ export class Supervisor {
       server.listen(0, "127.0.0.1", () => {
         const addr = server.address();
         if (!addr || typeof addr === "string") return reject(new Error("Control channel failed to bind"));
-        resolve({ url: `http://127.0.0.1:${addr.port}`, secret });
+        resolve({ url: `http://127.0.0.1:${addr.port}` });
       });
     });
+  }
+
+  /** True for the current child's launch token (and, while a switch is running, the token of the child it replaces). */
+  private isCurrentToken(got: string | string[] | undefined): boolean {
+    if (typeof got !== "string") return false;
+    const a = Buffer.from(got);
+    const accepted = [this.current?.spec.token, this.replacing?.token].filter((t): t is string => typeof t === "string");
+    let ok = false;
+    for (const t of accepted) {
+      const b = Buffer.from(t);
+      if (a.length === b.length && timingSafeEqual(a, b)) ok = true;
+    }
+    return ok;
   }
 
   /** One operation at a time; the same request arriving mid-flight shares its promise, a different one is refused. */
@@ -215,13 +236,6 @@ export class Supervisor {
 
 const launchUrl = (spec: ChildSpec) => `http://127.0.0.1:${spec.port}/api/local/launch?token=${spec.token}`;
 
-function sameSecret(got: string | string[] | undefined, secret: string): boolean {
-  if (typeof got !== "string") return false;
-  const a = Buffer.from(got);
-  const b = Buffer.from(secret);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 function parseBackend(raw: string): Backend | null {
   try {
     const b = (JSON.parse(raw) as { backend?: unknown }).backend;
@@ -231,14 +245,14 @@ function parseBackend(raw: string): Backend | null {
   }
 }
 
-/** Used by the app child to ask the supervisor for a switch. */
+/** Asks the supervisor for a switch, authenticated with a launch token (a getter, since the current token changes on every switch). */
 export class ControlClient {
-  constructor(private url: string, private secret: string) {}
+  constructor(private url: string, private token: string | (() => string)) {}
 
   async switchTo(backend: Backend): Promise<{ launchUrl: string; previousBootId: string | null }> {
     const res = await fetch(`${this.url}/switch`, {
       method: "POST",
-      headers: { "content-type": "application/json", [SECRET_HEADER]: this.secret },
+      headers: { "content-type": "application/json", [TOKEN_HEADER]: typeof this.token === "string" ? this.token : this.token() },
       body: JSON.stringify({ backend }),
     });
     const body = (await res.json().catch(() => ({}))) as { launchUrl?: string; previousBootId?: string | null; error?: string };

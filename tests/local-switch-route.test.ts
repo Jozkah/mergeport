@@ -44,10 +44,14 @@ describe("requestSwitch", () => {
     const real = await vi.importActual<typeof import("@/lib/local/switch-client")>("@/lib/local/switch-client");
     await expect(real.requestSwitch(HUB, { env: {} })).rejects.toThrow("Switching needs the launcher. Start Mergeport with npm run local.");
   });
-  it("posts to the control channel with the secret header and returns the launch url", async () => {
+  it("throws the launcher message when the launch token is unset", async () => {
+    const real = await vi.importActual<typeof import("@/lib/local/switch-client")>("@/lib/local/switch-client");
+    await expect(real.requestSwitch(HUB, { env: { MERGEPORT_CONTROL_URL: "http://127.0.0.1:9" } })).rejects.toThrow("Switching needs the launcher. Start Mergeport with npm run local.");
+  });
+  it("posts to the control channel with this child's launch token and returns the launch url", async () => {
     const real = await vi.importActual<typeof import("@/lib/local/switch-client")>("@/lib/local/switch-client");
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ launchUrl: "http://127.0.0.1:3000/api/local/launch?token=x" }), { status: 200 }));
-    const r = await real.requestSwitch(HUB, { env: { MERGEPORT_CONTROL_URL: "http://127.0.0.1:9", MERGEPORT_CONTROL_SECRET: "s3" }, fetch: fetchMock as unknown as typeof fetch });
+    const r = await real.requestSwitch(HUB, { env: { MERGEPORT_CONTROL_URL: "http://127.0.0.1:9", MERGEPORT_LAUNCH_TOKEN: "s3" }, fetch: fetchMock as unknown as typeof fetch });
     expect(r.launchUrl).toContain("token=x");
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("http://127.0.0.1:9/switch");

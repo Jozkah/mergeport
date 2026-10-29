@@ -5,11 +5,12 @@ import { ValidationError } from "@/lib/errors";
 export async function requestSwitch(backend: Backend, deps: { env?: Record<string, string | undefined>; fetch?: typeof fetch } = {}): Promise<{ launchUrl: string; previousBootId: string | null }> {
   const e = deps.env ?? process.env;
   const url = e.MERGEPORT_CONTROL_URL;
-  const secret = e.MERGEPORT_CONTROL_SECRET;
-  if (!url || !secret) throw new ValidationError("Switching needs the launcher. Start Mergeport with npm run local.");
+  // This child's own launch token: the supervisor accepts only the current child's, so an older process cannot switch.
+  const token = e.MERGEPORT_LAUNCH_TOKEN;
+  if (!url || !token) throw new ValidationError("Switching needs the launcher. Start Mergeport with npm run local.");
   const res = await (deps.fetch ?? fetch)(`${url}/switch`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-mergeport-control": secret },
+    headers: { "content-type": "application/json", "x-mergeport-control": token },
     body: JSON.stringify({ backend }),
   });
   const body = (await res.json().catch(() => ({}))) as { launchUrl?: string; previousBootId?: string | null; error?: string };

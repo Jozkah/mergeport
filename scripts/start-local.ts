@@ -81,10 +81,10 @@ async function main() {
   }
 
   // The supervisor owns the one app process, so a workspace switch is a restart on another database, never an in-process swap.
-  const control = { url: "", secret: "" };
+  const control = { url: "" };
   const supervisor = new Supervisor(
     {
-      spawnChild: (spec) => spawnNext(spec, { MERGEPORT_CONTROL_URL: control.url, MERGEPORT_CONTROL_SECRET: control.secret }),
+      spawnChild: (spec) => spawnNext(spec, { MERGEPORT_CONTROL_URL: control.url }),
       waitReady: (p, signal) => waitForReady(p, signal),
       resolveTarget: async ({ backend }) => {
         if (demo || signedInId === null) throw new Error("Switching workspaces is not available in this mode.");

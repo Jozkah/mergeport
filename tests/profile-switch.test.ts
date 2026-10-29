@@ -27,7 +27,10 @@ function freePort(): Promise<number> {
   });
 }
 
+/** Token of the child most recently spawned: what the current app process would send from its own environment. */
+let currentToken = "";
 function spawnFake(spec: ChildSpec): ChildHandle {
+  currentToken = spec.token;
   const child = spawn(process.execPath, [FAKE], {
     stdio: "ignore",
     env: { ...process.env, MERGEPORT_DB: spec.dbFile, MERGEPORT_LAUNCH_TOKEN: spec.token, MERGEPORT_PORT: String(spec.port), MERGEPORT_BACKEND: spec.backend ?? "github" },
@@ -82,8 +85,8 @@ async function setup() {
     { port, demo: false, killDelayMs: 20 },
   );
   const first = await sup.start({ dbFile: ghFile, backend: "github" });
-  const { url, secret } = await sup.listenControl();
-  return { port, ghFile, hubFile, first, client: new ControlClient(url, secret) };
+  const { url } = await sup.listenControl();
+  return { port, ghFile, hubFile, first, client: new ControlClient(url, () => currentToken) };
 }
 
 /** Follows a launch link by hand and returns the session cookie, or the failing status. */

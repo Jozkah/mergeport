@@ -173,8 +173,9 @@ describe("control channel", () => {
     const f = makeDeps({ resolve });
     const s = sup(f.deps);
     await s.start({ dbFile: "/db/a" });
-    const { url, secret } = await s.listenControl();
-    return { f, url, secret };
+    const { url } = await s.listenControl();
+    // The credential is the current child's launch token.
+    return { f, s, url, secret: f.spawned[0].token };
   }
   const post = (url: string, body: unknown, secret?: string) =>
     fetch(`${url}/switch`, {
@@ -183,10 +184,35 @@ describe("control channel", () => {
       body: typeof body === "string" ? body : JSON.stringify(body),
     });
 
-  it("rejects a wrong or missing secret with 401", async () => {
-    const { url } = await control();
-    expect((await post(url, { backend: HUB }, "wrong")).status).toBe(401);
-    expect((await post(url, { backend: HUB })).status).toBe(401);
+  it("rejects a wrong or missing token with 403", async () => {
+    const { url, secret } = await control();
+    expect((await post(url, { backend: HUB }, "wrong")).status).toBe(403);
+    expect((await post(url, { backend: HUB }, secret + "x")).status).toBe(403);
+    expect((await post(url, { backend: HUB }, secret.slice(0, -1))).status).toBe(403);
+    expect((await post(url, { backend: HUB })).status).toBe(403);
+  });
+
+  it("accepts only the current child's launch token: the previous child's token is refused after a switch", async () => {
+    const { f, s, url } = await control();
+    const first = f.spawned[0].token;
+    await s.switchTo({ backend: HUB });
+    const second = f.spawned[1].token;
+    expect(second).not.toBe(first);
+    expect((await post(url, { backend: "github" }, first)).status).toBe(403);
+    expect(f.spawned).toHaveLength(2); // nothing was switched by the stale token
+    const ok = await post(url, { backend: "github" }, second);
+    expect(ok.status).toBe(202);
+    await vi.waitFor(() => expect(f.spawned).toHaveLength(3));
+    // The token that just switched is stale too now.
+    expect((await post(url, { backend: HUB }, second)).status).toBe(403);
+    expect((await post(url, { backend: HUB }, f.spawned[2].token)).status).toBe(202);
+  });
+
+  it("refuses every token while no child is running", async () => {
+    const f = makeDeps();
+    const s = sup(f.deps);
+    const { url } = await s.listenControl();
+    expect((await post(url, { backend: HUB }, "anything")).status).toBe(403);
   });
 
   it("rejects a bad body with 400", async () => {
@@ -215,8 +241,8 @@ describe("control channel", () => {
     };
     const s = sup(f.deps);
     await s.start({ dbFile: "/db/a" });
-    const { url, secret } = await s.listenControl();
-    const res = await Promise.race([post(url, { backend: HUB }, secret), new Promise<null>((r) => setTimeout(() => r(null), 2000))]);
+    const { url } = await s.listenControl();
+    const res = await Promise.race([post(url, { backend: HUB }, f.spawned[0].token), new Promise<null>((r) => setTimeout(() => r(null), 2000))]);
     expect(f.events).not.toContain("kill:/db/a"); // reply arrived while the old child was still alive
     expect(res).not.toBeNull();
     expect(res!.status).toBe(202);
@@ -257,11 +283,15 @@ describe("control channel", () => {
   });
 
   it("ControlClient switches and surfaces errors", async () => {
-    const { url, secret } = await control();
+    const { f, url, secret } = await control();
     const ok = await new ControlClient(url, secret).switchTo(HUB);
     expect(ok.launchUrl).toContain("/api/local/launch?token=");
     expect(ok.previousBootId).toBe("boot-1");
     await expect(new ControlClient(url, "wrong").switchTo(HUB)).rejects.toThrow();
+    await expect(new ControlClient(url, secret).switchTo("github")).rejects.toThrow(); // stale: the first child is gone
+    await vi.waitFor(() => expect(f.spawned).toHaveLength(2));
+    const back = await new ControlClient(url, () => f.spawned[f.spawned.length - 1].token).switchTo("github");
+    expect(back.launchUrl).toContain("/api/local/launch?token=");
   });
 });
 
@@ -292,8 +322,8 @@ describe("killDelayMs", () => {
     const s = new Supervisor(f.deps, { port: 4100, demo: false, killDelayMs: 200 });
     sups.push(s);
     await s.start({ dbFile: "/db/a" });
-    const { url, secret } = await s.listenControl();
-    const res = await fetch(`${url}/switch`, { method: "POST", headers: { "content-type": "application/json", "x-mergeport-control": secret }, body: JSON.stringify({ backend: HUB }) });
+    const { url } = await s.listenControl();
+    const res = await fetch(`${url}/switch`, { method: "POST", headers: { "content-type": "application/json", "x-mergeport-control": f.spawned[0].token }, body: JSON.stringify({ backend: HUB }) });
     const got = Date.now();
     expect(res.status).toBe(202);
     expect(killedAt).toHaveLength(0);
