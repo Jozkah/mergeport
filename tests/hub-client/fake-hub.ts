@@ -42,6 +42,9 @@ export class FakeHub {
   private failKind: "network" | "auth" | "forbidden" | "not-found" | "rate-limited" | "unknown" = "network";
   private revoked = new Set<string>();
   private dropNext = false;
+  private stale = new Set<string>();
+  /** Number of POST /ops requests that reached the handler. */
+  opsRequests = 0;
   private pending = new Map<string, { seq: bigint; timer: NodeJS.Timeout }>();
 
   addMember(githubId: string, login: string, role: string) {
@@ -90,6 +93,10 @@ export class FakeHub {
   /** Removes an entity from the current state without leaving a tombstone event (history pruning). */
   dropEntity(spaceId: string, type: string, id: string) {
     this.spaces.get(spaceId)?.entities.delete(`${type}/${id}`);
+  }
+  /** Every push touching this entity answers stale, and the entity is bumped so a retry on the fresh version is stale again. */
+  alwaysStale(spaceId: string, type: string, id: string) {
+    this.stale.add(`${spaceId}/${type}/${id}`);
   }
   dropNextResponse() {
     this.dropNext = true;
@@ -164,6 +171,11 @@ export class FakeHub {
       const cur = s.entities.get(key);
       const seen = cur && (cur.appliedOps.includes(op.opId) || s.events.some((e) => e.opId === op.opId && e.entity.type === op.type && e.entity.id === op.entityId));
       if (cur && seen) return { opId: op.opId, status: "duplicate", version: cur.version };
+      if (this.stale.has(`${s.id}/${key}`)) {
+        // Somebody else keeps editing this entity: bump it (data unchanged) so every retry is stale again.
+        const bumped = this.inject(s.id, { type: op.type, id: op.entityId, data: cur?.data, deleted: cur?.deleted });
+        return { opId: op.opId, status: "stale", version: bumped.version, current: bumped };
+      }
       if (op.baseVersion !== (cur?.version ?? 0)) return { opId: op.opId, status: "stale", version: cur?.version ?? 0, current: cur };
       const del = op.kind === "DELETE";
       const next: EntityJson = { schema: 1, type: op.type, id: op.entityId, version: (cur?.version ?? 0) + 1, deleted: del, appliedOps: [...(cur?.appliedOps ?? []), op.opId].slice(-50), updatedAt: new Date().toISOString(), updatedBy: { id: actor.githubId, login: actor.login }, data: del ? {} : (op.data ?? {}) };
@@ -209,6 +221,7 @@ export class FakeHub {
       return send(200, { seq: String(page.length ? page[page.length - 1].seq : s.seq), events, more: newer.length > page.length });
     }
     if (req.method !== "POST") return send(405, { error: "method" });
+    this.opsRequests++;
     if (m.role === "READER") return send(403, { error: "read only" });
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);

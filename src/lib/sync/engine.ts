@@ -289,7 +289,7 @@ export class SyncEngine {
       for (const v of vanished.filter((s) => s.type === def.type)) {
         const owner = local.get(v.entityId);
         if (owner?.spaceId && owner.spaceId !== space.id) continue;
-        const hasLocalEdits = (await this.db.outboxOp.count({ where: { spaceId: space.id, entityType: def.type, entityId: v.entityId, status: { in: ["PENDING", "SENT"] } } })) > 0;
+        const hasLocalEdits = (await this.db.outboxOp.count({ where: { spaceId: space.id, entityType: def.type, entityId: v.entityId, status: { in: ["PENDING", "SENT", "CONFLICT"] } } })) > 0;
         if (hasLocalEdits) continue;
         await def.apply(this.db, ctx, v.entityId, null, v.baseVersion);
         await this.db.syncEntity.update({ where: { spaceId_type_entityId: { spaceId: space.id, type: def.type, entityId: v.entityId } }, data: { deleted: true, remoteSha: null } });
@@ -537,8 +537,88 @@ export class SyncEngine {
   }
 
   private async pushHub(space0: Space): Promise<{ sent: number }> {
-    this.backendOf(space0); // throws when no hub client is configured; the transport is filled in by a later task
-    return { sent: 0 };
+    let space = await this.db.space.findUniqueOrThrow({ where: { id: space0.id } });
+    const backend = this.backendOf(space); // throws when no hub client is configured, even for a read-only space
+    if (backend.kind !== "hub") throw new Error("Not a hub space");
+    const client = backend.client;
+    if (!space.canWrite || space.access !== "OK") return { sent: 0 };
+    const ctx = await this.ctx(space);
+    const keyOf = (type: string, entityId: string) => ({ spaceId_type_entityId: { spaceId: space.id, type, entityId } });
+    let sent = 0;
+    let touched = false;
+    // A stale answer is merged and the rewritten operation is retried at once; the round cap keeps a hot entity from spinning.
+    for (let round = 0; round < 3; round++) {
+      const ops0 = await this.db.outboxOp.findMany({ where: { spaceId: space.id, status: "PENDING" }, orderBy: { createdAt: "asc" } });
+      const ops: typeof ops0 = [];
+      for (const op of ops0) {
+        const se = await this.db.syncEntity.findUnique({ where: keyOf(op.entityType, op.entityId) });
+        if (!isBlocked(se)) ops.push(op);
+      }
+      if (ops.length === 0) break;
+      await this.db.outboxOp.updateMany({ where: { id: { in: ops.map((o) => o.id) } }, data: { status: "SENT", attempts: { increment: 1 } } });
+      let results: Awaited<ReturnType<HubClient["push"]>>;
+      try {
+        results = await client.push(space.hubSpaceId, ops.map((o) => ({ opId: o.id, type: o.entityType, entityId: o.entityId, kind: o.kind as "UPSERT" | "DELETE", baseVersion: o.baseVersion, data: o.kind === "DELETE" ? undefined : ((o.data as Data) ?? {}) })));
+      } catch (e) {
+        // Whether the hub applied them is unknown for network errors: the operation id makes the retry idempotent.
+        await this.db.outboxOp.updateMany({ where: { id: { in: ops.map((o) => o.id) }, status: "SENT" }, data: { status: "PENDING", error: e instanceof Error ? e.message : String(e) } });
+        await this.handleHubError(space, e, "write");
+        return { sent };
+      }
+      const byId = new Map(results.results.map((r) => [r.opId, r]));
+      let rewritten = false;
+      for (const op of ops) {
+        const r = byId.get(op.id);
+        const se = await this.db.syncEntity.findUnique({ where: keyOf(op.entityType, op.entityId) });
+        const settle = async (version: number) => {
+          const applied = [...(((se?.meta as { applied?: string[] } | null)?.applied ?? []).slice(-49)), op.id];
+          const row = { path: entityPath(op.entityType, op.entityId), remoteSha: null, baseVersion: version, baseData: ((op.kind === "DELETE" ? {} : op.data) ?? {}) as Prisma.InputJsonValue, meta: { applied } as Prisma.InputJsonValue, deleted: op.kind === "DELETE" };
+          await this.db.syncEntity.upsert({ where: keyOf(op.entityType, op.entityId), create: { spaceId: space.id, type: op.entityType, entityId: op.entityId, ...row }, update: row });
+        };
+        if (!r) {
+          await this.db.outboxOp.updateMany({ where: { id: op.id, status: "SENT" }, data: { status: "PENDING" } });
+        } else if (r.status === "applied") {
+          await settle(r.version);
+          await this.db.outboxOp.deleteMany({ where: { id: op.id } });
+          sent++;
+          touched = true;
+        } else if (r.status === "duplicate") {
+          if (r.version === (se?.baseVersion ?? 0) + 1) await settle(r.version);
+          await this.db.outboxOp.deleteMany({ where: { id: op.id } });
+          touched = true;
+        } else {
+          await this.db.outboxOp.updateMany({ where: { id: op.id }, data: { status: "PENDING" } });
+          const def = entityDef(op.entityType);
+          const current = r.current;
+          if (!def) continue;
+          if (!current) {
+            await this.db.outboxOp.updateMany({ where: { id: op.id }, data: { baseVersion: r.version } });
+            rewritten = true;
+            continue;
+          }
+          if (current.schema > ENTITY_SCHEMA) {
+            await this.blockEntity(space.id, def.type, current.id, String(results.seq), current.version);
+            continue;
+          }
+          const row = (await this.localMap(def, ctx.commonSpaceId)).get(op.entityId);
+          if (row?.spaceId && row.spaceId !== space.id) continue;
+          try {
+            const m = await this.reconcile(ctx, def, current, String(results.seq), row?.data ?? null);
+            if (m.applied && m.data && def.post) await def.post(this.db, ctx, [{ id: op.entityId, data: m.data }]);
+          } catch (e) {
+            await this.db.outboxOp.updateMany({ where: { id: op.id, status: "PENDING" }, data: { error: e instanceof Error ? e.message : String(e) } });
+            continue;
+          }
+          if (await this.db.outboxOp.count({ where: { id: op.id, status: "PENDING" } })) rewritten = true;
+        }
+      }
+      if (!rewritten) break;
+    }
+    if (touched) {
+      space = await this.db.space.update({ where: { id: space.id }, data: { lastChangedAt: this.now(), lastError: null } });
+      this.emit(space.id, "pushed");
+    }
+    return { sent };
   }
 
   private async pushGithub(space0: Space): Promise<{ sent: number }> {

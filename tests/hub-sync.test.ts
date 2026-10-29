@@ -224,3 +224,232 @@ describe("hub access and errors", () => {
     expect((await alice.engine.stateFor(sp)).state).toBe("rate-limited");
   });
 });
+
+const cardKey = (spaceId: string, id = "c1") => ({ spaceId_type_entityId: { spaceId, type: "card", entityId: id } });
+const title = async (c: HubTestClient, id = "c1") => (await c.db.planningItem.findUnique({ where: { id } }))?.title;
+
+describe("hub push", () => {
+  it("edit on olive reaches alice through push + pull (outbox empty, hub entity version 1)", async () => {
+    await olive.sync();
+    const sp = await olive.space("common");
+    await olive.db.project.create({ data: { id: "p9", workspaceId: olive.profile.workspace.id, name: "Nine", slug: "nine", spaceId: sp.id } });
+    await olive.sync();
+    expect(hub.entity("common", "project", "p9")?.version).toBe(1);
+    expect(await olive.db.outboxOp.count()).toBe(0);
+    await alice.sync();
+    expect((await alice.db.project.findUnique({ where: { id: "p9" } }))?.name).toBe("Nine");
+    expect(await alice.db.outboxOp.count()).toBe(0);
+  });
+
+  it("concurrent edits to DIFFERENT entities: both applied, no stale, no conflict", async () => {
+    seedBoard();
+    hub.inject("common", { type: "card", id: "c2", data: cardData("p1", "Second") });
+    await olive.sync();
+    await alice.sync();
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "O1" } });
+    await alice.db.planningItem.update({ where: { id: "c2" }, data: { title: "A2" } });
+    await olive.sync();
+    await alice.sync();
+    await olive.sync();
+    expect(hub.entity("common", "card", "c1")?.version).toBe(2);
+    expect(hub.entity("common", "card", "c2")?.version).toBe(2);
+    expect(await title(olive, "c2")).toBe("A2");
+    expect(await title(alice, "c1")).toBe("O1");
+    expect(await olive.db.syncConflict.count()).toBe(0);
+    expect(await alice.db.syncConflict.count()).toBe(0);
+  });
+
+  it("same entity, different fields: one stale, three-way merged, retried in the same cycle, both fields present on both clients after sync, no SyncConflict", async () => {
+    seedBoard();
+    await olive.sync();
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { priority: 2 } });
+    await alice.engine.capture();
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "O1" } });
+    await olive.sync();
+    const before = hub.opsRequests;
+    expect(await alice.engine.pushSpace(await alice.space("common"))).toEqual({ sent: 1 });
+    expect(hub.opsRequests - before).toBe(2); // stale, then the merged retry
+    await olive.sync();
+    await alice.sync();
+    for (const c of [olive, alice]) {
+      const row = await c.db.planningItem.findUniqueOrThrow({ where: { id: "c1" } });
+      expect(row.title).toBe("O1");
+      expect(row.priority).toBe(2);
+      expect(await c.db.syncConflict.count()).toBe(0);
+      expect(await c.db.outboxOp.count()).toBe(0);
+    }
+    expect(hub.entity("common", "card", "c1")?.version).toBe(3);
+  });
+
+  it("same field: SyncConflict OPEN with that field, op CONFLICT, nothing sent until resolveConflict(..., \"mine\")", async () => {
+    seedBoard();
+    await olive.sync();
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "Alice" } });
+    await alice.engine.capture();
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Olive" } });
+    await olive.sync();
+    const sp = await alice.space("common");
+    await alice.engine.pushSpace(sp);
+    const c = await alice.db.syncConflict.findFirstOrThrow({ where: { status: "OPEN" } });
+    expect(c.fields).toEqual(["title"]);
+    expect((await alice.db.outboxOp.findFirstOrThrow()).status).toBe("CONFLICT");
+    const before = hub.opsRequests;
+    expect(await alice.engine.pushSpace(sp)).toEqual({ sent: 0 });
+    expect(hub.opsRequests).toBe(before);
+    expect(hub.entity("common", "card", "c1")?.data.title).toBe("Olive");
+    await alice.engine.resolveConflict(c.id, "mine");
+    expect(await alice.engine.pushSpace(sp)).toEqual({ sent: 1 });
+    expect(hub.entity("common", "card", "c1")?.data.title).toBe("Alice");
+    await olive.sync();
+    expect(await title(olive)).toBe("Alice");
+  });
+
+  it("lost response (hub.dropNextResponse()): first push throws network, ops back to PENDING, second push gets duplicate, hub applied once (version 1), op gone, base correct", async () => {
+    seedBoard();
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "Lost" } });
+    await alice.engine.capture();
+    hub.dropNextResponse();
+    const sp = await alice.space("common");
+    expect(await alice.engine.pushSpace(sp)).toEqual({ sent: 0 });
+    const op = await alice.db.outboxOp.findFirstOrThrow();
+    expect(op.status).toBe("PENDING");
+    expect(op.error).toBeTruthy();
+    expect(hub.entity("common", "card", "c1")?.version).toBe(2); // applied exactly once (v1 was the seed)
+    expect(await alice.engine.pushSpace(await alice.space("common"))).toEqual({ sent: 0 });
+    expect(hub.entity("common", "card", "c1")?.version).toBe(2);
+    expect(await alice.db.outboxOp.count()).toBe(0);
+    const se = await alice.db.syncEntity.findUniqueOrThrow({ where: cardKey(sp.id) });
+    expect(se.baseVersion).toBe(2);
+    expect((se.baseData as { title: string }).title).toBe("Lost");
+    expect((se.meta as { applied: string[] }).applied).toContain(op.id);
+  });
+
+  it("duplicate with a newer remote version leaves base untouched and a later pull converges", async () => {
+    seedBoard();
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "Mine" } });
+    await alice.engine.capture();
+    hub.dropNextResponse();
+    await alice.engine.pushSpace(await alice.space("common"));
+    hub.inject("common", { type: "card", id: "c1", data: { ...cardData("p1", "Mine"), priority: 5 } }); // v3
+    const sp = await alice.space("common");
+    await alice.engine.pushSpace(sp);
+    expect(await alice.db.outboxOp.count()).toBe(0);
+    expect((await alice.db.syncEntity.findUniqueOrThrow({ where: cardKey(sp.id) })).baseVersion).toBe(1);
+    await alice.sync();
+    expect((await alice.db.syncEntity.findUniqueOrThrow({ where: cardKey(sp.id) })).baseVersion).toBe(3);
+    const row = await alice.db.planningItem.findUniqueOrThrow({ where: { id: "c1" } });
+    expect([row.title, row.priority]).toEqual(["Mine", 5]);
+    expect(await alice.db.outboxOp.count()).toBe(0);
+    expect(hub.entity("common", "card", "c1")?.version).toBe(3);
+  });
+
+  it("remote edit vs local delete: conflict with fields [\"__deleted\"]", async () => {
+    seedBoard();
+    await olive.sync();
+    await alice.sync();
+    await alice.db.planningItem.delete({ where: { id: "c1" } });
+    await alice.engine.capture();
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Edited" } });
+    await olive.sync();
+    await alice.engine.pushSpace(await alice.space("common"));
+    const c = await alice.db.syncConflict.findFirstOrThrow({ where: { status: "OPEN" } });
+    expect(c.fields).toEqual(["__deleted"]);
+    expect((await alice.db.outboxOp.findFirstOrThrow()).status).toBe("CONFLICT");
+    expect(hub.entity("common", "card", "c1")?.deleted).toBe(false);
+  });
+
+  it("local edit vs remote delete: conflict with fields [\"__deleted\"]", async () => {
+    seedBoard();
+    await olive.sync();
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "Edited" } });
+    await alice.engine.capture();
+    await olive.db.planningItem.delete({ where: { id: "c1" } });
+    await olive.sync();
+    expect(hub.entity("common", "card", "c1")?.deleted).toBe(true);
+    await alice.engine.pushSpace(await alice.space("common"));
+    const c = await alice.db.syncConflict.findFirstOrThrow({ where: { status: "OPEN" } });
+    expect(c.fields).toEqual(["__deleted"]);
+    expect((await alice.db.outboxOp.findFirstOrThrow()).status).toBe("CONFLICT");
+  });
+
+  it("offline queue: hub stopped, three edits captured and stay PENDING; hub restarted, one sync sends them all", async () => {
+    seedBoard();
+    hub.inject("common", { type: "card", id: "c2", data: cardData("p1", "Two") });
+    hub.inject("common", { type: "card", id: "c3", data: cardData("p1", "Three") });
+    await alice.sync();
+    await hub.close();
+    for (const id of ["c1", "c2", "c3"]) await alice.db.planningItem.update({ where: { id }, data: { title: `Off ${id}` } });
+    await alice.sync();
+    expect(await alice.db.outboxOp.count({ where: { status: "PENDING" } })).toBe(3);
+    expect((await alice.space("common")).lastError).toBe("offline");
+    await hub.restart();
+    const before = hub.opsRequests;
+    await alice.sync();
+    expect(hub.opsRequests - before).toBe(1);
+    expect(await alice.db.outboxOp.count()).toBe(0);
+    expect(hub.entity("common", "card", "c3")?.data.title).toBe("Off c3");
+  });
+
+  it("three-round cap: hub.alwaysStale(entity) leaves ops PENDING after exactly 3 push requests", async () => {
+    seedBoard();
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "Hot" } });
+    await alice.engine.capture();
+    hub.alwaysStale("common", "card", "c1");
+    const before = hub.opsRequests;
+    expect(await alice.engine.pushSpace(await alice.space("common"))).toEqual({ sent: 0 });
+    expect(hub.opsRequests - before).toBe(3);
+    const ops = await alice.db.outboxOp.findMany();
+    expect(ops.map((o) => o.status)).toEqual(["PENDING"]);
+    expect(await alice.db.syncConflict.count()).toBe(0);
+  });
+
+  it("write forbidden (member demoted to READER) -> ops QUARANTINED, canWrite false", async () => {
+    seedBoard();
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "Nope" } });
+    await alice.engine.capture();
+    hub.setRole("2", "READER");
+    await alice.engine.pushSpace(await alice.space("common"));
+    const sp = await alice.space("common");
+    expect(sp.canWrite).toBe(false);
+    expect(sp.access).toBe("OK");
+    expect((await alice.db.outboxOp.findFirstOrThrow()).status).toBe("QUARANTINED");
+    expect(hub.entity("common", "card", "c1")?.version).toBe(1);
+  });
+
+  it("delete is pushed as DELETE op and arrives as tombstone", async () => {
+    seedBoard();
+    await olive.sync();
+    await alice.sync();
+    await alice.db.planningItem.delete({ where: { id: "c1" } });
+    await alice.sync();
+    expect(hub.entity("common", "card", "c1")?.deleted).toBe(true);
+    expect(await alice.db.outboxOp.count()).toBe(0);
+    await olive.sync();
+    expect(await olive.db.planningItem.findUnique({ where: { id: "c1" } })).toBeNull();
+  });
+
+  it("a snapshot resync keeps a vanished entity that has a CONFLICT op", async () => {
+    seedBoard();
+    await olive.sync();
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "Alice" } });
+    await alice.engine.capture();
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Olive" } });
+    await olive.sync();
+    await alice.engine.pushSpace(await alice.space("common"));
+    expect((await alice.db.outboxOp.findFirstOrThrow()).status).toBe("CONFLICT");
+    hub.dropEntity("common", "card", "c1");
+    hub.inject("common", { type: "card", id: "c9", data: cardData("p1", "Other") });
+    hub.pruneBefore(hub.seq("common"));
+    await alice.engine.pullSpace(await alice.space("common"));
+    expect(await title(alice)).toBe("Alice");
+    expect(await alice.db.syncConflict.count({ where: { status: "OPEN" } })).toBe(1);
+  });
+});
