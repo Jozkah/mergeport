@@ -15,6 +15,7 @@ export type FakeHubOpts = {
   pollsBeforeOk?: number;
   githubId?: string;
   login?: string;
+  verificationUri?: string;
 };
 export type FakeHubRequest = { method: string; path: string; body: unknown };
 
@@ -41,7 +42,7 @@ export async function startFakeHub(opts: FakeHubOpts = {}) {
       const p = (req.url ?? "").split("?")[0];
       requests.push({ method: req.method ?? "", path: p, body });
       if (req.method === "GET" && p === "/health") return send(res, 200, { ok: true, team: team === null ? null : { name: team }, schema: 1, publicUrl: opts.publicUrl ?? origin, githubHost: opts.githubHost ?? "github.com" });
-      if (req.method === "POST" && p === "/auth/device/start") return send(res, 200, { deviceCode: "dev-code-secret", userCode: "ABCD-1234", verificationUri: `${origin}/device`, interval: 1, expiresIn: 600 });
+      if (req.method === "POST" && p === "/auth/device/start") return send(res, 200, { deviceCode: "dev-code-secret", userCode: "ABCD-1234", verificationUri: opts.verificationUri ?? `${origin}/device`, interval: 1, expiresIn: 600 });
       if (req.method === "POST" && p === "/auth/device/poll") {
         if (opts.expired) return send(res, 410);
         if (opts.removed) return send(res, 403, { reason: "removed" });

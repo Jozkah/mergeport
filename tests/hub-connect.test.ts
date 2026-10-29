@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { HubAuth, completeConnect } from "@/lib/hub/connect";
+import { HubAuth, completeConnect, safeVerificationUri } from "@/lib/hub/connect";
 import { hubLinkStatus, hubSessionPort } from "@/lib/hub/ports-stub";
 import { hubBackendId } from "@/lib/local/backends";
 import { profileDbPath } from "@/lib/local/profile";
@@ -113,5 +113,28 @@ describe("completeConnect", () => {
     expect(await completeConnect(base(h, "http://127.0.0.1:4000", { state: "missing-gh" }))).toEqual({ ok: false, error: "gh-missing" });
     expect(await completeConnect(base(h, "http://127.0.0.1:4000", { state: "error", message: "x" }))).toEqual({ ok: false, error: "gh-error" });
     expect(fs.readdirSync(h)).toEqual([]);
+  });
+});
+
+describe("completeConnect hardening", () => {
+  const base = (h: string, gh: GhStatus, githubId: string) => ({ home: h, host: "github.com", origin: "http://127.0.0.1:4000", teamName: "T", session: "s", member: { githubId, login: "octocat" }, gh, ports: { session: hubSessionPort } });
+  it("non-numeric hub id is a mismatch, not a throw", async () => {
+    const h = home();
+    expect(await completeConnect(base(h, ghOk(42n), "not-a-number"))).toEqual({ ok: false, error: "mismatch" });
+    expect(fs.readdirSync(h)).toEqual([]);
+  });
+  it("gh identity on another host is a mismatch", async () => {
+    const h = home();
+    const gh: GhStatus = { state: "ok", identity: { id: 42n, login: "octocat", name: null, avatarUrl: null, host: "ghe.example.com" } };
+    expect(await completeConnect(base(h, gh, "42"))).toEqual({ ok: false, error: "mismatch" });
+    expect(fs.readdirSync(h)).toEqual([]);
+  });
+});
+
+describe("safeVerificationUri", () => {
+  it("allows https github.com and the profile host only", () => {
+    expect(safeVerificationUri("https://github.com/login/device", "github.com")).toBe("https://github.com/login/device");
+    expect(safeVerificationUri("https://ghe.example.com/login/device", "ghe.example.com")).toBe("https://ghe.example.com/login/device");
+    for (const bad of ["http://github.com/login/device", "https://evil.example/login/device", "https://github.com.evil.example/x", "javascript:alert(1)", "https://u:p@github.com/x", "nope", "https://ghe.example.com/x"]) expect(safeVerificationUri(bad, "github.com")).toBeNull();
   });
 });

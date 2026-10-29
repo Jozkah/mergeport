@@ -81,6 +81,22 @@ export class HubAuth {
   }
 }
 
+/**
+ * The hub chooses the page the person is sent to, so it is only passed on when it is plain https on GitHub itself or on
+ * this computer's GitHub host, without credentials. Anything else returns null.
+ */
+export function safeVerificationUri(uri: string, githubHost: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(uri);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" || u.username || u.password) return null;
+  if (u.hostname !== "github.com" && u.hostname !== githubHost) return null;
+  return u.toString();
+}
+
 export type ConnectInput = {
   home: string;
   host: string;
@@ -100,7 +116,9 @@ export async function completeConnect(i: ConnectInput): Promise<{ ok: true; back
   if (i.gh.state === "not-logged-in") return { ok: false, error: "gh-login" };
   if (i.gh.state === "missing-gh") return { ok: false, error: "gh-missing" };
   if (i.gh.state !== "ok") return { ok: false, error: "gh-error" };
+  if (!/^\d+$/.test(i.member.githubId)) return { ok: false, error: "mismatch" };
   if (i.gh.identity.id !== BigInt(i.member.githubId)) return { ok: false, error: "mismatch" };
+  if (i.gh.identity.host && i.gh.identity.host !== i.host) return { ok: false, error: "mismatch" };
   const origin = normalizeHubOrigin(i.origin);
   const backend = hubBackendId(origin);
   const id = i.gh.identity;
