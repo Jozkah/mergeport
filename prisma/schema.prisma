@@ -502,6 +502,9 @@ model PlanningItem {
   workRepoGithubId BigInt? // stable reference to the linked work item, resolved to workItemId after source sync
   workNumber   Int?
   assigneeLogin String?
+  assignedByLogin String? // who last set the assignee (GitHub login, so it reads right on every computer)
+  authorLogin  String? // who created the task (GitHub login)
+  labels       Json     @default("[]") // [string]
   priority     Int      @default(0)
   dueDate      DateTime?
   milestoneId  String?
@@ -517,8 +520,25 @@ model PlanningItem {
   blocks    PlanningLink[]       @relation("LinkFrom")
   blockedBy PlanningLink[]       @relation("LinkTo")
   waiting   WaitingRecord[]
+  comments  TaskComment[]
 
   @@index([projectId, columnId])
+  @@index([assigneeLogin])
+}
+
+/// A comment on a task, or a short system line ("assigned to alice"). One row per entry so two people never edit the same file.
+model TaskComment {
+  id          String    @id @default(cuid())
+  itemId      String
+  authorLogin String
+  kind        String    @default("COMMENT") // COMMENT | EVENT
+  body        String
+  createdAt   DateTime  @default(now())
+  editedAt    DateTime?
+
+  item PlanningItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, createdAt])
 }
 
 model PlanningLink {

@@ -15,6 +15,7 @@ const LABELS: Record<string, string> = {
   "pull-requests": "Pull requests",
   issues: "Issues",
   planning: "Planning",
+  tasks: "Tasks",
   activity: "Activity",
   repositories: "Repositories",
   connect: "Connect repositories",

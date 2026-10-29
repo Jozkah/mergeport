@@ -4,8 +4,9 @@ import { requireViewer } from "@/lib/authz-page";
 import { attentionFor } from "@/lib/services/request-cache";
 import { planningWhere, type DerivedItem } from "@/lib/services/queries";
 import { formatDuration, formatInstant } from "@/lib/format";
+import { listTasks } from "@/lib/services/tasks";
 import { EmptyState, Mono, PageHeader, Panel, Segmented, StatusPill, Time, Avatar } from "@/components/ui/primitives";
-import { BellRing, Hourglass } from "@/components/ui/icons";
+import { BellRing, Hourglass, ListChecks } from "@/components/ui/icons";
 import { itemHref } from "@/components/work/WorkTable";
 
 export const metadata = { title: "My attention" };
@@ -88,6 +89,8 @@ export default async function Attention({ searchParams }: { searchParams: Promis
     orderBy: { startedAt: "asc" },
   });
 
+  const myTasks = await listTasks(db, viewer, { scope: "mine", status: "open" });
+
   return (
     <>
       <PageHeader title="My attention" subtitle="Review waiting is tracked separately from open or closed state. Each item says who is expected to act, why, and since when." />
@@ -96,6 +99,17 @@ export default async function Attention({ searchParams }: { searchParams: Promis
         <p className="border-b border-line px-4 py-2.5 text-[12.5px] text-ink-3">{meta.help}</p>
         {rows.length === 0 ? <EmptyState icon={BellRing} title="Nothing here">This queue is empty for the repositories you can see.</EmptyState> : <Grouped rows={rows} tz={viewer.timezone} now={now} queue={active} />}
       </Panel>
+
+      {myTasks.length > 0 && (
+        <Panel title={`Tasks assigned to you (${myTasks.length})`} icon={ListChecks} className="mt-5">
+          <ul className="divide-y divide-line">
+            {myTasks.slice(0, 8).map((t) => (
+              <li key={t.id}><Link href={`/tasks/${t.id}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-[13px] hover:bg-hover"><span className="font-medium">{t.title}</span><span className="text-[12px] text-ink-3">{t.project.name} · {t.column.name}{t.assignedByLogin && t.assignedByLogin !== viewer.login ? ` · from @${t.assignedByLogin}` : ""}</span></Link></li>
+            ))}
+          </ul>
+          {myTasks.length > 8 && <p className="border-t border-line px-4 py-2 text-[12.5px]"><Link href="/tasks" className="link">See all {myTasks.length}</Link></p>}
+        </Panel>
+      )}
 
       {(q.manualWaiting.length > 0 || manualPlanning.length > 0) && (
         <div className="mt-5">

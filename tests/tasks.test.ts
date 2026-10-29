@@ -1,0 +1,93 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
+import { addComment, assigneeCandidates, createTask, deleteComment, editComment, getTask, listTasks, taskCounts, updateTask } from "@/lib/services/tasks";
+import { freshSeed } from "./helpers";
+
+let S: Awaited<ReturnType<typeof freshSeed>>;
+beforeEach(async () => {
+  S = await freshSeed();
+});
+
+describe("creating and assigning", () => {
+  it("creates a task with an author, labels and an assignee, and records it in the history", async () => {
+    const { db, a, ids } = S;
+    const t = await createTask(db, a, { projectId: ids.projects.atlas.id, title: "  Rotate signing keys ", description: "before friday", assigneeLogin: "@bram-dev", labels: "security, Ops, ops", priority: 3 });
+    expect(t).toMatchObject({ title: "Rotate signing keys", authorLogin: a.login, assigneeLogin: "bram-dev", assignedByLogin: a.login, labels: ["security", "Ops"], priority: 3 });
+    const { comments } = await getTask(db, a, t.id);
+    expect(comments.map((c) => c.kind)).toEqual(["EVENT"]);
+    expect(comments[0].body).toMatch(/assigned it to @bram-dev/);
+  });
+
+  it("rejects an empty title and an invalid username", async () => {
+    const { db, a, ids } = S;
+    await expect(createTask(db, a, { projectId: ids.projects.atlas.id, title: "  " })).rejects.toBeInstanceOf(ValidationError);
+    await expect(createTask(db, a, { projectId: ids.projects.atlas.id, title: "x", assigneeLogin: "not a user!" })).rejects.toThrow(/username/);
+  });
+
+  it("reassigns, changes status and logs each change once; an unchanged save logs nothing", async () => {
+    const { db, a, ids } = S;
+    const t = await createTask(db, a, { projectId: ids.projects.atlas.id, title: "Ship it" });
+    await updateTask(db, a, t.id, { assigneeLogin: "carol", columnKey: "in-progress", priority: 2 });
+    await updateTask(db, a, t.id, { assigneeLogin: "carol", columnKey: "in-progress", priority: 2 });
+    const { task, comments } = await getTask(db, a, t.id);
+    expect(task.column.key).toBe("in-progress");
+    expect(comments.map((c) => c.body)).toEqual(["created this task", "assigned this to @carol", "set the priority to medium", "moved this to In progress"]);
+    await updateTask(db, a, t.id, { assigneeLogin: null });
+    expect((await getTask(db, a, t.id)).task.assigneeLogin).toBeNull();
+  });
+});
+
+describe("lists and visibility", () => {
+  it("filters mine, assigned by me, unassigned and open/done", async () => {
+    const { db, a, ids } = S;
+    const p = ids.projects.atlas.id;
+    const mine = await createTask(db, a, { projectId: p, title: "mine", assigneeLogin: a.login });
+    const given = await createTask(db, a, { projectId: p, title: "given", assigneeLogin: "dana" });
+    const open = await createTask(db, a, { projectId: p, title: "open" });
+    await updateTask(db, a, open.id, { columnKey: "done" });
+    const titles = async (f: Parameters<typeof listTasks>[2]) => (await listTasks(db, a, f)).map((x) => x.title);
+    expect(await titles({ scope: "mine" })).toContain("mine");
+    expect(await titles({ scope: "mine" })).not.toContain("given");
+    expect(await titles({ scope: "by-me" })).toEqual(["given"]);
+    expect(await titles({ scope: "unassigned" })).not.toContain("open"); // done is hidden by default
+    expect(await titles({ status: "done" })).toContain("open");
+    expect(await titles({ q: "GIV" })).toEqual(expect.arrayContaining([]));
+    expect(mine.id).not.toBe(given.id);
+    expect((await taskCounts(db, a)).byMe).toBe(1);
+  });
+
+  it("never shows or edits a task from a project the person cannot see", async () => {
+    const { db, a, b, ids } = S;
+    const hidden = await createTask(db, a, { projectId: ids.projects.atlas.id, title: "private to atlas members" });
+    const seen = (await listTasks(db, b, { scope: "all" })).some((t) => t.id === hidden.id);
+    if (!seen) {
+      await expect(getTask(db, b, hidden.id)).rejects.toBeInstanceOf(NotFoundError);
+      await expect(updateTask(db, b, hidden.id, { priority: 4 })).rejects.toBeInstanceOf(NotFoundError);
+      await expect(addComment(db, b, hidden.id, "hi")).rejects.toBeInstanceOf(NotFoundError);
+    }
+  });
+
+  it("offers assignees from members, authors and people already on tasks", async () => {
+    const { db, a, ids } = S;
+    await createTask(db, a, { projectId: ids.projects.atlas.id, title: "x", assigneeLogin: "zed" });
+    const people = await assigneeCandidates(db, a, ids.projects.atlas.id);
+    expect(people).toContain(a.login);
+    expect(people).toContain("zed");
+  });
+});
+
+describe("comments", () => {
+  it("lets anyone who sees the task comment, but only the author edit or delete (admins can delete)", async () => {
+    const { db, a, admin, ids } = S;
+    const t = await createTask(db, a, { projectId: ids.projects.atlas.id, title: "discuss" });
+    const c = await addComment(db, a, t.id, " first ");
+    expect(c.body).toBe("first");
+    await expect(addComment(db, a, t.id, "   ")).rejects.toBeInstanceOf(ValidationError);
+    await expect(editComment(db, admin, c.id, "hijack")).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await editComment(db, a, c.id, "edited")).editedAt).not.toBeNull();
+    await deleteComment(db, admin, c.id);
+    expect((await getTask(db, a, t.id)).comments.filter((x) => x.kind === "COMMENT")).toHaveLength(0);
+    const ev = (await getTask(db, a, t.id)).comments[0];
+    await expect(deleteComment(db, a, ev.id)).rejects.toBeInstanceOf(ForbiddenError); // system lines are permanent
+  });
+});

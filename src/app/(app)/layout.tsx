@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
 import { repoWhere } from "@/lib/authz/viewer";
 import { attentionFor } from "@/lib/services/request-cache";
-import { unreadNotificationCount } from "@/lib/services/queries";
+import { planningWhere, unreadNotificationCount } from "@/lib/services/queries";
 import { formatInstant } from "@/lib/format";
 import { MobileNav, Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
@@ -37,6 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     waiting: q.waitingExternal.length,
     changes: q.changesRequested.length,
     blocked: q.blocked.length,
+    tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login, column: { key: { not: "done" } } }] } }),
   };
   const last = lastSync._max.lastSyncedAt;
   const profile = await checkProfile(); // last known answer; refreshed in the background, never waits on gh

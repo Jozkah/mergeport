@@ -6,14 +6,14 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useId, useState, type ComponentType, type SVGProps } from "react";
 import * as D from "@radix-ui/react-dialog";
-import { Activity, BellRing, ChevronDown, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Kanban, Layers, LayoutDashboard, PanelLeft, RefreshCw, Route, Search, Settings, Users, X } from "@/components/ui/icons";
+import { Activity, BellRing, ChevronDown, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Kanban, Layers, ListChecks, LayoutDashboard, PanelLeft, RefreshCw, Route, Search, Settings, Users, X } from "@/components/ui/icons";
 import { Collapse } from "@/components/ui/Collapse";
 import { Metric } from "@/components/ui/Metric";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 type Item = { href: string; label: string; icon: Icon; count?: number; children?: { href: string; label: string; count?: number }[] };
 
-export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number };
+export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number };
 
 function buildNav(c: NavCounts, isAdmin: boolean) {
   const main: Item[] = [
@@ -31,6 +31,7 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
         { href: "/attention?queue=blocked", label: "Blocked", count: c.blocked },
       ],
     },
+    { href: "/tasks", label: "Tasks", icon: ListChecks, count: c.tasks },
     { href: "/pull-requests", label: "Pull requests", icon: GitPullRequest },
     { href: "/issues", label: "Issues", icon: CircleDot },
     {

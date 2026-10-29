@@ -43,6 +43,10 @@ Demo mode keeps its own database under `~/.mergeport/demo/`. Everything in it is
 
 Create, invite and join are in the app (**Team**). Creating a team shows the exact repository name, owner, visibility and permissions first and does nothing until you confirm. See `docs/architecture.md`.
 
+### Tasks
+
+**Tasks** is a GitLab-style work list on top of the planning cards: create a task, give it to someone by GitHub username, set status, priority, due date and labels, and discuss it in a comment thread with a history of who changed what. Filters: assigned to me, assigned by me, unassigned, all. Tasks assigned to you also show in **My attention**. In a team, tasks and comments sync like the rest of the shared data, so a task you assign appears on your teammate's computer.
+
 ### Joining an existing team
 
 1. Accept the GitHub invitation (Team page, or from GitHub).

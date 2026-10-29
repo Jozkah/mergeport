@@ -168,7 +168,7 @@ const card: EntityDef = {
         projectId: c.projectId, columnKey: c.column.key, position: c.position, title: c.title, description: c.description,
         workRepoGithubId: c.workItem ? c.workItem.repository.githubId.toString() : (c.workRepoGithubId?.toString() ?? null),
         workNumber: c.workItem ? c.workItem.number : c.workNumber,
-        assigneeLogin: c.assigneeLogin, priority: c.priority, due: day(c.dueDate), milestoneId: c.milestoneId,
+        assigneeLogin: c.assigneeLogin, assignedByLogin: c.assignedByLogin, authorLogin: c.authorLogin, labels: c.labels, priority: c.priority, due: day(c.dueDate), milestoneId: c.milestoneId,
         blockedBy: c.blockedBy.map((l) => l.fromId).sort(),
       },
     }));
@@ -187,7 +187,8 @@ const card: EntityDef = {
     const f = {
       projectId, columnId: col.id, position: Number(data.position), title: String(data.title), description: (data.description as string | null) ?? null,
       workItemId: wi?.id ?? null, workRepoGithubId: bigOrNull(data.workRepoGithubId), workNumber: data.workNumber === null || data.workNumber === undefined ? null : Number(data.workNumber),
-      assigneeLogin: (data.assigneeLogin as string | null) ?? null, priority: Number(data.priority ?? 0), dueDate: toDate(data.due), milestoneId: ms ? ms.id : null, version,
+      assigneeLogin: (data.assigneeLogin as string | null) ?? null, assignedByLogin: (data.assignedByLogin as string | null) ?? null, authorLogin: (data.authorLogin as string | null) ?? null,
+      labels: (data.labels ?? []) as Prisma.InputJsonValue, priority: Number(data.priority ?? 0), dueDate: toDate(data.due), milestoneId: ms ? ms.id : null, version,
     };
     await db.planningItem.upsert({ where: { id }, create: { id, createdById: ctx.localMemberId, ...f }, update: f });
   },
@@ -199,6 +200,27 @@ const card: EntityDef = {
       await db.planningLink.deleteMany({ where: { toId: a.id, fromId: { notIn: ok } } });
       for (const fromId of ok) await db.planningLink.upsert({ where: { fromId_toId: { fromId, toId: a.id } }, create: { fromId, toId: a.id }, update: {} });
     }
+  },
+};
+
+// ---------- task comments (one file per comment, so two people never edit the same file) ----------
+
+const taskcomment: EntityDef = {
+  type: "taskcomment",
+  order: 5,
+  async list(db) {
+    const rows = await db.taskComment.findMany({ where: { item: { project: { spaceId: { not: null } } } }, include: { item: { include: { project: true } } } });
+    return rows.map((c) => ({ id: c.id, spaceId: c.item.project.spaceId, data: { itemId: c.itemId, authorLogin: c.authorLogin, kind: c.kind, body: c.body, createdAt: iso(c.createdAt), editedAt: iso(c.editedAt) } }));
+  },
+  async apply(db, _ctx, id, data) {
+    if (!data) {
+      await db.taskComment.deleteMany({ where: { id } });
+      return;
+    }
+    const item = await db.planningItem.findUnique({ where: { id: String(data.itemId) }, select: { id: true } });
+    if (!item) return false; // the card has not been applied yet; the next pull retries
+    const f = { itemId: item.id, authorLogin: String(data.authorLogin), kind: String(data.kind ?? "COMMENT"), body: String(data.body), createdAt: toDate(data.createdAt) ?? new Date(), editedAt: toDate(data.editedAt) };
+    await db.taskComment.upsert({ where: { id }, create: { id, ...f }, update: f });
   },
 };
 
@@ -336,7 +358,7 @@ const waiting: EntityDef = {
   },
 };
 
-export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, card, rule, waitrule, forkmap, triage, waiting];
+export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, card, taskcomment, rule, waitrule, forkmap, triage, waiting];
 export const entityDef = (type: string) => ENTITY_TYPES.find((t) => t.type === type);
 export const entityPath = (type: string, id: string) => `entities/${type}/${id}.json`;
 export const parseEntityPath = (path: string): { type: string; id: string } | null => {
