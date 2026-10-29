@@ -37,7 +37,7 @@ export class Supervisor {
   private stopping = new AbortController();
   private listeners: Array<(code: number | null) => void> = [];
 
-  constructor(private deps: SupervisorDeps, private opts: { port: number; demo: boolean }) {}
+  constructor(private deps: SupervisorDeps, private opts: { port: number; demo: boolean; /** Pause between answering a switch request and killing the old child, so its response reaches the browser. Default 400. */ killDelayMs?: number }) {}
 
   /** Only event: "child-exit", for a child that died outside a switch. The supervisor does not respawn it. */
   on(event: "child-exit", cb: (code: number | null) => void) {
@@ -59,7 +59,10 @@ export class Supervisor {
       }
       const previous = this.current?.spec ?? null;
       const next: ChildSpec = { dbFile: target.dbFile, backend: req.backend, token: this.deps.newToken(), port: this.opts.port, demo: this.opts.demo };
-      announce?.({ launchUrl: launchUrl(next), previousBootId: this.current?.bootId ?? null });
+      if (announce) {
+        announce({ launchUrl: launchUrl(next), previousBootId: this.current?.bootId ?? null });
+        await new Promise((r) => setTimeout(r, this.opts.killDelayMs ?? 400));
+      }
       await this.killCurrent();
       try {
         const started = await this.boot(next, true);

@@ -52,7 +52,7 @@ function makeDeps(opts: { failReadyFor?: (spec: ChildSpec) => boolean; resolve?:
 
 const sups: Supervisor[] = [];
 function sup(deps: SupervisorDeps) {
-  const s = new Supervisor(deps, { port: 4100, demo: false });
+  const s = new Supervisor(deps, { port: 4100, demo: false, killDelayMs: 0 });
   sups.push(s);
   return s;
 }
@@ -277,5 +277,27 @@ describe("onSwitched", () => {
     expect(seen).toEqual([HUB]);
     await expect(s.switchTo({ backend: bad })).rejects.toThrow();
     expect(seen).toEqual([HUB]);
+  });
+});
+
+describe("killDelayMs", () => {
+  it("kills the old child no earlier than killDelayMs after the 202 is sent", async () => {
+    const f = makeDeps();
+    const killedAt: number[] = [];
+    const spawn = f.deps.spawnChild;
+    f.deps.spawnChild = (spec) => {
+      const h = spawn(spec);
+      return { ...h, kill: async () => { killedAt.push(Date.now()); await h.kill(); } };
+    };
+    const s = new Supervisor(f.deps, { port: 4100, demo: false, killDelayMs: 200 });
+    sups.push(s);
+    await s.start({ dbFile: "/db/a" });
+    const { url, secret } = await s.listenControl();
+    const res = await fetch(`${url}/switch`, { method: "POST", headers: { "content-type": "application/json", "x-mergeport-control": secret }, body: JSON.stringify({ backend: HUB }) });
+    const got = Date.now();
+    expect(res.status).toBe(202);
+    expect(killedAt).toHaveLength(0);
+    await vi.waitFor(() => expect(killedAt).toHaveLength(1));
+    expect(killedAt[0] - got).toBeGreaterThanOrEqual(150); // 200 ms minus timer slack between send and receive
   });
 });
