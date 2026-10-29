@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { HubDb } from "./db";
 import { HttpError } from "./http";
+import type { Limiter } from "./ratelimit";
 
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -100,7 +101,13 @@ export function bootstrapOrAdmit(db: HubDb, user: GithubIdentity, now: number): 
   })();
 }
 
-export type AuthContext = { db: HubDb; now: () => number };
+export type AuthContext = { db: HubDb; now: () => number; limiter?: Limiter };
+
+/** Member id of the authenticated request, read by the request log. */
+export const requestMembers = new WeakMap<IncomingMessage, bigint>();
+
+export const SESSION_LIMIT = 60;
+export const SESSION_WINDOW_MS = 10_000;
 
 /** 401 for a missing, malformed, unknown or expired credential; 403 "removed" for removed members. */
 export function requireSession(ctx: AuthContext, req: IncomingMessage): Session & { member: Member } {
@@ -112,5 +119,8 @@ export function requireSession(ctx: AuthContext, req: IncomingMessage): Session 
   const member = getMember(ctx.db, session.githubId);
   if (!member) throw new HttpError(401, "unauthorized");
   if (member.status === "REMOVED") throw new HttpError(403, "removed");
+  requestMembers.set(req, member.githubId);
+  const taken = ctx.limiter?.take(`session:${session.idHash}`, SESSION_LIMIT, SESSION_WINDOW_MS);
+  if (taken && !taken.ok) throw new HttpError(429, "rate limited", { "retry-after": String(taken.retryAfterSec) });
   return { ...session, member };
 }

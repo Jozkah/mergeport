@@ -1,3 +1,4 @@
+import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import { bootstrapOrAdmit, createSession, getMember, requireSession, revokeSession, toMember, type Member } from "./auth";
 import { listSpacesFor } from "./authz";
@@ -13,9 +14,21 @@ function teamJson(ctx: HubContext): { id: string; name: string } {
   return t;
 }
 
+/** First X-Forwarded-For entry when behind a trusted proxy, else the socket address. */
+export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
+  if (trustProxy) {
+    const xff = req.headers["x-forwarded-for"];
+    const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return req.socket.remoteAddress ?? "unknown";
+}
+
 export function authRoutes(): Route<HubContext>[] {
   return [
-    route<HubContext>("POST", "/auth/device/start", async (ctx, _req, res) => {
+    route<HubContext>("POST", "/auth/device/start", async (ctx, req, res) => {
+      const taken = ctx.limiter.take(`device:${clientIp(req, ctx.config.trustProxy)}`, 10, 60_000);
+      if (!taken.ok) throw new HttpError(429, "rate limited", { "retry-after": String(taken.retryAfterSec) });
       json(res, 200, await startDeviceFlow(ctx.config));
     }),
     route<HubContext>("POST", "/auth/device/poll", async (ctx, req, res) => {

@@ -5,7 +5,8 @@ import type { HubDb } from "./db";
 import { adminRoutes } from "./admin-routes";
 import { authRoutes } from "./auth-routes";
 import { createNotifier, type Notifier } from "./notify";
-import { findSession } from "./auth";
+import { findSession, requestMembers } from "./auth";
+import { createLimiter, type Limiter } from "./ratelimit";
 import { entityRoutes, startPruneTimer } from "./entities";
 import { HttpError, json, matchRoute, route, type Route } from "./http";
 import { createLogger, type Logger } from "./log";
@@ -20,6 +21,7 @@ export type HubContext = {
   /** Public base URL: config value, or the listened URL when config leaves it empty. */
   publicUrl: () => string;
   notify: Notifier;
+  limiter: Limiter;
 };
 
 export type Hub = { listen(port?: number): Promise<{ port: number; url: string }>; close(): Promise<void> };
@@ -46,11 +48,18 @@ export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => numb
     now,
     log: opts.log ?? createLogger(),
     publicUrl: () => opts.config.publicUrl || listened,
+    limiter: createLimiter(now),
     notify: createNotifier({ db: opts.db, now, findSession, ...opts.ws }),
   };
   const routes = [...coreRoutes(), ...(opts.routes ?? [])];
 
   const server = http.createServer((req, res) => {
+    const started = performance.now();
+    res.on("finish", () => {
+      const member = requestMembers.get(req);
+      // Method, path (no query), status, duration, member id. Never headers, body or query.
+      ctx.log.info("request", { method: req.method, path: (req.url ?? "/").split("?")[0], status: res.statusCode, ms: Math.round(performance.now() - started), ...(member === undefined ? {} : { member }) });
+    });
     void (async () => {
       try {
         const url = new URL(req.url ?? "/", "http://hub.local");

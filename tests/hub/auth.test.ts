@@ -220,3 +220,24 @@ describe("GitHub token hygiene", () => {
     for (const line of hub.logs) for (const tok of tokens) expect(line).not.toContain(tok);
   });
 });
+
+describe("request log", () => {
+  it("has method path status ms and member, never token, query or user code", async () => {
+    hub.github.addUser({ id: 7n, login: "olive" });
+    const s = await start();
+    hub.github.authorize(s.userCode, 7n);
+    const r = await hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode });
+    const token = r.body.session as string;
+    await hub.api(token)("GET", "/me?secretq=sneaky");
+    const ghToken = [...hub.github.tokens.keys()][0];
+    const all = hub.logs.join("\n");
+    expect(all).not.toContain(token);
+    expect(all).not.toContain(ghToken);
+    expect(all).not.toContain(s.userCode);
+    expect(all).not.toContain(s.deviceCode);
+    expect(all).not.toContain("sneaky");
+    const line = hub.logs.map((l) => JSON.parse(l)).find((l) => l.msg === "request" && l.path === "/me");
+    expect(line).toMatchObject({ method: "GET", path: "/me", status: 200, member: "7" });
+    expect(typeof line.ms).toBe("number");
+  });
+});
