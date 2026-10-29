@@ -52,7 +52,7 @@ class NodeSocket implements SocketLike {
 let hub: TestHub;
 let counter = 0;
 type Client = Awaited<ReturnType<typeof makeClient>>;
-const open: Client[] = [];
+const open: { close(): Promise<void> }[] = [];
 
 async function makeClient(githubId: bigint, login: string, token: string) {
   const file = path.resolve(".data", `client-e2e-${login}-${process.pid}-${counter++}.db`);
