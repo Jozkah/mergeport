@@ -675,11 +675,14 @@ select.select optgroup {
   border-right: 1px solid var(--color-line);
   min-width: 0;
 }
+/* Panels of different heights flow down balanced columns, so a short panel never leaves a tall empty gap beside a long one. */
 .fit-grid {
-  display: grid;
-  gap: 1.25rem;
-  align-items: start;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--fit-min, 560px)), 1fr));
+  column-width: var(--fit-min, 560px);
+  column-gap: 1.25rem;
+}
+.fit-grid > * {
+  break-inside: avoid;
+  margin-bottom: 1.25rem;
 }
 
 /* Narrow screens: nothing may force the page wider than the screen. */

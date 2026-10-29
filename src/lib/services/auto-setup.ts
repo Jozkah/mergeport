@@ -175,7 +175,7 @@ async function build(db: Db, v: Viewer, opts: SetupOptions): Promise<{ plan: Set
       steps,
       skipped,
       nothingToConfigure: [
-        "Notifications: the only kind that exists is “review requested” (for open pull requests), and it is always on; there is no per-kind setting to change.",
+        "Notifications: choose which events notify you, and whether they also pop up on the desktop, in the Notifications panel on this page.",
         "Automations: refresh runs in the background on its own schedule; the polling interval for shared team data is on the Sync page.",
         "Review rules are only proposed where GitHub's own review requests show a steady pattern; anything else needs your decision under Review routing or on a project.",
       ],
