@@ -1,4 +1,5 @@
 import { SectionTile } from "@/components/ui/SectionTile";
+import { TiltTile } from "@/components/ui/TiltTile";
 import type { ComponentType, CSSProperties, ReactNode, SVGProps } from "react";
 import { cn } from "@/lib/util";
 import { Ban, Check, CircleAlert, CircleHelp, Eye, Hourglass, Info, Users } from "./icons";
@@ -87,9 +88,9 @@ export function EmptyState({ icon: I, title, children, action }: { icon?: Icon; 
   return (
     <div className="empty-in flex flex-col items-center px-6 py-8 text-center">
       {I && (
-        <span className="mb-3 inline-flex size-10 items-center justify-center rounded-full border border-line bg-canvas text-ink-3">
+        <TiltTile>
           <I size={18} aria-hidden />
-        </span>
+        </TiltTile>
       )}
       <p className="text-[14px] font-medium text-ink">{title}</p>
       {children && <p className="mt-1 max-w-[52ch] text-[13px] text-ink-3">{children}</p>}

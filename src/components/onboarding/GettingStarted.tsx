@@ -56,7 +56,7 @@ export function GettingStarted({ steps }: { steps: Step[] }) {
       </div>
       <ol className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         {steps.map((s, i) => (
-          <li key={s.key} className={`flex flex-col gap-2 rounded-[10px] border p-3 ${s.done ? "border-ok-line bg-ok-bg" : s === next ? "border-line-strong bg-canvas" : "border-line bg-canvas"}`}>
+          <li key={s.key} className={`spot-card flex flex-col gap-2 rounded-[10px] border p-3 ${s.done ? "border-ok-line bg-ok-bg" : s === next ? "border-line-strong bg-canvas" : "border-line bg-canvas"}`}>
             <div className="flex items-center gap-2 text-[13.5px] font-medium">
               <span aria-hidden className={`inline-flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] ${s.done ? "bg-ok text-ink-invert" : "border border-line-strong text-ink-3"}`}>{s.done ? <Check size={12} /> : i + 1}</span>
               <span className={s.done ? "text-ink-2" : ""}>{s.title}{s.optional && <span className="ml-1.5 text-[11.5px] font-normal text-ink-3">optional</span>}</span>

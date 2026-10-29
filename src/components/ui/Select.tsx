@@ -1,8 +1,9 @@
 "use client";
 
 import * as S from "@radix-ui/react-select";
-import { Children, isValidElement, useState, type ChangeEvent, type ReactElement, type ReactNode } from "react";
+import { Children, isValidElement, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode } from "react";
 import { Check, ChevronDown } from "@/components/ui/icons";
+import { Glide } from "@/components/ui/Glide";
 
 /**
  * Themed dropdown with the markup of a native a native select (<option>, <optgroup>, name, id, defaultValue/value, onChange), so every
@@ -51,6 +52,7 @@ export function Select({ children, className, id, name, defaultValue, value, onC
   "aria-label"?: string;
   "aria-busy"?: boolean;
 }) {
+  const view = useRef<HTMLDivElement>(null);
   const groups = collect(children);
   const all = groups.flatMap((g) => g.options);
   const [inner, setInner] = useState(defaultValue !== undefined ? String(defaultValue) : (all[0]?.value ?? ""));
@@ -73,12 +75,13 @@ export function Select({ children, className, id, name, defaultValue, value, onC
       </S.Trigger>
       <S.Portal>
         <S.Content position="popper" sideOffset={4} collisionPadding={8} className="select-pop z-[70] max-h-[min(var(--radix-select-content-available-height),22rem)] min-w-[var(--radix-select-trigger-width)] max-w-[min(32rem,calc(100vw-16px))] overflow-hidden rounded-[10px] border border-line bg-surface text-[13px] text-ink shadow-pop">
-          <S.Viewport className="max-h-[inherit] overflow-y-auto p-1">
+          <S.Viewport ref={view} className="relative max-h-[inherit] overflow-y-auto p-1">
+            <Glide for={view} />
             {groups.map((g, gi) => (
               <S.Group key={gi}>
                 {g.label && <S.Label className="px-2 pb-1 pt-1.5 text-[11.5px] font-medium text-ink-3">{g.label}</S.Label>}
                 {g.options.map((o) => (
-                  <S.Item key={o.value} value={enc(o.value)} disabled={o.disabled} className="relative flex min-h-8 cursor-pointer select-none items-center gap-2 rounded-[6px] py-1.5 pl-2 pr-7 outline-none data-[disabled]:opacity-50 data-[highlighted]:bg-hover data-[state=checked]:font-medium">
+                  <S.Item key={o.value} value={enc(o.value)} disabled={o.disabled} className="relative z-[1] flex min-h-8 cursor-pointer select-none items-center gap-2 rounded-[6px] py-1.5 pl-2 pr-7 outline-none data-[disabled]:opacity-50 data-[state=checked]:font-medium">
                     <S.ItemText>{o.label}</S.ItemText>
                     <S.ItemIndicator className="absolute right-2 inline-flex"><Check size={14} aria-hidden /></S.ItemIndicator>
                   </S.Item>

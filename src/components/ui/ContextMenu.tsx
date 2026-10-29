@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { createPortal } from "react-dom";
 import type { CtxItem } from "@/lib/ctx";
 import { applyTheme, readTheme } from "@/components/shell/ThemeControls";
+import { Glide } from "@/components/ui/Glide";
 
 /**
  * The app's own right-click menu, in place of the browser's. It offers what the thing under the pointer can do: the entries an
@@ -191,6 +192,7 @@ export function ContextMenuProvider() {
       className="select-pop fixed z-[90] min-w-[220px] max-w-[320px] overflow-hidden rounded-[10px] border border-line bg-surface p-1 text-[13px] text-ink shadow-pop"
       style={{ left: at?.x ?? open.x, top: at?.y ?? open.y, visibility: at ? "visible" : "hidden" }}
     >
+      <Glide for={menu} />
       {open.entries.map((e, i) =>
         e === "sep" ? (
           <div key={i} role="separator" className="my-1 h-px bg-line" />
@@ -204,7 +206,7 @@ export function ContextMenuProvider() {
               close();
               e.run?.();
             }}
-            className="flex min-h-8 w-full items-center justify-between gap-6 rounded-[6px] px-2 py-1.5 text-left outline-none enabled:hover:bg-hover enabled:focus-visible:bg-hover disabled:opacity-40"
+            className="relative z-[1] flex min-h-8 w-full items-center justify-between gap-6 rounded-[6px] px-2 py-1.5 text-left outline-none disabled:opacity-40"
           >
             <span className="truncate">{e.label}</span>
             {e.hint && <span className="text-[11.5px] text-ink-3">{e.hint}</span>}

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ctx } from "@/lib/ctx";
+import { StatusMark } from "@/components/ui/StatusMark";
 import type { ReactNode } from "react";
-import { Ban, Check, CircleHelp, Clock, GitPullRequest, CircleDot, GitMerge } from "@/components/ui/icons";
+import { GitPullRequest, CircleDot, GitMerge } from "@/components/ui/icons";
 import { Avatar, LabelChip, Mono, StatusPill, Time, DemoBadge } from "@/components/ui/primitives";
 import { formatDuration, formatInstant } from "@/lib/format";
 import type { ReviewDerivation } from "@/lib/domain/review";
@@ -34,10 +35,10 @@ function StateIcon({ r }: { r: WorkRow }) {
 
 export function ChecksCell({ s }: { s: WorkRow["checksState"] }) {
   const m = {
-    SUCCESS: { i: <Check size={14} aria-hidden />, t: "Passing", c: "text-ok" },
-    FAILURE: { i: <Ban size={14} aria-hidden />, t: "Failing", c: "text-blocked" },
-    PENDING: { i: <Clock size={14} aria-hidden />, t: "Running", c: "text-waiting" },
-    UNKNOWN: { i: <CircleHelp size={14} aria-hidden />, t: "Unknown", c: "text-ink-3" },
+    SUCCESS: { i: <StatusMark status="done" size={14} />, t: "Passing", c: "text-ok" },
+    FAILURE: { i: <StatusMark status="failed" size={14} />, t: "Failing", c: "text-blocked" },
+    PENDING: { i: <StatusMark status="running" size={14} />, t: "Running", c: "text-waiting" },
+    UNKNOWN: { i: <StatusMark status="pending" size={14} />, t: "Unknown", c: "text-ink-3" },
     NONE: { i: null, t: "No checks", c: "text-ink-3" },
   }[s];
   return <span className={`inline-flex items-center gap-1 text-[12.5px] ${m.c}`}>{m.i}{m.t}</span>;

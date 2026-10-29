@@ -11,6 +11,7 @@ import { Topbar } from "@/components/shell/Topbar";
 import { LiveRefresh } from "@/components/sync/LiveRefresh";
 import { SectionMain } from "@/components/shell/SectionMain";
 import { ContextMenuProvider } from "@/components/ui/ContextMenu";
+import { SpotlightProvider } from "@/components/ui/SpotlightProvider";
 import { SyncAnnouncer } from "@/components/sync/SyncAnnouncer";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { TooltipProvider } from "@/components/ui/Tooltip";
@@ -84,6 +85,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="mx-auto flex min-h-dvh max-w-[3200px]">
       <LiveRefresh />
       <ContextMenuProvider />
+      <SpotlightProvider />
       <SyncAnnouncer state={sync?.state ?? null} />
       <Suspense fallback={<aside className="hidden w-[250px] shrink-0 lg:block" />}>
         <Sidebar {...navProps} />

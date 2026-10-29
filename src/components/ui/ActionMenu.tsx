@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Ellipsis } from "@/components/ui/icons";
+import { Glide } from "@/components/ui/Glide";
 
 export type MenuItem = { label: string; onSelect?: () => void; href?: string; external?: boolean; danger?: boolean; disabled?: boolean } | "sep";
 
@@ -62,7 +63,7 @@ export function ActionMenu({ label, items }: { label: string; items: MenuItem[] 
     e.preventDefault();
   };
 
-  const cls = (danger?: boolean) => `flex min-h-8 w-full items-center rounded-[6px] px-2 py-1.5 text-left text-[13px] outline-none enabled:hover:bg-hover enabled:focus-visible:bg-hover aria-disabled:opacity-40 ${danger ? "text-blocked" : "text-ink"}`;
+  const cls = (danger?: boolean) => `relative z-[1] flex min-h-8 w-full items-center rounded-[6px] px-2 py-1.5 text-left text-[13px] outline-none aria-disabled:opacity-40 disabled:opacity-40 ${danger ? "text-blocked" : "text-ink"}`;
 
   return (
     <>
@@ -72,6 +73,7 @@ export function ActionMenu({ label, items }: { label: string; items: MenuItem[] 
       {at &&
         createPortal(
           <div ref={pop} role="menu" aria-label={label} onKeyDown={onKey} className="select-pop fixed z-[80] min-w-[200px] overflow-hidden rounded-[10px] border border-line bg-surface p-1 shadow-pop" style={{ left: at.x, top: at.y, visibility: at.ready ? "visible" : "hidden" }}>
+            <Glide for={pop} />
             {items.map((it, i) =>
               it === "sep" ? (
                 <div key={i} role="separator" className="my-1 h-px bg-line" />

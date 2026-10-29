@@ -19,7 +19,7 @@ export const metadata = { title: "Overview" };
 
 function Metric({ href, title, icon: I, value, note, tone }: { href: string; title: string; icon: typeof BellRing; value: number; note: string; tone: "needs" | "waiting" | "blocked" }) {
   return (
-    <Link href={href} className="panel block transition-shadow duration-[var(--duration-feedback)] hover:shadow-hair focus-visible:shadow-hair">
+    <Link href={href} className="panel spot-card block transition-shadow duration-[var(--duration-feedback)] hover:shadow-hair focus-visible:shadow-hair">
       <div className="panel-head !min-h-9"><span className="flex items-center gap-2 text-[14px] font-medium text-ink-2"><I size={16} aria-hidden className="text-ink-3" />{title}</span><ArrowRight size={14} aria-hidden className="text-ink-3" /></div>
       <div className="panel-body px-4 py-4"><p className={`text-[32px] font-medium leading-9 ${value > 0 ? (tone === "needs" ? "text-needs" : tone === "waiting" ? "text-waiting" : "text-blocked") : "text-ink-3"}`}><AnimatedNumber value={value} /></p><p className="mt-1 text-[12.5px] text-ink-3">{note}</p></div>
     </Link>
