@@ -85,3 +85,6 @@ Phase 2 complete (ideas 1-8). Phase 3 complete (ideas 9-18). Phase 4 complete (i
 3. A real two-account acceptance test of sync, switching contexts and conflict recovery.
 4. Accessibility and performance audits, a mobile-width pass, and wider use of the repository chips.
 
+## Real-GitHub read-only check (2026-10-29)
+
+Read-only calls only, as the signed-in account, against public repositories and the account's own: confirmed the thread id mapping (GraphQL first-comment databaseId equals the REST root comment id, so `threadKey` matches), CODEOWNERS found at `.github/CODEOWNERS` with 404 for the other paths, `/rate_limit`, collaborator permission (admin on an own repo, 403 "Must have push access" elsewhere, which we report as unknown), combined status (`pending` with `total_count` 0 on a commit with no statuses, which we read as none), check-runs, compare and the single-issue endpoint. Not checked because they write or need a disposable target: the batched review POST, invitations, release links, and the 304 behaviour of coordination polling.
