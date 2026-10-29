@@ -38,7 +38,7 @@ export function WatchlistForm() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           spellCheck={false}
-          placeholder={"https://github.com/janhq/jan\nhttps://github.com/Jozkah/flint\nhttps://github.com/AI-Cluster-Kewaii/1cat-vllm-pxa  https://github.com/1CatAI/1Cat-vLLM"}
+          placeholder="owner/repository, or paste a GitHub address"
         />
         <p className="mt-1 text-[12px] text-ink-3">One address per line. A fork on GitHub is compared with its parent. To compare any two repositories, put the fork first and its upstream second on the same line. Private repositories need your GitHub sign-in to be able to read them. Nothing is shared with teammates.</p>
       </div>
