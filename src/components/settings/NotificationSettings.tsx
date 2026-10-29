@@ -46,8 +46,8 @@ export function NotificationSettings({ initial }: { initial: Prefs }) {
       <fieldset className="flex flex-wrap items-center gap-3">
         <legend className="label">Quiet hours</legend>
         <label className="flex items-center gap-2"><input type="checkbox" checked={prefs.quiet.enabled} onChange={(e) => setPrefs({ ...prefs, quiet: { ...prefs.quiet, enabled: e.target.checked } })} /> Hold desktop pop-ups</label>
-        <label className="flex items-center gap-1.5">from <input type="time" className="input !h-8 w-28" value={prefs.quiet.start} onChange={(e) => e.target.value && setPrefs({ ...prefs, quiet: { ...prefs.quiet, start: e.target.value } })} /></label>
-        <label className="flex items-center gap-1.5">until <input type="time" className="input !h-8 w-28" value={prefs.quiet.end} onChange={(e) => e.target.value && setPrefs({ ...prefs, quiet: { ...prefs.quiet, end: e.target.value } })} /></label>
+        <label className="flex items-center gap-1.5">from <input type="time" className="input !h-8 w-36" value={prefs.quiet.start} onChange={(e) => e.target.value && setPrefs({ ...prefs, quiet: { ...prefs.quiet, start: e.target.value } })} /></label>
+        <label className="flex items-center gap-1.5">until <input type="time" className="input !h-8 w-36" value={prefs.quiet.end} onChange={(e) => e.target.value && setPrefs({ ...prefs, quiet: { ...prefs.quiet, end: e.target.value } })} /></label>
         <p className="w-full text-[12px] text-ink-3">Quiet hours follow your time zone and only hold desktop pop-ups. Everything still appears in the app.</p>
       </fieldset>
 
