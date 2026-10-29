@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { createPrisma } from "@/lib/db";
 import { clearHubSession, loadHubSession, openVault, saveHubSession } from "@/lib/hub/session-vault";
@@ -69,7 +71,44 @@ describe("session vault", () => {
     await clearHubSession(db);
   });
 
+  it("throws on a wrong-length key file and leaves it untouched", () => {
+    const keyFile = path.join(dir, "key-bad");
+    fs.writeFileSync(keyFile, "short");
+    expect(() => openVault(keyFile)).toThrow(/corrupt/);
+    expect(fs.readFileSync(keyFile, "utf8")).toBe("short");
+  });
+
+  it("returns null when the auth tag segment is tampered", async () => {
+    const vault = openVault(path.join(dir, "key2"));
+    await saveHubSession(db, vault, sess);
+    const row = await db.hubSession.findUniqueOrThrow({ where: { id: "session" } });
+    const parts = row.cipher.split(".");
+    parts[2] = Buffer.alloc(16, 1).toString("base64");
+    await db.hubSession.update({ where: { id: "session" }, data: { cipher: parts.join(".") } });
+    expect(await loadHubSession(db, vault)).toBeNull();
+    parts[2] = Buffer.alloc(4, 1).toString("base64");
+    await db.hubSession.update({ where: { id: "session" }, data: { cipher: parts.join(".") } });
+    expect(await loadHubSession(db, vault)).toBeNull();
+  });
+
+  it("concurrent first opens from separate processes converge on one key", async () => {
+    const keyFile = path.join(dir, "key-race");
+    const script = pathToFileURL(path.resolve("src/lib/hub/session-vault.ts")).href;
+    const code = `import { openVault } from ${JSON.stringify(script)}; process.stdout.write(openVault(${JSON.stringify(keyFile)}).encrypt("x"));`;
+    const tsx = path.resolve("node_modules/tsx/dist/cli.mjs");
+    const run = () =>
+      new Promise<string>((resolve, reject) =>
+        execFile(process.execPath, [tsx, "--input-type=module", "-e", code], (err, out) => (err ? reject(err) : resolve(out))),
+      );
+    const ciphers = await Promise.all(Array.from({ length: 6 }, run));
+    const vault = openVault(keyFile);
+    for (const c of ciphers) expect(vault.decrypt(c)).toBe("x");
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  }, 60000);
+
   it.skipIf(process.platform === "win32")("key file mode is 0600", () => {
-    expect(fs.statSync(path.join(dir, "key1")).mode & 0o777).toBe(0o600);
+    const keyFile = path.join(dir, "key-mode");
+    openVault(keyFile);
+    expect(fs.statSync(keyFile).mode & 0o777).toBe(0o600);
   });
 });

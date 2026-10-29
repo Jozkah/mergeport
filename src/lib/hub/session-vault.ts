@@ -24,18 +24,39 @@ function restrictToCurrentUser(file: string): void {
   }
 }
 
-function loadOrCreateKey(keyFile: string): Buffer {
+function readKey(keyFile: string): Buffer | null {
   try {
-    const existing = fs.readFileSync(keyFile);
-    if (existing.length === 32) return existing;
-  } catch {
-    // fall through to create
+    const key = fs.readFileSync(keyFile);
+    if (key.length !== 32) throw new Error(`Hub key file ${keyFile} is corrupt (expected 32 bytes, got ${key.length}); remove it to start over`);
+    return key;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
   }
+}
+
+function loadOrCreateKey(keyFile: string): Buffer {
+  const existing = readKey(keyFile);
+  if (existing) return existing;
   fs.mkdirSync(path.dirname(keyFile), { recursive: true });
+  // Write a private temp file, then hard-link it into place: readers never see a partial key and a racing creator loses with EEXIST.
+  const tmp = `${keyFile}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   const key = randomBytes(32);
-  fs.writeFileSync(keyFile, key, { mode: 0o600 });
-  restrictToCurrentUser(keyFile);
-  return key;
+  try {
+    fs.writeFileSync(tmp, key, { mode: 0o600, flag: "wx" });
+    restrictToCurrentUser(tmp);
+    try {
+      fs.linkSync(tmp, keyFile);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      const winner = readKey(keyFile);
+      if (!winner) throw e;
+      return winner;
+    }
+    return key;
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
 }
 
 export function openVault(keyFile: string): Vault {
@@ -43,15 +64,18 @@ export function openVault(keyFile: string): Vault {
   return {
     encrypt(plain) {
       const iv = randomBytes(12);
-      const c = createCipheriv("aes-256-gcm", key, iv);
+      const c = createCipheriv("aes-256-gcm", key, iv, { authTagLength: 16 });
       const data = Buffer.concat([c.update(plain, "utf8"), c.final()]);
       return ["v1", iv.toString("base64"), c.getAuthTag().toString("base64"), data.toString("base64")].join(".");
     },
     decrypt(cipher) {
-      const [v, iv, tag, data] = cipher.split(".");
-      if (v !== "v1" || !iv || !tag || data === undefined) throw new Error("bad cipher");
-      const d = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64"));
-      d.setAuthTag(Buffer.from(tag, "base64"));
+      const [v, ivB64, tagB64, data] = cipher.split(".");
+      if (v !== "v1" || !ivB64 || !tagB64 || data === undefined) throw new Error("bad cipher");
+      const iv = Buffer.from(ivB64, "base64");
+      const tag = Buffer.from(tagB64, "base64");
+      if (iv.length !== 12 || tag.length !== 16) throw new Error("bad cipher");
+      const d = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: 16 });
+      d.setAuthTag(tag);
       return Buffer.concat([d.update(Buffer.from(data, "base64")), d.final()]).toString("utf8");
     },
   };
