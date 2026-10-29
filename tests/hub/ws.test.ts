@@ -170,6 +170,21 @@ describe("GET /ws", () => {
     expect(hub.db.prepare("SELECT COUNT(*) AS n FROM entity_event").get()).toEqual({ n: 0 });
   });
 
+  it("a removed member whose session survived is told bye removed and closed 4403, not refused with HTTP 403", async () => {
+    await start();
+    const alice = await addMember(2n, "alice");
+    hub.db.prepare("UPDATE member SET status = 'REMOVED' WHERE github_id = 2").run();
+    const c = new Client(hub.url, ["mergeport.v1", "bearer." + alice]);
+    clients.push(c);
+    expect(await c.opened).toBe(true);
+    expect(await withTimeout(c.closed)).toBe(4403);
+    expect(c.msgs).toEqual([{ t: "bye", reason: "removed" }]); // no hello, no spaces
+    // The hub keeps nothing for it: a change fans out to nobody.
+    expect((await api("POST", "/spaces/common/ops", { ops: [up("o1", "t1")] })).status).toBe(200);
+    await sleep(150);
+    expect(c.msgs).toHaveLength(1);
+  });
+
   it("invalid token is refused before upgrade", async () => {
     await start();
     const attempt = (protocols?: string) =>

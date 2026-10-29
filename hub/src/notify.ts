@@ -120,7 +120,14 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     if (!token || !session) return reject(socket, 401, "Unauthorized");
     const member = getMember(deps.db, session.githubId);
     if (!member) return reject(socket, 401, "Unauthorized");
-    if (member.status !== "ACTIVE") return reject(socket, 403, "Forbidden");
+    if (member.status !== "ACTIVE") {
+      // A refused upgrade (HTTP 403) reaches the browser as a bare 1006, which looks like any network failure. Accept, say
+      // why, and close as kick() does, so the client learns it was removed instead of reconnecting forever.
+      return wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.on("error", () => ws.terminate());
+        closeConn({ ws, token, idHash: session.idHash, githubId: member.githubId, silence: null, grace: null }, CLOSE_REMOVED, "removed");
+      });
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       const c: Conn = { ws, token, idHash: session.idHash, githubId: member.githubId, silence: null, grace: null };
       conns.add(c);
