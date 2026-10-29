@@ -622,6 +622,38 @@ describe("hub live", () => {
     expect(max).toBe(1);
   });
 
+  it("changed during an engine cycle already running is not lost: retried until the cursor reaches the notified seq, no polling", async () => {
+    await prepare(olive, alice);
+    const mt = new ManualTimers();
+    await live(alice, { timers: mt });
+    const real = alice.client.pull.bind(alice.client);
+    let reached!: () => void;
+    const gotStale = new Promise<void>((r) => (reached = r));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.spyOn(alice.client, "pull").mockImplementationOnce(async (s, since) => {
+      const r = await real(s, since); // the answer is computed before the edit exists
+      reached();
+      await gate;
+      return r;
+    });
+    const inFlight = alice.engine.syncSpace(await alice.space("common"));
+    await gotStale;
+    hub.inject("common", { type: "card", id: "c1", data: cardData("p1", "Missed") });
+    for (const s of aliceSockets()) s.deliver({ t: "changed", spaceId: "common", seq: String(hub.seq("common")) });
+    mt.advance(100); // debounce: the live layer calls engine.syncSpace, which returns at once
+    await sleep(30);
+    expect(await title(alice)).toBe("Ship it");
+    release();
+    await inFlight;
+    expect(await title(alice)).toBe("Ship it"); // the finished cycle never saw the edit
+    await vi.waitFor(async () => {
+      mt.advance(150);
+      expect(await title(alice)).toBe("Missed");
+    });
+    expect((await alice.space("common")).hubCursor).toBe(hub.seq("common"));
+  });
+
   it("newer hub schema refused: checkHubHealth throws kind schema and no Space is created", async () => {
     hub.setSchema(2);
     await expect(checkHubHealth(hub.origin())).rejects.toMatchObject({ kind: "schema" });

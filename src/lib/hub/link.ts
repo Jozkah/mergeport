@@ -143,6 +143,14 @@ export class HubLink {
     } catch {
       return;
     }
+    try {
+      this.dispatch(m);
+    } catch {
+      // a malformed message is ignored, it must never throw out of onmessage
+    }
+  }
+
+  private dispatch(m: { t?: string; [k: string]: unknown }) {
     switch (m.t) {
       case "hello": {
         this.failures = 0;

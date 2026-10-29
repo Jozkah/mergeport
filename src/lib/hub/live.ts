@@ -5,6 +5,9 @@ import { HubLink, defaultTimers, type HubLinkState, type SocketLike, type Timers
 import { syncHubSpaces } from "./spaces";
 
 const FALLBACK_POLL_MS = 60_000;
+/** engine.syncSpace silently returns when a cycle is already running; a notified seq not reached is retried this often, a few times. */
+const RETRY_MS = 150;
+const MAX_RETRIES = 5;
 
 export type HubLiveOptions = {
   db: Db;
@@ -29,6 +32,8 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
   // One cycle per space at a time; a notification that arrives mid-cycle schedules exactly one more.
   const inflight = new Map<string, Promise<void>>();
   const dirty = new Set<string>();
+  const wanted = new Map<string, bigint>(); // highest seq announced per local space id
+  const waiting = new Set<unknown>();
   const syncOne = (spaceId: string): Promise<void> => {
     const running = inflight.get(spaceId);
     if (running) {
@@ -37,12 +42,25 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
     }
     const p = (async () => {
       try {
-        do {
+        let retries = 0;
+        for (;;) {
           dirty.delete(spaceId);
           const sp = await o.db.space.findUnique({ where: { id: spaceId } });
           if (!sp || sp.backend !== "HUB" || sp.access === "REVOKED") return;
           await o.engine.syncSpace(sp);
-        } while (dirty.has(spaceId));
+          if (dirty.has(spaceId)) continue;
+          const after = await o.db.space.findUnique({ where: { id: spaceId } });
+          const want = wanted.get(spaceId);
+          if (stopped || !after || after.access === "REVOKED" || want === undefined || after.hubCursor >= want || retries++ >= MAX_RETRIES) return;
+          await new Promise<void>((resolve) => {
+            const h = timers.setTimeout(() => {
+              waiting.delete(h);
+              resolve();
+            }, RETRY_MS);
+            waiting.add(h);
+          });
+          if (stopped) return;
+        }
       } catch {
         // recorded on the space by the engine; the fallback poll retries
       } finally {
@@ -100,6 +118,7 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
           sp = await byHubId(hubSpaceId);
         }
         if (!sp || sp.access === "REVOKED" || sp.hubCursor >= seq) return;
+        if (seq > (wanted.get(sp.id) ?? 0n)) wanted.set(sp.id, seq);
         await syncOne(sp.id);
       })().catch(() => {});
     },
@@ -138,6 +157,8 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
     live: () => link.state === "live",
     stop: () => {
       stopped = true;
+      for (const h of waiting) timers.clearTimeout(h);
+      waiting.clear();
       stopPoll();
       link.stop();
     },

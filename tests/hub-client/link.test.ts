@@ -203,6 +203,23 @@ describe("HubLink", () => {
     expect(t.log.changed).toEqual([["a", 1n], ["b", 2n]]);
   });
 
+  it("malformed messages are ignored and never throw out of onmessage", async () => {
+    const t = setup();
+    t.link.start();
+    await flush();
+    const s = t.last();
+    expect(() => {
+      s.onmessage?.({ data: "not json" });
+      s.msg({ t: "hello", spaces: [{ id: "a", seq: "x" }] });
+      s.msg({ t: "changed", spaceId: "a", seq: "nope" });
+      s.msg({ t: "changed", spaceId: "a" });
+    }).not.toThrow();
+    expect(t.log.changed).toEqual([]);
+    expect(t.timers.pending).toBe(0);
+    s.msg({ t: "hello", spaces: [] });
+    expect(t.link.state).toBe("live");
+  });
+
   it("forwards access and team messages", async () => {
     const t = setup();
     t.link.start();
