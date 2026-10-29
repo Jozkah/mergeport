@@ -910,6 +910,7 @@ export class SyncEngine {
 }
 
 /** Expected delay before a teammate's change shows up here, in seconds. This is polling, not real time. */
-export function expectedConsistencyDelaySeconds(pollSeconds: number): { typical: number; worst: number } {
+export function expectedConsistencyDelaySeconds(pollSeconds: number, hub?: { live: boolean }): { typical: number; worst: number; label?: string } {
+  if (hub) return hub.live ? { typical: 1, worst: 1, label: "about 1 s (live)" } : { typical: 30, worst: 60, label: "up to 1 min (reconnecting)" };
   return { typical: Math.round(pollSeconds / 2 + 2), worst: Math.round(Math.min(MAX_POLL_MS / 1000, pollSeconds * 2 ** 3) * 1.2) };
 }

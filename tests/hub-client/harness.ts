@@ -3,6 +3,8 @@ import path from "node:path";
 import type { Space } from "@/generated/prisma/client";
 import { createPrisma, type Db } from "@/lib/db";
 import { HttpHubClient } from "@/lib/hub/client";
+import type { SocketLike, Timers } from "@/lib/hub/link";
+import { startHubLive } from "@/lib/hub/live";
 import { syncHubSpaces } from "@/lib/hub/spaces";
 import { ensureLocalProfile } from "@/lib/local/profile";
 import { SyncEngine } from "@/lib/sync/engine";
@@ -24,12 +26,14 @@ export async function makeHubClient(hub: FakeHub, githubId: bigint, login: strin
   const origin = hub.origin();
   await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "TEAM", backend: "HUB", hubOrigin: origin }, update: { mode: "TEAM", backend: "HUB", hubOrigin: origin } });
   const client = new HttpHubClient(origin, async () => token);
+  let liveHandle: ReturnType<typeof startHubLive> | null = null;
   const engine = new SyncEngine({
     db, actor, now: clock.now, random: () => 0.5,
     store: () => {
       throw new Error("GitHub store used in a hub test");
     },
     hub: () => client,
+    hubLive: () => liveHandle?.live() ?? false,
     onChange: (e) => opts.events?.push(e),
   });
   const space = (hubSpaceId: string): Promise<Space> => db.space.findFirstOrThrow({ where: { backend: "HUB", hubSpaceId } });
@@ -42,7 +46,25 @@ export async function makeHubClient(hub: FakeHub, githubId: bigint, login: strin
     }
     for (const s of await db.space.findMany({ where: { backend: "HUB" } })) await engine.syncSpace(s);
   };
-  return { login, db, file, actor, engine, profile, client, token, sync, space, close: () => db.$disconnect() };
+  /** Starts the live link against the FakeHub (in-memory sockets); the engine's hubLive reads it. */
+  const startLive = (o: { timers?: Timers; random?: () => number; getToken?: () => Promise<string | null>; connect?: (url: string, protocols: string[]) => SocketLike } = {}) => {
+    liveHandle?.stop();
+    liveHandle = startHubLive({
+      db, engine, client, origin, getToken: o.getToken ?? (async () => token), timers: o.timers, random: o.random ?? (() => 0.5),
+      connect: o.connect ?? ((_url, protocols) => hub.socket(protocols.find((p) => p.startsWith("bearer."))?.slice(7) ?? "")),
+    });
+    return liveHandle;
+  };
+  return {
+    login, db, file, actor, engine, profile, client, token, sync, space, startLive,
+    get live() {
+      return liveHandle;
+    },
+    close: async () => {
+      liveHandle?.stop();
+      await db.$disconnect();
+    },
+  };
 }
 
 /** Entity data exactly as `entityDef.list` produces it for a project / card, so a pulled entity never looks like a local edit. */

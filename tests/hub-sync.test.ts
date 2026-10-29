@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeHub } from "./hub-client/fake-hub";
+import { checkHubHealth } from "@/lib/hub/client";
+import type { SocketLike } from "@/lib/hub/link";
+import { expectedConsistencyDelaySeconds } from "@/lib/sync/engine";
+import { ManualTimers } from "./hub-client/manual-timers";
 import { cardData, makeHubClient, projectData, type HubTestClient } from "./hub-client/harness";
 
 let hub: FakeHub;
@@ -487,5 +491,161 @@ describe("hub push", () => {
     await alice.engine.pullSpace(await alice.space("common"));
     expect(await title(alice)).toBe("Alice");
     expect(await alice.db.syncConflict.count({ where: { status: "OPEN" } })).toBe(1);
+  });
+});
+
+describe("hub live", () => {
+  const dead = (): SocketLike => ({ onopen: null, onmessage: null, onclose: null, onerror: null, send() {}, close() {} });
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const editCard = async (c: HubTestClient, t: string) => {
+    await c.db.planningItem.update({ where: { id: "c1" }, data: { title: t } });
+    await c.sync();
+  };
+  const aliceSockets = () => [...hub.sockets].filter((s) => s.member?.githubId === "2");
+  const prepare = async (...clients: HubTestClient[]) => {
+    seedBoard();
+    for (const c of clients) await c.sync();
+  };
+  const live = async (c: HubTestClient, o: Parameters<HubTestClient["startLive"]>[0] = {}) => {
+    const h = c.startLive(o);
+    await vi.waitFor(() => expect(h.live()).toBe(true));
+    await sleep(50); // the hello cycle settles
+    return h;
+  };
+
+  it("live propagation: olive's edit reaches alice's live link in under 1000 ms with no polling", async () => {
+    await prepare(olive, alice);
+    await live(alice);
+    const pull = vi.spyOn(alice.client, "pull");
+    const t0 = Date.now();
+    await editCard(olive, "Live edit");
+    await vi.waitFor(async () => expect(await title(alice)).toBe("Live edit"), { timeout: 1000, interval: 10 });
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(pull).toHaveBeenCalled(); // the changed notification pulled, nothing else asked for it
+  });
+
+  it("socket down: the 60 s fallback poll picks the edit up", async () => {
+    await prepare(olive, alice);
+    const mt = new ManualTimers();
+    let n = 0;
+    const h = await live(alice, { timers: mt, connect: (_u, p) => (n++ === 0 ? hub.socket(p[1].slice(7)) : dead()) });
+    for (const s of aliceSockets()) s.deliverClose(1006);
+    expect(h.live()).toBe(false);
+    await editCard(olive, "While down");
+    mt.advance(59_999);
+    await sleep(50);
+    expect(await title(alice)).toBe("Ship it");
+    mt.advance(1);
+    await vi.waitFor(async () => expect(await title(alice)).toBe("While down"));
+    expect(h.live()).toBe(false);
+  });
+
+  it("hub restart with clients connected: sockets dropped, link reconnects, cursor continues, outage edit arrives", async () => {
+    await prepare(olive, alice);
+    const mt = new ManualTimers();
+    const h = await live(alice, { timers: mt });
+    const before = (await alice.space("common")).hubCursor;
+    const snapshot = vi.spyOn(alice.client, "snapshot");
+    await hub.restart();
+    expect(hub.sockets.size).toBe(0);
+    expect(h.live()).toBe(false);
+    hub.inject("common", { type: "card", id: "c1", data: cardData("p1", "During outage") });
+    mt.advance(1000);
+    await vi.waitFor(() => expect(h.live()).toBe(true));
+    await vi.waitFor(async () => expect(await title(alice)).toBe("During outage"));
+    const after = (await alice.space("common")).hubCursor;
+    expect(after).toBe(before + 1n);
+    expect(after).toBe(hub.seq("common"));
+    expect(snapshot).not.toHaveBeenCalled();
+  });
+
+  it("access removed over the socket purges alice's cached rows and quarantines unsent ops", async () => {
+    await prepare(alice);
+    await live(alice);
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "Unsent" } });
+    await alice.engine.capture();
+    expect(await alice.db.outboxOp.count({ where: { status: "PENDING" } })).toBe(1);
+    hub.removeMember("2");
+    await vi.waitFor(async () => expect((await alice.space("common")).access).toBe("REVOKED"));
+    expect(alice.live!.link.state).toBe("removed");
+    expect(await alice.db.project.count()).toBe(0);
+    expect(await alice.db.planningItem.count()).toBe(0);
+    expect((await alice.db.outboxOp.findMany()).map((o) => o.status)).toEqual(["QUARANTINED"]);
+    expect(hub.entity("common", "card", "c1")?.data).toMatchObject({ title: "Ship it" });
+  });
+
+  it("access deleted purges the deleting admin's data too", async () => {
+    await prepare(olive);
+    await live(olive);
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Unsent" } });
+    await olive.engine.capture();
+    hub.deleteSpace("common");
+    await vi.waitFor(async () => expect((await olive.space("common")).access).toBe("REVOKED"));
+    expect(await olive.db.project.count()).toBe(0);
+    expect(await olive.db.planningItem.count()).toBe(0);
+    expect((await olive.db.outboxOp.findMany()).map((o) => o.status)).toEqual(["QUARANTINED"]);
+  });
+
+  it("flapping: ten changed bursts with reconnects never run two syncSpace for one space", async () => {
+    await prepare(olive, alice);
+    const mt = new ManualTimers();
+    await live(alice, { timers: mt });
+    let active = 0;
+    let max = 0;
+    let calls = 0;
+    const real = alice.engine.syncSpace.bind(alice.engine);
+    vi.spyOn(alice.engine, "syncSpace").mockImplementation(async (s) => {
+      calls++;
+      active++;
+      max = Math.max(max, active);
+      try {
+        await sleep(15);
+        await real(s);
+      } finally {
+        active--;
+      }
+    });
+    for (let i = 1; i <= 10; i++) {
+      hub.inject("common", { type: "card", id: "c1", data: cardData("p1", `Edit ${i}`) });
+      const socks = aliceSockets();
+      for (const s of socks) s.deliver({ t: "changed", spaceId: "common", seq: String(hub.seq("common")) });
+      mt.advance(100);
+      await sleep(3);
+      for (const s of socks) s.deliver({ t: "changed", spaceId: "common", seq: String(hub.seq("common")) });
+      for (const s of socks) s.deliverClose(1006);
+      mt.advance(30_000);
+      await sleep(3);
+    }
+    await vi.waitFor(async () => expect(await title(alice)).toBe("Edit 10"), { timeout: 3000 });
+    await sleep(100);
+    expect(calls).toBeGreaterThan(0);
+    expect(max).toBe(1);
+  });
+
+  it("newer hub schema refused: checkHubHealth throws kind schema and no Space is created", async () => {
+    hub.setSchema(2);
+    await expect(checkHubHealth(hub.origin())).rejects.toMatchObject({ kind: "schema" });
+    expect(await alice.db.space.count()).toBe(0);
+  });
+
+  it("tick() leaves hub spaces to the live stream while live, and polls them when not", async () => {
+    await prepare(alice);
+    const h = await live(alice);
+    await alice.db.space.updateMany({ data: { nextPollAt: null } });
+    expect((await alice.engine.tick()).polled).toBe(0);
+    h.stop();
+    expect(h.live()).toBe(false);
+    expect((await alice.engine.tick()).polled).toBeGreaterThan(0);
+  });
+});
+
+describe("consistency delay", () => {
+  it("GitHub numbers are unchanged when no hub is given", () => {
+    expect(expectedConsistencyDelaySeconds(30)).toEqual({ typical: 17, worst: 144 });
+    expect(expectedConsistencyDelaySeconds(60)).toEqual({ typical: 32, worst: 144 });
+  });
+  it("hub live is about 1 s, otherwise up to a minute", () => {
+    expect(expectedConsistencyDelaySeconds(30, { live: true })).toEqual({ typical: 1, worst: 1, label: "about 1 s (live)" });
+    expect(expectedConsistencyDelaySeconds(30, { live: false })).toEqual({ typical: 30, worst: 60, label: "up to 1 min (reconnecting)" });
   });
 });

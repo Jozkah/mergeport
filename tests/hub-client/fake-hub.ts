@@ -11,9 +11,14 @@ export class FakeSocket {
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
   onclose: ((e: { code: number }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  /** Every string passed to send(). */
+  sent: string[] = [];
   closed = false;
   constructor(readonly member: Member | null, private hub: FakeHub) {}
-  send(_data: string) {}
+  send(data: string) {
+    this.sent.push(data);
+  }
   close(code = 1000) {
     this.deliverClose(code);
   }
