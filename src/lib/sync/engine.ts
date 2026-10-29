@@ -565,8 +565,9 @@ export class SyncEngine {
         await this.handleHubError(space, e, "write");
         return { sent };
       }
-      const byId = new Map(results.results.map((r) => [r.opId, r]));
       let rewritten = false;
+      try {
+      const byId = new Map(results.results.map((r) => [r.opId, r]));
       for (const op of ops) {
         const r = byId.get(op.id);
         const se = await this.db.syncEntity.findUnique({ where: keyOf(op.entityType, op.entityId) });
@@ -611,6 +612,12 @@ export class SyncEngine {
           }
           if (await this.db.outboxOp.count({ where: { id: op.id, status: "PENDING" } })) rewritten = true;
         }
+      }
+      } catch (e) {
+        // A local failure while recording results must not strand operations in SENT: the hub's duplicate answer makes the retry safe.
+        await this.db.outboxOp.updateMany({ where: { id: { in: ops.map((o) => o.id) }, status: "SENT" }, data: { status: "PENDING", error: e instanceof Error ? e.message : String(e) } });
+        await this.handleHubError(space, e, "write");
+        return { sent };
       }
       if (!rewritten) break;
     }

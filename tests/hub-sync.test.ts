@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeHub } from "./hub-client/fake-hub";
 import { cardData, makeHubClient, projectData, type HubTestClient } from "./hub-client/harness";
 
@@ -433,6 +433,42 @@ describe("hub push", () => {
     expect(await alice.db.outboxOp.count()).toBe(0);
     await olive.sync();
     expect(await olive.db.planningItem.findUnique({ where: { id: "c1" } })).toBeNull();
+  });
+
+  it("a local failure while recording results leaves no op in SENT; the next push converges through duplicates", async () => {
+    seedBoard();
+    hub.inject("common", { type: "card", id: "c2", data: cardData("p1", "Two") });
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "A1" } });
+    await alice.db.planningItem.update({ where: { id: "c2" }, data: { title: "A2" } });
+    await alice.engine.capture();
+    const spy = vi.spyOn(alice.db.syncEntity, "upsert").mockRejectedValueOnce(new Error("disk full"));
+    const sp = await alice.space("common");
+    expect(await alice.engine.pushSpace(sp)).toEqual({ sent: 0 });
+    spy.mockRestore();
+    const ops = await alice.db.outboxOp.findMany();
+    expect(ops.length).toBeGreaterThan(0);
+    expect(ops.every((o) => o.status === "PENDING" && o.error === "disk full")).toBe(true);
+    expect((await alice.space("common")).lastError).toBe("disk full");
+    await alice.engine.pushSpace(await alice.space("common"));
+    expect(await alice.db.outboxOp.count()).toBe(0);
+    expect(hub.entity("common", "card", "c1")?.version).toBe(2);
+    expect(hub.entity("common", "card", "c2")?.version).toBe(2);
+  });
+
+  it("an op missing from the hub's results goes back to PENDING and is settled by the next push", async () => {
+    seedBoard();
+    await alice.sync();
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "A1" } });
+    await alice.engine.capture();
+    const real = alice.client.push.bind(alice.client);
+    const spy = vi.spyOn(alice.client, "push").mockImplementationOnce(async (s, o) => ({ ...(await real(s, o)), results: [] }));
+    await alice.engine.pushSpace(await alice.space("common"));
+    spy.mockRestore();
+    expect((await alice.db.outboxOp.findFirstOrThrow()).status).toBe("PENDING");
+    await alice.engine.pushSpace(await alice.space("common"));
+    expect(await alice.db.outboxOp.count()).toBe(0);
+    expect(hub.entity("common", "card", "c1")?.version).toBe(2);
   });
 
   it("a snapshot resync keeps a vanished entity that has a CONFLICT op", async () => {
