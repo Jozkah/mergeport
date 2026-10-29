@@ -206,7 +206,7 @@ export class HubLink {
   }
 
   private scheduleRetry() {
-    const delay = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.min(this.failures, 20)) * (0.5 + this.random());
+    const delay = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.min(this.failures, 20) * (0.5 + this.random()));
     this.failures++;
     this.setState(this.failures >= OFFLINE_AFTER ? "offline" : "reconnecting");
     if (this.retry !== null) this.timers.clearTimeout(this.retry);

@@ -7,7 +7,7 @@ import type { Me } from "./types";
  * Spaces the member cannot see are never listed by the hub, so a restricted space only ever exists locally for its members.
  * Returns hub space ids.
  */
-export async function syncHubSpaces(db: Db, engine: SyncEngine, me: Me): Promise<{ added: string[]; removed: string[] }> {
+export async function syncHubSpaces(db: Db, engine: SyncEngine, me: Me, origin?: string): Promise<{ added: string[]; removed: string[] }> {
   const added: string[] = [];
   const removed: string[] = [];
   const local = await db.space.findMany({ where: { backend: "HUB" } });
@@ -40,8 +40,8 @@ export async function syncHubSpaces(db: Db, engine: SyncEngine, me: Me): Promise
   if (commonId) {
     await db.teamConfig.upsert({
       where: { id: "team" },
-      create: { id: "team", mode: "TEAM", backend: "HUB", teamRemoteId: me.team.id, name: me.team.name, commonSpaceId: commonId },
-      update: { commonSpaceId: commonId, teamRemoteId: me.team.id },
+      create: { id: "team", mode: "TEAM", backend: "HUB", teamRemoteId: me.team.id, name: me.team.name, commonSpaceId: commonId, ...(origin ? { hubOrigin: origin } : {}) },
+      update: { backend: "HUB", commonSpaceId: commonId, teamRemoteId: me.team.id, ...(origin ? { hubOrigin: origin } : {}) },
     });
   }
   return { added, removed };

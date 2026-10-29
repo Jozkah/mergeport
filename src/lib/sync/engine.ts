@@ -808,6 +808,7 @@ export class SyncEngine {
 
   private async handleHubError(space: Space, e: unknown, phase: "read" | "write"): Promise<void> {
     if (!(e instanceof HubError)) {
+      await this.schedule(space, "error");
       await this.db.space.update({ where: { id: space.id }, data: { lastError: e instanceof Error ? e.message : String(e) } });
       return;
     }

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeHub } from "./hub-client/fake-hub";
+import { HubError } from "@/lib/hub/types";
 import { checkHubHealth } from "@/lib/hub/client";
 import type { SocketLike } from "@/lib/hub/link";
 import { expectedConsistencyDelaySeconds } from "@/lib/sync/engine";
@@ -652,6 +653,62 @@ describe("hub live", () => {
       expect(await title(alice)).toBe("Missed");
     });
     expect((await alice.space("common")).hubCursor).toBe(hub.seq("common"));
+  });
+
+  it("a live space that failed is retried by the always-on 60 s poll even after the retries ran out", async () => {
+    await prepare(olive, alice);
+    const mt = new ManualTimers();
+    const h = await live(alice, { timers: mt });
+    await editCard(olive, "Hidden by 500");
+    const pull = vi.spyOn(alice.client, "pull").mockRejectedValue(new HubError("unknown", "boom", { status: 500 }));
+    for (const s of aliceSockets()) s.deliver({ t: "changed", spaceId: "common", seq: String(hub.seq("common")) });
+    mt.advance(100);
+    for (let i = 0; i < 8; i++) {
+      await sleep(20);
+      mt.advance(150); // exhaust the short retries
+    }
+    await sleep(20);
+    expect((await alice.space("common")).lastError).toBeTruthy();
+    expect(await title(alice)).toBe("Ship it");
+    pull.mockRestore();
+    expect(h.live()).toBe(true);
+    mt.advance(60_000);
+    await vi.waitFor(async () => expect(await title(alice)).toBe("Hidden by 500"));
+  });
+
+  it("startup: an op stranded in SENT goes back to PENDING and is delivered", async () => {
+    await prepare(alice);
+    await alice.db.planningItem.update({ where: { id: "c1" }, data: { title: "Crash edit" } });
+    await alice.engine.capture();
+    await alice.db.outboxOp.updateMany({ data: { status: "SENT" } });
+    await live(alice);
+    await vi.waitFor(async () => expect(hub.entity("common", "card", "c1")?.data).toMatchObject({ title: "Crash edit" }));
+    expect(await alice.db.outboxOp.count()).toBe(0);
+  });
+
+  it("403 on read revokes the space; 404 on write revokes it and quarantines unsent ops", async () => {
+    await prepare(alice, olive);
+    hub.failNext(1, "forbidden");
+    await alice.engine.syncSpace(await alice.space("common"));
+    expect((await alice.space("common")).access).toBe("REVOKED");
+    expect(await alice.db.project.count()).toBe(0);
+
+    await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Unsent" } });
+    await olive.engine.capture();
+    vi.spyOn(olive.client, "push").mockRejectedValueOnce(new HubError("not-found", "gone", { status: 404 }));
+    await olive.engine.pushSpace(await olive.space("common"));
+    expect((await olive.space("common")).access).toBe("REVOKED");
+    expect((await olive.db.outboxOp.findMany()).map((o) => o.status)).toEqual(["QUARANTINED"]);
+  });
+
+  it("a non-HubError failure still backs the space off", async () => {
+    await prepare(alice);
+    await alice.db.space.updateMany({ data: { nextPollAt: null } });
+    vi.spyOn(alice.client, "pull").mockRejectedValueOnce(new Error("disk full"));
+    await alice.engine.pullSpace(await alice.space("common")).catch(() => {});
+    const sp = await alice.space("common");
+    expect(sp.lastError).toBe("disk full");
+    expect(sp.nextPollAt).not.toBeNull();
   });
 
   it("newer hub schema refused: checkHubHealth throws kind schema and no Space is created", async () => {

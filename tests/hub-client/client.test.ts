@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { HttpHubClient, checkHubHealth, normalizeHubOrigin } from "@/lib/hub/client";
 import { HubError, type Op } from "@/lib/hub/types";
 import { FakeHub } from "./fake-hub";
@@ -16,6 +18,26 @@ describe("normalizeHubOrigin", () => {
 });
 
 const op = (opId: string, baseVersion: number, data: Record<string, unknown> = { title: "a" }): Op => ({ opId, type: "task", entityId: "t1", kind: "UPSERT", baseVersion, data });
+
+describe("redirects", () => {
+  it("a 302 is a HubError and the bearer is never replayed", async () => {
+    const seen: string[] = [];
+    const server = http.createServer((req, res) => {
+      seen.push(req.url ?? "");
+      res.writeHead(302, { location: "http://127.0.0.1:1/elsewhere" });
+      res.end();
+    });
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await expect(new HttpHubClient(origin, async () => "tok").me()).rejects.toBeInstanceOf(HubError);
+      await expect(checkHubHealth(origin)).rejects.toBeInstanceOf(HubError);
+      expect(seen).toEqual(["/me", "/health"]);
+    } finally {
+      await new Promise<void>((ok) => server.close(() => ok()));
+    }
+  });
+});
 
 describe("HttpHubClient against FakeHub", () => {
   let hub: FakeHub;

@@ -20,6 +20,15 @@ afterEach(async () => {
 });
 
 describe("syncHubSpaces", () => {
+  it("turns a GitHub-default TeamConfig into HUB and records the origin", async () => {
+    await c.db.teamConfig.update({ where: { id: "team" }, data: { backend: "GITHUB", hubOrigin: null } });
+    await syncHubSpaces(c.db, c.engine, await c.client.me(), "http://hub.test:1");
+    expect(await c.db.teamConfig.findUniqueOrThrow({ where: { id: "team" } })).toMatchObject({ backend: "HUB", hubOrigin: "http://hub.test:1" });
+    await c.db.teamConfig.delete({ where: { id: "team" } });
+    await syncHubSpaces(c.db, c.engine, await c.client.me(), "http://hub.test:2");
+    expect(await c.db.teamConfig.findUniqueOrThrow({ where: { id: "team" } })).toMatchObject({ backend: "HUB", hubOrigin: "http://hub.test:2" });
+  });
+
   it("creates, updates canWrite, and revokes vanished spaces; commonSpaceId set", async () => {
     const r1 = await syncHubSpaces(c.db, c.engine, await c.client.me());
     expect(r1).toEqual({ added: expect.arrayContaining(["common", "r1"]), removed: [] });

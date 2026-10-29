@@ -54,7 +54,7 @@ export class HttpHubClient implements HubClient {
     if (!token) throw new HubError("auth", "Not signed in");
     const headers: Record<string, string> = { authorization: `Bearer ${token}`, accept: "application/json" };
     if (init.body) headers["content-type"] = "application/json";
-    const res = await send(this.fetchImpl, this.origin + path, { ...init, headers });
+    const res = await send(this.fetchImpl, this.origin + path, { ...init, headers, redirect: "error" });
     if (res.status === 410 && allow410) return "gone";
     if (!res.ok) throw failure(res);
     return res;
@@ -86,7 +86,7 @@ export class HttpHubClient implements HubClient {
 
 export async function checkHubHealth(origin: string, supportedSchema = 1, fetchImpl: typeof fetch = (...a) => fetch(...a)): Promise<{ teamName: string | null; publicUrl: string; githubHost: string }> {
   const typed = normalizeHubOrigin(origin);
-  const res = await send(fetchImpl, typed + "/health", { headers: { accept: "application/json" } });
+  const res = await send(fetchImpl, typed + "/health", { headers: { accept: "application/json" }, redirect: "error" });
   if (!res.ok) throw failure(res);
   const h = await json<{ team?: { name: string } | null; schema?: number; publicUrl?: string; githubHost?: string }>(res);
   if (typeof h.schema !== "number") throw new HubError("unknown", "Not a Mergeport hub");

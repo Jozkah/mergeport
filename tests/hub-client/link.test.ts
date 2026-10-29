@@ -128,6 +128,32 @@ describe("HubLink", () => {
     expect(timers.scheduled).toEqual([1500]);
   });
 
+  it("the delay is clamped to 30 s after jitter is applied", async () => {
+    const timers = new ManualTimers();
+    const socks: ScriptSocket[] = [];
+    const link = new HubLink({
+      origin: "https://h",
+      getToken: async () => "t",
+      connect: (u, p) => {
+        socks.push(new ScriptSocket(u, p));
+        return socks[socks.length - 1];
+      },
+      timers,
+      random: () => 0.99,
+      onChanged() {},
+      onAccess() {},
+      onTeam() {},
+    });
+    link.start();
+    await flush();
+    for (let i = 0; i < 8; i++) {
+      socks[socks.length - 1].drop();
+      timers.advance(30_000);
+      await flush();
+    }
+    expect(timers.scheduled).toEqual([1490, 2980, 5960, 11920, 23840, 30000, 30000, 30000]);
+  });
+
   it("backoff resets after hello", async () => {
     const t = setup();
     t.link.start();

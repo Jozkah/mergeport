@@ -80,7 +80,7 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
   const refresh = (): Promise<void> => {
     const run = async () => {
       try {
-        await syncHubSpaces(o.db, o.engine, await o.client.me());
+        await syncHubSpaces(o.db, o.engine, await o.client.me(), o.origin);
       } catch {
         // a failing me() must not stop the spaces from syncing; the cycle records the failure
       }
@@ -134,24 +134,42 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
     onTeam: () => void refresh().catch(() => {}),
     onState: (s: HubLinkState) => {
       if (s === "removed") void revokeAll().catch(() => {});
-      if (s === "live" || s === "removed") stopPoll();
-      else startPoll();
     },
   });
 
-  function startPoll() {
-    if (stopped || poll !== null) return;
+  // Always on. Not live: refresh and sync every hub space. Live: only spaces that look unhealthy, so a
+  // failed cycle, an exhausted retry or a 5xx / 429 never leaves a live space stale until the next hello.
+  const pollOnce = async () => {
+    if (link.state === "removed") return;
+    if (link.state !== "live") return refreshAndSyncAll();
+    const now = new Date();
+    for (const s of await o.db.space.findMany({ where: { backend: "HUB", access: { not: "REVOKED" } } })) {
+      const want = wanted.get(s.id);
+      const unhealthy = !!s.lastError || (!!s.rateLimitedUntil && s.rateLimitedUntil <= now) || (want !== undefined && s.hubCursor < want);
+      if (unhealthy) void syncOne(s.id);
+    }
+  };
+  const startPoll = () => {
     poll = timers.setInterval(() => {
-      if (!stopped && link.state !== "live") void refreshAndSyncAll().catch(() => {});
+      if (!stopped) void pollOnce().catch(() => {});
     }, FALLBACK_POLL_MS);
-  }
-  function stopPoll() {
+  };
+  const stopPoll = () => {
     if (poll !== null) timers.clearInterval(poll);
     poll = null;
-  }
+  };
 
   startPoll();
-  link.start();
+  // An op left SENT by a crash mid-push is safe to resend: the hub answers `duplicate`.
+  void (async () => {
+    try {
+      const ids = (await o.db.space.findMany({ where: { backend: "HUB" }, select: { id: true } })).map((x) => x.id);
+      await o.db.outboxOp.updateMany({ where: { spaceId: { in: ids }, status: "SENT" }, data: { status: "PENDING" } });
+    } catch {
+      // the next push settles it
+    }
+    if (!stopped) link.start();
+  })();
   return {
     link,
     live: () => link.state === "live",
