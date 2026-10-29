@@ -16,15 +16,15 @@ export function json(res: ServerResponse, status: number, body: unknown, headers
 export async function readJson<T>(req: IncomingMessage, schema: ZodType<T>, limitBytes = 1_000_000): Promise<T> {
   const chunks: Buffer[] = [];
   let size = 0;
+  let tooBig = false;
+  // Drain the whole body even when oversized so the 413 reaches the client before the socket closes.
   for await (const chunk of req) {
     const buf = chunk as Buffer;
     size += buf.length;
-    if (size > limitBytes) {
-      req.resume();
-      throw new HttpError(413, "body too large", { connection: "close" });
-    }
-    chunks.push(buf);
+    if (size > limitBytes) tooBig = true;
+    if (!tooBig) chunks.push(buf);
   }
+  if (tooBig) throw new HttpError(413, "body too large", { connection: "close" });
   let raw: unknown;
   try {
     raw = JSON.parse(Buffer.concat(chunks).toString("utf8"));

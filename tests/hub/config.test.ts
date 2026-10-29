@@ -36,4 +36,10 @@ describe("hub config and health", () => {
     expect(r.status).toBe(400);
     await hub.close();
   });
+  it("answers 413 to an oversized body", async () => {
+    const hub = await startTestHub();
+    const r = await fetch(hub.url + "/auth/device/poll", { method: "POST", body: "x".repeat(5_000_000), headers: { "content-type": "application/json" } });
+    expect(r.status).toBe(413);
+    await hub.close();
+  });
 });
