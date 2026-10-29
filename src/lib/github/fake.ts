@@ -91,6 +91,16 @@ export class FakeGithub implements GithubPort {
   async listPullCommits() {
     return { commits: [], truncated: false };
   }
+  async listCommitFiles() {
+    return { files: [], truncated: false };
+  }
+  async getContents(): Promise<never> {
+    throw new GithubError("not-found", "Not found", undefined, undefined, 404);
+  }
+  async createReviewComment(o: string, r: string, n: number, i: { body: string; path: string; line: number }) {
+    this.writes.push(`review-comment ${o}/${r}#${n} ${i.path}:${i.line}`);
+    return { githubId: 3n, login: null, body: i.body, createdAt: new Date(), updatedAt: new Date() };
+  }
   async compare(u: { owner: string; repo: string; branch: string }, f: { owner: string; branch: string }): Promise<CompareOutcome> {
     this.maybeFail("compare");
     return this.compares.get(`${u.owner}/${u.repo}:${u.branch}...${f.owner}:${f.branch}`) ?? { kind: "not-found" };

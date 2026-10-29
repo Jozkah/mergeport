@@ -100,6 +100,7 @@ export default async function Repositories({ searchParams }: { searchParams: Pro
                     <td className="text-[12.5px]">{r.projects.length ? r.projects.map((p) => p.project.name).join(", ") : <span className="text-ink-3">None</span>}</td>
                     <td>
                       <div className="flex flex-col gap-1.5">
+                        <Link href={`/repositories/${r.id}/code`} className="btn" aria-label={`Browse code of ${r.fullName}`}>Browse code</Link>
                         <ActionForm action={refreshRepositoryAction} submitLabel="Refresh" submitAriaLabel={`Refresh ${r.fullName}`} submitClassName="btn"><input type="hidden" name="repositoryId" value={r.id} /></ActionForm>
                         <ActionForm action={untrackRepositoryAction} submitLabel="Stop tracking" submitAriaLabel={`Stop tracking ${r.fullName}`} submitClassName="btn btn-danger"><input type="hidden" name="repositoryId" value={r.id} /></ActionForm>
                       </div>

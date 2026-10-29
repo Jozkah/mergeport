@@ -56,8 +56,11 @@ export type RemoteWorkItem = {
 export type RemoteReview = { githubId: bigint; login: string | null; state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING"; body: string | null; commitSha: string | null; submittedAt: Date };
 export type RemoteComment = { githubId: bigint; login: string | null; body: string | null; createdAt: Date; updatedAt: Date; path?: string | null; line?: number | null; commitSha?: string | null; threadKey?: string | null };
 export type RemoteRequested = { users: string[]; teams: string[] };
-export type RemoteFile = { filename: string; status: string; additions: number; deletions: number; patch: string | null };
-export type RemoteCommit = { sha: string; message: string; author: string | null; date: Date | null };
+export type RemoteFile = { filename: string; status: string; additions: number; deletions: number; patch: string | null; previousFilename?: string | null };
+export type RemoteCommit = { sha: string; message: string; author: string | null; date: Date | null; body?: string; authorAvatar?: string | null };
+export type TreeEntry = { name: string; path: string; type: "file" | "dir" | "symlink" | "submodule"; size: number; sha: string };
+export type FileContent = { path: string; sha: string; size: number; text: string | null; binary: boolean; tooLarge: boolean; htmlUrl: string | null };
+export type Contents = { kind: "dir"; entries: TreeEntry[] } | { kind: "file"; file: FileContent };
 export type RemoteBranch = { name: string; sha: string; isDefault: boolean };
 
 export type Page<T> = { items: T[]; nextPage: number | null; rate?: RateInfo };
@@ -88,6 +91,11 @@ export interface GithubPort {
   listPullFiles(owner: string, repo: string, number: number): Promise<{ files: RemoteFile[]; truncated: boolean }>;
   listPullCommits(owner: string, repo: string, number: number): Promise<{ commits: RemoteCommit[]; truncated: boolean }>;
 
+  /** A file's text or a folder's entries at `ref` (a branch, tag or commit). Bounded: text over 1 MB is not returned. */
+  getContents(owner: string, repo: string, path: string, ref?: string): Promise<Contents>;
+  /** Files changed by one commit. */
+  listCommitFiles(owner: string, repo: string, sha: string): Promise<{ files: RemoteFile[]; truncated: boolean }>;
+
   /** BASE = upstream branch, HEAD = fork branch. */
   compare(upstream: { owner: string; repo: string; branch: string }, fork: { owner: string; branch: string }): Promise<CompareOutcome>;
   /** Is `sha` an ancestor of `branchTip` in `repo`'s network? */
@@ -101,6 +109,8 @@ export interface GithubPort {
   setAssignees(owner: string, repo: string, number: number, assignees: string[]): Promise<void>;
   setMilestone(owner: string, repo: string, number: number, milestoneNumber: number | null): Promise<void>;
   requestReviewers(owner: string, repo: string, number: number, reviewers: { users?: string[]; teams?: string[] }): Promise<void>;
+  /** An inline review comment on one line of the pull request's diff (`side` RIGHT = the new file). */
+  createReviewComment(owner: string, repo: string, number: number, input: { body: string; commitSha: string; path: string; line: number; side: "LEFT" | "RIGHT" }): Promise<RemoteComment>;
   submitReview(owner: string, repo: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string }): Promise<void>;
   mergePull(owner: string, repo: string, number: number, input: { method: MergeMethod; expectedHeadSha: string }): Promise<{ merged: boolean; message: string }>;
   mergeUpstream(owner: string, repo: string, branch: string): Promise<{ result: "merged" | "fast-forward" | "up-to-date" | "conflict"; message: string }>;

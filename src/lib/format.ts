@@ -32,3 +32,16 @@ export function relativeTime(d: Date, now: Date): string {
 }
 
 export const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+
+/** "12 B", "3.4 KB", "1.2 MB": sizes the way GitHub shows them. */
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = n;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u++;
+  }
+  return `${u === 0 ? v : v.toFixed(1)} ${units[u]}`;
+}

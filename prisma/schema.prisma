@@ -527,6 +527,18 @@ model PlanningItem {
   @@index([assigneeLogin])
 }
 
+/// Immutable GitHub answers keyed by commit (diffs, file contents, commit lists), so reopening a pull request or a file costs
+/// nothing. Safe to delete at any time; it is rebuilt on demand and pruned by age and size.
+model GitCache {
+  key        String   @id
+  payload    Json
+  bytes      Int
+  createdAt  DateTime @default(now())
+  accessedAt DateTime @default(now())
+
+  @@index([accessedAt])
+}
+
 /// One checkbox on a task. One row (and one synced file) per item, so two people ticking different items never conflict.
 model TaskCheckItem {
   id          String    @id @default(cuid())

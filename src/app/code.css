@@ -1,0 +1,442 @@
+/*
+ * Code, diffs and Markdown, drawn the way GitHub draws them (Primer colours, 85% monospace at 1.45 line height, 6px corners).
+ * Unlayered on purpose: it must win over the component layer's older .md rules.
+ */
+
+:root {
+  --code-bg: #f6f8fa;
+  --code-fg: #1f2328;
+  --code-border: #d1d9e0;
+  --code-muted: #59636e;
+  --code-inline: rgb(129 139 152 / 0.12);
+  --code-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --diff-add-bg: #dafbe1;
+  --diff-add-gutter: #aceebb;
+  --diff-add-word: #aceebb;
+  --diff-del-bg: #ffebe9;
+  --diff-del-gutter: #ffcecb;
+  --diff-hunk-bg: #ddf4ff;
+  --diff-hunk-fg: #0969da;
+  --diff-empty: #f6f8fa;
+  --diff-add-fg: #1a7f37;
+  --diff-del-fg: #cf222e;
+  --diff-comment-bg: #ffffff;
+}
+:root[data-theme="dark"] {
+  --code-bg: #151b23;
+  --code-fg: #f0f6fc;
+  --code-border: #3d444d;
+  --code-muted: #9198a1;
+  --code-inline: rgb(101 108 118 / 0.2);
+  --diff-add-bg: rgb(46 160 67 / 0.15);
+  --diff-add-gutter: rgb(63 185 80 / 0.3);
+  --diff-add-word: rgb(46 160 67 / 0.4);
+  --diff-del-bg: rgb(248 81 73 / 0.1);
+  --diff-del-gutter: rgb(248 81 73 / 0.3);
+  --diff-hunk-bg: rgb(56 139 253 / 0.1);
+  --diff-hunk-fg: #9198a1;
+  --diff-empty: rgb(110 118 129 / 0.08);
+  --diff-add-fg: #3fb950;
+  --diff-del-fg: #f85149;
+  --diff-comment-bg: #0d1117;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --code-bg: #151b23;
+    --code-fg: #f0f6fc;
+    --code-border: #3d444d;
+    --code-muted: #9198a1;
+    --code-inline: rgb(101 108 118 / 0.2);
+    --diff-add-bg: rgb(46 160 67 / 0.15);
+    --diff-add-gutter: rgb(63 185 80 / 0.3);
+    --diff-add-word: rgb(46 160 67 / 0.4);
+    --diff-del-bg: rgb(248 81 73 / 0.1);
+    --diff-del-gutter: rgb(248 81 73 / 0.3);
+    --diff-hunk-bg: rgb(56 139 253 / 0.1);
+    --diff-hunk-fg: #9198a1;
+    --diff-empty: rgb(110 118 129 / 0.08);
+    --diff-add-fg: #3fb950;
+    --diff-del-fg: #f85149;
+    --diff-comment-bg: #0d1117;
+  }
+}
+
+/* Token colours: every span carries the light and the dark colour; the theme picks one. */
+.hl span[style] {
+  color: var(--l);
+}
+:root[data-theme="dark"] .hl span[style] {
+  color: var(--d);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .hl span[style] {
+    color: var(--d);
+  }
+}
+
+/* ---------- Markdown, GitHub style ---------- */
+.md {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-ink);
+  overflow-wrap: break-word;
+}
+.md > * + * {
+  margin-top: 16px;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  font-weight: 600;
+  line-height: 1.25;
+  margin-top: 24px;
+}
+.md h1 {
+  font-size: 1.7em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-line);
+}
+.md h2 {
+  font-size: 1.4em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-line);
+}
+.md h3 {
+  font-size: 1.15em;
+}
+.md a {
+  color: var(--color-link, #0969da);
+  text-decoration: none;
+}
+.md a:hover {
+  text-decoration: underline;
+}
+:root[data-theme="dark"] .md a {
+  --color-link: #4493f8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .md a {
+    --color-link: #4493f8;
+  }
+}
+.md :not(pre) > code {
+  font-family: var(--code-font);
+  font-size: 85%;
+  padding: 0.2em 0.4em;
+  margin: 0;
+  background: var(--code-inline);
+  border-radius: 6px;
+  white-space: break-spaces;
+}
+.md pre {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  padding: 16px;
+  border-radius: 6px;
+  overflow: auto;
+  font-family: var(--code-font);
+  font-size: 85%;
+  line-height: 1.45;
+  tab-size: 4;
+}
+.md pre code {
+  font-family: inherit;
+  font-size: 100%;
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+  word-break: normal;
+}
+.md blockquote {
+  background: transparent;
+  border-radius: 0;
+  border-left: 0.25em solid var(--code-border);
+  padding: 0 1em;
+  color: var(--code-muted);
+}
+.md ul,
+.md ol {
+  padding-left: 2em;
+  list-style: revert;
+}
+.md li + li {
+  margin-top: 0.25em;
+}
+.md li > input[type="checkbox"] {
+  margin: 0 0.35em 0.25em -1.4em;
+  vertical-align: middle;
+}
+.md table {
+  border-collapse: collapse;
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+}
+.md th,
+.md td {
+  padding: 6px 13px;
+  border: 1px solid var(--code-border);
+}
+.md tr:nth-child(2n) {
+  background: var(--code-bg);
+}
+.md th {
+  font-weight: 600;
+}
+.md hr {
+  height: 0.25em;
+  padding: 0;
+  margin: 24px 0;
+  background: var(--code-border);
+  border: 0;
+}
+.md img {
+  max-width: 100%;
+  border-radius: 0;
+}
+
+/* ---------- Source file view ---------- */
+.code-box {
+  border: 1px solid var(--code-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+.code-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--code-border);
+  font-size: 13px;
+  color: var(--code-muted);
+}
+.code-scroll {
+  overflow: auto;
+}
+.src {
+  border-collapse: collapse;
+  font-family: var(--code-font);
+  font-size: 12px;
+  line-height: 20px;
+  width: 100%;
+  tab-size: 4;
+  color: var(--code-fg);
+}
+.src td {
+  padding: 0;
+  vertical-align: top;
+}
+.src .no {
+  width: 1%;
+  min-width: 50px;
+  padding: 0 10px 0 16px;
+  text-align: right;
+  color: var(--code-muted);
+  user-select: none;
+  white-space: nowrap;
+}
+.src .no a {
+  color: inherit;
+}
+.src .no a:hover {
+  color: var(--color-ink);
+}
+.src .tx {
+  padding: 0 16px 0 10px;
+  white-space: pre;
+}
+.src tr:target,
+.src tr.is-target {
+  background: rgb(255 223 93 / 0.25);
+}
+
+/* ---------- Diff ---------- */
+.diff {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  font-family: var(--code-font);
+  font-size: 12px;
+  line-height: 20px;
+  tab-size: 4;
+  color: var(--code-fg);
+}
+.diff td {
+  padding: 0;
+  vertical-align: top;
+}
+.diff .no {
+  width: 50px;
+  min-width: 50px;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--code-muted);
+  user-select: none;
+  position: relative;
+  white-space: nowrap;
+  cursor: default;
+}
+.diff .tx {
+  padding: 0 10px 0 22px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  position: relative;
+}
+.diff.nowrap .tx {
+  white-space: pre;
+  word-break: normal;
+}
+.diff .mk {
+  position: absolute;
+  left: 8px;
+  color: var(--code-muted);
+  user-select: none;
+}
+.diff .add > .no,
+.diff td.no.c-add {
+  background: var(--diff-add-gutter);
+  color: var(--code-fg);
+}
+.diff .add > .tx,
+.diff td.tx.c-add {
+  background: var(--diff-add-bg);
+}
+.diff .del > .no,
+.diff td.no.c-del {
+  background: var(--diff-del-gutter);
+  color: var(--code-fg);
+}
+.diff .del > .tx,
+.diff td.tx.c-del {
+  background: var(--diff-del-bg);
+}
+.diff .empty {
+  background: var(--diff-empty);
+}
+.diff .hunk > td {
+  background: var(--diff-hunk-bg);
+  color: var(--diff-hunk-fg);
+  height: 32px;
+}
+.diff .hunk .tx {
+  white-space: pre;
+  padding-left: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.diff .hunk .no {
+  padding: 0;
+  text-align: center;
+}
+.diff .hunk button {
+  width: 100%;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--diff-hunk-fg);
+  cursor: pointer;
+}
+.diff .hunk button:hover {
+  background: var(--diff-hunk-fg);
+  color: #fff;
+}
+.diff .cbtn {
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: #0969da;
+  color: #fff;
+  display: inline-flex;
+  opacity: 0;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+}
+.diff td:hover > .cbtn,
+.diff .cbtn:focus-visible {
+  opacity: 1;
+}
+.diff .split-sep {
+  border-left: 1px solid var(--code-border);
+}
+.diff-file {
+  border: 1px solid var(--code-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  scroll-margin-top: 72px;
+}
+.diff-file-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--code-border);
+  border-radius: 6px 6px 0 0;
+  font-size: 13px;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+.diff-file.is-collapsed .diff-file-head {
+  border-bottom: 0;
+  border-radius: 6px;
+}
+.diffstat {
+  display: inline-flex;
+  gap: 1px;
+  vertical-align: middle;
+}
+.diffstat i {
+  width: 8px;
+  height: 8px;
+  background: var(--code-border);
+  display: block;
+}
+.diffstat i.a {
+  background: var(--diff-add-fg);
+}
+.diffstat i.d {
+  background: var(--diff-del-fg);
+}
+.cthread {
+  border: 1px solid var(--code-border);
+  border-radius: 6px;
+  background: var(--diff-comment-bg);
+  margin: 8px 12px 8px 60px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: normal;
+  color: var(--color-ink);
+}
+.cthread .md {
+  font-size: 13px;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  width: 100%;
+  text-align: left;
+}
+.tree-row:hover {
+  background: var(--color-hover);
+}

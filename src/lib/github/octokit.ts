@@ -1,8 +1,10 @@
 import { Octokit } from "octokit";
+const MAX_TEXT_BYTES = 1_000_000;
 import type { RepoMeta } from "@/lib/services/repositories";
 import type { CompareOutcome } from "@/lib/domain/forks";
 import {
   GithubError,
+  type Contents,
   type Discovery,
   type DiscoveryNote,
   type GithubPort,
@@ -14,6 +16,7 @@ import {
   type RemoteRequested,
   type RemoteReview,
   type RemoteWorkItem,
+  type TreeEntry,
 } from "./port";
 
 export type CacheStore = {
@@ -272,13 +275,46 @@ export class OctokitPort implements GithubPort {
   async listPullFiles(owner: string, repo: string, number: number) {
     const { data, headers } = await this.get<any[]>("GET /repos/{owner}/{repo}/pulls/{pull_number}/files", { owner, repo, pull_number: number, per_page: 100 });
     const more = OctokitPort.nextPage(headers.link) !== null;
-    return { files: data.map((f) => ({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch ?? null })), truncated: more };
+    return { files: data.map((f) => ({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch ?? null, previousFilename: f.previous_filename ?? null })), truncated: more };
+  }
+
+  async getContents(owner: string, repo: string, path: string, ref?: string): Promise<Contents> {
+    const clean = path.replace(/^\/+|\/+$/g, "");
+    const route = clean ? "GET /repos/{owner}/{repo}/contents/{path}" : "GET /repos/{owner}/{repo}/contents";
+    const { data } = await this.get<any>(route, { owner, repo, ...(clean ? { path: clean } : {}), ...(ref ? { ref } : {}) });
+    if (Array.isArray(data)) {
+      const entries: TreeEntry[] = data.map((e) => ({ name: e.name, path: e.path, type: e.type === "dir" ? "dir" : e.type === "submodule" ? "submodule" : e.type === "symlink" ? "symlink" : "file", size: e.size ?? 0, sha: e.sha }));
+      entries.sort((a, b) => (a.type === "dir" ? 0 : 1) - (b.type === "dir" ? 0 : 1) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+      return { kind: "dir", entries };
+    }
+    const size = Number(data.size ?? 0);
+    const file = { path: data.path as string, sha: data.sha as string, size, htmlUrl: (data.html_url as string | undefined) ?? null };
+    if (size > MAX_TEXT_BYTES) return { kind: "file", file: { ...file, text: null, binary: false, tooLarge: true } };
+    let buf: Buffer;
+    if (data.encoding === "base64" && typeof data.content === "string") buf = Buffer.from(data.content, "base64");
+    else {
+      const raw = await this.send<ArrayBuffer | string>(route, { owner, repo, ...(clean ? { path: clean } : {}), ...(ref ? { ref } : {}), headers: { accept: "application/vnd.github.raw+json" } });
+      buf = typeof raw === "string" ? Buffer.from(raw, "utf8") : Buffer.from(raw);
+    }
+    if (buf.subarray(0, 8000).includes(0)) return { kind: "file", file: { ...file, text: null, binary: true, tooLarge: false } };
+    return { kind: "file", file: { ...file, text: buf.toString("utf8"), binary: false, tooLarge: false } };
+  }
+
+  async listCommitFiles(owner: string, repo: string, sha: string) {
+    const { data } = await this.get<any>("GET /repos/{owner}/{repo}/commits/{ref}", { owner, repo, ref: sha, per_page: 100 });
+    const files: any[] = data.files ?? [];
+    return { files: files.map((f) => ({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch ?? null, previousFilename: f.previous_filename ?? null })), truncated: files.length >= 300 };
+  }
+
+  async createReviewComment(owner: string, repo: string, number: number, i: { body: string; commitSha: string; path: string; line: number; side: "LEFT" | "RIGHT" }): Promise<RemoteComment> {
+    const c = await this.send<any>("POST /repos/{owner}/{repo}/pulls/{pull_number}/comments", { owner, repo, pull_number: number, body: i.body, commit_id: i.commitSha, path: i.path, line: i.line, side: i.side });
+    return { githubId: BigInt(c.id), login: c.user?.login ?? null, body: c.body, createdAt: new Date(c.created_at), updatedAt: new Date(c.updated_at), path: c.path, line: c.line ?? null, commitSha: c.commit_id ?? null };
   }
 
   async listPullCommits(owner: string, repo: string, number: number) {
     const { data, headers } = await this.get<any[]>("GET /repos/{owner}/{repo}/pulls/{pull_number}/commits", { owner, repo, pull_number: number, per_page: 100 });
     const more = OctokitPort.nextPage(headers.link) !== null;
-    return { commits: data.map((c) => ({ sha: c.sha, message: String(c.commit?.message ?? "").split(/\r?\n/)[0], author: c.author?.login ?? c.commit?.author?.name ?? null, date: c.commit?.author?.date ? new Date(c.commit.author.date) : null })), truncated: more };
+    return { commits: data.map((c) => { const full = String(c.commit?.message ?? ""); const [first, ...rest] = full.split(/\r?\n/); return { sha: c.sha, message: first, body: rest.join("\n").trim(), author: c.author?.login ?? c.commit?.author?.name ?? null, authorAvatar: c.author?.avatar_url ?? null, date: c.commit?.author?.date ? new Date(c.commit.author.date) : null }; }), truncated: more };
   }
 
   async compare(upstream: { owner: string; repo: string; branch: string }, fork: { owner: string; branch: string }): Promise<CompareOutcome> {

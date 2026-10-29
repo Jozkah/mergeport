@@ -36,6 +36,19 @@ export async function addComment(ctx: Ctx, workItemId: string, body: string) {
   await audit(ctx.db, ctx.v, "github.comment", { type: "WorkItem", id: item.id });
 }
 
+/** An inline comment on one line of a pull request's diff, posted as the acting person. */
+export async function addReviewComment(ctx: Ctx, workItemId: string, input: { path: string; line: number; side: "LEFT" | "RIGHT"; body: string }) {
+  if (!input.body.trim()) throw new ValidationError("Write a comment first");
+  if (input.body.length > 65_000) throw new ValidationError("That comment is too long");
+  if (!input.path || !Number.isInteger(input.line) || input.line < 1) throw new ValidationError("Pick a line to comment on");
+  const { item, repo, port, owner, name } = await load(ctx, workItemId, "manageWork");
+  if (item.type !== "PULL_REQUEST") throw new ValidationError("Only pull requests have a diff");
+  if (!item.headSha) throw new ValidationError("This pull request has no head commit yet");
+  await port.createReviewComment(owner, name, item.number, { body: input.body, commitSha: item.headSha, path: input.path, line: input.line, side: input.side });
+  await refresh(ctx, port, repo.id, item.number);
+  await audit(ctx.db, ctx.v, "github.review-comment", { type: "WorkItem", id: item.id });
+}
+
 export async function setLabels(ctx: Ctx, workItemId: string, labels: string[]) {
   const { item, repo, port, owner, name } = await load(ctx, workItemId, "manageWork");
   const clean = [...new Set(labels.map((l) => l.trim()).filter(Boolean))].slice(0, 50);

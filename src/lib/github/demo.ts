@@ -3,7 +3,8 @@ import type { Db } from "@/lib/db";
 import type { RepoMeta } from "@/lib/services/repositories";
 import type { CompareOutcome } from "@/lib/domain/forks";
 import { sameLogin, indexList } from "@/lib/domain/text-index";
-import { GithubError, type GithubPort, type MergeMethod, type Page, type RemoteBranch, type RemoteComment, type RemoteRequested, type RemoteReview, type RemoteWorkItem } from "./port";
+import { DEMO_CHANGES, DEMO_FILES, makePatch } from "@/lib/demo/repo-files";
+import { GithubError, type Contents, type TreeEntry, type GithubPort, type MergeMethod, type Page, type RemoteBranch, type RemoteComment, type RemoteRequested, type RemoteReview, type RemoteWorkItem } from "./port";
 
 /**
  * Demo-mode GitHub. The seeded database IS the demo "remote": reads reflect it and writes persist into it,
@@ -98,14 +99,51 @@ export class DemoPort implements GithubPort {
   }
   async listPullFiles() {
     return {
-      files: [
-        { filename: "src/example/demo.ts", status: "modified", additions: 12, deletions: 3, patch: ["@@ -1,5 +1,14 @@", " import { thing } from './thing';", "-const old = 1;", "+const next = 2; // synthetic demo diff", "+export function demo() {", "+  return next;", "+}"].join("\n") },
-      ],
+      files: DEMO_CHANGES.map((c) => {
+        const d = makePatch(c.before, c.after);
+        return { filename: c.filename, status: "modified", additions: d.additions, deletions: d.deletions, patch: d.patch, previousFilename: null };
+      }),
       truncated: false,
     };
   }
   async listPullCommits() {
-    return { commits: [{ sha: "d3m0c0m1", message: "Synthetic demo commit", author: "demo-author", date: new Date() }], truncated: false };
+    const when = (h: number) => new Date(Date.now() - h * 3600_000);
+    return {
+      commits: [
+        { sha: "9f3c2a1b7d0e4c58a6b1f2d3e4a5b6c7d8e9f012", message: "Rotate session ids with 32 random bytes", body: "16 bytes is enough today, but the cost of 32 is nothing\nand it removes the question.", author: "alice-demo", authorAvatar: null, date: when(30) },
+        { sha: "c41d7e90b2a35f68e7d1c0b9a8f7e6d5c4b3a291", message: "Slide the session expiry forward while it is in use", body: "", author: "alice-demo", authorAvatar: null, date: when(26) },
+        { sha: "0b8a6f4e2d1c9b7a5e3f1d0c8b6a4e2f0d9c7b5a", message: "Format byte sizes up to terabytes", body: "Also guards against NaN and negative input.", author: "bram-demo", authorAvatar: null, date: when(3) },
+      ],
+      truncated: false,
+    };
+  }
+  async listCommitFiles(_o: string, _r: string, sha: string) {
+    const all = (await this.listPullFiles()).files;
+    return { files: sha.startsWith("0b8a") ? all.slice(1) : all.slice(0, 1), truncated: false };
+  }
+  async getContents(_o: string, _r: string, path: string): Promise<Contents> {
+    const clean = path.replace(/^\/+|\/+$/g, "");
+    const text = DEMO_FILES[clean];
+    if (text !== undefined) return { kind: "file", file: { path: clean, sha: "demo" + clean.length, size: text.length, text, binary: false, tooLarge: false, htmlUrl: null } };
+    const prefix = clean ? clean + "/" : "";
+    const seen = new Map<string, TreeEntry>();
+    for (const [file, body] of Object.entries(DEMO_FILES)) {
+      if (!file.startsWith(prefix)) continue;
+      const rest = file.slice(prefix.length);
+      const [head, ...more] = rest.split("/");
+      if (more.length > 0) seen.set(head, { name: head, path: prefix + head, type: "dir", size: 0, sha: "d" + head });
+      else seen.set(head, { name: head, path: prefix + head, type: "file", size: body.length, sha: "f" + head });
+    }
+    if (seen.size === 0) throw new GithubError("not-found", "Not found", undefined, undefined, 404);
+    const entries = [...seen.values()].sort((a, b) => (a.type === "dir" ? 0 : 1) - (b.type === "dir" ? 0 : 1) || a.name.localeCompare(b.name));
+    return { kind: "dir", entries };
+  }
+  async createReviewComment(owner: string, name: string, number: number, input: { body: string; commitSha: string; path: string; line: number; side: "LEFT" | "RIGHT" }): Promise<RemoteComment> {
+    const { i } = await this.item(owner, name, number);
+    const now = new Date();
+    const c = await this.db.workItemComment.create({ data: { workItemId: i.id, githubId: nextId(), kind: "REVIEW_COMMENT", authorLogin: this.actingLogin, body: input.body, path: input.path, line: input.line, createdAtGh: now, updatedAtGh: now } });
+    await this.touch(i.id);
+    return { githubId: c.githubId, login: c.authorLogin, body: c.body, createdAt: now, updatedAt: now, path: input.path, line: input.line };
   }
   async compare(): Promise<CompareOutcome> {
     return { kind: "error", message: "Demo mode serves the stored comparison; it does not recompute one." };

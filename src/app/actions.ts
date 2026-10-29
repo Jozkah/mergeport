@@ -101,6 +101,14 @@ export async function commentAction(fd: FormData): Promise<ActionResult> {
   });
 }
 
+export async function inlineCommentAction(input: { id: string; path: string; line: number; side: "LEFT" | "RIGHT"; body: string }): Promise<ActionResult> {
+  return run(async () => {
+    await work.addReviewComment(await ctx(), input.id, { path: input.path, line: input.line, side: input.side === "LEFT" ? "LEFT" : "RIGHT", body: input.body });
+    revalidatePath("/pull-requests/" + input.id);
+    return { ok: true, message: "Comment posted" };
+  });
+}
+
 export async function labelsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     await work.setLabels(await ctx(), str(fd, "id"), str(fd, "labels").split(",").map((s) => s.trim()));

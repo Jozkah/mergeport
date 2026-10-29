@@ -1,6 +1,7 @@
 @import "@fontsource-variable/inter";
 @import "tailwindcss";
 @import "./motion.css";
+@import "./code.css";
 
 /*
  * One token system. Values measured from the Kravio reference (see DESIGN.md):
