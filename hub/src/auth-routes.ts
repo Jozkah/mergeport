@@ -18,7 +18,7 @@ export function authRoutes(): Route<HubContext>[] {
       json(res, 200, await startDeviceFlow(ctx.config));
     }),
     route<HubContext>("POST", "/auth/device/poll", async (ctx, req, res) => {
-      const { deviceCode } = await readJson(req, z.object({ deviceCode: z.string().min(1).max(256), clientName: z.string().max(100).optional() }));
+      const { deviceCode } = await readJson(req, z.object({ deviceCode: z.string().min(1).max(256) }));
       const polled = await pollDeviceFlow(ctx.config, deviceCode);
       if (polled.kind === "pending" || polled.kind === "slow_down") return json(res, 202, { pending: true });
       if (polled.kind === "expired") return json(res, 410, { error: "expired" });

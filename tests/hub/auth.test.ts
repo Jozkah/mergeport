@@ -122,6 +122,21 @@ describe("device-flow sign-in", () => {
     expect(expired.body).toEqual({ error: "expired" });
   });
 
+  it.each([9007199254740993n, 9223372036854775807n])("GitHub id %s keeps full precision through sign-in, /me and logout", async (id) => {
+    hub.github.addUser({ id, login: "big" });
+    const r = await signIn(id);
+    expect(r.status).toBe(200);
+    expect(r.body.member.githubId).toBe(id.toString());
+    const token = r.body.session as string;
+    const me = await hub.api(token)("GET", "/me");
+    expect(me.status).toBe(200);
+    expect(me.body.member.githubId).toBe(id.toString());
+    expect(me.body.members[0].githubId).toBe(id.toString());
+    expect((await signIn(id)).body.member.githubId).toBe(id.toString());
+    expect((await hub.api(token)("POST", "/auth/logout")).status).toBe(204);
+    expect((await hub.api(token)("GET", "/me")).status).toBe(401);
+  });
+
   it("poll rejects a missing deviceCode with 400", async () => {
     expect((await hub.api()("POST", "/auth/device/poll", {})).status).toBe(400);
   });

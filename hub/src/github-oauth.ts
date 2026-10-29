@@ -65,6 +65,8 @@ export async function pollDeviceFlow(cfg: OauthCfg, deviceCode: string): Promise
     case "expired_token":
     case "bad_verification_code":
       return { kind: "expired" };
+    case "incorrect_device_code":
+      throw new HttpError(400, "invalid device code");
     default:
       throw new HttpError(502, "github error");
   }
