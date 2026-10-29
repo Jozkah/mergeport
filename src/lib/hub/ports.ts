@@ -9,9 +9,49 @@ export type HubSessionPort = {
   save(dbFile: string, s: { origin: string; token: string; githubId: string }): Promise<void>;
   // marks TeamConfig.backend = hubId, hubOrigin = origin (plan 2 columns)
   markProfile(dbFile: string, p: { backend: Backend; origin: string; teamName: string }): Promise<void>;
+  // the stored session, or null when there is none (plan 2: decrypts the HubSession row)
+  read(dbFile: string): Promise<{ origin: string; token: string; githubId: string } | null>;
+  // forgets the stored session (sign out); a missing session is not an error
+  remove(dbFile: string): Promise<void>;
 };
 
 export type HubLinkStatus = { state: "live" | "reconnecting" | "offline"; pendingOps: number; needsSignIn: boolean };
 
-/** Admin calls against the hub; defined in Task 8. */
-export type HubAdminApi = Record<string, never>;
+export type HubRole = "OWNER" | "ADMIN" | "MEMBER" | "READER";
+export type HubMember = { githubId: string; login: string; name: string | null; avatarUrl: string | null; role: HubRole; status: "INVITED" | "ACTIVE" | "REMOVED" };
+export type HubSpaceInfo = { id: string; kind: "COMMON" | "RESTRICTED"; name: string; canWrite: boolean; seq: string };
+export type HubSpaceMember = { githubId: string; canWrite: boolean };
+
+/** Admin calls against the hub. The hub decides who may do what; callers only get friendlier errors. */
+export type HubAdminApi = {
+  me(): Promise<{ member: HubMember; team: { name: string }; members: HubMember[]; spaces: HubSpaceInfo[] }>;
+  invite(login: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void>;
+  removeMember(githubId: string): Promise<void>;
+  setRole(githubId: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void>;
+  createSpace(name: string, members: HubSpaceMember[]): Promise<HubSpaceInfo>;
+  updateSpace(id: string, p: { name?: string; members?: HubSpaceMember[] }): Promise<void>;
+  deleteSpace(id: string): Promise<void>;
+  logout(): Promise<void>;
+};
+
+/** 401: no valid session; the user signs in to the server again. */
+export class HubUnauthorized extends Error {
+  constructor(message = "Sign in to the server again") {
+    super(message);
+    this.name = "HubUnauthorized";
+  }
+}
+/** 403: the hub refused this member. */
+export class HubForbidden extends Error {
+  constructor(message = "The server refused that") {
+    super(message);
+    this.name = "HubForbidden";
+  }
+}
+/** 429 or other non-success answers. `retryAfter` is the Retry-After header value when present. */
+export class HubRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly retryAfter: string | null = null) {
+    super(message);
+    this.name = "HubRequestError";
+  }
+}
