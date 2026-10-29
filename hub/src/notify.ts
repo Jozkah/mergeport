@@ -1,7 +1,7 @@
 import type http from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import { getMember, type findSession as findSessionFn, type Member } from "./auth";
+import { getMember, peekSession, type findSession as findSessionFn, type Member } from "./auth";
 import { listSpacesFor, spaceAccess } from "./authz";
 import type { HubDb } from "./db";
 
@@ -76,12 +76,13 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     if (c.ws.readyState === c.ws.OPEN || c.ws.readyState === c.ws.CONNECTING) {
       c.ws.close(code, bye ?? "unauthorized");
       c.grace ??= setTimeout(() => c.ws.terminate(), CLOSE_GRACE_MS);
+      c.grace.unref();
     }
   };
 
-  /** The session must still exist (this also slides it) and its member must be ACTIVE; otherwise the socket is closed. */
-  const authenticate = (c: Conn): Member | null => {
-    const s = deps.findSession(deps.db, c.token, deps.now());
+  /** The session must still exist and its member must be ACTIVE; otherwise the socket is closed. Only a client ping (`slide`) extends the session. */
+  const authenticate = (c: Conn, slide = false): Member | null => {
+    const s = slide ? deps.findSession(deps.db, c.token, deps.now()) : peekSession(deps.db, c.token, deps.now());
     if (!s) return void closeConn(c, CLOSE_UNAUTHORIZED), null;
     const m = getMember(deps.db, s.githubId);
     if (!m) return void closeConn(c, CLOSE_UNAUTHORIZED), null;
@@ -106,7 +107,13 @@ export function createNotifier(deps: NotifierDeps): Notifier {
   };
 
   const onUpgrade = (req: http.IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (new URL(req.url ?? "/", "http://hub.local").pathname !== "/ws") return reject(socket, 404, "Not Found");
+    let pathname: string;
+    try {
+      pathname = new URL(req.url ?? "/", "http://hub.local").pathname;
+    } catch {
+      return reject(socket, 400, "Bad Request");
+    }
+    if (pathname !== "/ws") return reject(socket, 404, "Not Found");
     if (closing) return reject(socket, 503, "Service Unavailable");
     const token = tokenFromProtocols(req.headers["sec-websocket-protocol"]);
     const session = token ? deps.findSession(deps.db, token, deps.now()) : null;
@@ -126,7 +133,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
       });
       ws.on("message", (raw, isBinary) => {
         armSilence(c);
-        const m = authenticate(c);
+        const m = authenticate(c, true);
         if (!m || isBinary) return;
         try {
           const msg = JSON.parse(raw.toString()) as { t?: unknown };

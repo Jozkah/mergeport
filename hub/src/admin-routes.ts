@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { requireSession, revokeSessions, toMember, type Member } from "./auth";
+import { getMember, requireSession, revokeSessions, toMember, type Member, type Role } from "./auth";
 import { memberJson } from "./auth-routes";
 import { requireRole, ROLES } from "./authz";
 import type { AccessAction } from "./notify";
@@ -102,6 +102,14 @@ export function adminRoutes(): Route<HubContext>[] {
     return s.member;
   };
 
+  /** Re-reads the actor right before a write (the body was awaited since the first check) and re-applies the role floor. */
+  const fresh = (ctx: HubContext, actorId: bigint, min: Role): Member => {
+    const m = getMember(ctx.db, actorId);
+    if (!m || m.status !== "ACTIVE") throw new HttpError(403, "forbidden");
+    requireRole(m, min);
+    return m;
+  };
+
   return [
     route<HubContext>("GET", "/admin/members", (ctx, req, res) => {
       admin(ctx, req);
@@ -110,14 +118,17 @@ export function adminRoutes(): Route<HubContext>[] {
     }),
 
     route<HubContext>("POST", "/admin/invites", async (ctx, req, res) => {
-      const actor = admin(ctx, req);
+      const first = admin(ctx, req);
       const body = await readJson(
         req,
         z.object({ githubLogin: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/), role: z.enum(["READER", "MEMBER", "ADMIN"]) }),
       );
+      const actor = fresh(ctx, first.githubId, "ADMIN");
       if (body.role === "ADMIN") requireRole(actor, "OWNER");
       const active = ctx.db.prepare("SELECT 1 FROM member WHERE lower(login) = lower(?) AND status = 'ACTIVE'").get(body.githubLogin);
       if (active) throw new HttpError(409, "already a member");
+      const removed = ctx.db.prepare("SELECT 1 FROM member WHERE lower(login) = lower(?) AND status = 'REMOVED'").get(body.githubLogin);
+      if (removed) throw new HttpError(409, "member was removed");
       const now = ctx.now();
       const invite = {
         id: randomUUID(),
@@ -133,40 +144,44 @@ export function adminRoutes(): Route<HubContext>[] {
     }),
 
     route<HubContext>("DELETE", "/admin/members/:githubId", (ctx, req, res, params) => {
-      const actor = admin(ctx, req);
-      const target = targetMember(ctx, params.githubId);
-      if (target.role === "OWNER") throw new HttpError(409, "owner cannot be removed");
-      if (target.role === "ADMIN") requireRole(actor, "OWNER");
-      ctx.db.transaction(() => {
+      const first = admin(ctx, req);
+      const target = ctx.db.transaction(() => {
+        const actor = fresh(ctx, first.githubId, "ADMIN");
+        const target = targetMember(ctx, params.githubId);
+        if (target.role === "OWNER") throw new HttpError(409, "owner cannot be removed");
+        if (target.role === "ADMIN") requireRole(actor, "OWNER");
         ctx.db.prepare("UPDATE member SET status = 'REMOVED' WHERE github_id = ?").run(target.githubId);
         ctx.db.prepare("DELETE FROM space_member WHERE github_id = ?").run(target.githubId);
         revokeSessions(ctx.db, target.githubId);
+        return target;
       })();
       accessChanged(ctx, { kind: "member-removed", githubId: target.githubId });
       noContent(res);
     }),
 
     route<HubContext>("PATCH", "/admin/members/:githubId", async (ctx, req, res, params) => {
-      const actor = admin(ctx, req);
+      const first = admin(ctx, req);
       const { role } = await readJson(req, z.object({ role: z.enum(ROLES) }));
-      const target = targetMember(ctx, params.githubId);
-      if (target.status !== "ACTIVE") throw new HttpError(409, "member is removed");
-      if (target.role === "OWNER") {
-        // Ownership only moves by transferring it to someone else.
-        throw new HttpError(409, "owner role can only be transferred");
-      }
-      if (role === "OWNER") {
-        requireRole(actor, "OWNER");
-        ctx.db.transaction(() => {
+      const { actor, target } = ctx.db.transaction(() => {
+        const actor = fresh(ctx, first.githubId, "ADMIN");
+        const target = targetMember(ctx, params.githubId);
+        if (target.status !== "ACTIVE") throw new HttpError(409, "member is removed");
+        if (target.role === "OWNER") {
+          // Ownership only moves by transferring it to someone else.
+          throw new HttpError(409, "owner role can only be transferred");
+        }
+        if (role === "OWNER") {
+          requireRole(actor, "OWNER");
           ctx.db.prepare("UPDATE member SET role = 'ADMIN' WHERE github_id = ?").run(actor.githubId);
           ctx.db.prepare("UPDATE member SET role = 'OWNER' WHERE github_id = ?").run(target.githubId);
           ctx.db.prepare("UPDATE team SET owner_github_id = ?").run(target.githubId);
-        })();
-        accessChanged(ctx, { kind: "member-role", githubId: actor.githubId });
-      } else {
-        if (role === "ADMIN" || target.role === "ADMIN") requireRole(actor, "OWNER");
-        ctx.db.prepare("UPDATE member SET role = ? WHERE github_id = ?").run(role, target.githubId);
-      }
+        } else {
+          if (role === "ADMIN" || target.role === "ADMIN") requireRole(actor, "OWNER");
+          ctx.db.prepare("UPDATE member SET role = ? WHERE github_id = ?").run(role, target.githubId);
+        }
+        return { actor, target };
+      })();
+      if (role === "OWNER") accessChanged(ctx, { kind: "member-role", githubId: actor.githubId });
       accessChanged(ctx, { kind: "member-role", githubId: target.githubId });
       const row = ctx.db.prepare("SELECT * FROM member WHERE github_id = ?").safeIntegers(true).get(target.githubId) as Parameters<typeof toMember>[0];
       json(res, 200, { member: memberJson(toMember(row)) });
@@ -179,8 +194,9 @@ export function adminRoutes(): Route<HubContext>[] {
     }),
 
     route<HubContext>("POST", "/admin/spaces", async (ctx, req, res) => {
-      const actor = admin(ctx, req);
+      const first = admin(ctx, req);
       const body = await readJson(req, z.object({ name: spaceName, members: spaceMembers.default([]) }));
+      const actor = fresh(ctx, first.githubId, "ADMIN");
       const id = randomUUID();
       ctx.db.transaction(() => {
         ctx.db.prepare("INSERT INTO space (id, kind, name, created_at, created_by) VALUES (?, 'RESTRICTED', ?, ?, ?)").run(id, body.name, new Date(ctx.now()).toISOString(), actor.githubId);
@@ -191,8 +207,9 @@ export function adminRoutes(): Route<HubContext>[] {
     }),
 
     route<HubContext>("PATCH", "/admin/spaces/:id", async (ctx, req, res, params) => {
-      admin(ctx, req);
+      const first = admin(ctx, req);
       const body = await readJson(req, z.object({ name: spaceName.optional(), members: spaceMembers.optional() }));
+      fresh(ctx, first.githubId, "ADMIN");
       const space = getSpace(ctx, params.id);
       if (space.kind === "COMMON" && body.members !== undefined) throw new HttpError(400, "common space membership is implicit");
       const before = spaceMemberMap(ctx, space.id);

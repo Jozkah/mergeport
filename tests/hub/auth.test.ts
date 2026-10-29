@@ -183,7 +183,7 @@ describe("sessions", () => {
     expect(r.body.member.login).toBe("olive");
     expect(r.body.team.name).toBe("olive's team");
     expect(r.body.members).toHaveLength(1);
-    expect(r.body.spaces).toEqual([{ id: "common", kind: "COMMON", name: "Workspace", canWrite: true, seq: 0 }]);
+    expect(r.body.spaces).toEqual([{ id: "common", kind: "COMMON", name: "Workspace", canWrite: true, seq: "0" }]);
   });
 
   it("logout kills only that session", async () => {

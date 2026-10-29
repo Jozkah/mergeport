@@ -365,3 +365,17 @@ Expected: all pass; the existing suites unchanged.
 - Spec coverage: config and binding (T1), schema (T1), device flow/sessions/bootstrap/invites/expiry (T2), roles and admin routes, `/me` members and spaces (T3), op semantics, cursor, 410, snapshot, appliedOps 50, pruning (T4), WebSocket messages, coalescing, ping/75 s, 4403, shutdown (T5), rate limits, log redaction, README with Caddy/systemd/backup/upgrade (T6). `githubHost` in `/health` (T1). Not in this plan, by design: everything client-side (plans 2 and 3).
 - Review Focus 1, 2, 4 → T4 tests; 3 → T5; 5 → T2.
 - Names used across tasks: `requireSession`, `requireRole`, `spaceAccess`, `listSpacesFor`, `applyOps`, `eventsSince`, `snapshot`, `prune`, `createNotifier`, `createLimiter`, `startTestHub`, `FakeGitHubOAuth.authorize/deny/addUser` — consistent as written.
+
+## API notes for client sessions
+
+Deviations and additions made while building the hub (the code and `hub/README.md` are authoritative):
+
+- `GET /spaces/:id/entities` returns `{ seq, events, more }`; pages of 500, optional `limit` query. Loop until `more` is false, feeding the returned `seq` back as `since`.
+- Ops request body is capped at 16 MiB (413 beyond); batch by byte size.
+- `POST /admin/invites` answers `{ invite: { id, githubLogin, role, createdAt, expiresAt } }`; invites expire after 7 days. Inviting a removed login is 409 "member was removed".
+- `PATCH /admin/members/:id` answers `{ member }`; space routes answer `{ space }`.
+- `access: added` is also sent when a member's `canWrite` on a space changes.
+- A `team` event with reason `member` is also sent when an invite is accepted.
+- The socket closes with 4401 on logout or an expired session, and 4403 on removal. A removed member's token answers 401 after removal.
+- `/me` `spaces[].seq` is a string, like `seq` in `hello`, `changed`, entities and snapshot.
+- `requireSession` is the single authentication entry point; it also applies the 60 per 10 s per-session rate limit.

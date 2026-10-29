@@ -288,3 +288,21 @@ describe("GET /ws", () => {
     expect(exp() > before).toBe(true);
   });
 });
+
+describe("team event on invite acceptance", () => {
+  it("accepting an invite pushes team/member to connected sockets", async () => {
+    const hub = await startTestHub();
+    try {
+      const olive = await signInAs(hub, 1n, "olive");
+      const c = new Client(hub.url, ["mergeport.v1", `bearer.${olive}`]);
+      await c.opened;
+      hub.github.addUser({ id: 2n, login: "mia" });
+      await hub.api(olive)("POST", "/admin/invites", { githubLogin: "mia", role: "MEMBER" });
+      await signInAs(hub, 2n, "mia");
+      await c.waitFor((m) => m.t === "team" && m.reason === "member");
+      c.ws.close();
+    } finally {
+      await hub.close();
+    }
+  });
+});

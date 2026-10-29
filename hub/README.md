@@ -7,6 +7,7 @@ A small self-hosted server for a Mergeport team: members, roles, spaces, and a s
 - Node 24
 - A domain name pointing at the machine
 - A reverse proxy that terminates TLS (Caddy below)
+- The `sqlite3` command-line tool (for backups)
 
 ## 1. Register a GitHub OAuth App
 
@@ -34,7 +35,7 @@ MERGEPORT_HUB_TRUST_PROXY=true
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `MERGEPORT_HUB_DATA` | yes | | Directory holding `hub.db` (created if missing). |
-| `MERGEPORT_HUB_PUBLIC_URL` | yes | | Public https URL; must match the OAuth App homepage. |
+| `MERGEPORT_HUB_PUBLIC_URL` | yes | | Public URL, should be https; must match the OAuth App homepage. |
 | `MERGEPORT_HUB_GITHUB_CLIENT_ID` | yes | | OAuth App client id. |
 | `MERGEPORT_HUB_GITHUB_CLIENT_SECRET` | yes | | OAuth App client secret. |
 | `MERGEPORT_HUB_PORT` | no | `8787` | Listen port. |
@@ -51,7 +52,7 @@ npm ci
 npm run hub
 ```
 
-Load the `.env` with your process manager (systemd below) or your shell. The first person to sign in becomes the team owner; everyone else needs an invite from an owner or admin.
+Load the `.env` with your process manager (systemd below) or your shell. The first person to sign in becomes the team owner (the team is named `<login>'s team`); everyone else needs an invite from an owner or admin. **Sign in yourself immediately after the first start**, before anyone else can reach the hub.
 
 ## 4. Reverse proxy (Caddy)
 
@@ -62,6 +63,8 @@ hub.example.com {
 ```
 
 Caddy gets the certificate, forwards WebSockets, and sets `X-Forwarded-For`.
+
+With nginx, set the header explicitly: `proxy_set_header X-Forwarded-For $remote_addr;` (not `$proxy_add_x_forwarded_for`, which appends to a client-supplied value and lets clients dodge the per-IP rate limit). Also forward WebSockets (`proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection upgrade;`).
 
 ## 5. systemd
 
@@ -77,7 +80,7 @@ Type=simple
 User=mergeport
 WorkingDirectory=/opt/mergeport
 EnvironmentFile=/etc/mergeport-hub.env
-ExecStart=/usr/bin/npm run hub
+ExecStart=/usr/bin/node --import tsx hub/src/main.ts
 Restart=on-failure
 KillSignal=SIGTERM
 
@@ -85,7 +88,7 @@ KillSignal=SIGTERM
 WantedBy=multi-user.target
 ```
 
-Then `systemctl enable --now mergeport-hub`. The hub closes cleanly on SIGTERM.
+Adjust the `node` path and `WorkingDirectory` to your install. Then `systemctl enable --now mergeport-hub`. The hub closes cleanly on SIGTERM.
 
 ## Backup
 
@@ -106,6 +109,7 @@ Stop the hub, `git pull`, `npm ci`, start it. Migrations apply at start. A datab
 - **Sessions** last 30 days and slide: every authenticated request extends them.
 - **Rate limits**: 60 requests per 10 s per session; 10 device-flow starts per minute per IP. Over the limit answers `429` with `Retry-After` (seconds).
 - **Ops body cap**: a push request body is capped at 16 MiB; larger answers `413`. Clients should batch ops by byte size.
+- **Reading events**: `GET /spaces/:id/entities?since=<seq>` returns `{ seq, events, more }`, in pages of 500 (`limit` can lower that). A client must loop until `more` is `false`, using the returned `seq` as the next `since`.
 - **Event log pruning**: old events are pruned. Sessions with no cursor for a space do not hold pruning back. A client whose `since` has been pruned gets `410` and re-snapshots that space.
 - **Logs**: one JSON line per request (`method`, `path`, `status`, `ms`, `member` when known). Never bodies, query strings, session tokens, GitHub tokens, device codes or user codes.
 

@@ -28,7 +28,7 @@ export function spaceAccess(db: HubDb, member: Member, spaceId: string): SpaceAc
   return { canRead: true, canWrite: row.can_write === 1 && writer };
 }
 
-export type SpaceSummary = { id: string; kind: string; name: string; canWrite: boolean; seq: number };
+export type SpaceSummary = { id: string; kind: string; name: string; canWrite: boolean; seq: string };
 
 /** Spaces the member can read: COMMON first, then restricted ones by name. */
 export function listSpacesFor(db: HubDb, member: Member): SpaceSummary[] {
@@ -42,5 +42,5 @@ export function listSpacesFor(db: HubDb, member: Member): SpaceSummary[] {
     )
     .all(member.githubId) as { id: string; kind: string; name: string; seq: number; can_write: number | null }[];
   const writer = roleRank(member.role) >= RANK.MEMBER;
-  return rows.map((r) => ({ id: r.id, kind: r.kind, name: r.name, seq: r.seq, canWrite: writer && (r.kind === "COMMON" || r.can_write === 1) }));
+  return rows.map((r) => ({ id: r.id, kind: r.kind, name: r.name, seq: String(r.seq), canWrite: writer && (r.kind === "COMMON" || r.can_write === 1) }));
 }

@@ -26,7 +26,7 @@ async function setup(...others: Spec[]): Promise<Record<string, string>> {
 }
 const roleOf = (id: bigint) => (hub.db.prepare("SELECT role FROM member WHERE github_id = ?").get(id) as { role: string }).role;
 const spacesOf = async (token: string) =>
-  (await hub.api(token)("GET", "/me")).body.spaces as { id: string; kind: string; name: string; canWrite: boolean; seq: number }[];
+  (await hub.api(token)("GET", "/me")).body.spaces as { id: string; kind: string; name: string; canWrite: boolean; seq: string }[];
 
 describe("invites and roles", () => {
   it("READER cannot POST /admin/invites (403)", async () => {
@@ -159,7 +159,7 @@ describe("/me", () => {
     expect((await spacesOf(t.max)).find((s) => s.id === id)).toMatchObject({ canWrite: false });
     const common = (await spacesOf(t.mia)).find((s) => s.id === "common")!;
     expect(common).toMatchObject({ kind: "COMMON", name: "Workspace", canWrite: true });
-    expect(typeof common.seq).toBe("number");
+    expect(common.seq).toBe("0");
   });
 
   it("owner bootstrap creates the COMMON space", async () => {

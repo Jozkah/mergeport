@@ -46,6 +46,7 @@ export function authRoutes(): Route<HubContext>[] {
       }
       const clientName = (req.headers["x-mergeport-client"] as string | undefined)?.slice(0, 100) ?? null;
       const session = createSession(ctx.db, admission.member.githubId, clientName, ctx.now());
+      if (admission.joined) ctx.notify.team("member");
       ctx.log.info("sign-in", { githubId: user.id, login: user.login, role: admission.member.role });
       json(res, 200, { session, member: memberJson(admission.member), team: teamJson(ctx) });
     }),

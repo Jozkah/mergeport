@@ -62,7 +62,12 @@ export function createHub(opts: { config: HubConfig; db: HubDb; now?: () => numb
     });
     void (async () => {
       try {
-        const url = new URL(req.url ?? "/", "http://hub.local");
+        let url: URL;
+        try {
+          url = new URL(req.url ?? "/", "http://hub.local");
+        } catch {
+          throw new HttpError(400, "bad path");
+        }
         const m = matchRoute(routes, req.method ?? "GET", url.pathname);
         if (!m) throw new HttpError(404, "not found");
         await m.route.handler(ctx, req, res, m.params, url);

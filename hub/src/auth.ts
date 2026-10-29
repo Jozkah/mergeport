@@ -36,16 +36,24 @@ export function createSession(db: HubDb, githubId: bigint, clientName: string | 
   return raw;
 }
 
-/** Slides expiry to now + 30d on every hit; null when unknown or expired. */
-export function findSession(db: HubDb, rawToken: string, now: number): Session | null {
+/** Read-only: the session if it exists and has not expired; does not slide it. */
+export function peekSession(db: HubDb, rawToken: string, now: number): Session | null {
   const idHash = hashToken(rawToken);
   const row = db.prepare("SELECT github_id, client_name, expires_at FROM session WHERE id_hash = ?").safeIntegers(true).get(idHash) as
     | { github_id: bigint; client_name: string | null; expires_at: string }
     | undefined;
   if (!row || row.expires_at <= iso(now)) return null;
+  return { idHash, githubId: row.github_id, clientName: row.client_name, expiresAt: row.expires_at };
+}
+
+/** Slides expiry to now + 30d on every hit; null when unknown or expired. */
+export function findSession(db: HubDb, rawToken: string, now: number): Session | null {
+  const found = peekSession(db, rawToken, now);
+  if (!found) return null;
+  const idHash = found.idHash;
   const expiresAt = iso(now + SESSION_TTL_MS);
   db.prepare("UPDATE session SET last_seen_at = ?, expires_at = ? WHERE id_hash = ?").run(iso(now), expiresAt, idHash);
-  return { idHash, githubId: row.github_id, clientName: row.client_name, expiresAt };
+  return { ...found, expiresAt };
 }
 
 export function revokeSession(db: HubDb, idHash: string): void {
@@ -56,7 +64,7 @@ export function revokeSessions(db: HubDb, githubId: bigint): void {
   db.prepare("DELETE FROM session WHERE github_id = ?").run(githubId);
 }
 
-export type Admission = { ok: true; member: Member } | { ok: false; reason: "not-invited" | "removed" };
+export type Admission = { ok: true; member: Member; joined: boolean } | { ok: false; reason: "not-invited" | "removed" };
 
 export function bootstrapOrAdmit(db: HubDb, user: GithubIdentity, now: number): Admission {
   return db.transaction((): Admission => {
@@ -72,12 +80,12 @@ export function bootstrapOrAdmit(db: HubDb, user: GithubIdentity, now: number): 
         at,
       );
       db.prepare("INSERT INTO space (id, kind, name, created_at, created_by) VALUES ('common', 'COMMON', 'Workspace', ?, ?)").run(at, user.id);
-      return { ok: true, member: getMember(db, user.id)! };
+      return { ok: true, member: getMember(db, user.id)!, joined: false };
     }
     const existing = getMember(db, user.id);
     if (existing?.status === "ACTIVE") {
       db.prepare("UPDATE member SET login = ?, name = ?, avatar_url = ? WHERE github_id = ?").run(user.login, user.name, user.avatarUrl, user.id);
-      return { ok: true, member: getMember(db, user.id)! };
+      return { ok: true, member: getMember(db, user.id)!, joined: false };
     }
     if (existing?.status === "REMOVED") return { ok: false, reason: "removed" };
     const invite = db
@@ -97,7 +105,7 @@ export function bootstrapOrAdmit(db: HubDb, user: GithubIdentity, now: number): 
       at,
     );
     db.prepare("UPDATE invite SET used_at = ? WHERE id = ?").run(at, invite.id);
-    return { ok: true, member: getMember(db, user.id)! };
+    return { ok: true, member: getMember(db, user.id)!, joined: true };
   })();
 }
 
