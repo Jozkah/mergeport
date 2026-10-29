@@ -1,0 +1,117 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { HubAuth, completeConnect } from "@/lib/hub/connect";
+import { hubLinkStatus, hubSessionPort } from "@/lib/hub/ports-stub";
+import { hubBackendId } from "@/lib/local/backends";
+import { profileDbPath } from "@/lib/local/profile";
+import { readActive, readHubs } from "@/lib/local/registry";
+import type { GhStatus } from "@/lib/github/gh";
+import { startFakeHub } from "./fake-hub";
+
+const hubs: { stop(): Promise<void> }[] = [];
+const dirs: string[] = [];
+const hub = async (o: Parameters<typeof startFakeHub>[0] = {}) => {
+  const h = await startFakeHub(o);
+  hubs.push(h);
+  return h;
+};
+const home = () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "mp-hubconn-"));
+  dirs.push(d);
+  return d;
+};
+afterEach(async () => {
+  for (const h of hubs.splice(0)) await h.stop();
+  for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+});
+
+const ghOk = (id: bigint): GhStatus => ({ state: "ok", identity: { id, login: "octocat", name: null, avatarUrl: null, host: "github.com" } });
+
+describe("HubAuth.health", () => {
+  it("returns the team name and canonical origin", async () => {
+    const h = await hub();
+    const typed = h.origin.replace("http://", "HTTP://") + "/";
+    const r = await new HubAuth().health(typed, "github.com");
+    expect(r.origin).toBe(h.origin);
+    expect(r.teamName).toBe("Fake Team");
+    expect(r.backend).toBe(hubBackendId(h.origin));
+  });
+  it("rejects a publicUrl that differs from what was typed, naming both", async () => {
+    const h = await hub({ publicUrl: "https://elsewhere.example.com" });
+    await expect(new HubAuth().health(h.origin, "github.com")).rejects.toThrow(/https:\/\/elsewhere\.example\.com.*127\.0\.0\.1/);
+  });
+  it("rejects a different GitHub host", async () => {
+    const h = await hub({ githubHost: "ghe.example.com" });
+    await expect(new HubAuth().health(h.origin, "github.com")).rejects.toThrow(/ghe\.example\.com/);
+  });
+  it("rejects ok:false and a closed port", async () => {
+    const stopped = await startFakeHub();
+    const origin = stopped.origin;
+    await stopped.stop();
+    await expect(new HubAuth().health(origin, "github.com")).rejects.toThrow(/reach/i);
+    const bad = new HubAuth((async () => new Response(JSON.stringify({ ok: false }), { status: 200 })) as typeof fetch);
+    await expect(bad.health("http://127.0.0.1:9", "github.com")).rejects.toThrow();
+  });
+  it("rejects plain http off loopback before any request", async () => {
+    const h = await hub();
+    await expect(new HubAuth().health("http://example.com", "github.com")).rejects.toThrow();
+    expect(h.requests.length).toBe(0);
+  });
+});
+
+describe("HubAuth device flow", () => {
+  it("start returns the user code", async () => {
+    const h = await hub();
+    const s = await new HubAuth().start(h.origin);
+    expect(s.userCode).toBe("ABCD-1234");
+    expect(s.deviceCode).toBeTruthy();
+  });
+  it("polls pending twice then ok", async () => {
+    const h = await hub({ pollsBeforeOk: 2, githubId: "7", login: "mona" });
+    const a = new HubAuth();
+    expect(await a.poll(h.origin, "d")).toEqual({ status: "pending" });
+    expect(await a.poll(h.origin, "d")).toEqual({ status: "pending" });
+    const ok = await a.poll(h.origin, "d");
+    expect(ok).toMatchObject({ status: "ok", member: { githubId: "7", login: "mona" }, team: { name: "Fake Team" } });
+  });
+  it("maps refusals and expiry", async () => {
+    const a = new HubAuth();
+    expect(await a.poll((await hub({ invited: false })).origin, "d")).toEqual({ status: "refused", reason: "not-invited" });
+    expect(await a.poll((await hub({ removed: true })).origin, "d")).toEqual({ status: "refused", reason: "removed" });
+    expect(await a.poll((await hub({ expired: true })).origin, "d")).toEqual({ status: "expired" });
+  });
+});
+
+describe("completeConnect", () => {
+  const base = (h: string, origin: string, gh: GhStatus) => ({ home: h, host: "github.com", origin, teamName: "Fake Team", session: "session-token-secret", member: { githubId: "42", login: "octocat" }, gh, ports: { session: hubSessionPort } });
+
+  it("creates the profile and registry entries, and never writes the token to hubs/active", async () => {
+    const h = home();
+    const origin = "http://127.0.0.1:4000";
+    const r = await completeConnect(base(h, origin, ghOk(42n)));
+    const backend = hubBackendId(origin);
+    expect(r).toEqual({ ok: true, backend });
+    const db = profileDbPath(h, "github.com", 42n, backend);
+    expect(db).toMatch(/github\.com-42-hub-[0-9a-f]{16}/);
+    expect(fs.existsSync(db)).toBe(true);
+    expect(readHubs(h)[0]).toMatchObject({ origin, teamName: "Fake Team", lastSignedInAs: { id: "42", login: "octocat" } });
+    expect(readActive(h)).toEqual({ host: "github.com", accountId: "42", backend });
+    for (const f of ["hubs.json", "active.json"]) expect(fs.readFileSync(path.join(h, f), "utf8")).not.toContain("session-token-secret");
+    expect(fs.readFileSync(path.join(path.dirname(db), "hub-profile.json"), "utf8")).not.toContain("session-token-secret");
+    expect(await hubLinkStatus(db)).toEqual({ state: "offline", pendingOps: 0, needsSignIn: false });
+  });
+  it("mismatch writes nothing", async () => {
+    const h = home();
+    expect(await completeConnect(base(h, "http://127.0.0.1:4000", ghOk(43n)))).toEqual({ ok: false, error: "mismatch" });
+    expect(fs.readdirSync(h)).toEqual([]);
+  });
+  it("maps gh states", async () => {
+    const h = home();
+    expect(await completeConnect(base(h, "http://127.0.0.1:4000", { state: "not-logged-in" }))).toEqual({ ok: false, error: "gh-login" });
+    expect(await completeConnect(base(h, "http://127.0.0.1:4000", { state: "missing-gh" }))).toEqual({ ok: false, error: "gh-missing" });
+    expect(await completeConnect(base(h, "http://127.0.0.1:4000", { state: "error", message: "x" }))).toEqual({ ok: false, error: "gh-error" });
+    expect(fs.readdirSync(h)).toEqual([]);
+  });
+});
