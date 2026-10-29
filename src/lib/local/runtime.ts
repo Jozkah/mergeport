@@ -9,7 +9,7 @@ import { SyncEngine } from "@/lib/sync/engine";
 import { CoordinationStore } from "@/lib/sync/store";
 import { TeamService } from "@/lib/team/service";
 import { HubTeamService } from "@/lib/team/hub-service";
-import { httpHubAdmin, hubSessionPort } from "@/lib/hub/ports-stub";
+import { httpHubAdmin, hubSessionPort } from "@/lib/hub/ports-impl";
 import { hubBackendId } from "@/lib/local/backends";
 import { mergeportHome } from "@/lib/local/profile";
 import { readHubs } from "@/lib/local/registry";

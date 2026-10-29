@@ -1,15 +1,15 @@
 import type { Backend } from "@/lib/local/backends";
 
 /**
- * The seam between the hub profile UI (plan 3) and the hub storage/sync layer (plan 2).
- * Plan 2 replaces `ports-stub.ts` with real implementations; callers only depend on these types.
+ * The seam between the hub profile UI and the hub storage/sync layer. `ports-impl.ts` implements it; callers only
+ * depend on these types.
  */
 export type HubSessionPort = {
-  // stores the token encrypted in the profile db (plan 2: HubSession table + key file)
-  save(dbFile: string, s: { origin: string; token: string; githubId: string }): Promise<void>;
-  // marks TeamConfig.backend = hubId, hubOrigin = origin (plan 2 columns)
+  // stores the token encrypted in the profile db (HubSession table + key file)
+  save(dbFile: string, s: { origin: string; token: string; githubId: string; login: string }): Promise<void>;
+  // marks TeamConfig as a TEAM profile on the HUB backend at `origin`
   markProfile(dbFile: string, p: { backend: Backend; origin: string; teamName: string }): Promise<void>;
-  // the stored session, or null when there is none (plan 2: decrypts the HubSession row)
+  // the stored session, or null when there is none (decrypts the HubSession row)
   read(dbFile: string): Promise<{ origin: string; token: string; githubId: string } | null>;
   // forgets the stored session (sign out); a missing session is not an error
   remove(dbFile: string): Promise<void>;

@@ -95,18 +95,17 @@ Two small registry files live in the Mergeport home (`src/lib/local/registry.ts`
 
 **Backend isolation.** `assertBackendMatch(config, space)` (`src/lib/local/backend-guard.ts`) refuses to open a `GITHUB` space in a hub profile and the reverse.
 
-### Plan 2 integration checklist
+### Hub integration (done)
 
-Hub UI was built against ports so it works before the hub client and sync land. When plan 2 merges:
+The hub UI was built against ports (`src/lib/hub/ports.ts`); `src/lib/hub/ports-impl.ts` now implements them on the real storage and the real hub API:
 
-- [ ] Replace `src/lib/hub/ports-stub.ts`. `hubSessionPort` (currently clear-text `hub-session.json` and `hub-profile.json` beside the db) becomes the encrypted `HubSession` table plus key file.
-- [ ] `hubLinkStatus` returns the real `HubLink` state instead of the stub.
-- [ ] `httpHubAdmin` may reuse the `HubClient` transport (auth, timeouts, error mapping to `HubUnauthorized`, `HubForbidden`, `HubRequestError`).
-- [ ] `currentBackend()` in `src/lib/local/workspaces.ts` reads `TeamConfig.backend` and `TeamConfig.hubOrigin`.
-- [ ] `markProfile` writes the `TeamConfig` columns instead of `hub-profile.json`.
-- [ ] Call `assertBackendMatch` from the `SyncEngine` wherever a space is synced.
-- [ ] Check the assumed `GET /admin/spaces` shape, `{ spaces: [{ id, kind, name, members: [{ githubId, canWrite }] }] }` (`parseAdminSpaces` in `ports-stub.ts`), against the real hub; adjust only that parser.
-- [ ] Keep both writers of `active.json`: `completeConnect` writes it on connect, the launcher writes it again on switch success.
+- `hubSessionPort` keeps the token encrypted in the profile's `HubSession` row (`src/lib/hub/session-vault.ts`, key file `key` beside the db) and `markProfile` writes `TeamConfig { mode: TEAM, backend: HUB, hubOrigin }`.
+- `httpHubAdmin` speaks `hub/src/{auth-routes,admin-routes}.ts` (`POST /admin/invites { githubLogin, role }`, `POST /admin/spaces` answers `{ space }`).
+- `hubLinkStatus` reads the running process's `HubLink` state (registered by `getEngine()` in `src/lib/local/runtime.ts`) plus the count of `PENDING`/`CONFLICT` outbox ops in hub spaces.
+- `getEngine()` reads `TeamConfig`: on `backend = HUB` it builds the engine with an `HttpHubClient` and starts `startHubLive`; a GitHub profile keeps the GitHub store unchanged.
+- `tests/hub-e2e.test.ts` runs two local clients against the real in-process hub (`tests/hub/harness.ts`).
+
+Still open: `currentBackend()` in `src/lib/local/workspaces.ts` reads `MERGEPORT_BACKEND`/`active.json`, not `TeamConfig`; `assertBackendMatch` is not yet called from the `SyncEngine`.
 
 ### Manual verification (spec) not yet run
 

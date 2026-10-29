@@ -2,8 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createPrisma } from "@/lib/db";
 import { HubAuth, completeConnect, safeVerificationUri } from "@/lib/hub/connect";
-import { hubLinkStatus, hubSessionPort } from "@/lib/hub/ports-stub";
+import { hubLinkStatus, hubSessionPort } from "@/lib/hub/ports-impl";
 import { hubBackendId } from "@/lib/local/backends";
 import { profileDbPath } from "@/lib/local/profile";
 import { readActive, readHubs } from "@/lib/local/registry";
@@ -99,7 +100,17 @@ describe("completeConnect", () => {
     expect(readHubs(h)[0]).toMatchObject({ origin, teamName: "Fake Team", lastSignedInAs: { id: "42", login: "octocat" } });
     expect(readActive(h)).toEqual({ host: "github.com", accountId: "42", backend });
     for (const f of ["hubs.json", "active.json"]) expect(fs.readFileSync(path.join(h, f), "utf8")).not.toContain("session-token-secret");
-    expect(fs.readFileSync(path.join(path.dirname(db), "hub-profile.json"), "utf8")).not.toContain("session-token-secret");
+    for (const f of fs.readdirSync(path.dirname(db))) expect(fs.readFileSync(path.join(path.dirname(db), f))).not.toContain("session-token-secret");
+    expect(await hubSessionPort.read(db)).toEqual({ origin, token: "session-token-secret", githubId: "42" });
+    const prisma = createPrisma(db);
+    try {
+      expect(await prisma.teamConfig.findUnique({ where: { id: "team" } })).toMatchObject({ mode: "TEAM", backend: "HUB", hubOrigin: origin, name: "Fake Team" });
+      expect(await prisma.hubSession.findUnique({ where: { id: "session" } })).toMatchObject({ origin, githubId: 42n, login: "octocat" });
+    } finally {
+      await prisma.$disconnect();
+    }
+    await hubSessionPort.remove(db);
+    expect(await hubSessionPort.read(db)).toBeNull();
     expect(await hubLinkStatus(db)).toEqual({ state: "offline", pendingOps: 0, needsSignIn: false });
   });
   it("mismatch writes nothing", async () => {

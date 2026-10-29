@@ -71,13 +71,13 @@ export async function startFakeHub(opts: FakeHubOpts = {}) {
       if (req.method === "GET" && p === "/me") return send(res, 200, { member: full(actor), team: { name: team ?? "" }, members: members.map(full), spaces });
       // admin routes: ADMIN or OWNER; only the OWNER touches an ADMIN; the OWNER is untouchable
       if (actor.role !== "OWNER" && actor.role !== "ADMIN") return send(res, 403);
-      const b = (body ?? {}) as { login?: string; role?: FakeMember["role"]; name?: string };
+      const b = (body ?? {}) as { githubLogin?: string; role?: FakeMember["role"]; name?: string };
       const mm = /^\/admin\/members\/([^/]+)$/.exec(p);
       if (req.method === "POST" && p === "/admin/invites") {
-        if (!b.login || !b.role || b.role === "OWNER") return send(res, 422);
+        if (!b.githubLogin || !b.role || b.role === "OWNER") return send(res, 422);
         if (b.role === "ADMIN" && actor.role !== "OWNER") return send(res, 403);
-        members.push({ githubId: String(100 + members.length), login: b.login, role: b.role, status: "INVITED" });
-        return send(res, 204);
+        members.push({ githubId: String(100 + members.length), login: b.githubLogin, role: b.role, status: "INVITED" });
+        return send(res, 201, { invite: { id: "i1", githubLogin: b.githubLogin, role: b.role } });
       }
       if (mm && (req.method === "DELETE" || req.method === "PATCH")) {
         const t = members.find((m) => m.githubId === decodeURIComponent(mm[1]));
@@ -94,7 +94,7 @@ export async function startFakeHub(opts: FakeHubOpts = {}) {
         if (!b.name) return send(res, 422);
         const sp = { id: `s${spaces.length + 1}`, kind: "RESTRICTED" as const, name: b.name, canWrite: true, seq: "0" };
         spaces.push(sp);
-        return send(res, 200, sp);
+        return send(res, 201, { space: { id: sp.id, kind: sp.kind, name: sp.name, members: [] } });
       }
       const sm = /^\/admin\/spaces\/([^/]+)$/.exec(p);
       if (sm && (req.method === "PATCH" || req.method === "DELETE")) {

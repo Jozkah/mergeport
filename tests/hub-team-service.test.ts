@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { ValidationError } from "@/lib/errors";
 import { HubForbidden, HubRequestError, HubUnauthorized } from "@/lib/hub/ports";
-import { httpHubAdmin, hubSessionPort } from "@/lib/hub/ports-stub";
+import { httpHubAdmin, hubSessionPort } from "@/lib/hub/ports-impl";
 import { HubTeamService } from "@/lib/team/hub-service";
 import { FAKE_SESSION, startFakeHub, type FakeMember } from "./fake-hub";
 
@@ -81,7 +81,7 @@ describe("HubTeamService", () => {
   it("ADMIN invites @Octo-Cat as octo-cat", async () => {
     const { hub, svc } = await setup("2");
     await svc.invite("  @Octo-Cat ");
-    expect(hub.requests.find((r) => r.path === "/admin/invites")?.body).toEqual({ login: "octo-cat", role: "MEMBER" });
+    expect(hub.requests.find((r) => r.path === "/admin/invites")?.body).toEqual({ githubLogin: "octo-cat", role: "MEMBER" });
   });
 
   it("rejects invalid logins without a request", async () => {
@@ -146,7 +146,7 @@ describe("HubTeamService", () => {
   it("signOut succeeds with the hub down and removes the session", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hubsvc-"));
     const db = path.join(dir, "mergeport.db");
-    await hubSessionPort.save(db, { origin: "http://127.0.0.1:1", token: FAKE_SESSION, githubId: "1" });
+    await hubSessionPort.save(db, { origin: "http://127.0.0.1:1", token: FAKE_SESSION, githubId: "1", login: "boss" });
     expect((await hubSessionPort.read(db))?.token).toBe(FAKE_SESSION);
     const svc = new HubTeamService(httpHubAdmin("http://127.0.0.1:1", async () => FAKE_SESSION), "1");
     await expect(svc.signOut(db)).resolves.toEqual({ switchTo: "github" });

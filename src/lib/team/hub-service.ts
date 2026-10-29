@@ -1,6 +1,6 @@
 import { ValidationError } from "@/lib/errors";
 import type { HubAdminApi, HubAdminSpace, HubMember, HubSessionPort, HubSpaceInfo } from "@/lib/hub/ports";
-import { hubSessionPort } from "@/lib/hub/ports-stub";
+import { hubSessionPort } from "@/lib/hub/ports-impl";
 
 /**
  * Team administration in hub mode. The hub enforces every rule; the local checks here only give friendlier

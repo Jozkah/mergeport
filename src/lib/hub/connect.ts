@@ -129,7 +129,7 @@ export async function completeConnect(i: ConnectInput): Promise<{ ok: true; back
   } finally {
     await prisma.$disconnect();
   }
-  await i.ports.session.save(dbFile, { origin, token: i.session, githubId: i.member.githubId });
+  await i.ports.session.save(dbFile, { origin, token: i.session, githubId: i.member.githubId, login: i.member.login });
   await i.ports.session.markProfile(dbFile, { backend, origin, teamName: i.teamName });
   upsertHub(i.home, { origin, teamName: i.teamName, lastSignedInAs: { id: i.member.githubId, login: i.member.login }, addedAt: new Date().toISOString() });
   writeActive(i.home, { host: i.host, accountId: i.member.githubId, backend });

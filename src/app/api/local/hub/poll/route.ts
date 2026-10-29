@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { HubAuth, completeConnect } from "@/lib/hub/connect";
 import { failure, guardConnect, readBody } from "@/lib/hub/connect-route";
-import { hubSessionPort } from "@/lib/hub/ports-stub";
+import { hubSessionPort } from "@/lib/hub/ports-impl";
 import { currentGhStatus } from "@/lib/local/identity";
 import { mergeportHome } from "@/lib/local/profile";
 import { requestSwitch } from "@/lib/local/switch-client";

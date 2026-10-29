@@ -1,6 +1,6 @@
 import { requireViewer } from "@/lib/authz-page";
 import { HubForbidden, HubUnauthorized, type HubLinkStatus } from "@/lib/hub/ports";
-import { hubLinkStatus } from "@/lib/hub/ports-stub";
+import { hubLinkStatus } from "@/lib/hub/ports-impl";
 import { getHubTeamService } from "@/lib/local/runtime";
 import type { HubAdminSpace } from "@/lib/hub/ports";
 import type { HubOverview } from "@/lib/team/hub-service";
