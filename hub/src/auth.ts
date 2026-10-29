@@ -5,7 +5,7 @@ import { HttpError } from "./http";
 
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-export type Role = "OWNER" | "ADMIN" | "MEMBER";
+export type Role = "OWNER" | "ADMIN" | "MEMBER" | "READER";
 export type Member = { githubId: bigint; login: string; name: string | null; avatarUrl: string | null; role: string; status: string };
 export type Session = { idHash: string; githubId: bigint; clientName: string | null; expiresAt: string };
 export type GithubIdentity = { id: bigint; login: string; name: string | null; avatarUrl: string | null };
@@ -70,6 +70,7 @@ export function bootstrapOrAdmit(db: HubDb, user: GithubIdentity, now: number): 
         user.avatarUrl,
         at,
       );
+      db.prepare("INSERT INTO space (id, kind, name, created_at, created_by) VALUES ('common', 'COMMON', 'Workspace', ?, ?)").run(at, user.id);
       return { ok: true, member: getMember(db, user.id)! };
     }
     const existing = getMember(db, user.id);

@@ -2,6 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { HubConfig } from "./config";
 import type { HubDb } from "./db";
+import { adminRoutes } from "./admin-routes";
 import { authRoutes } from "./auth-routes";
 import { HttpError, json, matchRoute, route, type Route } from "./http";
 import { createLogger, type Logger } from "./log";
@@ -27,6 +28,7 @@ export function coreRoutes(): Route<HubContext>[] {
       json(res, 200, { ok: true, team: team ? { name: team.name } : null, schema: 1, publicUrl: ctx.publicUrl(), githubHost: "github.com" });
     }),
     ...authRoutes(),
+    ...adminRoutes(),
   ];
 }
 

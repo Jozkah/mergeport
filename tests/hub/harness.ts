@@ -163,3 +163,13 @@ export async function startTestHub(o: { now?: () => number; dataDir?: string } =
     },
   };
 }
+
+/** Adds the fake GitHub user (if absent) and completes a device-flow sign-in; returns the session token. */
+export async function signInAs(hub: TestHub, id: bigint, login: string): Promise<string> {
+  if (!hub.github.users.has(id)) hub.github.addUser({ id, login });
+  const s = (await hub.api()("POST", "/auth/device/start")).body as { deviceCode: string; userCode: string };
+  hub.github.authorize(s.userCode, id);
+  const r = await hub.api()("POST", "/auth/device/poll", { deviceCode: s.deviceCode });
+  if (r.status !== 200) throw new Error(`sign-in of ${login} failed: ${r.status} ${JSON.stringify(r.body)}`);
+  return r.body.session as string;
+}

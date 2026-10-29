@@ -59,14 +59,13 @@ describe("device-flow sign-in", () => {
     expect(refused.status).toBe(403);
     expect(refused.body).toEqual({ reason: "not-invited" });
 
-    // Invite endpoint arrives in Task 3; insert the row it would create.
-    hub.db
-      .prepare("INSERT INTO invite (id, github_login, role, created_by, created_at, expires_at) VALUES ('i1', 'Alice', 'MEMBER', 101, ?, ?)")
-      .run(new Date(clock).toISOString(), new Date(clock + 7 * DAY).toISOString());
+    const tokenOwner = (await signIn(101n)).body.session as string;
+    const inv = await hub.api(tokenOwner)("POST", "/admin/invites", { githubLogin: "Alice", role: "MEMBER" });
+    expect(inv.status).toBe(201);
     const ok = await signIn(202n);
     expect(ok.status).toBe(200);
     expect(ok.body.member).toMatchObject({ githubId: "202", login: "alice", name: "Alice A", role: "MEMBER", status: "ACTIVE" });
-    expect(hub.db.prepare("SELECT used_at FROM invite WHERE id = 'i1'").get()).toEqual({ used_at: new Date(clock).toISOString() });
+    expect(hub.db.prepare("SELECT used_at FROM invite WHERE id = ?").get(inv.body.invite.id)).toEqual({ used_at: new Date(clock).toISOString() });
   });
 
   it("an expired invite does not admit", async () => {
@@ -97,7 +96,19 @@ describe("device-flow sign-in", () => {
     expect(r.body).toEqual({ reason: "removed" });
   });
 
-  it.todo("a removed member's old session dies via DELETE /admin/members/:id (Task 3)");
+  it("a removed member's old session dies via DELETE /admin/members/:id; new device flow is 403 removed", async () => {
+    hub.github.addUser({ id: 101n, login: "olive" });
+    hub.github.addUser({ id: 202n, login: "alice" });
+    const owner = (await signIn(101n)).body.session as string;
+    expect((await hub.api(owner)("POST", "/admin/invites", { githubLogin: "alice", role: "MEMBER" })).status).toBe(201);
+    const old = (await signIn(202n)).body.session as string;
+    expect((await hub.api(old)("GET", "/me")).status).toBe(200);
+    expect((await hub.api(owner)("DELETE", "/admin/members/202")).status).toBe(204);
+    expect((await hub.api(old)("GET", "/me")).status).toBe(401);
+    const again = await signIn(202n);
+    expect(again.status).toBe(403);
+    expect(again.body).toEqual({ reason: "removed" });
+  });
 
   it("a session of a removed member gets 403 removed", async () => {
     hub.github.addUser({ id: 101n, login: "olive" });
@@ -172,7 +183,7 @@ describe("sessions", () => {
     expect(r.body.member.login).toBe("olive");
     expect(r.body.team.name).toBe("olive's team");
     expect(r.body.members).toHaveLength(1);
-    expect(r.body.spaces).toEqual([]);
+    expect(r.body.spaces).toEqual([{ id: "common", kind: "COMMON", name: "Workspace", canWrite: true, seq: 0 }]);
   });
 
   it("logout kills only that session", async () => {

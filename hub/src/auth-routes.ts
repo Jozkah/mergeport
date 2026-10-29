@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { bootstrapOrAdmit, createSession, getMember, requireSession, revokeSession, toMember, type Member } from "./auth";
+import { listSpacesFor } from "./authz";
 import { fetchGithubUser, pollDeviceFlow, startDeviceFlow } from "./github-oauth";
 import { HttpError, json, readJson, route, type Route } from "./http";
 import type { HubContext } from "./server";
@@ -45,8 +46,7 @@ export function authRoutes(): Route<HubContext>[] {
       const s = requireSession(ctx, req);
       const rows = ctx.db.prepare("SELECT * FROM member WHERE status = 'ACTIVE' ORDER BY joined_at, github_id").safeIntegers(true).all() as Parameters<typeof toMember>[0][];
       const self = getMember(ctx.db, s.githubId) ?? s.member;
-      // spaces arrive with Task 3.
-      json(res, 200, { member: memberJson(self), team: teamJson(ctx), members: rows.map((r) => memberJson(toMember(r))), spaces: [] });
+      json(res, 200, { member: memberJson(self), team: teamJson(ctx), members: rows.map((r) => memberJson(toMember(r))), spaces: listSpacesFor(ctx.db, self) });
     }),
   ];
 }
