@@ -84,7 +84,7 @@ function Column({ col, cards: allCards, cols, onMove, busy, fx }: { col: Col; ca
   const [limit, setLimit] = useState(COLUMN_PAGE);
   const cards = allCards.slice(0, limit); // a long column renders in pages; the count in the header is the real one
   return (
-    <section aria-labelledby={`col-${col.key}`} className="flex min-h-0 min-w-[272px] flex-1 basis-[272px] flex-col rounded-[12px] border border-line bg-canvas p-2">
+    <section aria-labelledby={`col-${col.key}`} className="flex min-h-0 max-h-[calc(100dvh-19rem)] min-w-[236px] flex-1 basis-[236px] flex-col rounded-[12px] border border-line bg-canvas p-2">
       <h3 id={`col-${col.key}`} className="mb-2 flex items-center justify-between px-1.5 text-[13px] font-medium text-ink-2">{col.name}<span className="rounded-full bg-muted px-2 text-[11.5px] leading-5"><Metric value={allCards.length} /></span></h3>
       <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <ul ref={setNodeRef} className={`flex min-h-16 flex-1 flex-col gap-2 overflow-y-auto rounded-[8px] p-1 transition-colors duration-[var(--duration-feedback)] ${isOver ? "bg-muted" : ""}`}>
@@ -290,8 +290,8 @@ export function Board({ columns, initial }: { columns: Col[]; initial: CardView[
     <div ref={root}>
       <DndContext id="planning-board" sensors={sensors} collisionDetection={closestCorners} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => { setActive(null); dragging.current = false; pointerOwns.current = false; }}>
         {/* The board scrolls inside its own region; it never widens the page. */}
-        <div className="relative h-[calc(100dvh-19rem)] min-h-[22rem] max-w-full overflow-x-auto pb-3" tabIndex={0} role="region" aria-label="Planning board (scrolls horizontally; each column scrolls vertically)">
-          <div ref={content} className="flex h-full min-w-max gap-3 xl:min-w-full">
+        <div className="relative max-w-full overflow-x-auto pb-3" tabIndex={0} role="region" aria-label="Planning board (scrolls horizontally; each column scrolls vertically)">
+          <div ref={content} className="flex min-h-[16rem] min-w-max gap-3 xl:min-w-full">
             {columns.map((col) => <Column key={col.key} col={col} cols={columns} cards={byCol(col.key)} onMove={(id, key) => { refocus.current = id; commit(id, key, null); }} busy={pending} fx={fx} />)}
           </div>
         </div>

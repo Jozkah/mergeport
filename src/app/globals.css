@@ -678,7 +678,7 @@ select.select optgroup {
   display: grid;
   gap: 1.25rem;
   align-items: start;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--fit-min, 560px)), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--fit-min, 560px)), 1fr));
 }
 
 /* Narrow screens: nothing may force the page wider than the screen. */

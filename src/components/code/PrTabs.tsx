@@ -109,7 +109,7 @@ export function PrTabs({ itemId, repoId, initial, fileCount, conversation, aside
         {visited.files && <div id="pane-files" role="tabpanel" aria-labelledby="tab-files" hidden={tab !== "files"}><FilesPane itemId={itemId} repoId={repoId} githubFilesUrl={`${githubUrl}/files`} active={tab === "files"} /></div>}
         {visited.commits && <div id="pane-commits" role="tabpanel" aria-labelledby="tab-commits" hidden={tab !== "commits"}><CommitsPane itemId={itemId} repoId={repoId} githubUrl={githubUrl} onCount={setCommitCount} /></div>}
       </div>
-      <div id="review" className={wide ? "grid gap-5 xl:grid-cols-3" : ""}>{wide ? aside : <div className="flex flex-col gap-5">{aside}</div>}</div>
+      <div id="review" className={wide ? "xl:[&>aside]:grid xl:[&>aside]:grid-cols-[repeat(auto-fit,minmax(340px,1fr))] xl:[&>aside]:items-start xl:[&>aside]:gap-5" : ""}>{aside}</div>
     </div>
   );
 }

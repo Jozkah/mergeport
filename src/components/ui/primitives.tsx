@@ -84,7 +84,7 @@ export { Avatar } from "./Avatar";
 
 export function EmptyState({ icon: I, title, children, action }: { icon?: Icon; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="empty-in flex flex-col items-center px-6 py-12 text-center">
+    <div className="empty-in flex flex-col items-center px-6 py-8 text-center">
       {I && (
         <span className="mb-3 inline-flex size-10 items-center justify-center rounded-full border border-line bg-canvas text-ink-3">
           <I size={18} aria-hidden />
@@ -104,7 +104,7 @@ export function Banner({ tone = "info", title, children, action }: { tone?: "inf
   return (
     <div role={tone === "error" ? "alert" : "status"} className={cn("flex items-start gap-3 rounded-[10px] border px-3 py-2.5 text-[13px]", cls)} style={{ height: "auto", borderRadius: 10 }}>
       <I size={16} aria-hidden className="mt-0.5 shrink-0" />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 max-w-[110ch] flex-1">
         <p className="font-medium">{title}</p>
         {children && <div className="mt-0.5 text-[12.5px] opacity-90">{children}</div>}
       </div>
