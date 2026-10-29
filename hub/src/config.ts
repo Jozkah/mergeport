@@ -6,6 +6,8 @@ export type HubConfig = {
   publicUrl: string;
   githubClientId: string;
   githubClientSecret: string;
+  /** GitHub login allowed to bootstrap an empty hub as OWNER (compared case-insensitively). */
+  ownerLogin: string;
   trustProxy: boolean;
   /** Tests only: override via MERGEPORT_HUB_GITHUB_API_BASE. */
   githubApiBase: string;
@@ -22,6 +24,7 @@ const schema = z.object({
   MERGEPORT_HUB_PUBLIC_URL: z.string().url(),
   MERGEPORT_HUB_GITHUB_CLIENT_ID: z.string().min(1),
   MERGEPORT_HUB_GITHUB_CLIENT_SECRET: z.string().min(1),
+  MERGEPORT_HUB_OWNER_LOGIN: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login"),
   MERGEPORT_HUB_TRUST_PROXY: bool.default(true),
   MERGEPORT_HUB_GITHUB_API_BASE: z.string().url().default("https://api.github.com"),
   MERGEPORT_HUB_GITHUB_OAUTH_BASE: z.string().url().default("https://github.com"),
@@ -43,6 +46,7 @@ export function loadConfig(env: Record<string, string | undefined>): HubConfig {
     publicUrl,
     githubClientId: e.MERGEPORT_HUB_GITHUB_CLIENT_ID,
     githubClientSecret: e.MERGEPORT_HUB_GITHUB_CLIENT_SECRET,
+    ownerLogin: e.MERGEPORT_HUB_OWNER_LOGIN,
     trustProxy: e.MERGEPORT_HUB_TRUST_PROXY,
     githubApiBase: e.MERGEPORT_HUB_GITHUB_API_BASE.replace(/\/+$/, ""),
     githubOauthBase: e.MERGEPORT_HUB_GITHUB_OAUTH_BASE.replace(/\/+$/, ""),

@@ -66,11 +66,16 @@ export function revokeSessions(db: HubDb, githubId: bigint): void {
 
 export type Admission = { ok: true; member: Member; joined: boolean } | { ok: false; reason: "not-invited" | "removed" };
 
-export function bootstrapOrAdmit(db: HubDb, user: GithubIdentity, now: number): Admission {
+export function isBootstrapped(db: HubDb): boolean {
+  return (db.prepare("SELECT COUNT(*) AS n FROM team").get() as { n: number }).n > 0;
+}
+
+/** `ownerLogin` is the only GitHub login that may bootstrap an empty hub; anyone else is refused as not-invited. */
+export function bootstrapOrAdmit(db: HubDb, user: GithubIdentity, now: number, ownerLogin: string): Admission {
   return db.transaction((): Admission => {
     const at = iso(now);
-    const teams = db.prepare("SELECT COUNT(*) AS n FROM team").get() as { n: number };
-    if (teams.n === 0) {
+    if (!isBootstrapped(db)) {
+      if (user.login.toLowerCase() !== ownerLogin.toLowerCase()) return { ok: false, reason: "not-invited" };
       db.prepare("INSERT INTO team (id, name, created_at, owner_github_id) VALUES (?, ?, ?, ?)").run(randomUUID(), `${user.login}'s team`, at, user.id);
       db.prepare("INSERT INTO member (github_id, login, name, avatar_url, role, status, joined_at) VALUES (?, ?, ?, ?, 'OWNER', 'ACTIVE', ?)").run(
         user.id,

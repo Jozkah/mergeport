@@ -10,8 +10,14 @@ describe("hub config and health", () => {
   it("refuses to start without GitHub OAuth values", () => {
     expect(() => loadConfig({ MERGEPORT_HUB_PUBLIC_URL: "https://h.example" })).toThrow(/MERGEPORT_HUB_GITHUB_CLIENT_ID/);
   });
+  it("refuses to start without the owner login", () => {
+    const base = { MERGEPORT_HUB_GITHUB_CLIENT_ID: "a", MERGEPORT_HUB_GITHUB_CLIENT_SECRET: "b", MERGEPORT_HUB_DATA: "x", MERGEPORT_HUB_PUBLIC_URL: "https://h.example" };
+    expect(() => loadConfig(base)).toThrow(/MERGEPORT_HUB_OWNER_LOGIN/);
+    expect(() => loadConfig({ ...base, MERGEPORT_HUB_OWNER_LOGIN: "not a login" })).toThrow(/MERGEPORT_HUB_OWNER_LOGIN/);
+    expect(loadConfig({ ...base, MERGEPORT_HUB_OWNER_LOGIN: "Olive-1" }).ownerLogin).toBe("Olive-1");
+  });
   it("binds loopback unless trustProxy=false and https public url", () => {
-    const base = { MERGEPORT_HUB_GITHUB_CLIENT_ID: "a", MERGEPORT_HUB_GITHUB_CLIENT_SECRET: "b", MERGEPORT_HUB_DATA: "x" };
+    const base = { MERGEPORT_HUB_GITHUB_CLIENT_ID: "a", MERGEPORT_HUB_GITHUB_CLIENT_SECRET: "b", MERGEPORT_HUB_DATA: "x", MERGEPORT_HUB_OWNER_LOGIN: "olive" };
     expect(loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "https://h.example", MERGEPORT_HUB_TRUST_PROXY: "true" }).bindHost).toBe("127.0.0.1");
     expect(loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "http://h.example", MERGEPORT_HUB_TRUST_PROXY: "false" }).bindHost).toBe("127.0.0.1");
     expect(loadConfig({ ...base, MERGEPORT_HUB_PUBLIC_URL: "https://h.example", MERGEPORT_HUB_TRUST_PROXY: "false" }).bindHost).toBe("0.0.0.0");
@@ -20,7 +26,7 @@ describe("hub config and health", () => {
     const hub = await startTestHub();
     const r = await hub.api()("GET", "/health");
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ ok: true, team: null, schema: 1, publicUrl: hub.url, githubHost: "github.com" });
+    expect(r.body).toEqual({ ok: true, bootstrapped: false, team: null, schema: 1, publicUrl: hub.url, githubHost: "github.com" });
     await hub.close();
   });
   it("refuses a database from a newer hub", () => {

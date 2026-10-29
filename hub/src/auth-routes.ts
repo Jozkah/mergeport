@@ -67,7 +67,7 @@ export function authRoutes(): Route<HubContext>[] {
       if (polled.kind === "denied") return json(res, 403, { reason: "denied" });
       // The GitHub access token is used for this one lookup, then dropped.
       const user = await fetchGithubUser(ctx.config, polled.accessToken);
-      const admission = bootstrapOrAdmit(ctx.db, user, ctx.now());
+      const admission = bootstrapOrAdmit(ctx.db, user, ctx.now(), ctx.config.ownerLogin);
       if (!admission.ok) {
         ctx.log.info("sign-in refused", { githubId: user.id, login: user.login, reason: admission.reason });
         return json(res, 403, { reason: admission.reason });

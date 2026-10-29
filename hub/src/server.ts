@@ -5,7 +5,7 @@ import type { HubDb } from "./db";
 import { adminRoutes } from "./admin-routes";
 import { authRoutes } from "./auth-routes";
 import { createNotifier, type Notifier } from "./notify";
-import { findSession, requestMembers } from "./auth";
+import { findSession, isBootstrapped, requestMembers } from "./auth";
 import { createLimiter, type Limiter } from "./ratelimit";
 import { entityRoutes, startPruneTimer } from "./entities";
 import { HttpError, json, matchRoute, route, type Route } from "./http";
@@ -31,7 +31,7 @@ export function coreRoutes(): Route<HubContext>[] {
   return [
     route<HubContext>("GET", "/health", (ctx, _req, res) => {
       const team = ctx.db.prepare("SELECT name FROM team LIMIT 1").get() as { name: string } | undefined;
-      json(res, 200, { ok: true, team: team ? { name: team.name } : null, schema: 1, publicUrl: ctx.publicUrl(), githubHost: "github.com" });
+      json(res, 200, { ok: true, bootstrapped: isBootstrapped(ctx.db), team: team ? { name: team.name } : null, schema: 1, publicUrl: ctx.publicUrl(), githubHost: "github.com" });
     }),
     ...authRoutes(),
     ...adminRoutes(),

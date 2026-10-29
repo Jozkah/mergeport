@@ -51,7 +51,27 @@ describe("device-flow sign-in", () => {
     expect(r.status).toBe(200);
     expect(r.body.member).toMatchObject({ githubId: "101", login: "olive", role: "OWNER", status: "ACTIVE" });
     expect(r.body.team.name).toBe("olive's team");
-    expect((await hub.api()("GET", "/health")).body.team).toEqual({ name: "olive's team" });
+    const health = (await hub.api()("GET", "/health")).body;
+    expect(health.team).toEqual({ name: "olive's team" });
+    expect(health.bootstrapped).toBe(true);
+  });
+
+  it("only the configured owner login can bootstrap an empty hub; the match ignores case", async () => {
+    hub.github.addUser({ id: 101n, login: "olive" });
+    hub.github.addUser({ id: 303n, login: "mallory" });
+    expect((await hub.api()("GET", "/health")).body.bootstrapped).toBe(false);
+    const refused = await signIn(303n);
+    expect(refused.status).toBe(403);
+    expect(refused.body).toEqual({ reason: "not-invited" });
+    expect((await hub.api()("GET", "/health")).body.bootstrapped).toBe(false);
+    expect(hub.db.prepare("SELECT COUNT(*) AS n FROM member").get()).toEqual({ n: 0 });
+    hub.github.addUser({ id: 101n, login: "OLIVE" });
+    const r = await signIn(101n);
+    expect(r.status).toBe(200);
+    expect(r.body.member).toMatchObject({ githubId: "101", login: "OLIVE", role: "OWNER" });
+    expect((await hub.api()("GET", "/health")).body.bootstrapped).toBe(true);
+    // Bootstrapped: the owner login is no longer special, mallory still needs an invite.
+    expect((await signIn(303n)).body).toEqual({ reason: "not-invited" });
   });
 
   it("a second person is refused until invited, then admitted with the invite's role", async () => {
@@ -137,7 +157,7 @@ describe("device-flow sign-in", () => {
   });
 
   it.each([9007199254740993n, 9223372036854775807n])("GitHub id %s keeps full precision through sign-in, /me and logout", async (id) => {
-    hub.github.addUser({ id, login: "big" });
+    hub.github.addUser({ id, login: "olive" });
     const r = await signIn(id);
     expect(r.status).toBe(200);
     expect(r.body.member.githubId).toBe(id.toString());

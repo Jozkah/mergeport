@@ -28,6 +28,7 @@ MERGEPORT_HUB_DATA=/var/lib/mergeport-hub
 MERGEPORT_HUB_PUBLIC_URL=https://hub.example.com
 MERGEPORT_HUB_GITHUB_CLIENT_ID=<client id>
 MERGEPORT_HUB_GITHUB_CLIENT_SECRET=<client secret>
+MERGEPORT_HUB_OWNER_LOGIN=<your GitHub login>
 MERGEPORT_HUB_PORT=8787
 MERGEPORT_HUB_TRUST_PROXY=true
 ```
@@ -38,6 +39,7 @@ MERGEPORT_HUB_TRUST_PROXY=true
 | `MERGEPORT_HUB_PUBLIC_URL` | yes | | Public URL, should be https; must match the OAuth App homepage. |
 | `MERGEPORT_HUB_GITHUB_CLIENT_ID` | yes | | OAuth App client id. |
 | `MERGEPORT_HUB_GITHUB_CLIENT_SECRET` | yes | | OAuth App client secret. |
+| `MERGEPORT_HUB_OWNER_LOGIN` | yes | | GitHub login of the person who becomes the team owner. Only this login (compared case-insensitively) can sign in to an empty hub; everyone else is refused as not invited until the owner has signed in and invited them. |
 | `MERGEPORT_HUB_PORT` | no | `8787` | Listen port. |
 | `MERGEPORT_HUB_TRUST_PROXY` | no | `true` | `true` when a reverse proxy fronts the hub: it binds `127.0.0.1` only and takes the client IP from the first `X-Forwarded-For` entry (used for rate limits). `false` binds `0.0.0.0` (only when the public URL is https; otherwise still loopback) and uses the socket address. Never set `false` behind a proxy and never `true` when clients can reach the hub directly (they could spoof the header). |
 | `MERGEPORT_HUB_GITHUB_API_BASE` | no | `https://api.github.com` | Tests only. Points the hub at a fake GitHub API. |
@@ -52,7 +54,7 @@ npm ci
 npm run hub
 ```
 
-Load the `.env` with your process manager (systemd below) or your shell. The first person to sign in becomes the team owner (the team is named `<login>'s team`); everyone else needs an invite from an owner or admin. **Sign in yourself immediately after the first start**, before anyone else can reach the hub.
+Load the `.env` with your process manager (systemd below) or your shell. The first sign-in by `MERGEPORT_HUB_OWNER_LOGIN` bootstraps the team (named `<login>'s team`) with that person as owner; any other login is refused on an empty hub, so nobody can claim the hub before you do. Everyone else needs an invite from an owner or admin. `GET /health` reports `bootstrapped: false` until the owner has signed in.
 
 ## 4. Reverse proxy (Caddy)
 

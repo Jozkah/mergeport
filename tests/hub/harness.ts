@@ -121,7 +121,7 @@ export type TestHub = {
   api(token?: string): (method: string, path: string, body?: unknown) => Promise<ApiResult>;
 };
 
-export async function startTestHub(o: { now?: () => number; dataDir?: string; trustProxy?: boolean; ws?: { silenceMs?: number; coalesceMs?: number } } = {}): Promise<TestHub> {
+export async function startTestHub(o: { now?: () => number; dataDir?: string; trustProxy?: boolean; /** Login allowed to bootstrap the empty hub; default `olive`. */ ownerLogin?: string; ws?: { silenceMs?: number; coalesceMs?: number } } = {}): Promise<TestHub> {
   const github = new FakeGitHubOAuth();
   await github.start();
   const dataDir = o.dataDir ?? mkdtempSync(path.join(tmpdir(), "hub-"));
@@ -131,6 +131,7 @@ export async function startTestHub(o: { now?: () => number; dataDir?: string; tr
     publicUrl: "",
     githubClientId: "test-client",
     githubClientSecret: "test-secret",
+    ownerLogin: o.ownerLogin ?? "olive",
     trustProxy: o.trustProxy ?? true,
     githubApiBase: github.url,
     githubOauthBase: github.url,
