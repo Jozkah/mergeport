@@ -4,7 +4,7 @@ import { readActive, readHubs } from "@/lib/local/registry";
 export type WorkspaceEntry = { backend: Backend; label: string; detail?: string; available: boolean };
 
 /** What the workspace switcher offers: GitHub, then every known hub server in the order it was added. */
-export function listWorkspaces(home: string, _host: string, accountId: string): { active: Backend; entries: WorkspaceEntry[] } {
+export function listWorkspaces(home: string, host: string, accountId: string): { active: Backend; entries: WorkspaceEntry[] } {
   const entries: WorkspaceEntry[] = [{ backend: GITHUB_BACKEND, label: "GitHub (repositories)", available: true }];
   for (const h of readHubs(home).sort((a, b) => a.addedAt.localeCompare(b.addedAt))) {
     let backend: Backend;
@@ -16,6 +16,7 @@ export function listWorkspaces(home: string, _host: string, accountId: string): 
     const other = h.lastSignedInAs.id !== accountId;
     entries.push({ backend, label: h.teamName || h.origin, detail: other ? `Signed in as @${h.lastSignedInAs.login}` : h.origin, available: !other });
   }
-  const wanted = readActive(home)?.backend ?? GITHUB_BACKEND;
+  const a = readActive(home);
+  const wanted = a && a.host === host && a.accountId === accountId ? a.backend : GITHUB_BACKEND;
   return { active: entries.some((e) => e.backend === wanted) ? wanted : GITHUB_BACKEND, entries };
 }

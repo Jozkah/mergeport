@@ -39,7 +39,7 @@ export function WorkspaceSwitcher({ entries, active, switchable }: { entries: Wo
     }
   }
 
-  if (!switchable) return <span className="hidden shrink-0 text-[12px] text-ink-3 sm:inline">GitHub (repositories)</span>;
+  if (!switchable) return <span className="max-w-[7.5rem] shrink-0 truncate text-[12px] text-ink-3 sm:max-w-none">GitHub (repositories)</span>;
   return (
     <>
       <div className="w-[7.5rem] shrink-0 sm:w-[13rem]">

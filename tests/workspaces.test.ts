@@ -53,4 +53,14 @@ describe("listWorkspaces", () => {
     fs.writeFileSync(path.join(h, "active.json"), "{not json");
     expect(listWorkspaces(h, "github.com", "7").active).toBe("github");
   });
+
+  it("ignores an active.json written for another account or host", () => {
+    const h = home();
+    upsertHub(h, hub("https://a.example.com", "Alpha", "7", "2026-01-01T00:00:00Z"));
+    const b = hubBackendId("https://a.example.com");
+    writeActive(h, { host: "github.com", accountId: "8", backend: b });
+    expect(listWorkspaces(h, "github.com", "7").active).toBe("github");
+    writeActive(h, { host: "ghe.example.com", accountId: "7", backend: b });
+    expect(listWorkspaces(h, "github.com", "7").active).toBe("github");
+  });
 });

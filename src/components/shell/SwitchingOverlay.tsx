@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { Logo } from "@/components/ui/Logo";
 import { Banner } from "@/components/ui/primitives";
 import { pollSwitch, validateSwitchTarget, type Ready } from "@/lib/local/switch-poll";
@@ -11,6 +11,7 @@ type Props = { launchUrl: string; previousBootId: string | null; expectedBackend
 /** Full-screen state shown in place while the app restarts on another workspace. Rendered by the caller, not a route: the old app stops serving pages. */
 export function SwitchingOverlay({ launchUrl, previousBootId, expectedBackend }: Props) {
   const [state, setState] = useState<"waiting" | "timeout" | "invalid">("waiting");
+  const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,7 +36,12 @@ export function SwitchingOverlay({ launchUrl, previousBootId, expectedBackend }:
     };
   }, [launchUrl, previousBootId, expectedBackend]);
 
-  return (
+  // A full page load on purpose: the app behind this page may have restarted.
+  // eslint-disable-next-line @next/next/no-html-link-for-pages
+  const back = <a href="/" className="btn">Back</a>;
+  // Portaled to <body>: a caller inside the top bar (backdrop-blur) would otherwise confine position:fixed to the header.
+  if (!mounted) return null;
+  return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-canvas p-6">
       <div className="panel w-full max-w-[420px]">
         <div className="panel-body flex flex-col items-center gap-4 p-6 text-center">
@@ -47,11 +53,12 @@ export function SwitchingOverlay({ launchUrl, previousBootId, expectedBackend }:
             </div>
           ) : (
             <div className="w-full text-left">
-              <Banner tone="error" title={state === "invalid" ? "The switch link is not valid" : "The other workspace did not start"} action={<Link href="/" className="btn">Back</Link>} />
+              <Banner tone="error" title={state === "invalid" ? "The switch link is not valid" : "The other workspace did not start"} action={back} />
             </div>
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
