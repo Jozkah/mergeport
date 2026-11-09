@@ -5,6 +5,7 @@ import { HubLink, defaultTimers, type HubLinkState, type SocketLike, type Timers
 import { syncHubSpaces } from "./spaces";
 import { handleGithubEvent } from "./gh-events";
 import { RepoRefresher } from "./repo-refresher";
+import { saveHubCoverage } from "./github-app-install";
 import { registerHubWatch, trackedGithubIds } from "./watch";
 import { refreshRepositoryAndWait } from "@/lib/services/refresh";
 
@@ -28,6 +29,8 @@ export type HubLiveOptions = {
   refreshRepository?: (repositoryId: string) => Promise<void>;
   /** Asks the job worker to run due jobs now (the runtime passes the scheduler's `runJobsNow`). */
   kickJobs?: () => void;
+  /** Called after the hub reported which watched repositories the GitHub App covers and the set was saved (the runtime emits `notifyChange("state")`). */
+  notifyState?: () => void;
   /** Clock for the fallback refresher (tests). */
   now?: () => number;
 };
@@ -147,6 +150,10 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
       void refreshAndSyncAll().catch(() => {});
     },
     onGithubEvent: (e) => void handleGithubEvent(o.db, e, { refresh: (id, kind) => refresher.request(id, kind), notify }).catch(() => {}),
+    onCovered: (ids) =>
+      void saveHubCoverage(o.db, ids)
+        .then(() => o.notifyState?.())
+        .catch(() => {}),
     onChanged: (hubSpaceId, seq) => {
       void (async () => {
         let sp = await byHubId(hubSpaceId);

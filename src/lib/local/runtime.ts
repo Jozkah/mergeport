@@ -115,7 +115,7 @@ async function buildEngine(): Promise<SyncEngine | null> {
   });
   state.engine = engine;
   if (!state.live) {
-    state.live = startHubLive({ db, engine, client, origin: hubOrigin, getToken: hubToken, notify: () => notifyChange("pulled"), kickJobs: () => void import("@/lib/local/scheduler").then((m) => m.runJobsNow()).catch(() => {}) });
+    state.live = startHubLive({ db, engine, client, origin: hubOrigin, getToken: hubToken, notify: () => notifyChange("pulled"), notifyState: () => notifyChange("state"), kickJobs: () => void import("@/lib/local/scheduler").then((m) => m.runJobsNow()).catch(() => {}) });
     registerHubLinkState(() => state.live?.link.state ?? "offline");
   }
   return engine;

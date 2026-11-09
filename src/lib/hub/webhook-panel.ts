@@ -9,6 +9,14 @@ export const installUrl = (appSlug: string) => `https://github.com/apps/${encode
 /** DiscoveryCache key of the last "Add my tracked repositories" result (see github-app-install.ts). */
 export const COVERAGE_KEY = "github-app-coverage";
 
+/** DiscoveryCache key of the covered ids the hub reports over the socket: JSON `{ ids: string[], at: ISO string }`. */
+export const HUB_COVERAGE_KEY = "github-app-hub-coverage";
+
+/** Shown, as a plain note and not as a failure, when GitHub refuses `GET /user/installations` for the person's own token. */
+export const REFUSED_NOTE = "GitHub does not allow this from here. Use the install link; coverage is detected automatically.";
+/** Why the table needs no button press. */
+export const DETECTION_HELP = "Mergeport sees which repositories the App covers from GitHub's own events. Install the App on a repository on GitHub and it shows as Covered within seconds.";
+
 export const DAY_MS = 24 * 3600 * 1000;
 
 export type WebhookStatus = { kind: "on" | "waiting" | "quiet" | "off"; text: string };
