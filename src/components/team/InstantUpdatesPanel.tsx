@@ -5,7 +5,7 @@ import { WebhookByHand } from "@/components/team/WebhookByHand";
 import { Banner, Mono, Panel, SimplePill } from "@/components/ui/primitives";
 import { Zap } from "@/components/ui/icons";
 import type { HubWebhooks } from "@/lib/hub/ports";
-import { appFailureText, DETECTION_HELP, installUrl, UNREACHABLE_HELP, WAITING_HELP, webhookStatus } from "@/lib/hub/webhook-panel";
+import { appFailureText, DETECTION_HELP, installUrl, UNREACHABLE_HELP, WAITING_HELP, webhookStatus, COVERAGE_WAITING_HELP, COVERAGE_WAITING_LABEL } from "@/lib/hub/webhook-panel";
 
 export type TrackedRow = { id: string; githubId: string; fullName: string };
 export type GithubAppResult = { result: "created" | "failed"; reason?: string };
@@ -59,12 +59,13 @@ export function InstantUpdatesPanel({ teamName, origin, isOwner, webhooks, track
                   {tracked.map((r) => (
                     <li key={r.id} className="flex min-h-10 items-center justify-between gap-3 border-b border-line px-3 last:border-b-0">
                       <Mono>{r.fullName}</Mono>
-                      {covered.has(r.githubId) ? <SimplePill tone="ok">Covered</SimplePill> : <SimplePill tone="unknown">Not installed yet</SimplePill>}
+                      {covered.has(r.githubId) ? <SimplePill tone="ok">Covered</SimplePill> : <SimplePill tone="unknown">{COVERAGE_WAITING_LABEL}</SimplePill>}
                     </li>
                   ))}
                 </ul>
               )}
               <p className="text-[13px] text-ink-2">{DETECTION_HELP}</p>
+              {tracked.some((r) => !covered.has(r.githubId)) && <p className="text-[13px] text-ink-2">{COVERAGE_WAITING_HELP}</p>}
               {slug ? (
                 <p className="text-[13px] text-ink-2">
                   {coveredCount === 0 ? "If you have not installed the App yet, " : "For repositories that are not covered, "}

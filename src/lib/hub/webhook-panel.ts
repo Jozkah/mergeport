@@ -31,6 +31,10 @@ export function webhookStatus(w: HubWebhooks, now = Date.now()): WebhookStatus {
   return { kind: "quiet", text: "No event from GitHub for over a day" };
 }
 
+/** A tracked repository the hub has not reported as covered. Coverage is learned from GitHub's events, so "unknown yet" is the honest state. */
+export const COVERAGE_WAITING_LABEL = "Waiting for GitHub's first event";
+export const COVERAGE_WAITING_HELP = "If you already installed the App on this repository, Mergeport learns it from the next event, or right away when you redeliver the App's installation event (GitHub, your App, Advanced, Recent deliveries).";
+
 export const WAITING_HELP = "Install the App on a repository (GitHub sends an event when you do), then edit an issue to see it arrive instantly.";
 export const UNREACHABLE_HELP = "GitHub could not reach the server. If Cloudflare is in front, add a skip rule for the path /webhooks/github.";
 

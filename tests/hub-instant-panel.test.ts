@@ -211,7 +211,7 @@ describe("panel: who sees what", () => {
 });
 
 describe("panel: repositories and the hidden form", () => {
-  it("lists tracked repositories as Covered or Not installed yet", async () => {
+  it("lists tracked repositories as Covered or waiting", async () => {
     const { InstantUpdatesPanel } = await import("@/components/team/InstantUpdatesPanel");
     const html = renderToStaticMarkup(
       InstantUpdatesPanel({
@@ -220,12 +220,12 @@ describe("panel: repositories and the hidden form", () => {
       }),
     );
     expect(html).toMatch(/acme\/one[\s\S]*?Covered/);
-    expect(html).toMatch(/acme\/two[\s\S]*?Not installed yet/);
+    expect(html).toMatch(/acme\/two[\s\S]*?Waiting for GitHub&#x27;s first event/);
     expect(html).toContain("Add my tracked repositories");
     expect(html).toContain("https://github.com/apps/team-app/installations/new");
   });
 
-  it("renders Covered and Not installed yet from the hub-reported set, explains detection, and offers the API button as optional", async () => {
+  it("renders Covered and waiting from the hub-reported set, explains detection, and offers the API button as optional", async () => {
     const { InstantUpdatesPanel } = await import("@/components/team/InstantUpdatesPanel");
     const html = renderToStaticMarkup(
       InstantUpdatesPanel({
@@ -233,7 +233,7 @@ describe("panel: repositories and the hidden form", () => {
         tracked: [{ id: "a", githubId: "11", fullName: "acme/one" }, { id: "b", githubId: "12", fullName: "acme/two" }], covered: new Set(["12"]),
       }),
     );
-    expect(html).toMatch(/acme\/one[\s\S]*?Not installed yet/);
+    expect(html).toMatch(/acme\/one[\s\S]*?Waiting for GitHub&#x27;s first event/);
     expect(html).toMatch(/acme\/two[\s\S]*?Covered/);
     expect(html).toContain("Mergeport sees which repositories the App covers from GitHub&#x27;s own events. Install the App on a repository on GitHub and it shows as Covered within seconds.");
     expect(html).toContain("https://github.com/apps/team-app/installations/new");
