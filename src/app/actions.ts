@@ -24,6 +24,7 @@ import type { Discovery } from "@/lib/github/port";
 import { GithubError } from "@/lib/github/port";
 import { enqueue } from "@/lib/jobs";
 import { slugify } from "@/lib/slug";
+import { parseWatchMaxRepos, parseWatchSeconds, saveWatchSettings } from "@/lib/local/watch-settings";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const strs = (fd: FormData, k: string) => fd.getAll(k).map(String).filter(Boolean);
@@ -593,6 +594,20 @@ export async function setTimezoneAction(fd: FormData): Promise<ActionResult> {
     await db.user.update({ where: { id: user.id }, data: { timezone: tz } });
     revalidatePath("/", "layout");
     return { ok: true, message: "Timezone saved" };
+  });
+}
+
+/** Auto-sync of repositories without webhooks (repo-watch.ts). The unchecked switch is simply absent from the form. */
+export async function setRepoWatchAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    await requireViewer();
+    const enabled = fd.get("enabled") === "on" || fd.get("enabled") === "true";
+    const seconds = parseWatchSeconds(fd.get("seconds"));
+    const maxRepos = parseWatchMaxRepos(fd.get("max"));
+    await saveWatchSettings(db, { enabled, seconds, maxRepos });
+    revalidatePath("/settings");
+    revalidatePath("/repositories");
+    return { ok: true, message: enabled ? `Checking up to ${maxRepos} repositories every ${seconds} seconds while Mergeport is open` : "Automatic checks are off. Repositories still refresh every 15 minutes." };
   });
 }
 

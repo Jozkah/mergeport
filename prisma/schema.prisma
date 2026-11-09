@@ -1003,6 +1003,11 @@ model TeamConfig {
   ownerLogin    String?
   commonSpaceId String?
   pollSeconds   Int      @default(30)
+  /// Repository watcher (repo-watch.ts). watchSeconds NULL = not set here, so MERGEPORT_WATCH_SECONDS or 15 applies.
+  watchSeconds  Int?
+  watchEnabled  Boolean  @default(true)
+  /// NULL = not set here: MERGEPORT_WATCH_MAX_REPOS or 20.
+  watchMaxRepos Int?
   backend       TeamBackend @default(GITHUB)
   hubOrigin     String?
   updatedAt     DateTime @updatedAt

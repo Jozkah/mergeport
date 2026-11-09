@@ -35,6 +35,8 @@ export type RepoRow = {
   projects: string[];
   /** The team GitHub App covers this repository, so its changes arrive instantly. */
   instant: boolean;
+  /** Polled by the auto-sync watcher (no webhooks for this repository), with the words for the pill. */
+  watch: { label: string; title: string } | null;
 };
 export type SpaceOpt = { id: string; name: string; everyone: boolean };
 
@@ -148,6 +150,7 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
                     {r.archived && <span className="pill pill-unknown">Archived</span>}
                     {r.demo && <span className="pill pill-needs">Demo</span>}
                     {r.instant && <span className="pill pill-ok"><Zap size={12} aria-hidden /> Instant</span>}
+                    {!r.instant && r.watch && <span className="pill pill-unknown" title={r.watch.title}>{r.watch.label}</span>}
                   </p>
                   <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-ink-3">
                     <span className="inline-flex items-center gap-1" title={r.ownerType === "ORGANIZATION" ? "Organization account" : r.ownerType === "USER" ? "Personal account" : "Account type unknown"}>{r.ownerType === "ORGANIZATION" ? <Building2 size={11} aria-hidden /> : <User size={11} aria-hidden />}{r.ownerLogin}</span>

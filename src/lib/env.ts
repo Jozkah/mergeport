@@ -19,6 +19,22 @@ const schema = z.object({
   DEMO_MODE: z.enum(["true", "false"]).default("false"),
   /** Active coordination polling interval in seconds (floor 15). */
   MERGEPORT_POLL_SECONDS: z.coerce.number().int().min(15).default(30),
+  /** Most repositories the watcher polls (1 to 200). Anything invalid means 20. */
+  MERGEPORT_WATCH_MAX_REPOS: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const n = v !== undefined && /^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN;
+      return Number.isInteger(n) && n >= 1 && n <= 200 ? n : 20;
+    }),
+  /** How often each repository without webhooks is probed while a tab is open, in seconds (2 to 300). Anything invalid means 15. The request budget in repo-watch.ts can stretch it. */
+  MERGEPORT_WATCH_SECONDS: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const n = v !== undefined && /^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN;
+      return Number.isInteger(n) && n >= 2 && n <= 300 ? n : 15;
+    }),
 });
 
 export type Env = z.infer<typeof schema>;

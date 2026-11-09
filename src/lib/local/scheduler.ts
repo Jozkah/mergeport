@@ -4,6 +4,7 @@ import { ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs"
 import { checkProfile } from "@/lib/local/identity";
 import { pollMode } from "@/lib/local/activity";
 import { RECONCILE_EVERY_MS, handlers } from "@/lib/local/handlers";
+import { startRepoWatch, stopRepoWatch } from "@/lib/local/repo-watch";
 import { getEngine, notifyChange } from "@/lib/local/runtime";
 import { recoverDiscovery, shutdownDiscovery, tickDiscovery } from "@/lib/local/discovery-jobs";
 
@@ -76,6 +77,8 @@ export function startLocalScheduler(intervalMs = 5000) {
   process.once("exit", shutdownDiscovery);
   process.once("SIGTERM", shutdownDiscovery);
   process.once("SIGINT", shutdownDiscovery);
+  process.once("exit", stopRepoWatch);
+  startRepoWatch(); // auto-sync of repositories without webhooks; idle unless a tab is open
   const state = { busy: false, lastTick: 0, timer: undefined as unknown as ReturnType<typeof setInterval> };
   state.timer = setInterval(async () => {
     if (state.busy) return;
