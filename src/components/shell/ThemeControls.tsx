@@ -10,7 +10,7 @@ const LABEL: Record<ThemePreference, string> = { light: "Light", dark: "Dark", s
 const ICON = { light: Sun, dark: Moon, system: Monitor } as const;
 
 /** The server rendered <html data-theme> from the cookie; the DOM attribute is the single source of truth on the client. */
-function read(): ThemePreference {
+export function readTheme(): ThemePreference {
   return parseTheme(document.documentElement.getAttribute("data-theme"));
 }
 function subscribe(fn: () => void) {
@@ -20,7 +20,7 @@ function subscribe(fn: () => void) {
 
 let generation = 0;
 
-function apply(pref: ThemePreference) {
+export function applyTheme(pref: ThemePreference) {
   const root = document.documentElement;
   const swap = () => {
     const attr = themeAttribute(pref);
@@ -57,8 +57,8 @@ function apply(pref: ThemePreference) {
 }
 
 function useTheme(initial: ThemePreference) {
-  const pref = useSyncExternalStore(subscribe, read, () => initial);
-  return [pref, useCallback((p: ThemePreference) => apply(p), [])] as const;
+  const pref = useSyncExternalStore(subscribe, readTheme, () => initial);
+  return [pref, useCallback((p: ThemePreference) => applyTheme(p), [])] as const;
 }
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";

@@ -18,6 +18,8 @@ export type WaitingRuleRow = {
   includeDrafts: boolean;
   waitingOn: Reviewer[];
   reason: string;
+  /** Hand-off stage this rule describes; empty means "infer". */
+  stage?: string;
   enabled: boolean;
 };
 

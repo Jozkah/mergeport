@@ -5,6 +5,10 @@ import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { repoWhere } from "@/lib/authz/viewer";
 import { deriveForIds, listProjects, listWorkItems, type WorkItemListParams } from "@/lib/services/queries";
+import { readScope, scopeRepositoryIds } from "@/lib/scope";
+import { ViewBar } from "@/components/views/ViewBar";
+import { listViews } from "@/lib/services/views";
+import { ScopeNote } from "@/components/shell/ScopeNote";
 import { PageHeader, Panel, EmptyState, Segmented, Banner } from "@/components/ui/primitives";
 import { CircleDot, Filter, GitPullRequest, Plus, Search } from "@/components/ui/icons";
 import { WorkTable } from "./WorkTable";
@@ -19,10 +23,12 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
   const { viewer, user } = await requireViewer();
   const now = new Date();
   const state = (["OPEN", "CLOSED", "MERGED", "ALL"].includes(one(searchParams.state).toUpperCase()) ? one(searchParams.state).toUpperCase() : "OPEN") as WorkItemListParams["state"];
+  const scope = await readScope(db, viewer);
+  const scopedRepos = !one(searchParams.repo) ? await scopeRepositoryIds(db, scope) : undefined;
   const params: WorkItemListParams = {
     type,
     state,
-    repositoryIds: one(searchParams.repo) ? [one(searchParams.repo)] : undefined,
+    repositoryIds: one(searchParams.repo) ? [one(searchParams.repo)] : scopedRepos,
     projectId: one(searchParams.project) || undefined,
     label: one(searchParams.label) || undefined,
     author: one(searchParams.author) || undefined,
@@ -82,6 +88,8 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
           ) : undefined
         }
       />
+      <ScopeNote scope={scope} />
+      <ViewBar scope={type} views={await listViews(db, viewer, type)} />
       {unsynced > 0 && (
         <div className="mb-4">
           <Banner tone="info" title={`${unsynced} of ${repos.length} repositor${repos.length === 1 ? "y has" : "ies have"} not been synchronized yet`}>

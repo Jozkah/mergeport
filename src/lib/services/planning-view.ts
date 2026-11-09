@@ -2,6 +2,7 @@ import { checklistProgress } from "./tasks";
 import type { Db } from "@/lib/db";
 import { repoWhere, type Viewer } from "@/lib/authz/viewer";
 import { isOverdue, todayIn } from "@/lib/domain/planning";
+import { blockerFinished } from "@/lib/domain/deps";
 import { formatDateOnly } from "@/lib/format";
 import { planningWhere, asLabels } from "./queries";
 
@@ -30,6 +31,11 @@ export type CardView = {
   blockedBy: number; // unfinished blockers, including ones the viewer cannot see
   hiddenBlockers: number;
   canMove: boolean;
+  /** The task record behind this card: every card, GitHub-linked or not, opens its task detail. */
+  taskHref: string;
+  epicId: string | null;
+  epicTitle: string | null;
+  iterationId: string | null;
 };
 
 export async function planningBoard(db: Db, v: Viewer, projectId: string, now = new Date()) {
@@ -41,7 +47,7 @@ export async function planningBoard(db: Db, v: Viewer, projectId: string, now = 
       milestone: true,
       workItem: { include: { repository: { select: { fullName: true, isDemo: true } } } },
       waiting: { where: { status: "PENDING" } },
-      blockedBy: { include: { from: { include: { column: true } } } },
+      blockedBy: { where: { kind: "blocks" }, include: { from: { include: { column: true, workItem: { select: { type: true, state: true } } } } } },
     },
     orderBy: [{ position: "asc" }],
   });
@@ -50,11 +56,12 @@ export async function planningBoard(db: Db, v: Viewer, projectId: string, now = 
   const visibleIds = new Set(
     (await db.planningItem.findMany({ where: await planningWhere(db, v, projectId), select: { id: true } })).map((i) => i.id),
   );
+  const epicTitles = new Map((await db.epic.findMany({ where: { projectId }, select: { id: true, title: true } })).map((e) => [e.id, e.title]));
   const today = todayIn(v.timezone, now);
   const progress = await checklistProgress(db, items.map((i) => i.id));
 
   const cards: CardView[] = items.map((i) => {
-    const unfinished = i.blockedBy.filter((l) => l.from.column.key !== "done");
+    const unfinished = i.blockedBy.filter((l) => !blockerFinished({ columnKey: l.from.column.key, workType: l.from.workItem?.type ?? null, workState: l.from.workItem?.state ?? null }));
     const w = i.waiting[0];
     return {
       id: i.id,
@@ -81,6 +88,10 @@ export async function planningBoard(db: Db, v: Viewer, projectId: string, now = 
       blockedBy: unfinished.length,
       hiddenBlockers: unfinished.filter((l) => !visibleIds.has(l.fromId)).length,
       canMove: v.isAdmin || !i.workItemId || manageable.has(i.workItem!.repositoryId),
+      taskHref: `/tasks/${i.id}`,
+      epicId: i.epicId,
+      epicTitle: i.epicId ? (epicTitles.get(i.epicId) ?? null) : null,
+      iterationId: i.iterationId,
     };
   });
   return { columns, cards };

@@ -138,3 +138,28 @@ describe("checklist", () => {
     expect((await listTasks(db, a, { status: "all", openItems: true })).some((x) => x.id === t.id)).toBe(false);
   });
 });
+
+const NL = String.fromCharCode(10);
+describe("audit regressions", () => {
+  it("matches assignees regardless of username case in lists, by-me and counts (B07)", async () => {
+    const { db, a, ids } = S;
+    const p = ids.projects.atlas.id;
+    const t = await createTask(db, a, { projectId: p, title: "shouting", assigneeLogin: a.login.toUpperCase() });
+    expect((await listTasks(db, a, { scope: "mine" })).map((x) => x.id)).toContain(t.id);
+    expect((await listTasks(db, a, { scope: "by-me" })).map((x) => x.id)).not.toContain(t.id);
+    const before = (await taskCounts(db, a)).mine;
+    await updateTask(db, a, t.id, { assigneeLogin: "Dana" });
+    expect((await taskCounts(db, a)).mine).toBe(before - 1);
+    expect((await listTasks(db, a, { scope: "by-me" })).map((x) => x.id)).toContain(t.id);
+    expect((await listTasks(db, a, { assignee: "DANA" })).map((x) => x.id)).toContain(t.id);
+  });
+
+  it("saves nothing when any pasted checklist line is rejected (B08)", async () => {
+    const { db, a, ids } = S;
+    const t = await createTask(db, a, { projectId: ids.projects.atlas.id, title: "list" });
+    await expect(addCheckItems(db, a, t.id, `fine${NL}${"x".repeat(201)}`)).rejects.toThrow(/at most 200/);
+    expect(await db.taskCheckItem.count({ where: { itemId: t.id } })).toBe(0);
+    await addCheckItems(db, a, t.id, `one${NL}two`);
+    expect(await db.taskCheckItem.count({ where: { itemId: t.id } })).toBe(2);
+  });
+});

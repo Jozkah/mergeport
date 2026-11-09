@@ -35,17 +35,21 @@ export async function addCheckItems(db: Db, v: Viewer, taskId: string, raw: stri
   await loadTask(db, v, taskId);
   const parsed = parseChecklistLines(raw);
   if (!parsed.length) throw new ValidationError("Write the checklist item first");
-  const existing = await db.taskCheckItem.count({ where: { itemId: taskId } });
-  if (existing + parsed.length > CHECKLIST_MAX_ITEMS) throw new ValidationError(`A task can have at most ${CHECKLIST_MAX_ITEMS} checklist items`);
-  const last = await db.taskCheckItem.findFirst({ where: { itemId: taskId }, orderBy: { position: "desc" } });
-  let pos = last?.position ?? 0;
-  const created = [];
-  for (const p of parsed) {
-    pos += 1024;
-    created.push(await db.taskCheckItem.create({ data: { itemId: taskId, text: cleanItemText(p.text), done: p.done, doneByLogin: p.done ? v.login : null, doneAt: p.done ? new Date() : null, position: pos } }));
-  }
-  await db.planningItem.update({ where: { id: taskId }, data: { updatedAt: new Date() } });
-  return created;
+  // Validate the whole paste before writing anything, then write it as one unit: a rejected paste changes nothing.
+  const clean = parsed.map((p) => ({ text: cleanItemText(p.text), done: p.done }));
+  return db.$transaction(async (tx) => {
+    const existing = await tx.taskCheckItem.count({ where: { itemId: taskId } });
+    if (existing + clean.length > CHECKLIST_MAX_ITEMS) throw new ValidationError(`A task can have at most ${CHECKLIST_MAX_ITEMS} checklist items`);
+    const last = await tx.taskCheckItem.findFirst({ where: { itemId: taskId }, orderBy: { position: "desc" } });
+    let pos = last?.position ?? 0;
+    const created = [];
+    for (const p of clean) {
+      pos += 1024;
+      created.push(await tx.taskCheckItem.create({ data: { itemId: taskId, text: p.text, done: p.done, doneByLogin: p.done ? v.login : null, doneAt: p.done ? new Date() : null, position: pos } }));
+    }
+    await tx.planningItem.update({ where: { id: taskId }, data: { updatedAt: new Date() } });
+    return created;
+  });
 }
 
 async function loadCheckItem(db: Db, v: Viewer, id: string) {

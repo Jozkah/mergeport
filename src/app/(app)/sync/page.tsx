@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { isDemo } from "@/lib/env";
-import { getEngine } from "@/lib/local/runtime";
+import { getEngine, getTeamService } from "@/lib/local/runtime";
+import { syncCenter } from "@/lib/services/sync-center";
 import { expectedConsistencyDelaySeconds } from "@/lib/sync/engine";
 import { formatInstant } from "@/lib/format";
 import { deriveSourceStatus } from "@/lib/sync/source-status";
@@ -42,12 +44,40 @@ export default async function SyncPage() {
   });
   const sourceProblems = sourceRepos.filter((r) => r.trackingStatus === "DISCONNECTED" || r.rateLimited || r.syncError);
   const lastSource = sourceRepos.reduce<Date | null>((m, r) => (r.lastSyncedAt && (!m || r.lastSyncedAt > m) ? r.lastSyncedAt : m), null);
+  const center = await syncCenter(db, poll);
+  const teamSvc = await getTeamService();
+  const quota = teamSvc && !isDemo() ? await Promise.race([teamSvc.rateLimit(), new Promise<null>((r) => setTimeout(() => r(null), 3000))]) : null;
   const states = engine ? await Promise.all(spaces.map(async (s) => [s, await engine.stateFor(s)] as const)) : [];
 
   return (
     <>
       <PageHeader title="Sync" subtitle="Your edits are saved on this computer first. This page shows what has reached GitHub, what is waiting, and what needs a decision." actions={engine ? <ActionForm action={refreshSyncAction} submitLabel="Refresh now" submitClassName="btn" resetOnSuccess={false}>{null}</ActionForm> : undefined} />
       {isDemo() && <div className="mb-4"><Banner title="Demo mode">Nothing syncs in demo mode.</Banner></div>}
+
+      {center.length > 0 && (
+        <div className="mb-5">
+          <Panel title="Where your changes are" icon={RefreshCw} id="where">
+            <div className="flex flex-col gap-3 p-4 text-[13px]">
+              {quota && <p className="text-[12.5px] text-ink-3">GitHub request budget for your account: <span className="tnum font-medium text-ink-2">{quota.remaining}</span> of {quota.limit} left{quota.remaining < quota.limit * 0.1 ? <span className="text-waiting"> (low: syncing may pause until {formatInstant(quota.resetsAt, viewer.timezone)})</span> : `, resets ${formatInstant(quota.resetsAt, viewer.timezone)}`}. Source repositories and shared planning use the same budget.</p>}
+              {center.map((c) => (
+                <section key={c.id} aria-label={c.fullName} className="rounded-[10px] border border-line p-3">
+                  <p className="font-medium"><Mono>{c.fullName}</Mono></p>
+                  <ol className="mt-2 flex flex-col gap-1.5">
+                    {c.facts.map((f) => (
+                      <li key={f.key} className="flex items-start gap-2">
+                        <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full ${f.tone === "ok" ? "bg-ok" : f.tone === "hold" ? "bg-blocked" : f.tone === "wait" ? "bg-waiting" : "bg-line-strong"}`} />
+                        <div><p className="font-medium">{f.label}</p><p className="text-[12.5px] text-ink-3">{f.detail}</p></div>
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="mt-2 text-[12px] text-ink-3">{c.lastPolledAt ? `Last checked for teammates' changes ${formatInstant(c.lastPolledAt, viewer.timezone)}` : "Not checked yet"}{c.nextPollAt ? ` · next check ${formatInstant(c.nextPollAt, viewer.timezone)}` : ""}</p>
+                </section>
+              ))}
+              <p className="text-[12px] text-ink-3">Mergeport only syncs while it is open. A change you publish reaches a teammate when their app next checks; nothing here means &ldquo;delivered to them&rdquo;.</p>
+            </div>
+          </Panel>
+        </div>
+      )}
 
       <div className="mb-5"><Banner title="How fresh is shared data?">Mergeport polls GitHub; it is not real time. With the app open and visible it checks every {poll} seconds, so a teammate&apos;s change typically shows up within about {delay.typical} seconds (longer when nothing changes: checks back off to at most 10 minutes, and a hidden or closed tab checks about once a minute or not at all). Background sync runs only while this app is running.</Banner></div>
 
@@ -77,11 +107,12 @@ export default async function SyncPage() {
                 const fields = c.fields as string[];
                 const local = c.local as Record<string, unknown>;
                 const remote = c.remote as Record<string, unknown>;
+                const base = (c.base ?? {}) as Record<string, unknown>;
                 return (
                   <li key={c.id} className="flex flex-col gap-3 border-b border-line p-4 last:border-b-0">
                     <p className="text-[13px]"><span className="font-medium">{c.entityType}</span> in <Mono>{c.space.repoName}</Mono> was changed on this computer and by a teammate.</p>
-                    <div className="table-wrap" tabIndex={0} role="region" aria-label={`Differences for ${c.entityType} in ${c.space.repoName}`}><table className="data !text-[12.5px] [overflow-wrap:anywhere]"><thead><tr><th scope="col">Field</th><th scope="col">Your version</th><th scope="col">Teammate&apos;s version</th></tr></thead>
-                      <tbody>{fields.map((f) => <tr key={f}><td className="mono">{f === "__deleted" ? "existence" : f}</td><td>{f === "__deleted" ? (Object.keys(local).length ? "kept / edited" : "deleted") : val(local[f])}</td><td>{f === "__deleted" ? (Object.keys(remote).length ? "kept / edited" : "deleted") : val(remote[f])}</td></tr>)}</tbody></table></div>
+                    <div className="table-wrap" tabIndex={0} role="region" aria-label={`Differences for ${c.entityType} in ${c.space.repoName}`}><table className="data !text-[12.5px] [overflow-wrap:anywhere]"><thead><tr><th scope="col">Field</th><th scope="col">Before either change</th><th scope="col">Your version</th><th scope="col">Teammate&apos;s version</th></tr></thead>
+                      <tbody>{fields.map((f) => <tr key={f}><td className="mono">{f === "__deleted" ? "existence" : f}</td><td className="text-ink-3">{f === "__deleted" ? "existed" : val(base[f])}</td><td>{f === "__deleted" ? (Object.keys(local).length ? "kept / edited" : "deleted") : val(local[f])}</td><td>{f === "__deleted" ? (Object.keys(remote).length ? "kept / edited" : "deleted") : val(remote[f])}</td></tr>)}</tbody></table></div>
                     <div className="flex flex-wrap gap-2">
                       <ActionForm action={resolveConflictAction} submitLabel="Keep mine" submitAriaLabel={`Keep my version of ${c.entityType} in ${c.space.repoName}`} submitClassName="btn btn-primary" resetOnSuccess={false}><input type="hidden" name="id" value={c.id} /><input type="hidden" name="choice" value="mine" /></ActionForm>
                       <ActionForm action={resolveConflictAction} submitLabel="Take theirs" submitAriaLabel={`Take the teammate\u2019s version of ${c.entityType} in ${c.space.repoName}`} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={c.id} /><input type="hidden" name="choice" value="theirs" /></ActionForm>
@@ -96,7 +127,7 @@ export default async function SyncPage() {
       )}
 
       <Panel title="Spaces" icon={RefreshCw} id="spaces">
-        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet">Spaces appear after you create or join a team.</EmptyState> : (
+        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet" action={<Link href="/team" className="btn btn-primary">Set up a team</Link>}>You work alone right now, so everything stays on this computer. Create or join a team to share projects and tasks.</EmptyState> : (
           <ul>
             {states.map(([s, st]) => (
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 text-[13px] last:border-b-0">
