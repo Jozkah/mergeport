@@ -12,12 +12,16 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createPrisma } from "../src/lib/db";
-import { killTree } from "../src/lib/github/exec";
 import { ghStatus, loginCommand, REQUIRED_SCOPES } from "../src/lib/github/gh";
-import { mergeportHome, profileDbPath } from "../src/lib/local/profile";
+import { mergeportHome } from "../src/lib/local/profile";
+import { writeActive } from "../src/lib/local/registry";
+import { resolveStartProfile, resolveSwitchTarget } from "../src/lib/local/start-profile";
+import { spawnNext, waitForReady } from "../src/lib/local/child-process";
+import type { Backend } from "../src/lib/local/backends";
+import { NOT_RESTORED, Supervisor } from "../src/lib/local/supervisor";
 import { looksOffline, savedProfiles } from "../src/lib/local/saved-profiles";
 import { seedDemo } from "../src/lib/demo/seed";
-import { activeDbFile, profileDirOf } from "../src/lib/local/contexts";
+import { activeDbFile, profileDirOf, readIndex } from "../src/lib/local/contexts";
 
 const args = process.argv.slice(2);
 const demo = args.includes("--demo");
@@ -28,6 +32,8 @@ const host = process.env.MERGEPORT_HOST ?? "github.com";
 async function main() {
   const home = mergeportHome(process.env.MERGEPORT_HOME);
   let dbFile: string;
+  let startBackend: Backend = "github";
+  let signedInId: bigint | null = null; // who gh is (or, offline, who the saved profile is); switching only opens this account's profiles
   if (demo) {
     dbFile = path.join(home, "demo", "mergeport-demo.db");
     fs.mkdirSync(path.dirname(dbFile), { recursive: true });
@@ -54,66 +60,101 @@ async function main() {
         process.exit(2);
       }
       dbFile = saved[0].dbFile;
+      signedInId = BigInt(saved[0].id);
       createPrisma(dbFile); // applies migrations
       console.log(`GitHub is unreachable (${st.message}). Opening the saved profile for @${saved[0].login} (id ${saved[0].id}) from this computer: ${dbFile}\nData is shown as last saved. Nothing is sent to GitHub until the account is verified again.`);
     } else {
-      dbFile = profileDbPath(home, host, st.identity.id);
+      signedInId = st.identity.id;
+      const prof = resolveStartProfile(home, host, st.identity.id);
+      dbFile = prof.dbFile;
+      startBackend = prof.backend;
       fs.mkdirSync(path.dirname(dbFile), { recursive: true });
       createPrisma(dbFile); // applies migrations
       console.log(`Signed in to ${host} as ${st.identity.login} (id ${st.identity.id}). Profile: ${dbFile}`);
     }
   }
 
-  // The profile's base database is the one chosen above. The ACTIVE context (a separate database file for another team) may be a
-  // different file in the same folder; switching writes the new choice and exits with RESTART so this launcher reopens it.
-  const baseFile = dbFile;
-  const dir = profileDirOf(baseFile);
-  const baseName = path.basename(baseFile);
+  const next = path.join("node_modules", "next", "dist", "bin", "next");
+  if (!fs.existsSync(".next/BUILD_ID")) {
+    console.log("First run: building the app (one time)…");
+    const buildEnv = { ...process.env, MERGEPORT_DB: dbFile, MERGEPORT_PORT: String(port), DEMO_MODE: demo ? "true" : "false", NODE_ENV: "production" } as unknown as NodeJS.ProcessEnv;
+    await new Promise<void>((resolve, reject) => spawn(process.execPath, [next, "build"], { stdio: "inherit", env: buildEnv }).on("exit", (c) => (c === 0 ? resolve() : reject(new Error("build failed")))));
+  }
+
+  // Team contexts: one profile can hold several databases. A child that exits with RESTART asked to be reopened on the profile's (new) active one.
   const RESTART = 75;
-  for (;;) {
-    const file = activeDbFile(dir, baseName);
+  const baseOf = (file: string) => {
+    const dir = profileDirOf(file);
+    return path.basename(path.dirname(file)) === "contexts" ? path.join(dir, readIndex(dir, path.basename(file)).base) : file;
+  };
+  const openContext = async (base: string) => {
+    const file = activeDbFile(profileDirOf(base), path.basename(base));
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const migrated = createPrisma(file); // applies migrations to this context's database
     if (demo && (await migrated.user.count()) === 0) await seedDemo(migrated);
     await migrated.$disconnect();
-    if (file !== baseFile) console.log(`Opening context database: ${file}`);
-    const code = await serve(file, baseFile);
-    if (code !== RESTART) process.exit(code);
+    if (file !== base) console.log(`Opening context database: ${file}`);
+    return file;
+  };
+  let lastBase = dbFile;
+  let lastBackend = startBackend; // a relaunch reopens whatever workspace was running, not necessarily the one the launcher started with
+  // The supervisor owns the one app process, so a workspace switch is a restart on another database, never an in-process swap.
+  const control = { url: "" };
+  const supervisor = new Supervisor(
+    {
+      spawnChild: (spec) => spawnNext(spec, { MERGEPORT_CONTROL_URL: control.url, MERGEPORT_LAUNCHER: "1", MERGEPORT_BASE_DB: ((lastBackend = spec.backend ?? lastBackend), (lastBase = baseOf(spec.dbFile))) }),
+      waitReady: (p, signal) => waitForReady(p, signal),
+      resolveTarget: async ({ backend }) => {
+        if (demo || signedInId === null) throw new Error("Switching workspaces is not available in this mode.");
+        return resolveSwitchTarget(home, host, signedInId, backend);
+      },
+      // The launcher owns active.json: it changes only once the new workspace is really up.
+      onSwitched: (backend) => {
+        if (signedInId !== null) writeActive(home, { host, accountId: String(signedInId), backend });
+      },
+      newToken: () => randomBytes(24).toString("base64url"),
+    },
+    { port, demo },
+  );
+  Object.assign(control, await supervisor.listenControl());
+  // Stop the whole tree (the server AND any gh it is running) so nothing outlives the launcher. On Windows a plain kill would orphan them.
+  const stop = () => void supervisor.stop().finally(() => process.exit(0));
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  // A child that dies outside a switch ends the launcher, as before.
+  supervisor.on("child-exit", (c) => {
+    if (c !== RESTART) return process.exit(c ?? 0);
     console.log("Switching context: restarting Mergeport…");
-  }
-}
+    void openContext(lastBase)
+      .then((file) => supervisor.start({ dbFile: file, backend: lastBackend }))
+      .then(({ launchUrl }) => openLink(launchUrl))
+      .catch((e) => {
+        console.error(e instanceof Error ? e.message : e);
+        process.exit(1);
+      });
+  });
+  // A switch that failed after the browser was told it was accepted has no other way to be reported.
+  supervisor.on("switch-failed", (err) => {
+    console.error(err.message);
+    if (err.message === NOT_RESTORED) void supervisor.stop().finally(() => process.exit(1)); // no child is running any more
+  });
 
-function serve(dbFile: string, baseFile: string): Promise<number> {
-  const token = randomBytes(24).toString("base64url");
-  const env = { ...process.env, MERGEPORT_DB: dbFile, MERGEPORT_BASE_DB: baseFile, MERGEPORT_LAUNCHER: "1", MERGEPORT_LAUNCH_TOKEN: token, MERGEPORT_PORT: String(port), DEMO_MODE: demo ? "true" : "false", NODE_ENV: "production" } as unknown as NodeJS.ProcessEnv;
-  const next = path.join("node_modules", "next", "dist", "bin", "next");
-  return (async () => {
-    if (!fs.existsSync(".next/BUILD_ID")) {
-      console.log("First run: building the app (one time)…");
-      await new Promise<void>((resolve, reject) => spawn(process.execPath, [next, "build"], { stdio: "inherit", env: { ...env, NODE_ENV: "production" } }).on("exit", (c) => (c === 0 ? resolve() : reject(new Error("build failed")))));
-    }
-    const child = spawn(process.execPath, [next, "start", "-H", "127.0.0.1", "-p", String(port)], { stdio: "inherit", env });
-    const url = `http://127.0.0.1:${port}/api/local/launch?token=${encodeURIComponent(token)}`;
-    setTimeout(() => {
-      console.log(`\nMergeport is running at http://127.0.0.1:${port} (this computer only).`);
-      if (demo) console.log("Demo sign-in is on the sign-in page.");
-      if (!noOpen) {
-        const [cmd, a] = process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
-        execFile(cmd as string, a as string[], () => {});
-      } else console.log("Open this one-time link:\n" + url);
-    }, 2500);
-    // Stop the whole tree (the server AND any gh it is running) so nothing outlives the launcher. On Windows a plain kill would orphan them.
-    const stop = () => killTree(child);
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
-    return await new Promise<number>((resolve) =>
-      child.on("exit", (c) => {
-        process.off("SIGINT", stop);
-        process.off("SIGTERM", stop);
-        resolve(c ?? 0);
-      }),
-    );
-  })();
+  const openLink = (url: string) => {
+    if (!noOpen) {
+      const [cmd, a] = process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
+      execFile(cmd as string, a as string[], () => {});
+    } else console.log("Open this one-time link:\n" + url);
+  };
+  const started = Date.now();
+  const { launchUrl: url } = await supervisor.start({ dbFile: await openContext(dbFile), backend: startBackend }).catch(async (e) => {
+    await supervisor.stop();
+    throw e;
+  });
+  setTimeout(() => {
+    console.log(`\nMergeport is running at http://127.0.0.1:${port} (this computer only).`);
+    if (demo) console.log("Demo sign-in is on the sign-in page.");
+    openLink(url);
+  }, Math.max(0, 2500 - (Date.now() - started)));
 }
 main().catch((e) => {
   console.error(e instanceof Error ? e.message : e);
