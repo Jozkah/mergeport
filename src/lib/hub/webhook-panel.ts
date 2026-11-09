@@ -12,6 +12,9 @@ export const COVERAGE_KEY = "github-app-coverage";
 /** DiscoveryCache key of the covered ids the hub reports over the socket: JSON `{ ids: string[], at: ISO string }`. */
 export const HUB_COVERAGE_KEY = "github-app-hub-coverage";
 
+/** DiscoveryCache key of whether the hub's webhooks are enabled, as last seen in `me()`: JSON `{ enabled: boolean, at: ISO string }`. */
+export const HUB_WEBHOOKS_KEY = "github-app-hub-webhooks";
+
 /** Shown, as a plain note and not as a failure, when GitHub refuses `GET /user/installations` for the person's own token. */
 export const REFUSED_NOTE = "GitHub does not allow this from here. Use the install link; coverage is detected automatically.";
 /** Why the table needs no button press. */
@@ -32,7 +35,7 @@ export function webhookStatus(w: HubWebhooks, now = Date.now()): WebhookStatus {
 }
 
 /** A tracked repository the hub has not reported as covered. Coverage is learned from GitHub's events, so "unknown yet" is the honest state. */
-export const COVERAGE_WAITING_LABEL = "Waiting for GitHub's first event";
+export const COVERAGE_WAITING_LABEL = "Not seen yet";
 export const COVERAGE_WAITING_HELP = "If you already installed the App on this repository, Mergeport learns it from the next event, or right away when you redeliver the App's installation event (GitHub, your App, Advanced, Recent deliveries).";
 
 export const WAITING_HELP = "Install the App on a repository (GitHub sends an event when you do), then edit an issue to see it arrive instantly.";

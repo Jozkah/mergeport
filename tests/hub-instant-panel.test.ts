@@ -220,7 +220,9 @@ describe("panel: repositories and the hidden form", () => {
       }),
     );
     expect(html).toMatch(/acme\/one[\s\S]*?Covered/);
-    expect(html).toMatch(/acme\/two[\s\S]*?Waiting for GitHub&#x27;s first event/);
+    expect(html).toMatch(/acme\/two[\s\S]*?Not seen yet/);
+    expect(html).toContain("If you already installed the App on this repository, Mergeport learns it from the next event, or right away when you redeliver the App&#x27;s installation event (GitHub, your App, Advanced, Recent deliveries).");
+    expect(html).not.toContain("Not installed yet");
     expect(html).toContain("Add my tracked repositories");
     expect(html).toContain("https://github.com/apps/team-app/installations/new");
   });
@@ -233,7 +235,7 @@ describe("panel: repositories and the hidden form", () => {
         tracked: [{ id: "a", githubId: "11", fullName: "acme/one" }, { id: "b", githubId: "12", fullName: "acme/two" }], covered: new Set(["12"]),
       }),
     );
-    expect(html).toMatch(/acme\/one[\s\S]*?Waiting for GitHub&#x27;s first event/);
+    expect(html).toMatch(/acme\/one[\s\S]*?Not seen yet/);
     expect(html).toMatch(/acme\/two[\s\S]*?Covered/);
     expect(html).toContain("Mergeport sees which repositories the App covers from GitHub&#x27;s own events. Install the App on a repository on GitHub and it shows as Covered within seconds.");
     expect(html).toContain("https://github.com/apps/team-app/installations/new");
