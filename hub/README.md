@@ -154,6 +154,7 @@ How it works:
 
 - `POST /webhooks/github` has no bearer token. It is authenticated only by `X-Hub-Signature-256`, the HMAC-SHA256 of the raw body with the secret (compared in constant time). The body is capped at 1 MiB (`413`); a missing or wrong signature is `401` and nothing else happens.
 - `ping`, `installation` and `installation_repositories` are recorded (`GET /me` shows `webhooks.lastDeliveryAt` and `lastEvent`, held in memory) and not relayed. `issues`, `issue_comment`, `pull_request`, `pull_request_review`, `pull_request_review_comment`, `pull_request_review_thread`, `check_run`, `check_suite`, `status`, `push`, `create` and `delete` are relayed over the WebSocket as `{"t":"gh", ...}` to the connections that asked for that repository (`{"t":"watch","repos":[...]}`) and are allowed to see it: the repository is public, or its owner is the member (by GitHub id), or it is shared through a space the member can read. Everyone else's app catches up on its 15-minute cycle. Any other event is ignored (`202`).
+- Coverage detection: after the signature is verified, the hub records which repositories the App covers in the table `github_covered` (ids only): `installation` and `installation_repositories` events add or remove the repositories they list, and any other relayed event marks its own repository, since an event arriving proves the App covers it. Each connection receives `{"t":"covered","repos":[...]}` with only the covered ids among the repositories it watches, after `watch` and whenever that list changes, so the app can show "Instant" without any GitHub API call that GitHub refuses.
 - Deliveries repeated within 10 minutes (same `X-GitHub-Delivery`) are relayed once. The endpoint shares one bucket of 600 requests per minute (`429` above it). A payload over 256 KiB is relayed as `payload: null`, which makes the app fetch instead.
 - Logs carry the event name, the repository id and the number of sockets notified. Never a body, a title, a signature or the secret.
 
@@ -173,5 +174,6 @@ Security notes:
 - Sessions, as SHA-256 hashes of the token, with expiry and client name
 - Spaces, space membership, and the synced entity records and their change log
 - The GitHub App's webhook secret and slug, when instant updates are set up (table `setting`)
+- Ids of the repositories the GitHub App covers and when each was last seen (table `github_covered`; ids only, no names or content)
 
 It never stores GitHub tokens: the access token from sign-in is used once to read your GitHub profile and is then dropped. It stores no source code, no issues and no pull requests; GitHub stays the source of truth for those.

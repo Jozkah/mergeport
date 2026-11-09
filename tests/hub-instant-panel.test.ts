@@ -11,7 +11,7 @@ import { hubBackendId } from "@/lib/local/backends";
 import { ensureLocalProfile } from "@/lib/local/profile";
 import { HubForbidden, HubRequestError, type HubAdminApi, type HubLinkStatus, type HubMember, type HubWebhooks } from "@/lib/hub/ports";
 import { httpHubAdmin, parseWebhooks } from "@/lib/hub/ports-impl";
-import { readCoverage, saveCoverage } from "@/lib/hub/github-app-install";
+import { readCoverage, saveCoverage, saveHubCoverage } from "@/lib/hub/github-app-install";
 import { HubTeamService } from "@/lib/team/hub-service";
 import { FAKE_SESSION, FAKE_WEBHOOK_SECRET, startFakeHub, type FakeMember } from "./fake-hub";
 
@@ -225,6 +225,22 @@ describe("panel: repositories and the hidden form", () => {
     expect(html).toContain("https://github.com/apps/team-app/installations/new");
   });
 
+  it("renders Covered and Not installed yet from the hub-reported set, explains detection, and offers the API button as optional", async () => {
+    const { InstantUpdatesPanel } = await import("@/components/team/InstantUpdatesPanel");
+    const html = renderToStaticMarkup(
+      InstantUpdatesPanel({
+        teamName: "T", origin: ORIGIN, isOwner: false, webhooks: { enabled: true, appSlug: "team-app", lastDeliveryAt: null, lastEvent: null },
+        tracked: [{ id: "a", githubId: "11", fullName: "acme/one" }, { id: "b", githubId: "12", fullName: "acme/two" }], covered: new Set(["12"]),
+      }),
+    );
+    expect(html).toMatch(/acme\/one[\s\S]*?Not installed yet/);
+    expect(html).toMatch(/acme\/two[\s\S]*?Covered/);
+    expect(html).toContain("Mergeport sees which repositories the App covers from GitHub&#x27;s own events. Install the App on a repository on GitHub and it shows as Covered within seconds.");
+    expect(html).toContain("https://github.com/apps/team-app/installations/new");
+    expect(html).toContain("Add my tracked repositories");
+    expect(html).toContain("Try to add them through GitHub&#x27;s API");
+  });
+
   it("the hidden form posts the manifest field to the action URL that `start` answered", async () => {
     const { ManifestForm } = await import("@/components/team/GithubAppCreate");
     const { buildManifest, manifestActionUrl } = await import("@/lib/hub/github-app-manifest");
@@ -329,6 +345,27 @@ describe("actions", () => {
     expect(calls).toEqual([]);
   });
 
+  it("a refused installations list is a neutral note, not a failure, and stores nothing", async () => {
+    await seedRepos();
+    mockApi(apiFor("2", { enabled: true, appSlug: "team-app", lastDeliveryAt: null, lastEvent: null }), "2");
+    h.rest = new GitHubRest((async () => new Response(JSON.stringify({ message: "Resource not accessible" }), { status: 403 })) as unknown as typeof fetch);
+    const { addTrackedRepositoriesAction } = await import("@/app/hub-webhook-actions");
+    expect(await addTrackedRepositoriesAction()).toEqual({ ok: true, message: "GitHub does not allow this from here. Use the install link; coverage is detected automatically.", data: { neutral: true } });
+    expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-coverage" } })).toBeNull();
+  });
+
+  it("Check now treats any covered repository as success, from either source", async () => {
+    await seedRepos();
+    const { checkInstantUpdatesAction } = await import("@/app/hub-webhook-actions");
+    mockApi(apiFor("2", { enabled: true, appSlug: "team-app", lastDeliveryAt: null, lastEvent: null }), "2");
+    expect(await checkInstantUpdatesAction()).toMatchObject({ ok: true, message: expect.stringContaining("Install the App on a repository") });
+    await saveHubCoverage(h.db, ["12"]);
+    expect(await checkInstantUpdatesAction()).toMatchObject({ ok: true, message: expect.stringContaining("The App covers 1 of your 2 tracked repositories.") });
+    await h.db.discoveryCache.deleteMany({});
+    await saveCoverage(h.db, { appSlug: "team-app", checkedAt: new Date().toISOString(), covered: ["11", "12"] });
+    expect(await checkInstantUpdatesAction()).toMatchObject({ ok: true, message: expect.stringContaining("The App covers 2 of your 2 tracked repositories.") });
+  });
+
   it("Check now words each state", async () => {
     const { checkInstantUpdatesAction } = await import("@/app/hub-webhook-actions");
     mockApi(apiFor("3", { enabled: true, appSlug: "a", lastDeliveryAt: null, lastEvent: null }), "3");
@@ -346,7 +383,9 @@ describe("actions", () => {
     expect(await saveWebhookSecretAction(fd({ secret: "c".repeat(64), appSlug: "team-app" }))).toMatchObject({ ok: true });
     expect(await saveWebhookSecretAction(fd({ secret: "c".repeat(64) }))).toMatchObject({ ok: true });
     await saveCoverage(h.db, { appSlug: "team-app", checkedAt: new Date().toISOString(), covered: ["11"] });
+    await saveHubCoverage(h.db, ["11"]);
     expect(await turnOffInstantUpdatesAction()).toMatchObject({ ok: true });
+    expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-hub-coverage" } })).toBeNull();
     expect(calls).toEqual(["set:64:team-app", "set:64:", "clear"]);
     expect((await readCoverage(h.db, "team-app")).size).toBe(0);
     mockApi(apiFor("3", OFF, calls), "3");
@@ -381,6 +420,34 @@ describe("the Instant badge", () => {
     await stored();
     h.getHubTeamService.mockResolvedValue({ svc: new HubTeamService({ ...apiFor("3", OFF), me: async () => { throw new HubRequestError("down", 0); } }, "3"), dbFile: "x.db", origin: ORIGIN });
     expect((await instantRepoIds(h.db)).size).toBe(0);
+  });
+
+  it("shows a repository the hub reported, only while the hub's webhooks are enabled", async () => {
+    const { instantRepoIds } = await import("@/lib/hub/instant-badges");
+    await saveHubCoverage(h.db, ["21", "22"]);
+    on("team-app");
+    expect([...(await instantRepoIds(h.db))].sort()).toEqual(["21", "22"]);
+    on(null); // hub-reported ids do not depend on the slug
+    expect([...(await instantRepoIds(h.db))].sort()).toEqual(["21", "22"]);
+    on("team-app", false);
+    expect((await instantRepoIds(h.db)).size).toBe(0);
+  });
+
+  it("a repository covered by either source shows the badge", async () => {
+    const { instantRepoIds } = await import("@/lib/hub/instant-badges");
+    await stored(); // 11, 12 by the old result
+    await saveHubCoverage(h.db, ["12", "13"]);
+    on("team-app");
+    expect([...(await instantRepoIds(h.db))].sort()).toEqual(["11", "12", "13"]);
+    on("replacement-app"); // the old result is stale, the hub's ids are not
+    expect([...(await instantRepoIds(h.db))].sort()).toEqual(["12", "13"]);
+  });
+
+  it("leaving the team clears the hub-reported coverage too", async () => {
+    const { leaveTeamLocally } = await import("@/lib/team/leave");
+    await saveHubCoverage(h.db, ["21"]);
+    await leaveTeamLocally(h.db);
+    expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-hub-coverage" } })).toBeNull();
   });
 
   it("readCoverage is empty for an unknown or different slug", async () => {

@@ -3,6 +3,7 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import { getMember, peekSession, type findSession as findSessionFn, type Member } from "./auth";
 import { listSpacesFor, spaceAccess } from "./authz";
+import { coveredAmong } from "./coverage";
 import type { HubDb } from "./db";
 
 /** A socket with no message for this long is terminated; clients ping every 25 s. */
@@ -46,6 +47,8 @@ export type Notifier = {
   access(target: bigint | `space:${string}`, spaceId: string, action: AccessAction): void;
   /** Relays a GitHub webhook delivery to the connections that watch the repository and may see it; returns how many were sent. */
   github(relay: GithubRelay): number;
+  /** Coverage changed: tells every connection whose watched covered set differs from what it last received. */
+  coverage(): void;
   team(reason: "member" | "role"): void;
   /** Sends `bye` and closes with 4403. */
   kick(githubId: bigint, reason: "removed"): void;
@@ -57,7 +60,7 @@ export type Notifier = {
 
 export type GithubRelay = { repoId: string; isPrivate: boolean; ownerLogin: string; /** GitHub numeric id of the owner, when the payload has one; it decides over the login. */ ownerId: number | null; event: string; delivery: string; payload: unknown };
 
-type Conn = { frames: number[]; watch: Set<string>; ws: WebSocket; token: string; idHash: string; githubId: bigint; silence: NodeJS.Timeout | null; grace: NodeJS.Timeout | null };
+type Conn = { /** JSON of the last `covered` list sent; null before the first. */ covered: string | null; frames: number[]; watch: Set<string>; ws: WebSocket; token: string; idHash: string; githubId: bigint; silence: NodeJS.Timeout | null; grace: NodeJS.Timeout | null };
 
 const reject = (socket: Duplex, status: number, text: string) => {
   const body = `HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`;
@@ -85,6 +88,19 @@ export function createNotifier(deps: NotifierDeps): Notifier {
 
   const send = (c: Conn, msg: Record<string, unknown>) => {
     if (c.ws.readyState === c.ws.OPEN) c.ws.send(JSON.stringify(msg));
+  };
+  /** Sends the covered ids among the connection's watched set, only when they differ from what it last received. */
+  const sendCovered = (c: Conn) => {
+    let repos: string[];
+    try {
+      repos = coveredAmong(deps.db, c.watch);
+    } catch {
+      return;
+    }
+    const key = JSON.stringify(repos);
+    if (key === c.covered || c.ws.readyState !== c.ws.OPEN) return;
+    c.covered = key;
+    send(c, { t: "covered", repos });
   };
   const closeConn = (c: Conn, code: number, bye?: "removed" | "shutdown", reason?: string) => {
     if (bye) send(c, { t: "bye", reason: bye });
@@ -147,11 +163,11 @@ export function createNotifier(deps: NotifierDeps): Notifier {
       // why, and close as kick() does, so the client learns it was removed instead of reconnecting forever.
       return wss.handleUpgrade(req, socket, head, (ws) => {
         ws.on("error", () => ws.terminate());
-        closeConn({ ws, token, idHash: session.idHash, githubId: member.githubId, silence: null, grace: null, watch: new Set(), frames: [] }, CLOSE_REMOVED, "removed");
+        closeConn({ ws, token, idHash: session.idHash, githubId: member.githubId, silence: null, grace: null, watch: new Set(), covered: null, frames: [] }, CLOSE_REMOVED, "removed");
       });
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const c: Conn = { ws, token, idHash: session.idHash, githubId: member.githubId, silence: null, grace: null, watch: new Set(), frames: [] };
+      const c: Conn = { ws, token, idHash: session.idHash, githubId: member.githubId, silence: null, grace: null, watch: new Set(), covered: null, frames: [] };
       conns.add(c);
       armSilence(c);
       deps.log?.info("ws open", { member: member.githubId.toString(), sockets: conns.size });
@@ -179,6 +195,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
           else if (msg.t === "watch") {
             const repos = (msg as { repos?: unknown }).repos;
             if (Array.isArray(repos)) c.watch = new Set(repos.filter((r): r is string => typeof r === "string" && /^[0-9]{1,19}$/.test(r)).slice(0, MAX_WATCH));
+            sendCovered(c);
           }
         } catch {
           /* ignore garbage */
@@ -234,6 +251,9 @@ export function createNotifier(deps: NotifierDeps): Notifier {
         }
       }
       return sent;
+    },
+    coverage() {
+      for (const c of conns) sendCovered(c);
     },
     team(reason) {
       for (const c of conns) send(c, { t: "team", reason });

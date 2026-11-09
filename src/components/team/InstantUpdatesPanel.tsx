@@ -5,7 +5,7 @@ import { WebhookByHand } from "@/components/team/WebhookByHand";
 import { Banner, Mono, Panel, SimplePill } from "@/components/ui/primitives";
 import { Zap } from "@/components/ui/icons";
 import type { HubWebhooks } from "@/lib/hub/ports";
-import { appFailureText, installUrl, UNREACHABLE_HELP, WAITING_HELP, webhookStatus } from "@/lib/hub/webhook-panel";
+import { appFailureText, DETECTION_HELP, installUrl, UNREACHABLE_HELP, WAITING_HELP, webhookStatus } from "@/lib/hub/webhook-panel";
 
 export type TrackedRow = { id: string; githubId: string; fullName: string };
 export type GithubAppResult = { result: "created" | "failed"; reason?: string };
@@ -64,17 +64,18 @@ export function InstantUpdatesPanel({ teamName, origin, isOwner, webhooks, track
                   ))}
                 </ul>
               )}
+              <p className="text-[13px] text-ink-2">{DETECTION_HELP}</p>
               {slug ? (
                 <p className="text-[13px] text-ink-2">
-                  {coveredCount === 0 ? "If you have not installed the App yet, " : "For repositories it cannot add for you, "}
+                  {coveredCount === 0 ? "If you have not installed the App yet, " : "For repositories that are not covered, "}
                   <a className="underline" href={installUrl(slug)} target="_blank" rel="noreferrer">install it on GitHub</a>.
                 </p>
               ) : (
                 <p className="text-[13px] text-ink-3">Install the GitHub App on your repositories on GitHub.</p>
               )}
               {slug && tracked.length > 0 && (
-                <ActionForm action={addTrackedRepositoriesAction} submitLabel="Add my tracked repositories" pendingLabel="Adding…" resetOnSuccess={false} submitClassName="btn !h-10">
-                  <p className="text-[12.5px] text-ink-3">Asks GitHub, as you, to add each tracked repository the App does not cover yet. It never changes anything else.</p>
+                <ActionForm action={addTrackedRepositoriesAction} submitLabel="Add my tracked repositories" submitAriaLabel="Add my tracked repositories: try to add them through GitHub's API" pendingLabel="Adding…" resetOnSuccess={false} submitClassName="btn !h-10">
+                  <p className="text-[12.5px] text-ink-3">Optional. Try to add them through GitHub&apos;s API, as you. GitHub often refuses this; the install link above always works. It never changes anything else.</p>
                 </ActionForm>
               )}
             </>

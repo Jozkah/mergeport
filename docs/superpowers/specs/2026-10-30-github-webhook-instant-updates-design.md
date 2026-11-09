@@ -122,6 +122,15 @@ A collapsed "Set it up by hand" section (OWNER) for a person who cannot use the 
 
 The Repositories page shows a small badge per repository: *Instant* (covered) or nothing. Both follow `DESIGN.md`; errors are plain sentences.
 
+## Coverage detection
+
+Added 2026-11-09. `GET /user/installations` is refused for the person's `gh` token (GitHub only allows it for a user-to-server token of the App itself), so the app cannot learn coverage that way. The hub learns it from what it sees instead.
+
+- Hub storage: table `github_covered(repo_id TEXT PRIMARY KEY, seen_at INTEGER NOT NULL)` (migration `20261109000000_github_covered`). After a delivery's signature is verified, independent of the relay and never failing the delivery: `installation` with action `created`, `new_permissions_accepted` or `unsuspend` marks every id in `repositories[]`; `deleted` or `suspend` removes them; `installation_repositories` marks `repositories_added[]` and removes `repositories_removed[]`; every other relayed event marks `repository.id`. Ids are decimal strings, non-integers are ignored, at most 5000 ids per delivery. `installation` and `installation_repositories` are still not relayed.
+- WebSocket, hub to app: `{ "t": "covered", "repos": ["<id>", ...] }` holds exactly the covered ids in that connection's watched set (nothing else is ever disclosed). It is sent after each `watch` (so right after the first), and whenever a mark or remove changes the table, and only when the list differs from the one that connection last received.
+- App: `HubLink` dispatches it to `onCovered(repoIds)` (malformed messages are ignored, a throwing handler is contained). `startHubLive` saves `{ ids, at }` under the `DiscoveryCache` key `github-app-hub-coverage` and emits `notifyChange("state")`. The Instant badge shows for a repository in that set (or in the older "Add my tracked repositories" result) while the hub's `/me.webhooks.enabled` is true. Leaving the team and Turn off clear the key.
+- Panel step 2 shows each tracked repository as *Covered* or *Not installed yet*, explains that coverage is detected from GitHub's own events, links to the install page, and keeps "Add my tracked repositories" as an optional API attempt. A refusal of that attempt is a neutral note ("GitHub does not allow this from here. Use the install link; coverage is detected automatically."), not a failure. Step 3 "Check" counts any covered repository as success.
+
 ## Security notes (to be written into `hub/README.md`)
 
 - The endpoint is public and authenticated by HMAC with the App's webhook secret, which lives in the hub's database file (a backup of `hub.db` contains it). It proves a delivery came from GitHub and grants no repository access.

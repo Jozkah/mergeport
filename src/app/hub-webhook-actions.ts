@@ -5,8 +5,8 @@ import type { ActionResult } from "@/lib/action-result";
 import { requireViewer } from "@/lib/auth/current";
 import { db } from "@/lib/db";
 import { ValidationError } from "@/lib/errors";
-import { addTrackedRepositories, clearCoverage, profileRest, saveCoverage } from "@/lib/hub/github-app-install";
-import { WAITING_HELP, webhookStatus } from "@/lib/hub/webhook-panel";
+import { addTrackedRepositories, clearCoverage, clearHubCoverage, profileRest, readAllCoverage, saveCoverage } from "@/lib/hub/github-app-install";
+import { REFUSED_NOTE, WAITING_HELP, webhookStatus } from "@/lib/hub/webhook-panel";
 import { hubRun, hubService } from "@/lib/team/hub-action-run";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -29,7 +29,8 @@ export async function addTrackedRepositoriesAction(): Promise<ActionResult> {
     if (report.state === "checked") await saveCoverage(db, { appSlug: report.appSlug, checkedAt: new Date().toISOString(), covered: report.covered });
     refresh();
     if (report.state === "not-installed") return { ok: false, error: "You have not installed the App yet. Install it on GitHub first, then press this button again." };
-    if (report.state === "cannot-list") return { ok: false, error: "GitHub would not let Mergeport check your installations. Install the App on your repositories on GitHub." };
+    // GitHub refuses this credential for installations: not a failure, coverage is detected from the hub's events instead.
+    if (report.state === "cannot-list") return { ok: true, message: REFUSED_NOTE, data: { neutral: true } };
     const parts: string[] = [];
     if (report.added.length) parts.push(`Added ${report.added.length} ${report.added.length === 1 ? "repository" : "repositories"} to the App.`);
     if (!report.added.length && !report.failed.length) parts.push("Every repository you track is already covered.");
@@ -44,11 +45,18 @@ export async function addTrackedRepositoriesAction(): Promise<ActionResult> {
 /** Step 3: re-reads the hub's `/me` and says in words what it shows. */
 export async function checkInstantUpdatesAction(): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    const { viewer } = await requireViewer();
     const { svc } = await hubService();
     const { webhooks } = await svc.overview();
     refresh();
     const s = webhookStatus(webhooks);
+    if (webhooks.enabled) {
+      // Any covered repository is success, however it became known.
+      const covered = await readAllCoverage(db, webhooks.appSlug);
+      const rows = await db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: "ACTIVE", isDemo: false }, select: { githubId: true } });
+      const n = rows.filter((r) => covered.has(r.githubId.toString())).length;
+      if (n > 0) return { ok: true, message: `The App covers ${n} of your ${rows.length} tracked ${rows.length === 1 ? "repository" : "repositories"}. ${s.kind === "on" ? "Events from GitHub are arriving." : "Edit an issue on GitHub to see it arrive instantly."}` };
+    }
     if (s.kind === "off") return { ok: true, message: "Not set up yet. The owner creates the GitHub App in step 1." };
     if (s.kind === "waiting") return { ok: true, message: WAITING_HELP };
     return { ok: true, message: `${s.text}. The last event was ${webhooks.lastEvent ?? "an event"}.` };
@@ -72,6 +80,7 @@ export async function turnOffInstantUpdatesAction(): Promise<ActionResult> {
     const { svc } = await hubService();
     await svc.clearGithubWebhook();
     await clearCoverage(db);
+    await clearHubCoverage(db);
     refresh();
     return { ok: true, message: "Turned off. The server no longer accepts events from GitHub." };
   });

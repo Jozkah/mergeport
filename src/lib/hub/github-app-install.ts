@@ -2,7 +2,7 @@ import type { Db } from "@/lib/db";
 import { ghFetch } from "@/lib/github/gh";
 import { GitHubRest } from "@/lib/github/rest";
 import { profileRunner } from "@/lib/local/profile-runner";
-import { COVERAGE_KEY, installUrl } from "@/lib/hub/webhook-panel";
+import { COVERAGE_KEY, HUB_COVERAGE_KEY, installUrl } from "@/lib/hub/webhook-panel";
 import { GithubError } from "@/lib/github/port";
 import { fromJson, toJson } from "@/lib/local/discovery";
 
@@ -133,4 +133,34 @@ export async function readCoverage(db: Db, appSlug: string | null): Promise<Set<
   const c = fromJson<StoredCoverage>(row.payload);
   if (c.appSlug !== appSlug) return new Set();
   return new Set(Array.isArray(c.covered) ? c.covered.filter((x): x is string => typeof x === "string") : []);
+}
+
+export type HubCoverage = { ids: string[]; at: string };
+
+/** Saves the covered ids the hub reported (replacing the previous set). */
+export async function saveHubCoverage(db: Db, ids: string[], at = new Date()): Promise<void> {
+  const data = { payload: toJson({ ids, at: at.toISOString() } satisfies HubCoverage), fetchedAt: at, state: "FRESH", error: null, attempts: 0, nextRetryAt: null };
+  await db.discoveryCache.upsert({ where: { key: HUB_COVERAGE_KEY }, create: { key: HUB_COVERAGE_KEY, ...data }, update: data });
+}
+
+export async function clearHubCoverage(db: Db): Promise<void> {
+  await db.discoveryCache.deleteMany({ where: { key: HUB_COVERAGE_KEY } });
+}
+
+/** GitHub ids (decimal) the hub last reported as covered. Unlike `readCoverage` it is not bound to an App slug: the hub only reports what its own App sees. */
+export async function readHubCoverage(db: Db): Promise<Set<string>> {
+  try {
+    const row = await db.discoveryCache.findUnique({ where: { key: HUB_COVERAGE_KEY } });
+    if (!row || row.payload === null) return new Set();
+    const c = fromJson<Partial<HubCoverage>>(row.payload);
+    return new Set(Array.isArray(c?.ids) ? c.ids.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Covered by either source: what the hub saw, or the last "Add my tracked repositories" result for the current App. */
+export async function readAllCoverage(db: Db, appSlug: string | null): Promise<Set<string>> {
+  const [byApi, byHub] = await Promise.all([readCoverage(db, appSlug), readHubCoverage(db)]);
+  return new Set([...byApi, ...byHub]);
 }

@@ -27,11 +27,14 @@ export class FakeSocket {
       if (m.t === "watch" && Array.isArray(m.repos)) {
         this.watches.push(m.repos.map(String));
         this.watched = new Set(m.repos.slice(0, 2000).map(String));
+        this.hub.sendCovered(this);
       }
     } catch {
       // not JSON: only recorded
     }
   }
+  /** JSON of the last `covered` list sent on this socket (the hub sends only when it differs). */
+  lastCovered: string | null = null;
   close(code = 1000) {
     this.deliverClose(code);
   }
@@ -100,6 +103,21 @@ export class FakeHub {
     return n;
   }
   private deliveries = 0;
+  /** Repository ids the GitHub App covers, as the hub learned them from GitHub's events. */
+  covered = new Set<string>();
+  /** Sends `covered` to a socket as the hub does: only the watched covered ids, and only when the list differs from the last one sent. */
+  sendCovered(k: FakeSocket) {
+    const repos = [...k.watched].filter((id) => this.covered.has(id)).sort();
+    const key = JSON.stringify(repos);
+    if (key === k.lastCovered) return;
+    k.lastCovered = key;
+    k.deliver({ t: "covered", repos });
+  }
+  /** Replaces the covered set (a coverage change on the hub) and tells every socket whose watched covered ids changed. */
+  setCovered(ids: string[]) {
+    this.covered = new Set(ids);
+    for (const k of this.sockets) this.sendCovered(k);
+  }
   /** Webhook status answered by GET /me. */
   webhooks = { enabled: false, appSlug: null as string | null, lastDeliveryAt: null as string | null, lastEvent: null as string | null };
   /** Simulates a restored or rebuilt hub: its sequence goes back to `seq` and no history is kept. */

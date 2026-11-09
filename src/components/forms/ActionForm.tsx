@@ -100,7 +100,11 @@ export function ActionForm({
         {/* Two permanent regions: a region that changes role in the same render it gains text is often not announced. */}
         <p role="status" aria-live="polite" className="min-h-5 text-[12.5px]">
           {pending && slow && <span className="text-ink-3">Still working. This is taking longer than usual; your input is kept.</span>}
-          {!pending && result?.ok && (
+          {/* A neutral outcome (data.neutral) is information, not a success and not a failure: plain text colour, no check. */}
+          {!pending && result?.ok && result.data?.neutral === true && (
+            <span key={seq} className="result-in text-ink-2">{result.message}</span>
+          )}
+          {!pending && result?.ok && result.data?.neutral !== true && (
             <span key={seq} className="result-in inline-flex items-center gap-1 text-ok">
               <svg className="check-draw shrink-0" width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M20 6 9 17l-5-5" pathLength={1} />

@@ -1,6 +1,6 @@
 import { requireViewer } from "@/lib/authz-page";
 import { db } from "@/lib/db";
-import { readCoverage } from "@/lib/hub/github-app-install";
+import { readAllCoverage } from "@/lib/hub/github-app-install";
 import { InstantUpdatesPanel, type GithubAppResult, type TrackedRow } from "@/components/team/InstantUpdatesPanel";
 import { HubForbidden, HubUnauthorized, type HubLinkStatus } from "@/lib/hub/ports";
 import { hubLinkStatus } from "@/lib/hub/ports-impl";
@@ -20,7 +20,7 @@ async function instantUpdatesPanel({ overview, origin, viewerWorkspaceId, github
   try {
     const rows = await db.repository.findMany({ where: { workspaceId: viewerWorkspaceId, trackingStatus: "ACTIVE", isDemo: false }, orderBy: { fullName: "asc" }, select: { id: true, githubId: true, fullName: true } });
     tracked = rows.map((r) => ({ id: r.id, githubId: r.githubId.toString(), fullName: r.fullName }));
-    covered = await readCoverage(db, overview.webhooks.appSlug);
+    covered = await readAllCoverage(db, overview.webhooks.appSlug);
   } catch {
     // keep the empty lists
   }

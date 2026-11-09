@@ -37,6 +37,8 @@ export type HubLinkOptions = {
   onHello?(spaces: { id: string; seq: bigint }[]): void;
   /** A GitHub webhook delivery relayed by the hub. `payload` is null when the hub did not send it (too large). */
   onGithubEvent?(e: { repoId: string; event: string; delivery: string; payload: unknown | null }): void;
+  /** The hub says which of the repositories this connection watches the GitHub App covers (decimal ids; the hub never sends any other). */
+  onCovered?(repoIds: string[]): void;
   onState?(s: HubLinkState): void;
 };
 
@@ -188,6 +190,16 @@ export class HubLink {
         const { repoId, event, delivery } = m;
         if (typeof repoId !== "string" || typeof event !== "string" || typeof delivery !== "string") break;
         this.o.onGithubEvent?.({ repoId, event, delivery, payload: m.payload === undefined ? null : m.payload });
+        break;
+      }
+      case "covered": {
+        const repos = m.repos;
+        if (!Array.isArray(repos) || repos.length > 5000 || !repos.every((r) => typeof r === "string" && /^[0-9]{1,19}$/.test(r))) break;
+        try {
+          this.o.onCovered?.(repos as string[]);
+        } catch {
+          // a failing handler must not break the socket
+        }
         break;
       }
       case "access":
