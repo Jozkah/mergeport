@@ -29,7 +29,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const zones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["UTC"];
   const clones = (await searchParams).clones ?? path.dirname(process.cwd()); // by default the folder that holds this app, where clones usually sit
   const setup = viewer.isAdmin && !isDemo() ? await planAutoSetup(db, viewer, { clonesFolder: clones }) : null;
-  const watch = (await watchView(db)).summary;
+  const { summary: watch, config: wcfg } = await watchView(db);
+  const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
     <>
       <PageHeader title="Settings" subtitle={`Signed in as @${user.login}${viewer.isAdmin ? " (administrator of the team space)" : ""}. These settings belong to this computer.`} />
@@ -57,10 +58,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <ActionForm action={setRepoWatchAction} submitLabel="Save" resetOnSuccess={false} className="max-w-md">
               <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" name="enabled" defaultChecked={watch.enabled} /> Check repositories I don&apos;t own while Mergeport is open</label>
               <label className="label mt-3" htmlFor="watch-seconds">Check every (seconds)</label>
-              <input id="watch-seconds" name="seconds" type="number" min={WATCH_MIN_SECONDS} max={WATCH_MAX_SECONDS} defaultValue={watch.configured} className="input max-w-[8rem]" />
+              <input id="watch-seconds" name="seconds" type="number" min={WATCH_MIN_SECONDS} max={WATCH_MAX_SECONDS} defaultValue={wcfg.stored.seconds ?? ""} placeholder={String(wcfg.fallback.seconds)} className="input max-w-[8rem]" />
+              <p className="mt-1 text-[12px] text-ink-3" data-testid="watch-seconds-hint">{hint(wcfg.stored.seconds, wcfg.fallback.seconds, wcfg.fallback.secondsFromEnv, "MERGEPORT_WATCH_SECONDS")}</p>
               <label className="label mt-3" htmlFor="watch-max">Watch at most (repositories)</label>
-              <input id="watch-max" name="max" type="number" min={WATCH_MAX_REPOS_MIN} max={WATCH_MAX_REPOS_LIMIT} defaultValue={watch.maxRepos} className="input max-w-[8rem]" />
+              <input id="watch-max" name="max" type="number" min={WATCH_MAX_REPOS_MIN} max={WATCH_MAX_REPOS_LIMIT} defaultValue={wcfg.stored.maxRepos ?? ""} placeholder={String(wcfg.fallback.maxRepos)} className="input max-w-[8rem]" />
+              <p className="mt-1 text-[12px] text-ink-3" data-testid="watch-max-hint">{hint(wcfg.stored.maxRepos, wcfg.fallback.maxRepos, wcfg.fallback.maxReposFromEnv, "MERGEPORT_WATCH_MAX_REPOS")}</p>
               <p className="mt-1 text-[12px] text-ink-3">Repositories beyond this number keep the 15-minute refresh. The least recently synced are watched first.</p>
+              <p className="mt-1 text-[12px] text-ink-3">On by default. Turn off to use only the 15-minute cycle.</p>
               <p className="mt-1 text-[12px] text-ink-3">Checks use conditional requests that do not use your GitHub rate limit when nothing changed. Webhook-covered repositories are never polled.</p>
             </ActionForm>
             <p className="mt-3 text-[12.5px] text-ink-2" data-testid="watch-effective">

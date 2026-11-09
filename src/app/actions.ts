@@ -24,7 +24,7 @@ import type { Discovery } from "@/lib/github/port";
 import { GithubError } from "@/lib/github/port";
 import { enqueue } from "@/lib/jobs";
 import { slugify } from "@/lib/slug";
-import { parseWatchMaxRepos, parseWatchSeconds, saveWatchSettings } from "@/lib/local/watch-settings";
+import { parseOptional, parseWatchMaxRepos, parseWatchSeconds, readWatchConfig, saveWatchSettings } from "@/lib/local/watch-settings";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const strs = (fd: FormData, k: string) => fd.getAll(k).map(String).filter(Boolean);
@@ -597,17 +597,26 @@ export async function setTimezoneAction(fd: FormData): Promise<ActionResult> {
   });
 }
 
-/** Auto-sync of repositories without webhooks (repo-watch.ts). The unchecked switch is simply absent from the form. */
+/**
+ * Auto-sync of repositories without webhooks (repo-watch.ts). The unchecked switch is simply absent from the form. A blank
+ * number means "use the default (environment or built-in)" and clears the saved value; only fields that changed are written.
+ */
 export async function setRepoWatchAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     await requireViewer();
     const enabled = fd.get("enabled") === "on" || fd.get("enabled") === "true";
-    const seconds = parseWatchSeconds(fd.get("seconds"));
-    const maxRepos = parseWatchMaxRepos(fd.get("max"));
-    await saveWatchSettings(db, { enabled, seconds, maxRepos });
+    const seconds = parseOptional(fd.get("seconds"), parseWatchSeconds);
+    const maxRepos = parseOptional(fd.get("max"), parseWatchMaxRepos);
+    const cur = await readWatchConfig(db);
+    await saveWatchSettings(db, {
+      enabled: enabled !== cur.enabled ? enabled : undefined,
+      seconds: seconds !== cur.stored.seconds ? seconds : undefined,
+      maxRepos: maxRepos !== cur.stored.maxRepos ? maxRepos : undefined,
+    });
     revalidatePath("/settings");
     revalidatePath("/repositories");
-    return { ok: true, message: enabled ? `Checking up to ${maxRepos} repositories every ${seconds} seconds while Mergeport is open` : "Automatic checks are off. Repositories still refresh every 15 minutes." };
+    const now = await readWatchConfig(db);
+    return { ok: true, message: now.enabled ? `Checking up to ${now.maxRepos} repositories every ${now.seconds} seconds while Mergeport is open` : "Automatic checks are off. Repositories still refresh every 15 minutes." };
   });
 }
 
