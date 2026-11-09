@@ -7,8 +7,9 @@ import { enqueue } from "@/lib/jobs";
  * whose earlier sync was cut short is repaired instead of only receiving what changed since. Requests for one repository merge
  * into one job (`dedupeKey`). The scheduler runs it with the person's own gh, through the same job as the button.
  */
-export function requestRepositoryRefresh(db: Db, repositoryId: string) {
-  return enqueue(db, { type: "sync.repository", payload: { repositoryId, full: true }, dedupeKey: `sync:${repositoryId}` });
+export function requestRepositoryRefresh(db: Db, repositoryId: string, o: { full?: boolean } = {}) {
+  // `full: false` (the auto-sync watcher) is an incremental refresh; it never downgrades a full one that is already queued or running (jobs.ts keepFull).
+  return enqueue(db, { type: "sync.repository", payload: { repositoryId, full: o.full ?? true }, dedupeKey: `sync:${repositoryId}` });
 }
 
 export const REFRESH_POLL_MS = 250;

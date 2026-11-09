@@ -4,12 +4,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { truncateAll } from "@/lib/demo/seed";
 import { resetEnvCache } from "@/lib/env";
 import { GitHubRest } from "@/lib/github/rest";
+import { ghFetch } from "@/lib/github/gh";
+import type { GhRunner } from "@/lib/github/exec";
+import { requestRepositoryRefresh } from "@/lib/services/refresh";
 import { ensureLocalProfile } from "@/lib/local/profile";
-import { MAX_BACKOFF_MS, MAX_IN_FLIGHT, MIN_REFRESH_GAP_MS, coveredIds, createRepoWatcher, watchTargets, watchView } from "@/lib/local/repo-watch";
+import { MAX_BACKOFF_MS, MAX_IN_FLIGHT, MAX_REFRESHES, MIN_REFRESH_GAP_MS, coveredIds, createRepoWatcher, watchTargets, watchView } from "@/lib/local/repo-watch";
 import { WATCH_MAX_REPOS, effectiveWatchSeconds, watchLabel, watchTitle } from "@/lib/local/watch-format";
 import { parseWatchMaxRepos, parseWatchSeconds, readWatchSettings, saveWatchSettings } from "@/lib/local/watch-settings";
-import { saveHubCoverage } from "@/lib/hub/github-app-install";
+import { saveHubCoverage, saveHubWebhooks } from "@/lib/hub/github-app-install";
 import { ValidationError } from "@/lib/errors";
+import { db as appDb } from "@/lib/db";
 import { testDb } from "./helpers";
 
 const h = vi.hoisted(() => ({ viewer: null as unknown, user: null as unknown }));
@@ -204,8 +208,9 @@ describe("which repositories", () => {
   it("GitHub-only profile (no hub): nothing is covered, so everything is watched; with a hub the reported ids are covered", async () => {
     await addRepo("a/one", { githubId: 1n });
     await saveHubCoverage(db, ["1"]);
-    expect([...(await coveredIds(db, "github"))]).toEqual([]);
-    expect([...(await coveredIds(db, HUB))]).toEqual(["1"]);
+    await saveHubWebhooks(db, true);
+    expect([...(await coveredIds(db, "github"))!]).toEqual([]);
+    expect([...(await coveredIds(db, HUB))!]).toEqual(["1"]);
     const s = setup({ covered: () => coveredIds(db, "github") });
     await s.round(1);
     expect(s.gh.calls.length).toBe(2);
@@ -286,16 +291,15 @@ describe("pacing", () => {
     await addRepo("a/one");
     await addRepo("a/two");
     const s = setup();
-    const reset = Math.floor((s.clock.t + 120_000) / 1000);
-    s.gh.fail("a/one", () => new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) } }));
+    s.gh.fail("a/one", () => new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403, headers: { "x-ratelimit-remaining": "0", "retry-after": "120" } }));
     await s.round(2);
     const n = s.gh.calls.length;
-    expect(s.w.pausedUntil).toBe(reset * 1000);
+    expect(s.w.pausedUntil).toBe(s.clock.t + 120_000);
     s.clock.t += 60_000;
     await s.round(3);
     expect(s.gh.calls.length).toBe(n); // nothing at all, not even the other repository
     s.gh.fail("a/one", null);
-    s.clock.t = reset * 1000 + 1;
+    s.clock.t += 61_000;
     await s.round(2);
     expect(s.gh.calls.length).toBeGreaterThan(n);
   });
@@ -306,6 +310,15 @@ describe("pacing", () => {
     s.gh.fail("a/one", () => new Response("{}", { status: 429, headers: { "retry-after": "90" } }));
     await s.round(1);
     expect(s.w.pausedUntil).toBe(s.clock.t + 90_000);
+  });
+
+  it("a reset time in the past (clock skew) still pauses for at least 60 s, and counts as a failure for the backoff", async () => {
+    await addRepo("a/one");
+    const s = setup();
+    s.gh.fail("a/one", () => new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1" } }));
+    await s.round(1);
+    expect(s.w.pausedUntil).toBe(s.clock.t + 60_000);
+    expect(s.w.baseline((await db.repository.findFirstOrThrow()).id)!.failures).toBe(1);
   });
 });
 
@@ -456,12 +469,12 @@ describe("setRepoWatchAction", () => {
 
   it("refuses out-of-range and non-numeric input with a plain sentence and saves nothing", async () => {
     const { setRepoWatchAction } = await import("@/app/actions");
-    for (const bad of ["1", "301", "abc", "", "-5", "10.5"]) {
+    for (const bad of ["1", "301", "abc", "-5", "10.5"]) {
       const r = await setRepoWatchAction(form({ enabled: "on", seconds: bad, max: "12" }));
       expect(r.ok).toBe(false);
       expect(JSON.stringify(r)).toContain("Enter a whole number of seconds from 2 to 300.");
     }
-    for (const bad of ["0", "201", "x", ""]) {
+    for (const bad of ["0", "201", "x"]) {
       const r = await setRepoWatchAction(form({ enabled: "on", seconds: "30", max: bad }));
       expect(r.ok).toBe(false);
       expect(JSON.stringify(r)).toContain("Enter a whole number of repositories from 1 to 200.");
@@ -495,7 +508,10 @@ describe("pages", () => {
     expect(html).toContain("Effective: every 8 s for 20 repositories.");
     expect(html).toContain("Stretched from 2 s");
     expect(html).toContain("Watch at most (repositories)");
-    expect(html).toMatch(/name="max"[^>]*value="20"/);
+    expect(html).toMatch(/id="watch-max"[^>]*placeholder="20"/);
+    expect(html).toContain("Using the default, 20.");
+    expect(html).toContain("Saved here. Clear the field to go back to the default.");
+    expect(html).toContain("On by default. Turn off to use only the 15-minute cycle.");
   });
 
   it("RepoList shows the pill for watched repositories only, not for Instant ones", async () => {
@@ -510,5 +526,245 @@ describe("pages", () => {
     const html = renderToStaticMarkup(createElement(RepoList, { rows, writable: [] } as never));
     expect(html.match(/Auto-sync ~15 s/g)).toHaveLength(1);
     expect(html).toContain('title="Checked about every 15 seconds while Mergeport is open"');
+  });
+});
+
+describe("settings semantics: blank clears, only changes are written", () => {
+  const form = (o: Record<string, string>) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(o)) fd.set(k, v);
+    return fd;
+  };
+  const row = () => db.teamConfig.findUniqueOrThrow({ where: { id: "team" } });
+
+  it("a blank field clears the saved value (NULL) so the environment or default applies again", async () => {
+    const { setRepoWatchAction } = await import("@/app/actions");
+    await setRepoWatchAction(form({ enabled: "on", seconds: "40", max: "9" }));
+    expect(await row()).toMatchObject({ watchSeconds: 40, watchMaxRepos: 9 });
+    process.env.MERGEPORT_WATCH_SECONDS = "7";
+    resetEnvCache();
+    await setRepoWatchAction(form({ enabled: "on", seconds: "", max: "" }));
+    expect(await row()).toMatchObject({ watchSeconds: null, watchMaxRepos: null });
+    expect(await readWatchSettings(db)).toEqual({ enabled: true, seconds: 7, maxRepos: 20 });
+  });
+
+  it("saveWatchSettings writes only the fields given; undefined leaves a column alone, null clears it", async () => {
+    await saveWatchSettings(db, { seconds: 33, maxRepos: 5 });
+    expect(await saveWatchSettings(db, { enabled: false })).toEqual(["watchEnabled"]);
+    expect(await row()).toMatchObject({ watchSeconds: 33, watchMaxRepos: 5, watchEnabled: false });
+    expect(await saveWatchSettings(db, { seconds: null })).toEqual(["watchSeconds"]);
+    expect(await row()).toMatchObject({ watchSeconds: null, watchMaxRepos: 5 });
+    expect(await saveWatchSettings(db, {})).toEqual([]);
+  });
+
+  it("the action does not write a field that did not change", async () => {
+    const { setRepoWatchAction } = await import("@/app/actions");
+    await setRepoWatchAction(form({ enabled: "on", seconds: "40", max: "9" }));
+    const spy = vi.spyOn(appDb.teamConfig, "upsert");
+    await setRepoWatchAction(form({ enabled: "on", seconds: "40", max: "9" })); // nothing differs from what is stored
+    expect(spy).not.toHaveBeenCalled();
+    await setRepoWatchAction(form({ enabled: "on", seconds: "40", max: "10" })); // only max differs
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0].update).toEqual({ watchMaxRepos: 10 });
+    spy.mockRestore();
+  });
+
+  it("the Settings page says when a value comes from the environment", async () => {
+    process.env.MERGEPORT_WATCH_SECONDS = "7";
+    process.env.MERGEPORT_WATCH_MAX_REPOS = "50";
+    resetEnvCache();
+    const Page = (await import("@/app/(app)/settings/page")).default;
+    const html = renderToStaticMarkup(await Page({ searchParams: Promise.resolve({}) }));
+    expect(html).toContain("Using 7 from the environment (MERGEPORT_WATCH_SECONDS). Type a number to override it.");
+    expect(html).toContain("Using 50 from the environment (MERGEPORT_WATCH_MAX_REPOS). Type a number to override it.");
+    delete process.env.MERGEPORT_WATCH_MAX_REPOS;
+  });
+});
+
+describe("review fixes", () => {
+  it("baselines are pruned against every eligible repository, not the capped round", async () => {
+    const r0 = await addRepo("a/r0", { synced: new Date(1) });
+    const r1 = await addRepo("a/r1", { synced: new Date(2) });
+    const gone = await addRepo("a/gone", { synced: new Date(3) });
+    let max = 3;
+    const s = setup({ settings: async () => ({ enabled: true, seconds: 15, maxRepos: max }) });
+    await s.round(3);
+    expect(s.w.baseline(r1.id)?.etags.issues).toBeDefined();
+    max = 1; // r1 and gone fall out of the cap, but are still eligible
+    await s.round(1);
+    expect(s.w.baseline(r1.id)?.etags.issues).toBeDefined();
+    expect(s.w.baseline(r0.id)).toBeDefined();
+    await db.repository.update({ where: { id: gone.id }, data: { trackingStatus: "DISCONNECTED" } });
+    await s.round(1); // next cycle
+    expect(s.w.baseline(gone.id)).toBeUndefined(); // no longer eligible: pruned
+    expect(s.w.baseline(r1.id)).toBeDefined();
+    // coming back into the cap, r1 still has its baseline, so a change made meanwhile is detected
+    max = 3;
+    s.gh.bump("a/r1", "issues");
+    await s.round(2);
+    expect(s.refreshed).toEqual([r1.id]);
+  });
+
+  it("a failed enqueue keeps the change pending for the next probe", async () => {
+    const r = await addRepo("a/r");
+    let fails = 1;
+    const calls: string[] = [];
+    const s = setup({
+      refresh: async (id) => {
+        calls.push(id);
+        if (fails-- > 0) throw new Error("database is locked");
+      },
+    });
+    await s.round(2);
+    s.gh.bump("a/r", "issues");
+    await s.round(1);
+    expect(calls).toEqual([r.id]);
+    expect(s.w.baseline(r.id)!.pending).toBe(true);
+    await s.round(1); // same clock: a failed enqueue does not start the 30 s gap
+    expect(calls).toEqual([r.id, r.id]);
+    expect(s.w.baseline(r.id)!.pending).toBe(false);
+  });
+
+  it("at most 2 watcher-triggered refreshes are queued or running; the rest stay pending", async () => {
+    const repos = [await addRepo("a/r0", { synced: new Date(1) }), await addRepo("a/r1", { synced: new Date(2) }), await addRepo("a/r2", { synced: new Date(3) })];
+    const busy = new Set<string>();
+    const asked: string[] = [];
+    const s = setup({
+      refresh: async (id) => void asked.push(id),
+      refreshPending: async (id) => busy.has(id),
+    });
+    await s.round(3);
+    for (const r of repos) s.gh.bump(r.fullName, "issues");
+    for (const r of repos) busy.add(r.id); // every job we enqueue stays "running"
+    await s.round(3);
+    expect(MAX_REFRESHES).toBe(2);
+    expect(asked).toEqual([repos[0].id, repos[1].id]);
+    expect(s.w.baseline(repos[2].id)!.pending).toBe(true);
+    busy.clear(); // the first two jobs finished
+    await s.round(3);
+    expect(asked).toEqual([repos[0].id, repos[1].id, repos[2].id]);
+  });
+
+  it("the default refresh is incremental (full: false) and never downgrades a full one", async () => {
+    const r = await addRepo("Jozkah/mergeport");
+    const gh = fakeGithub();
+    const clock = { t: 1_000_000 };
+    const w = createRepoWatcher({ db, now: () => clock.t, random: () => 0.5, isActive: () => true, rest: async () => gh.rest, settings: async () => ({ enabled: true, seconds: 15 }), covered: async () => new Set(), setTimer: () => 0, clearTimer: () => {} });
+    for (let i = 0; i < 2; i++) { await w.step(); await w.settle(); }
+    gh.bump("Jozkah/mergeport", "commits");
+    await w.step();
+    await w.settle();
+    const job = await db.job.findFirstOrThrow({ where: { type: "sync.repository" } });
+    expect(job.payload).toEqual({ repositoryId: r.id, full: false });
+    await requestRepositoryRefresh(db, r.id); // the Refresh button: full by default
+    expect((await db.job.findFirstOrThrow({ where: { type: "sync.repository" } })).payload).toEqual({ repositoryId: r.id, full: true });
+    clock.t += MIN_REFRESH_GAP_MS;
+    gh.bump("Jozkah/mergeport", "issues");
+    await w.step();
+    await w.settle();
+    expect((await db.job.findFirstOrThrow({ where: { type: "sync.repository" } })).payload).toMatchObject({ full: true }); // keepFull
+  });
+
+  it("coveredIds: a covered repository is excluded only while the hub's webhooks are enabled; an unreadable database is null, not empty", async () => {
+    await saveHubCoverage(db, ["1"]);
+    expect([...(await coveredIds(db, HUB))!]).toEqual([]); // flag unknown: nothing covered
+    await saveHubWebhooks(db, false);
+    expect([...(await coveredIds(db, HUB))!]).toEqual([]);
+    await saveHubWebhooks(db, true);
+    expect([...(await coveredIds(db, HUB))!]).toEqual(["1"]);
+    expect([...(await coveredIds(db, "github"))!]).toEqual([]);
+    const broken = { discoveryCache: { findUnique: async () => { throw new Error("locked"); } } } as never;
+    expect(await coveredIds(broken, HUB)).toBeNull();
+    // watchView follows the same rule
+    await addRepo("a/one", { githubId: 1n });
+    await saveHubWebhooks(db, false);
+    expect((await watchView(db)).ids.has("1")).toBe(true); // backend is GitHub-only here: nothing covered
+  });
+
+  it("the watcher skips the cycle when coverage is unreadable and keeps the last known set afterwards", async () => {
+    await addRepo("a/one", { githubId: 1n });
+    await addRepo("a/two", { githubId: 2n });
+    let answer: Set<string> | null = null;
+    const s = setup({ covered: async () => answer });
+    await s.round(1);
+    expect(s.gh.calls).toEqual([]); // nothing known yet: skipped
+    answer = new Set(["1"]);
+    await s.round(1);
+    expect([...new Set(s.gh.calls.map((c) => c.repo))]).toEqual(["a/two"]);
+    answer = null; // unreadable next cycle: the last known set stays
+    await s.round(3);
+    expect(new Set(s.gh.calls.map((c) => c.repo))).toEqual(new Set(["a/two"]));
+  });
+
+  it("a stale loop never survives stop() and start(): only one loop runs", async () => {
+    await addRepo("a/one");
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const s = setup({ settings: async () => { await gate; return { enabled: true, seconds: 15 }; } });
+    s.w.start();
+    s.timers[0].fn(); // loop 1 is now awaiting its first step
+    s.w.stop();
+    s.w.start(); // loop 2
+    expect(s.timers.filter((t) => t.live)).toHaveLength(1);
+    release!();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(s.timers.filter((t) => t.live)).toHaveLength(1); // loop 1 scheduled nothing
+    s.w.stop();
+    expect(s.timers.filter((t) => t.live)).toHaveLength(0);
+    s.w.start();
+    s.w.start(); // a second start while running is ignored
+    expect(s.timers.filter((t) => t.live)).toHaveLength(1);
+    s.w.stop();
+  });
+});
+
+describe("real gh api -i output through ghFetch", () => {
+  /** What `gh api -i` prints, with its exit code: 304 and 4xx exit 1 and say so on stderr. */
+  const block = (status: string, headers: string[], body = "") => `HTTP/2.0 ${status}\r\n${headers.join("\r\n")}\r\n\r\n${body}`;
+  const E1 = 'W/"abc123"';
+  const E2 = 'W/"def456"';
+
+  function ghRunner(current: () => string, mode: { rate?: boolean } = {}) {
+    const sent: (string | null)[] = [];
+    const run: GhRunner = async (args) => {
+      const h = args.findIndex((a, i) => a === "-H" && /^if-none-match:/i.test(args[i + 1] ?? ""));
+      const inm = h >= 0 ? args[h + 1].replace(/^if-none-match:\s*/i, "") : null;
+      sent.push(inm);
+      if (mode.rate) {
+        return { stdout: block("403 Forbidden", ["Retry-After: 120", "X-Ratelimit-Remaining: 0", "X-Ratelimit-Limit: 5000", "Content-Type: application/json; charset=utf-8"], '{"message":"You have exceeded a secondary rate limit.","documentation_url":"https://docs.github.com"}'), stderr: "gh: You have exceeded a secondary rate limit. (HTTP 403)", code: 1 };
+      }
+      const etag = current();
+      if (inm === etag) return { stdout: block("304 Not Modified", [`Etag: ${etag}`, "X-Ratelimit-Remaining: 4999"]), stderr: "gh: HTTP 304", code: 1 };
+      return { stdout: block("200 OK", [`Etag: ${etag}`, "Content-Type: application/json; charset=utf-8", "X-Ratelimit-Remaining: 4998"], "[]"), stderr: "", code: 0 };
+    };
+    return { run, sent };
+  }
+
+  it("a 304 block (exit 1, stderr gh: HTTP 304) is a no-op; a new Etag triggers one refresh", async () => {
+    const r = await addRepo("Jozkah/mergeport");
+    let etag = E1;
+    const g = ghRunner(() => etag);
+    const s = setup({ rest: async () => new GitHubRest(ghFetch(g.run, "github.com")) });
+    await s.round(1); // first answers: record only
+    expect(s.refreshed).toEqual([]);
+    await s.round(1); // conditional: 304 twice
+    expect(g.sent.slice(0, 2)).toEqual([null, null]);
+    expect(g.sent.slice(2)).toEqual([E1, E1]);
+    expect(s.refreshed).toEqual([]);
+    expect(s.w.baseline(r.id)!.failures).toBe(0);
+    etag = E2;
+    await s.round(1);
+    expect(s.refreshed).toEqual([r.id]);
+  });
+
+  it("a 403 with Retry-After and X-Ratelimit-Remaining: 0 pauses the watcher", async () => {
+    await addRepo("Jozkah/mergeport");
+    const g = ghRunner(() => E1, { rate: true });
+    const s = setup({ rest: async () => new GitHubRest(ghFetch(g.run, "github.com")) });
+    await s.round(1);
+    expect(s.w.pausedUntil).toBe(s.clock.t + 120_000);
+    const n = g.sent.length;
+    await s.round(3);
+    expect(g.sent.length).toBe(n);
   });
 });

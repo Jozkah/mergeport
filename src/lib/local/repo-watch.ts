@@ -4,13 +4,13 @@ import { isDemo } from "@/lib/env";
 import { ghFetch } from "@/lib/github/gh";
 import { GithubError } from "@/lib/github/port";
 import { GitHubRest } from "@/lib/github/rest";
-import { readAllCoverage } from "@/lib/hub/github-app-install";
-import { COVERAGE_KEY } from "@/lib/hub/webhook-panel";
+import { readAllCoverage, readHubWebhooksEnabled } from "@/lib/hub/github-app-install";
+import { COVERAGE_KEY, HUB_COVERAGE_KEY } from "@/lib/hub/webhook-panel";
 import { pollMode } from "@/lib/local/activity";
 import { isHubBackend } from "@/lib/local/backends";
 import { fromJson } from "@/lib/local/discovery";
 import { profileRunner } from "@/lib/local/profile-runner";
-import { readWatchSettings } from "@/lib/local/watch-settings";
+import { readWatchConfig, readWatchSettings, type WatchConfig } from "@/lib/local/watch-settings";
 import { WATCH_MAX_REPOS, effectiveWatchSeconds, watchSummary, type WatchSummary } from "@/lib/local/watch-format";
 import { currentBackend } from "@/lib/local/workspaces";
 import { requestRepositoryRefresh } from "@/lib/services/refresh";
@@ -18,14 +18,18 @@ import { requestRepositoryRefresh } from "@/lib/services/refresh";
 /**
  * Auto-sync watcher for repositories that can never send webhooks (public repositories the person does not own, anything the
  * hub's GitHub App does not cover). While a browser tab is open it probes each such repository with two conditional requests,
- * the issues list sorted by last update and the latest commit, each with the ETag of the previous answer. A 304 costs no rate
- * limit and does nothing; a different ETag asks for a refresh of that repository through the same job as the Refresh button.
- * The 15-minute reconcile stays the safety net: nothing here is required for correctness.
+ * the issues list sorted by last update (pull requests are issues too, and a review bumps their updated_at) and the latest
+ * commit of the default branch, each with the ETag of the previous answer. A 304 costs no rate limit and does nothing; a
+ * different ETag asks for an incremental refresh of that repository through the same job as the Refresh button. Releases, tags
+ * and other branches are not probed: they wait for the 15-minute reconcile, which stays the safety net.
  */
 
 export const MIN_REFRESH_GAP_MS = 30_000;
 export const MAX_BACKOFF_MS = 600_000;
+export const MIN_RATE_PAUSE_S = 60;
 export const MAX_IN_FLIGHT = 2;
+/** Most watcher-triggered refresh jobs queued or running at once. */
+export const MAX_REFRESHES = 2;
 const RECHECK_MS = 5_000;
 const BUSY_MS = 250;
 
@@ -41,43 +45,54 @@ export type RepoWatchDeps = {
   isActive: () => boolean;
   /** GitHub REST access of this profile; null when there is none (demo, signed out). */
   rest: () => Promise<GitHubRest | null>;
+  /** Enqueues an incremental refresh. Rejecting means "not enqueued": the change stays pending. */
   refresh: (repositoryId: string) => Promise<unknown>;
+  /** Is the refresh job of that repository still queued or running. */
+  refreshPending: (repositoryId: string) => Promise<boolean>;
   settings: () => Promise<{ enabled: boolean; seconds: number; maxRepos?: number }>;
-  /** GitHub ids covered by the hub's App. Empty without a hub. */
-  covered: () => Promise<Set<string>>;
+  /** GitHub ids the hub's App covers while its webhooks are enabled; empty without a hub; null when it could not be read. */
+  covered: () => Promise<Set<string> | null>;
 };
 
-/** GitHub ids the hub's App is known to cover; nothing is covered without a hub workspace. */
-export async function coveredIds(db: Db, backend?: string): Promise<Set<string>> {
+/**
+ * GitHub ids that get instant updates, so need no watching: covered by the hub's App AND the hub's webhooks are enabled
+ * (as last seen in `me()`, stored locally; the watcher never asks the hub). Nothing is covered without a hub workspace.
+ * Null when the database could not be read (callers skip the cycle or keep the last known set; never "nothing covered").
+ */
+export async function coveredIds(db: Db, backend?: string): Promise<Set<string> | null> {
   try {
     if (!isHubBackend(backend ?? (await currentBackend()))) return new Set();
-    let slug: string | null = null;
+    if (!(await readHubWebhooksEnabled(db))) return new Set();
     const legacy = await db.discoveryCache.findUnique({ where: { key: COVERAGE_KEY } });
-    if (legacy?.payload) slug = fromJson<{ appSlug?: string }>(legacy.payload)?.appSlug ?? null;
+    const slug = legacy?.payload ? (fromJson<{ appSlug?: string }>(legacy.payload)?.appSlug ?? null) : null;
+    await db.discoveryCache.findUnique({ where: { key: HUB_COVERAGE_KEY } }); // readAllCoverage swallows read errors; this one must not
     return await readAllCoverage(db, slug);
   } catch {
-    return new Set();
+    return null;
   }
 }
 
-/** Active, real, not covered, the least recently synced first, at most `max` (default 20). */
-export async function watchTargets(db: Db, covered: Set<string>, max = WATCH_MAX_REPOS): Promise<WatchTarget[]> {
+/** Every active, real, uncovered repository, the least recently synced first. */
+export async function watchEligible(db: Db, covered: Set<string>): Promise<WatchTarget[]> {
   const rows = await db.repository.findMany({
     where: { trackingStatus: "ACTIVE", isDemo: false },
     select: { id: true, githubId: true, fullName: true, lastSyncedAt: true },
     orderBy: [{ lastSyncedAt: "asc" }, { fullName: "asc" }],
   });
-  return rows
-    .filter((r) => !covered.has(r.githubId.toString()) && /^[^/]+\/[^/]+$/.test(r.fullName))
-    .slice(0, max)
-    .map((r) => ({ id: r.id, githubId: r.githubId.toString(), fullName: r.fullName }));
+  return rows.filter((r) => !covered.has(r.githubId.toString()) && /^[^/]+\/[^/]+$/.test(r.fullName)).map((r) => ({ id: r.id, githubId: r.githubId.toString(), fullName: r.fullName }));
+}
+
+/** The watched set: the eligible repositories capped at `max` (default 20). */
+export async function watchTargets(db: Db, covered: Set<string>, max = WATCH_MAX_REPOS): Promise<WatchTarget[]> {
+  return (await watchEligible(db, covered)).slice(0, max);
 }
 
 /** For the pages: which repositories the watcher covers (by GitHub id) and the numbers to show. `instant` ones are never watched. */
-export async function watchView(db: Db, instant: Set<string> = new Set()): Promise<{ ids: Set<string>; summary: WatchSummary }> {
-  const settings = await readWatchSettings(db);
-  const targets = (await watchTargets(db, new Set([...(await coveredIds(db)), ...instant]), settings.maxRepos)).filter((t) => !instant.has(t.githubId));
-  return { ids: settings.enabled ? new Set(targets.map((t) => t.githubId)) : new Set(), summary: watchSummary(settings.enabled, settings.seconds, targets.length, settings.maxRepos) };
+export async function watchView(db: Db, instant: Set<string> = new Set()): Promise<{ ids: Set<string>; summary: WatchSummary; config: WatchConfig }> {
+  const config = await readWatchConfig(db);
+  const covered = (await coveredIds(db)) ?? new Set<string>();
+  const targets = (await watchTargets(db, new Set([...covered, ...instant]), config.maxRepos)).filter((t) => !instant.has(t.githubId));
+  return { ids: config.enabled ? new Set(targets.map((t) => t.githubId)) : new Set(), summary: watchSummary(config.enabled, config.seconds, targets.length, config.maxRepos), config };
 }
 
 type Probe = "issues" | "commits";
@@ -102,12 +117,19 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
         return (rest ??= new GitHubRest(ghFetch(profileRunner(over.db))));
       };
     })(),
-    refresh: (id) => requestRepositoryRefresh(over.db, id),
+    refresh: (id) => requestRepositoryRefresh(over.db, id, { full: false }),
+    refreshPending: async (id) => {
+      const job = await over.db.job.findFirst({ where: { type: "sync.repository", dedupeKey: `sync:${id}`, status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
+      return job !== null;
+    },
     settings: () => readWatchSettings(over.db),
     covered: () => coveredIds(over.db),
     ...over,
   };
   const states = new Map<string, RepoState>();
+  /** Repositories this watcher asked to refresh and whose job may still be running. */
+  const outstanding = new Set<string>();
+  let lastCovered: Set<string> | null = null;
   let round: WatchTarget[] = [];
   let index = 0;
   let intervalMs = 15_000;
@@ -115,6 +137,8 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
   let inFlight = 0;
   let timer: unknown;
   let stopped = true;
+  /** Bumped by start() and stop(): a loop or step belonging to an older generation does nothing more. */
+  let gen = 0;
   const running = new Set<Promise<void>>();
 
   const stateOf = (id: string): RepoState => {
@@ -122,6 +146,26 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
     if (!s) states.set(id, (s = { etags: {}, failures: 0, backoffUntil: 0, lastRefresh: -Infinity, pending: false }));
     return s;
   };
+
+  /** Enqueues the pending refresh when the gap and the cap allow it; a failure to enqueue keeps it pending. */
+  async function maybeRefresh(id: string, st: RepoState): Promise<void> {
+    if (!st.pending || d.now() - st.lastRefresh < MIN_REFRESH_GAP_MS) return;
+    for (const o of [...outstanding]) if (!(await d.refreshPending(o).catch(() => true))) outstanding.delete(o);
+    if (outstanding.size >= MAX_REFRESHES && !outstanding.has(id)) return; // later: the change stays pending
+    try {
+      await d.refresh(id);
+    } catch {
+      return; // not enqueued: keep `pending`, the next probe tries again
+    }
+    st.pending = false;
+    st.lastRefresh = d.now();
+    outstanding.add(id);
+  }
+
+  function fail(st: RepoState, now: number) {
+    st.failures++;
+    st.backoffUntil = now + Math.min(MAX_BACKOFF_MS, intervalMs * 2 ** st.failures);
+  }
 
   async function probe(t: WatchTarget): Promise<void> {
     const st = stateOf(t.id);
@@ -145,24 +189,19 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
       }
       st.failures = 0;
       st.backoffUntil = 0;
-      if (st.pending && d.now() - st.lastRefresh >= MIN_REFRESH_GAP_MS) {
-        st.pending = false;
-        st.lastRefresh = d.now();
-        await d.refresh(t.id).catch(() => {}); // the 15-minute cycle will catch up
-      }
+      await maybeRefresh(t.id, st);
     } catch (e) {
       const now = d.now();
       if (e instanceof GithubError && e.kind === "rate-limited") {
-        pausedUntil = Math.max(pausedUntil, e.resetAt?.getTime() ?? now + (e.retryAfterSeconds ?? 60) * 1000);
-      } else {
-        st.failures++;
-        st.backoffUntil = now + Math.min(MAX_BACKOFF_MS, intervalMs * 2 ** st.failures);
+        // Relative to our own clock: the reset header is not trusted on its own (clock skew), 60 s at least.
+        pausedUntil = Math.max(pausedUntil, now + Math.max(e.retryAfterSeconds ?? MIN_RATE_PAUSE_S, MIN_RATE_PAUSE_S) * 1000);
       }
+      fail(st, now);
     }
   }
 
   /** One scheduling step: starts at most one repository's probe. Returns the delay until the next step. Never throws. */
-  async function step(): Promise<number> {
+  async function stepFor(g: number): Promise<number> {
     try {
       const now = d.now();
       if (!d.isActive()) {
@@ -173,12 +212,24 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
       if (index >= round.length) {
         // Start of a cycle: read the settings again, so a change applies within one interval.
         const s = await d.settings();
-        round = s.enabled ? await watchTargets(d.db, await d.covered(), s.maxRepos) : [];
+        let covered = await d.covered();
+        if (g !== gen) return RECHECK_MS;
+        if (covered) lastCovered = covered;
+        else covered = lastCovered; // unreadable: keep the last known set, or skip this cycle when there is none
+        if (!covered) return RECHECK_MS;
+        const eligible = s.enabled ? await watchEligible(d.db, covered) : [];
+        if (g !== gen) return RECHECK_MS;
+        round = eligible.slice(0, s.maxRepos ?? WATCH_MAX_REPOS);
         index = 0;
-        for (const id of states.keys()) if (!round.some((r) => r.id === id)) states.delete(id);
+        // Baselines are pruned against everything eligible, not the capped round: a repository that falls out of the cap
+        // and comes back keeps its ETags and its pending change.
+        const keep = new Set(eligible.map((r) => r.id));
+        for (const id of [...states.keys()]) if (!keep.has(id)) states.delete(id);
+        for (const id of [...outstanding]) if (!keep.has(id)) outstanding.delete(id);
         if (round.length === 0) return RECHECK_MS;
         intervalMs = effectiveWatchSeconds(s.seconds, round.length) * 1000;
       }
+      if (g !== gen) return RECHECK_MS;
       if (inFlight >= MAX_IN_FLIGHT) return BUSY_MS;
       const t = round[index++];
       const st = stateOf(t.id);
@@ -197,11 +248,11 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
     }
   }
 
-  function loop() {
+  function loop(g: number) {
+    if (g !== gen) return; // a loop of an older generation (stop() or start() happened since) ends here
     timer = undefined;
-    if (stopped) return;
-    void step().then((delay) => {
-      if (!stopped) timer = d.setTimer(loop, delay);
+    void stepFor(g).then((delay) => {
+      if (g === gen && !stopped) timer = d.setTimer(() => loop(g), delay);
     });
   }
 
@@ -209,16 +260,18 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
     start() {
       if (!stopped) return;
       stopped = false;
-      timer = d.setTimer(loop, 0);
+      const g = ++gen;
+      timer = d.setTimer(() => loop(g), 0);
     },
     stop() {
       stopped = true;
+      gen++;
       if (timer !== undefined) d.clearTimer(timer);
       timer = undefined;
       round = [];
       index = 0;
     },
-    step,
+    step: () => stepFor(gen),
     /** Resolves when every started probe has finished (tests). */
     async settle() {
       while (running.size) await Promise.all([...running]);
@@ -232,6 +285,8 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
     get running() {
       return !stopped;
     },
+    /** Tests: the remembered state of a repository. */
+    baseline: (id: string) => states.get(id),
   };
 }
 
