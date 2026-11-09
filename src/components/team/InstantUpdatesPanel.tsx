@@ -75,7 +75,7 @@ export function InstantUpdatesPanel({ teamName, origin, isOwner, webhooks, track
               )}
               {slug && tracked.length > 0 && (
                 <ActionForm action={addTrackedRepositoriesAction} submitLabel="Add my tracked repositories" submitAriaLabel="Add my tracked repositories: try to add them through GitHub's API" pendingLabel="Adding…" resetOnSuccess={false} submitClassName="btn !h-10">
-                  <p className="text-[12.5px] text-ink-3">Optional. Tries to add each tracked repository the App does not cover yet through GitHub's API, as you. It never changes anything else.</p>
+                  <p className="text-[12.5px] text-ink-3">Optional. Try to add them through GitHub&apos;s API, as you. GitHub often refuses this; the install link above always works. It never changes anything else.</p>
                 </ActionForm>
               )}
             </>
