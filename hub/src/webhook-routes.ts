@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getMember, requireSession, type Member } from "./auth";
 import { requireRole } from "./authz";
+import { applyCoverage } from "./coverage";
 import { HttpError, json, readJson, readRaw, route, type Route } from "./http";
 import type { HubContext } from "./server";
 
@@ -87,19 +88,24 @@ export function webhookRoutes(): Route<HubContext>[] {
       if (!validSignature(secret, raw, header(req, "x-hub-signature-256"))) throw new HttpError(401, "invalid signature");
 
       const event = header(req, "x-github-event") ?? "";
+      if (!RECORDED.has(event) && !RELAYED.has(event)) return json(res, 202, { ok: true, ignored: true });
+
+      let parsed: unknown;
+      let parsedOk = true;
+      try {
+        parsed = JSON.parse(raw.toString("utf8"));
+      } catch {
+        parsedOk = false;
+      }
+      // Coverage is learned from every verified delivery, independent of the relay and of its own failures.
+      if (parsedOk && applyCoverage(ctx.db, event, parsed, ctx.now())) ctx.notify.coverage();
+
       if (RECORDED.has(event)) {
         ctx.webhooks.record(event, ctx.now());
         ctx.log.info("github webhook", { event });
         return json(res, 200, { ok: true });
       }
-      if (!RELAYED.has(event)) return json(res, 202, { ok: true, ignored: true });
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw.toString("utf8"));
-      } catch {
-        throw new HttpError(400, "invalid json");
-      }
+      if (!parsedOk) throw new HttpError(400, "invalid json");
       const repo = (parsed as { repository?: { id?: unknown; private?: unknown; owner?: { login?: unknown; id?: unknown } } } | null)?.repository;
       const id = repo?.id;
       const ownerLogin = repo?.owner?.login;
