@@ -5,7 +5,7 @@ import { HubLink, defaultTimers, type HubLinkState, type SocketLike, type Timers
 import { syncHubSpaces } from "./spaces";
 import { handleGithubEvent } from "./gh-events";
 import { RepoRefresher } from "./repo-refresher";
-import { saveHubCoverage } from "./github-app-install";
+import { saveHubCoverage, saveHubWebhooks } from "./github-app-install";
 import { registerHubWatch, trackedGithubIds } from "./watch";
 import { refreshRepositoryAndWait } from "@/lib/services/refresh";
 
@@ -95,7 +95,9 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
   const refresh = (): Promise<void> => {
     const run = async () => {
       try {
-        await syncHubSpaces(o.db, o.engine, await o.client.me(), o.origin);
+        const me = await o.client.me();
+        await saveHubWebhooks(o.db, me.webhooks?.enabled === true).catch(() => {});
+        await syncHubSpaces(o.db, o.engine, me, o.origin);
       } catch {
         // a failing me() must not stop the spaces from syncing; the cycle records the failure
       }

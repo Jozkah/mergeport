@@ -2,7 +2,7 @@ import type { Db } from "@/lib/db";
 import { ghFetch } from "@/lib/github/gh";
 import { GitHubRest } from "@/lib/github/rest";
 import { profileRunner } from "@/lib/local/profile-runner";
-import { COVERAGE_KEY, HUB_COVERAGE_KEY, installUrl } from "@/lib/hub/webhook-panel";
+import { COVERAGE_KEY, HUB_COVERAGE_KEY, HUB_WEBHOOKS_KEY, installUrl } from "@/lib/hub/webhook-panel";
 import { GithubError } from "@/lib/github/port";
 import { fromJson, toJson } from "@/lib/local/discovery";
 
@@ -163,4 +163,21 @@ export async function readHubCoverage(db: Db): Promise<Set<string>> {
 export async function readAllCoverage(db: Db, appSlug: string | null): Promise<Set<string>> {
   const [byApi, byHub] = await Promise.all([readCoverage(db, appSlug), readHubCoverage(db)]);
   return new Set([...byApi, ...byHub]);
+}
+
+/** Remembers whether the hub's webhooks are enabled (from `me()`), so local code can tell "covered" from "instant" without asking the hub. */
+export async function saveHubWebhooks(db: Db, enabled: boolean, at = new Date()): Promise<void> {
+  const data = { payload: toJson({ enabled, at: at.toISOString() }), fetchedAt: at, state: "FRESH", error: null, attempts: 0, nextRetryAt: null };
+  await db.discoveryCache.upsert({ where: { key: HUB_WEBHOOKS_KEY }, create: { key: HUB_WEBHOOKS_KEY, ...data }, update: data });
+}
+
+export async function clearHubWebhooks(db: Db): Promise<void> {
+  await db.discoveryCache.deleteMany({ where: { key: HUB_WEBHOOKS_KEY } });
+}
+
+/** True only when `me()` last said the hub's webhooks are enabled. Unknown means false. Throws on a database error. */
+export async function readHubWebhooksEnabled(db: Db): Promise<boolean> {
+  const row = await db.discoveryCache.findUnique({ where: { key: HUB_WEBHOOKS_KEY } });
+  if (!row || row.payload === null) return false;
+  return fromJson<{ enabled?: boolean }>(row.payload)?.enabled === true;
 }

@@ -5,7 +5,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { requireViewer } from "@/lib/auth/current";
 import { db } from "@/lib/db";
 import { ValidationError } from "@/lib/errors";
-import { addTrackedRepositories, clearCoverage, clearHubCoverage, profileRest, readAllCoverage, saveCoverage } from "@/lib/hub/github-app-install";
+import { addTrackedRepositories, clearCoverage, clearHubCoverage, clearHubWebhooks, profileRest, readAllCoverage, saveCoverage } from "@/lib/hub/github-app-install";
 import { REFUSED_NOTE, WAITING_HELP, webhookStatus } from "@/lib/hub/webhook-panel";
 import { hubRun, hubService } from "@/lib/team/hub-action-run";
 
@@ -81,6 +81,7 @@ export async function turnOffInstantUpdatesAction(): Promise<ActionResult> {
     await svc.clearGithubWebhook();
     await clearCoverage(db);
     await clearHubCoverage(db);
+    await clearHubWebhooks(db);
     refresh();
     return { ok: true, message: "Turned off. The server no longer accepts events from GitHub." };
   });

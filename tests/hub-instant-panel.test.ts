@@ -386,8 +386,10 @@ describe("actions", () => {
     expect(await saveWebhookSecretAction(fd({ secret: "c".repeat(64) }))).toMatchObject({ ok: true });
     await saveCoverage(h.db, { appSlug: "team-app", checkedAt: new Date().toISOString(), covered: ["11"] });
     await saveHubCoverage(h.db, ["11"]);
+    await h.db.discoveryCache.create({ data: { key: "github-app-hub-webhooks", payload: { enabled: true, at: new Date().toISOString() } } });
     expect(await turnOffInstantUpdatesAction()).toMatchObject({ ok: true });
     expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-hub-coverage" } })).toBeNull();
+    expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-hub-webhooks" } })).toBeNull();
     expect(calls).toEqual(["set:64:team-app", "set:64:", "clear"]);
     expect((await readCoverage(h.db, "team-app")).size).toBe(0);
     mockApi(apiFor("3", OFF, calls), "3");
