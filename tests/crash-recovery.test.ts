@@ -36,7 +36,7 @@ describe("recovery after the app stopped while sending (the SENT state)", () => 
     await olive.engine.capture();
     const op = await olive.db.outboxOp.findFirstOrThrow({ where: { entityId: task.id } });
     // The process died after marking it SENT and before learning the result: it stays SENT, long ago.
-    await olive.db.$executeRawUnsafe(`UPDATE "OutboxOp" SET "status" = 'SENT', "updatedAt" = datetime('now', '-1 hour') WHERE "id" = ?`, op.id);
+    await olive.db.outboxOp.update({ where: { id: op.id }, data: { status: "SENT", updatedAt: new Date(clock.t - 60 * 60_000) } });
     await olive.engine.syncSpace(common);
     expect(await olive.db.outboxOp.count({ where: { id: op.id } })).toBe(0);
     await alice.engine.syncSpace(await alice.db.space.findUniqueOrThrow({ where: { id: joined.id } }));
@@ -55,7 +55,7 @@ describe("recovery after the app stopped while sending (the SENT state)", () => 
     const appliedId = ((se.meta as { applied: string[] }).applied ?? []).at(-1)!;
     // Reconstruct the crash: the outbox still holds the operation as SENT even though the file already records it.
     await olive.db.outboxOp.create({ data: { id: appliedId, spaceId: common.id, entityType: "card", entityId: task.id, kind: "UPSERT", data: {}, status: "SENT" } });
-    await olive.db.$executeRawUnsafe(`UPDATE "OutboxOp" SET "updatedAt" = datetime('now', '-1 hour') WHERE "id" = ?`, appliedId);
+    await olive.db.outboxOp.update({ where: { id: appliedId }, data: { updatedAt: new Date(clock.t - 60 * 60_000) } });
     const commitsBefore = server.history(common.repoOwner, common.repoName).length;
     await olive.engine.syncSpace(common);
     expect(await olive.db.outboxOp.count({ where: { id: appliedId } })).toBe(0);
