@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { DigestEntry, DigestPayload, DigestSection } from "@/lib/services/digest";
-import { EmptyState, Panel } from "@/components/ui/primitives";
+import { Panel } from "@/components/ui/primitives";
 import { RepoChip } from "@/components/ui/RepoChip";
 import { BellRing, CircleCheck, Hourglass, ListChecks } from "@/components/ui/icons";
 
@@ -9,11 +9,12 @@ const age = (d: number | null) => (d === null ? null : d < 1 ? "today" : `${d} d
 function Entry({ e, showAge }: { e: DigestEntry; showAge: boolean }) {
   const a = showAge ? age(e.ageDays) : null;
   return (
-    <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 border-b border-line px-4 py-3 last:border-b-0">
+    // The title link is stretched over the whole row so the hit area is the row, not one line of text.
+    <li className="relative flex flex-wrap items-start justify-between gap-x-4 gap-y-1 border-b border-line px-4 py-3 last:border-b-0 transition-colors duration-[var(--duration-feedback)] hover:bg-faint has-[a:focus-visible]:bg-faint">
       <div className="min-w-0">
-        <Link href={e.href} className="text-[13.5px] font-medium leading-snug underline-offset-2 hover:underline [overflow-wrap:anywhere]">{e.title}</Link>
+        <Link href={e.href} className="text-[13.5px] font-medium leading-snug text-pretty underline-offset-2 after:absolute after:inset-0 hover:underline [overflow-wrap:anywhere]">{e.title}</Link>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-3">
-          {e.repo && <RepoChip fullName={e.repo} />}
+          {e.repo && e.repo !== e.title && <RepoChip fullName={e.repo} />}
           <span className="text-ink-2">{e.reason}</span>
         </div>
       </div>
@@ -26,11 +27,12 @@ function Block({ id, title, icon, section, empty, showAge }: { id: string; title
   return (
     <Panel title={`${title} (${section.total})`} icon={icon} id={id}>
       {section.entries.length === 0 ? (
-        <EmptyState icon={icon} title={empty} />
+        // An empty part is one quiet line: three of four parts are often empty, and a full empty state each pushed the real entries below the fold.
+        <p className="px-4 py-3 text-[13px] text-ink-3">{empty}</p>
       ) : (
         <>
           <ul>{section.entries.map((e) => <Entry key={e.key} e={e} showAge={showAge} />)}</ul>
-          {section.more > 0 && <p className="border-t border-line px-4 py-2.5 text-[12.5px] text-ink-3">and {section.more} more not shown</p>}
+          {section.more > 0 && <p className="tnum border-t border-line px-4 py-2.5 text-[12.5px] text-ink-3">and {section.more} more not shown</p>}
         </>
       )}
     </Panel>

@@ -48,10 +48,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <Panel title="Daily digest" icon={Newspaper} id="digest">
           <div className="p-4">
             <ActionForm action={saveDigestSettingsAction} submitLabel="Save" resetOnSuccess={false} className="max-w-md">
-              <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" name="enabled" defaultChecked={prefs.digest.enabled} /> Make a digest of the previous day each day</label>
+              <label className="-my-2 flex min-h-10 w-fit cursor-pointer items-center gap-2 text-[13px]"><input type="checkbox" name="enabled" defaultChecked={prefs.digest.enabled} /> Make a digest of the previous day each day</label>
               <label className="label mt-3" htmlFor="digest-hour">Make it after (hour, 0 to 23)</label>
-              <input id="digest-hour" name="hour" type="number" min={0} max={23} defaultValue={prefs.digest.hour} className="input max-w-[8rem]" />
-              <p className="mt-1 text-[12px] text-ink-3">Your local time ({user.timezone}). It is built only from the data on this computer, with no network call. If Mergeport was closed at that hour it is made when you next open it. It shows in the bell and on Overview.</p>
+              <input id="digest-hour" name="hour" type="number" inputMode="numeric" min={0} max={23} step={1} defaultValue={prefs.digest.hour} aria-describedby="digest-hour-help" className="input tnum max-w-[8rem]" />
+              <p id="digest-hour-help" className="mt-1 max-w-[60ch] text-[12px] text-ink-3 text-pretty">Your local time ({user.timezone}). It is built only from the data on this computer, with no network call. If Mergeport was closed at that hour it is made when you next open it. It shows in the bell and on Overview.</p>
             </ActionForm>
           </div>
         </Panel>
