@@ -104,13 +104,16 @@ export default async function Overview() {
 
           <Panel title="Daily digest" icon={Newspaper} id="digest" actions={<Link href="/digest" className="btn">Open</Link>}>
             {!digest ? <EmptyState icon={Newspaper} title="No digest yet">The first one is made on a morning Mergeport is open.</EmptyState> : (
-              <Link href={`/digest?day=${digest.day}`} className="block px-4 py-3 text-[13px] hover:bg-faint">
-                <p className="font-medium">{formatDateOnly(new Date(digest.day + "T00:00:00Z"))}{digest.readAt ? "" : " · new"}</p>
-                <dl className="tnum mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[12.5px]">
-                  <div className="flex justify-between"><dt className="text-ink-3">Done</dt><dd>{digest.payload.counts.done}</dd></div>
-                  <div className="flex justify-between"><dt className="text-ink-3">Left undone</dt><dd>{digest.payload.counts.undone}</dd></div>
-                  <div className="flex justify-between"><dt className="text-ink-3">Needs you</dt><dd>{digest.payload.counts.mine}</dd></div>
-                  <div className="flex justify-between"><dt className="text-ink-3">Waiting on others</dt><dd>{digest.payload.counts.others}</dd></div>
+              <Link href={`/digest?day=${digest.day}`} className="block px-4 py-3 text-[13px] transition-colors duration-[var(--duration-feedback)] hover:bg-faint">
+                <p className="flex items-center gap-2 font-medium">
+                  {formatDateOnly(new Date(digest.day + "T00:00:00Z"))}
+                  {!digest.readAt && <span className="rounded-full bg-ink px-1.5 text-[11px] font-normal leading-[18px] text-ink-invert">New</span>}
+                </p>
+                <dl className="tnum mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5 text-[12.5px] max-[420px]:grid-cols-1">
+                  <div className="flex justify-between gap-3"><dt className="text-ink-3">Done</dt><dd className="font-medium">{digest.payload.counts.done}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-ink-3">Left undone</dt><dd className="font-medium">{digest.payload.counts.undone}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-ink-3">Needs you</dt><dd className="font-medium">{digest.payload.counts.mine}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-ink-3">Waiting on others</dt><dd className="font-medium">{digest.payload.counts.others}</dd></div>
                 </dl>
               </Link>
             )}

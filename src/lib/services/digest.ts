@@ -196,7 +196,7 @@ async function mineEntries(ctx: DigestContext, q: AttentionQueues): Promise<Dige
   if (restores > 0) out.push(entry(ctx, { key: "hub-restores", title: `${restores} restored-server decision${restores === 1 ? "" : "s"}`, repo: null, href: "/sync", reason: "The team server was restored from a backup" }));
 
   const repos = await db.repository.findMany({ where: { AND: [repoWhere(v), { OR: [{ syncError: { not: null } }, { trackingStatus: "DISCONNECTED" }] }] }, orderBy: { fullName: "asc" } });
-  for (const r of repos) out.push(entry(ctx, { key: `repo:${r.id}`, title: r.fullName, repo: r.fullName, href: `/repositories/${r.id}`, reason: r.trackingStatus === "DISCONNECTED" ? `Disconnected${r.statusDetail ? `: ${r.statusDetail}` : ""}` : `Sync is failing: ${r.syncError}`, since: r.lastSyncedAt }));
+  for (const r of repos) out.push(entry(ctx, { key: `repo:${r.id}`, title: r.fullName, repo: r.fullName, href: "/repositories", reason: r.trackingStatus === "DISCONNECTED" ? `Disconnected${r.statusDetail ? `: ${r.statusDetail}` : ""}` : `Sync is failing: ${r.syncError}`, since: r.lastSyncedAt }));
   return out;
 }
 
