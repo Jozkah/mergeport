@@ -227,7 +227,8 @@
 .chevron {
   transition: transform var(--duration-fast) var(--ease-smooth-out);
 }
-.chevron[data-open="true"] {
+.chevron[data-open="true"],
+details[open] > summary > .chevron {
   transform: rotate(180deg);
 }
 
