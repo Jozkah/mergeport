@@ -74,7 +74,7 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
             return (
               <Panel key={m.id} id={`m-${m.id}`} icon={GitCompare} title={<span className="inline-flex flex-wrap items-center gap-2"><Mono>{m.fork.fullName}</Mono><ArrowRight size={12} aria-hidden /><Mono>{m.upstream.fullName}</Mono></span>}
                 actions={<ActionForm action={refreshForkAction} submitLabel="Refresh" submitClassName="btn"><input type="hidden" name="mappingId" value={m.id} /></ActionForm>}>
-                <div className="flex flex-col gap-5 p-4">
+                <div className="flex flex-col gap-5 p-3 sm:p-4">
                   <div className="grid gap-4 md:grid-cols-[1fr_auto]">
                     <div className="flex flex-col gap-2">
                       <div className="flex flex-wrap items-center gap-2"><SimplePill tone={s.tone}>{s.label}</SimplePill>{c?.truncated && <SimplePill tone="unknown">Commit list truncated</SimplePill>}{stale && c && <SimplePill tone="waiting">Branch moved since this comparison</SimplePill>}</div>
@@ -83,7 +83,7 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
                       </p>
                       {c ? (
                         <p className="tnum text-[13px]">
-                          {c.aheadBy !== null ? <>Fork has <strong>{c.aheadBy}</strong> commit(s) upstream lacks. Fork is missing <strong>{c.behindBy}</strong> upstream commit(s).</> : <span className="text-ink-3">No counts available.</span>}
+                          {c.aheadBy !== null ? <>Fork has <strong>{c.aheadBy}</strong> {c.aheadBy === 1 ? "commit" : "commits"} upstream lacks. Fork is missing <strong>{c.behindBy}</strong> upstream {c.behindBy === 1 ? "commit" : "commits"}.</> : <span className="text-ink-3">No counts available.</span>}
                         </p>
                       ) : <p className="text-[13px] text-ink-3">No comparison has run yet.</p>}
                       {c?.error && <p className="text-[12.5px] text-ink-3">{c.error}</p>}
