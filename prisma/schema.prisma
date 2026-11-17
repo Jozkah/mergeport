@@ -1211,3 +1211,15 @@ model BackportRecord {
 
   @@unique([mappingId, upstreamNumber, targetBranch])
 }
+
+/// One generated daily digest per person and local day (day = the day reported, the previous local day). Built from this computer's own data, personal, never synchronised.
+model DailyDigest {
+  id          String    @id @default(cuid())
+  userId      String
+  day         String // YYYY-MM-DD in the person's time zone
+  payload     Json
+  generatedAt DateTime  @default(now())
+  readAt      DateTime?
+
+  @@unique([userId, day])
+}

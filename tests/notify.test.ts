@@ -14,7 +14,7 @@ describe("notification preferences (pure)", () => {
     const p = parsePrefs({ kinds: { "review-requested": { inApp: false, desktop: "yes" }, evil: { inApp: false } }, quiet: { enabled: true, start: "25:99", end: "06:30" } });
     expect(p.kinds["review-requested"]).toEqual({ inApp: false, desktop: false });
     expect(p.quiet).toEqual({ enabled: true, start: "22:00", end: "06:30" });
-    expect(Object.keys(p.kinds)).toEqual(["review-requested", "changes-requested"]);
+    expect(Object.keys(p.kinds)).toEqual(["review-requested", "changes-requested", "daily-digest"]);
   });
 
   it("quiet hours wrap midnight and follow the person's time zone", () => {
