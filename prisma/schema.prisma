@@ -646,8 +646,52 @@ model ForkMapping {
   comparisons ForkComparison[]
   upstreamPrs UpstreamPrState[]
   triage      UpstreamIssueTriage[]
+  updateConfig UpstreamUpdateConfig?
+  updateRuns   UpstreamUpdateRun[]
 
   @@unique([forkRepoId, upstreamRepoId, forkBranch, upstreamBranch])
+}
+
+/// Per-mapping settings of the upstream auto-updater. LOCAL ONLY: `verifyCommand` runs on this computer, so this table is never
+/// written to a space, a hub or a backup, and a restore never imports it.
+model UpstreamUpdateConfig {
+  id            String    @id @default(cuid())
+  mappingId     String    @unique
+  enabled       Boolean   @default(false)
+  verifyCommand String?
+  /// pr | push
+  promote       String    @default("pr")
+  timeoutSec    Int       @default(1200)
+  branchName    String    @default("mergeport/upstream-sync")
+  lastRunAt     DateTime?
+  updatedAt     DateTime  @default(now()) @updatedAt
+
+  mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+}
+
+/// One attempt of the upstream auto-updater for a mapping (its history is what the Forks page shows).
+model UpstreamUpdateRun {
+  id             String    @id @default(cuid())
+  mappingId      String
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  /// running | promoted | pr-opened | up-to-date | conflict | verify-failed | failed | cancelled | merged-untested
+  state          String    @default("running")
+  /// auto | manual
+  trigger        String    @default("auto")
+  /// Upstream head the run started from (the newest it knew), and the fork tip it merged onto.
+  upstreamSha    String?
+  forkSha        String?
+  triedShas      Json
+  prUrl          String?
+  filesConflicted Json?
+  commits        Json
+  logTail        String    @default("")
+  error          String?
+
+  mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@index([mappingId, startedAt])
 }
 
 model ForkComparison {
