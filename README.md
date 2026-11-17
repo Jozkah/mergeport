@@ -90,6 +90,12 @@ The top bar has a workspace switcher. Each workspace (GitHub, or a team server) 
 | `npm run db:seed` | Seed synthetic data into the dev database |
 | `npm run migrate:from-postgres -- --from <url> --login <you>` | Import a legacy Postgres install (`docs/migration.md`) |
 
+## Agents and the command line
+
+`npm run mp -- <command>` creates and updates Mergeport tasks from a terminal, so you can tell any AI agent "add this to mergeport under the atlas-api repo, assign bram". It runs the app's own services against the signed-in profile's database as that profile's user (same rules, limits and task history as the web app), works while Mergeport is running, never calls GitHub and never creates GitHub issues or pull requests. Commands: `projects`, `task add` (`--dry-run` previews), `task update <id>`, `task done <id>`, `task list`; add `--json` for machine-readable output, `npm run mp -- help` for flags. Ambiguity (a repo in several projects, an unknown assignee) is an error that lists the candidates, never a guess.
+
+`npm run skill:install` copies the agent-neutral skill in `docs/agent-skill/mergeport` to `~/.claude`, `~/.agents` and, when those folders exist, `~/.codex` and `~/.gemini` (`--dry-run`, `--force`, `--tool claude,codex,agents,gemini`). It never overwrites a differing file without `--force`.
+
 ## Light, dark, system
 
 Settings has **Light / Dark / System**, and the top bar has a quick toggle. The choice is stored on this device only (a first-party cookie, never synced to a team). The server renders it into the first byte of HTML, so there is no flash and no hydration mismatch. System follows the OS and updates live.
