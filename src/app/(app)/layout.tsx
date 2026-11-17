@@ -10,6 +10,7 @@ import { Shortcuts } from "@/components/shell/Shortcuts";
 import { DesktopNotifier } from "@/components/shell/DesktopNotifier";
 import { ScopePicker } from "@/components/shell/ScopePicker";
 import { inbox } from "@/lib/services/inbox";
+import { unreadDigestCount } from "@/lib/services/digest";
 import { attentionFor } from "@/lib/services/request-cache";
 import { planningWhere, unreadNotificationCount } from "@/lib/services/queries";
 import { formatInstant } from "@/lib/format";
@@ -54,6 +55,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     changes: q.changesRequested.length,
     blocked: q.blocked.length,
     inbox: (await inbox(db, viewer, { queues: q })).unread,
+    digest: await unreadDigestCount(db, viewer.userId),
     tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login.toLowerCase(), column: { key: { not: "done" } } }] } }),
   };
   const last = lastSync._max.lastSyncedAt;

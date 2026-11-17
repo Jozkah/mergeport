@@ -120,4 +120,9 @@ export interface GithubPort {
   submitReview(owner: string, repo: string, number: number, input: { event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES"; body?: string; commitSha?: string; comments?: { path: string; line: number; side: "LEFT" | "RIGHT"; body: string }[] }): Promise<void>;
   mergePull(owner: string, repo: string, number: number, input: { method: MergeMethod; expectedHeadSha: string }): Promise<{ merged: boolean; message: string }>;
   mergeUpstream(owner: string, repo: string, branch: string): Promise<{ result: "merged" | "fast-forward" | "up-to-date" | "conflict"; message: string }>;
+  /**
+   * One pull request from branch `head` into `base`, both in the same repository (the upstream auto-updater's sync branch). Idempotent:
+   * an open pull request for that pair is updated (title and body), otherwise one is created. Never merges or closes anything.
+   */
+  openOrUpdatePull(owner: string, repo: string, input: { head: string; base: string; title: string; body: string }): Promise<{ number: number; htmlUrl: string; created: boolean }>;
 }

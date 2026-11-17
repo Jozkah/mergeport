@@ -231,4 +231,7 @@ export class DemoPort implements GithubPort {
     await this.db.forkComparison.create({ data: { mappingId: map.id, status: "identical", aheadBy: 0, behindBy: 0, baseSha: last?.baseSha, headSha: last?.baseSha } });
     return { result: "fast-forward" as const, message: "Fork branch fast-forwarded (demo)" };
   }
+  async openOrUpdatePull(): Promise<{ number: number; htmlUrl: string; created: boolean }> {
+    throw new GithubError("forbidden", "The upstream auto-updater does not run on demo data");
+  }
 }

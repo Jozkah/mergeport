@@ -167,4 +167,20 @@ export class FakeGithub implements GithubPort {
     this.writes.push(`merge-upstream ${o}/${r}:${b}`);
     return { result: "merged" as const, message: "ok" };
   }
+  /** Pull requests opened by `openOrUpdatePull`, so tests can assert one exists and what it says. */
+  pulls: { owner: string; repo: string; number: number; head: string; base: string; title: string; body: string; htmlUrl: string }[] = [];
+  async openOrUpdatePull(o: string, r: string, i: { head: string; base: string; title: string; body: string }) {
+    this.maybeFail("openOrUpdatePull");
+    const found = this.pulls.find((p) => p.owner === o && p.repo === r && p.head === i.head && p.base === i.base);
+    if (found) {
+      Object.assign(found, { title: i.title, body: i.body });
+      this.writes.push(`pull-update ${o}/${r}#${found.number}`);
+      return { number: found.number, htmlUrl: found.htmlUrl, created: false };
+    }
+    const number = 1 + this.pulls.filter((p) => p.owner === o && p.repo === r).length;
+    const htmlUrl = `https://github.com/${o}/${r}/pull/${number}`;
+    this.pulls.push({ owner: o, repo: r, number, ...i, htmlUrl });
+    this.writes.push(`pull-create ${o}/${r}#${number} ${i.head}->${i.base}`);
+    return { number, htmlUrl, created: true };
+  }
 }

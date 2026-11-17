@@ -3,6 +3,7 @@ import { canSpend } from "@/lib/domain/sync";
 import { portForSync } from "@/lib/github/factory";
 import { GithubError } from "@/lib/github/port";
 import type { Handler } from "@/lib/jobs";
+import { maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
 import { setStatus, syncFork, syncItem, syncRepository } from "@/lib/sync/repository";
 
 /**
@@ -13,6 +14,7 @@ import { setStatus, syncFork, syncItem, syncRepository } from "@/lib/sync/reposi
 
 export const SOURCE_BUDGET_KEY = "source";
 export const RECONCILE_EVERY_MS = 15 * 60_000;
+export const DIGEST_EVERY_MS = 10 * 60_000;
 
 export async function guardSourceBudget() {
   const rl = await db.rateLimitState.findUnique({ where: { key: SOURCE_BUDGET_KEY } });
@@ -55,12 +57,19 @@ export const handlers: Record<string, Handler> = {
     await guardSourceBudget();
     const port = await portForSync(db, m.forkRepoId);
     if (port) await syncFork(db, port, p.mappingId);
+    await maybeRequestUpdate(db, p.mappingId); // opt-in upstream auto-update, when the fork is now known to be behind
   }) as Handler,
+  ...updateHandlers(db),
   // Recurrence is owned by the runner (ensureRecurring), never by this handler.
   "reconcile.all": (async () => {
     const { enqueue } = await import("@/lib/jobs");
     const repos = await db.repository.findMany({ where: { trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
     for (const r of repos) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}` });
+  }) as Handler,
+  // Local only (no GitHub, no network): makes the daily digest once per local day, and catches up after the app was closed.
+  "digest.daily": (async () => {
+    const { runDailyDigest } = await import("@/lib/services/digest");
+    if ((await runDailyDigest(db)) === "generated") (await import("@/lib/local/runtime")).notifyChange("state");
   }) as Handler,
 };
 

@@ -10,11 +10,12 @@ import { ThemeSelect } from "@/components/shell/ThemeControls";
 import { Mono, PageHeader, Panel, SimplePill } from "@/components/ui/primitives";
 import { KeyRound, RefreshCw, Settings } from "@/components/ui/icons";
 import { autoSetupAction, setRepoWatchAction, setTimezoneAction } from "@/app/actions";
+import { saveDigestSettingsAction } from "@/app/digest-actions";
 import { watchView } from "@/lib/local/repo-watch";
 import { WATCH_MAX_REPOS_LIMIT, WATCH_MAX_REPOS_MIN, WATCH_MAX_SECONDS, WATCH_MIN_SECONDS } from "@/lib/local/watch-format";
 import { planAutoSetup } from "@/lib/services/auto-setup";
 import { db } from "@/lib/db";
-import { Bell, Wand2 } from "@/components/ui/icons";
+import { Bell, Newspaper, Wand2 } from "@/components/ui/icons";
 import { BackupPanel } from "@/components/settings/BackupPanel";
 import { NotificationSettings } from "@/components/settings/NotificationSettings";
 import { getPrefs } from "@/lib/services/notification-prefs";
@@ -29,6 +30,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const zones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["UTC"];
   const clones = (await searchParams).clones ?? path.dirname(process.cwd()); // by default the folder that holds this app, where clones usually sit
   const setup = viewer.isAdmin && !isDemo() ? await planAutoSetup(db, viewer, { clonesFolder: clones }) : null;
+  const prefs = await getPrefs(db, user.id);
   const { summary: watch, config: wcfg } = await watchView(db);
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
@@ -41,7 +43,17 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </Panel>
         )}
         <Panel title="Notifications" icon={Bell} id="notifications">
-          <NotificationSettings initial={await getPrefs(db, user.id)} />
+          <NotificationSettings initial={prefs} />
+        </Panel>
+        <Panel title="Daily digest" icon={Newspaper} id="digest">
+          <div className="p-4">
+            <ActionForm action={saveDigestSettingsAction} submitLabel="Save" resetOnSuccess={false} className="max-w-md">
+              <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" name="enabled" defaultChecked={prefs.digest.enabled} /> Make a digest of the previous day each day</label>
+              <label className="label mt-3" htmlFor="digest-hour">Make it after (hour, 0 to 23)</label>
+              <input id="digest-hour" name="hour" type="number" min={0} max={23} defaultValue={prefs.digest.hour} className="input max-w-[8rem]" />
+              <p className="mt-1 text-[12px] text-ink-3">Your local time ({user.timezone}). It is built only from the data on this computer, with no network call. If Mergeport was closed at that hour it is made when you next open it. It shows in the bell and on Overview.</p>
+            </ActionForm>
+          </div>
         </Panel>
         <Panel title="Display" icon={Settings} id="display">
           <div className="grid gap-5 p-4">

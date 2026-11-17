@@ -1,3 +1,5 @@
+import { DEFAULT_DIGEST_SETTINGS, parseDigestSettings, type DigestSettings } from "./digest";
+
 /**
  * Personal notification preferences. Pure.
  * Each kind of event has two independent channels: the in-app list, and a desktop pop-up. Desktop pop-ups can only appear while
@@ -6,17 +8,21 @@
 export const KINDS = [
   { key: "review-requested", label: "Someone asked you to review a pull request" },
   { key: "changes-requested", label: "A reviewer asked for changes on your pull request" },
+  { key: "daily-digest", label: "Your daily digest is ready" },
 ] as const;
 export type NotifyKind = (typeof KINDS)[number]["key"];
 
 export type Prefs = {
   kinds: Record<NotifyKind, { inApp: boolean; desktop: boolean }>;
   quiet: { enabled: boolean; start: string; end: string };
+  /** The daily digest (digest.ts): on or off, and the local hour after which it is generated. */
+  digest: DigestSettings;
 };
 
 export const DEFAULT_PREFS: Prefs = {
-  kinds: { "review-requested": { inApp: true, desktop: false }, "changes-requested": { inApp: true, desktop: false } },
+  kinds: { "review-requested": { inApp: true, desktop: false }, "changes-requested": { inApp: true, desktop: false }, "daily-digest": { inApp: true, desktop: false } },
   quiet: { enabled: false, start: "22:00", end: "07:00" },
+  digest: DEFAULT_DIGEST_SETTINGS,
 };
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -30,7 +36,7 @@ export function parsePrefs(raw: unknown): Prefs {
     kinds[k.key] = { inApp: typeof v?.inApp === "boolean" ? v.inApp : DEFAULT_PREFS.kinds[k.key].inApp, desktop: typeof v?.desktop === "boolean" ? v.desktop : DEFAULT_PREFS.kinds[k.key].desktop };
   }
   const q = r.quiet;
-  return { kinds, quiet: { enabled: typeof q?.enabled === "boolean" ? q.enabled : false, start: typeof q?.start === "string" && HHMM.test(q.start) ? q.start : DEFAULT_PREFS.quiet.start, end: typeof q?.end === "string" && HHMM.test(q.end) ? q.end : DEFAULT_PREFS.quiet.end } };
+  return { digest: parseDigestSettings(r.digest), kinds, quiet: { enabled: typeof q?.enabled === "boolean" ? q.enabled : false, start: typeof q?.start === "string" && HHMM.test(q.start) ? q.start : DEFAULT_PREFS.quiet.start, end: typeof q?.end === "string" && HHMM.test(q.end) ? q.end : DEFAULT_PREFS.quiet.end } };
 }
 
 const minutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3));

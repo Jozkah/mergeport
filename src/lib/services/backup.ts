@@ -11,7 +11,8 @@ import { ValidationError } from "@/lib/errors";
  * Included: planning (projects, cards, columns, links, comments, checklists, milestones, epics, iterations, boards, history events),
  * review and waiting rules, fork mappings and decisions, labels, subscriptions, backports, availability, your saved views, notification
  * preferences, inbox/seen state, pending review drafts, and the edits still waiting to be sent.
- * Never included: credentials or sessions, local folder paths and worktree snapshots, caches, anything GitHub owns (issues, pull
+ * Never included: credentials or sessions, local folder paths and worktree snapshots, caches, the upstream auto-updater's settings and runs
+ * (`UpstreamUpdateConfig` holds a command that runs on this computer, so no backup can carry it in or out; a crafted file naming that table is ignored), anything GitHub owns (issues, pull
  * requests, reviews, checks), and the coordination repositories themselves.
  *
  * Restore is additive: it creates what is missing and updates what differs, never deletes, and shows a preview first. Rows that point

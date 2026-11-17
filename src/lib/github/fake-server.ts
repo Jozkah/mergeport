@@ -13,6 +13,7 @@ type FakeRepo = {
   id: number; owner: string; name: string; private: boolean; defaultBranch: string;
   collaborators: Map<string, Perm>; invitations: Map<number, Invitation>;
   objects: Map<string, Obj>; refs: Map<string, string>;
+  pulls?: Map<number, { number: number; state: "open" | "closed"; head: string; base: string; title: string; body: string }>;
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
@@ -255,6 +256,32 @@ export class FakeGitHubServer {
       if (cur && !b.force && !this.isAncestor(r, cur, b.sha)) return json(422, { message: "Update is not a fast forward" });
       r.refs.set(ref, b.sha);
       return json(200, { ref: `refs/${ref}`, object: { sha: b.sha } });
+    }
+    // pull requests (same-repository head/base only: what the upstream auto-updater needs)
+    const pulls = (r.pulls ??= new Map());
+    const pullJson = (x: { number: number; state: string; head: string; base: string; title: string; body: string }) => ({ number: x.number, state: x.state, title: x.title, body: x.body, html_url: `https://github.com/${r.owner}/${r.name}/pull/${x.number}`, head: { ref: x.head, label: `${r.owner}:${x.head}` }, base: { ref: x.base } });
+    if (method === "GET" && sub === "/pulls") {
+      const state = url.searchParams.get("state") ?? "open";
+      const head = url.searchParams.get("head");
+      const base = url.searchParams.get("base");
+      const hit = [...pulls.values()].filter((x) => (state === "all" || x.state === state) && (!head || head === `${r.owner}:${x.head}`) && (!base || base === x.base));
+      return json(200, hit.map(pullJson));
+    }
+    if (method === "POST" && sub === "/pulls") {
+      if (p !== "push" && p !== "admin") return json(403, { message: "Resource not accessible" });
+      if (!r.refs.has(`heads/${b?.head}`) || !r.refs.has(`heads/${b?.base}`)) return json(422, { message: "Validation Failed", errors: [{ message: "head or base is not a branch" }] });
+      if ([...pulls.values()].some((x) => x.state === "open" && x.head === b.head && x.base === b.base)) return json(422, { message: "Validation Failed", errors: [{ message: `A pull request already exists for ${r.owner}:${b.head}.` }] });
+      const x = { number: pulls.size + 1, state: "open" as const, head: String(b.head), base: String(b.base), title: String(b.title ?? ""), body: String(b.body ?? "") };
+      pulls.set(x.number, x);
+      return json(201, pullJson(x));
+    }
+    if (method === "PATCH" && (m = /^\/pulls\/(\d+)$/.exec(sub))) {
+      if (p !== "push" && p !== "admin") return json(403, { message: "Resource not accessible" });
+      const x = pulls.get(Number(m[1]));
+      if (!x) return json(404, { message: "Not Found" });
+      if (typeof b?.title === "string") x.title = b.title;
+      if (typeof b?.body === "string") x.body = b.body;
+      return json(200, pullJson(x));
     }
     return json(404, { message: "Not Found" });
   }

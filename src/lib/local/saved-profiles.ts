@@ -36,5 +36,5 @@ export function savedProfiles(home: string, host: string): SavedProfile[] {
   return out;
 }
 
-/** True when `gh api user` failed for want of a network, as opposed to being signed out or refused. */
-export const looksOffline = (message: string) => /connect|network|internet|ENOTFOUND|ETIMEDOUT|ECONN|timed? ?out|unreachable/i.test(message) && !/HTTP 401|bad credentials|not logged in/i.test(message);
+/** True when `gh api user` failed for want of a network or an exhausted API budget (a rate limit says nothing about who is signed in), as opposed to being signed out or refused. */
+export const looksOffline = (message: string) => /connect|network|internet|ENOTFOUND|ETIMEDOUT|ECONN|timed? ?out|unreachable|rate limit/i.test(message) && !/HTTP 401|bad credentials|not logged in/i.test(message);
