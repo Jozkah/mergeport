@@ -198,7 +198,7 @@ describe("panel: who sees what", () => {
 
   it("keeps every existing Team page element", async () => {
     const html = await renderTeam("2", OFF);
-    for (const t of ["Fake Team", "Members (3)", "Restricted spaces (0)", "Invite", "Sign out of this server", "Live"]) expect(html).toContain(t);
+    for (const t of ["Fake Team", "Members (3)", "Restricted spaces (0)", "Invite", "Sign out of this server", "Live"]) expect(html.replace(/<[^>]*>/g, "")).toContain(t); // the counts sit in their own tabular-number span
   });
 
   it("a hub that cannot be reached shows no panel and no error from it", async () => {
