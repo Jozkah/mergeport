@@ -8,8 +8,10 @@ import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { ThemeSelect } from "@/components/shell/ThemeControls";
 import { Mono, PageHeader, Panel, SimplePill } from "@/components/ui/primitives";
-import { KeyRound, Settings } from "@/components/ui/icons";
-import { autoSetupAction, setTimezoneAction } from "@/app/actions";
+import { KeyRound, RefreshCw, Settings } from "@/components/ui/icons";
+import { autoSetupAction, setRepoWatchAction, setTimezoneAction } from "@/app/actions";
+import { watchView } from "@/lib/local/repo-watch";
+import { WATCH_MAX_REPOS_LIMIT, WATCH_MAX_REPOS_MIN, WATCH_MAX_SECONDS, WATCH_MIN_SECONDS } from "@/lib/local/watch-format";
 import { planAutoSetup } from "@/lib/services/auto-setup";
 import { db } from "@/lib/db";
 import { Bell, Wand2 } from "@/components/ui/icons";
@@ -27,6 +29,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const zones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["UTC"];
   const clones = (await searchParams).clones ?? path.dirname(process.cwd()); // by default the folder that holds this app, where clones usually sit
   const setup = viewer.isAdmin && !isDemo() ? await planAutoSetup(db, viewer, { clonesFolder: clones }) : null;
+  const { summary: watch, config: wcfg } = await watchView(db);
+  const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
     <>
       <PageHeader title="Settings" subtitle={`Signed in as @${user.login}${viewer.isAdmin ? " (administrator of the team space)" : ""}. These settings belong to this computer.`} />
@@ -47,6 +51,26 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <Select id="tz" name="timezone" defaultValue={user.timezone} className="select max-w-sm">{[...new Set(["UTC", user.timezone, ...zones])].map((z) => <option key={z} value={z}>{z}</option>)}</Select>
               <p className="mt-1 text-[12px] text-ink-3">Times are stored in UTC and shown in this zone. Due dates and milestone dates are calendar dates and are not shifted.</p>
             </ActionForm>
+          </div>
+        </Panel>
+        <Panel title="Auto-sync of repositories" icon={RefreshCw} id="auto-sync">
+          <div className="p-4">
+            <ActionForm action={setRepoWatchAction} submitLabel="Save" resetOnSuccess={false} className="max-w-md">
+              <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" name="enabled" defaultChecked={watch.enabled} /> Check repositories I don&apos;t own while Mergeport is open</label>
+              <label className="label mt-3" htmlFor="watch-seconds">Check every (seconds)</label>
+              <input id="watch-seconds" name="seconds" type="number" min={WATCH_MIN_SECONDS} max={WATCH_MAX_SECONDS} defaultValue={wcfg.stored.seconds ?? ""} placeholder={String(wcfg.fallback.seconds)} className="input max-w-[8rem]" />
+              <p className="mt-1 text-[12px] text-ink-3" data-testid="watch-seconds-hint">{hint(wcfg.stored.seconds, wcfg.fallback.seconds, wcfg.fallback.secondsFromEnv, "MERGEPORT_WATCH_SECONDS")}</p>
+              <label className="label mt-3" htmlFor="watch-max">Watch at most (repositories)</label>
+              <input id="watch-max" name="max" type="number" min={WATCH_MAX_REPOS_MIN} max={WATCH_MAX_REPOS_LIMIT} defaultValue={wcfg.stored.maxRepos ?? ""} placeholder={String(wcfg.fallback.maxRepos)} className="input max-w-[8rem]" />
+              <p className="mt-1 text-[12px] text-ink-3" data-testid="watch-max-hint">{hint(wcfg.stored.maxRepos, wcfg.fallback.maxRepos, wcfg.fallback.maxReposFromEnv, "MERGEPORT_WATCH_MAX_REPOS")}</p>
+              <p className="mt-1 text-[12px] text-ink-3">Repositories beyond this number keep the 15-minute refresh. The least recently synced are watched first.</p>
+              <p className="mt-1 text-[12px] text-ink-3">On by default. Turn off to use only the 15-minute cycle.</p>
+              <p className="mt-1 text-[12px] text-ink-3">Checks use conditional requests that do not use your GitHub rate limit when nothing changed. Webhook-covered repositories are never polled.</p>
+            </ActionForm>
+            <p className="mt-3 text-[12.5px] text-ink-2" data-testid="watch-effective">
+              {!watch.enabled ? "Off. Repositories still refresh every 15 minutes." : watch.repos === 0 ? "No repositories to check right now." : <>Effective: every {watch.effective} s for {watch.repos} repositor{watch.repos === 1 ? "y" : "ies"}.</>}
+            </p>
+            {watch.enabled && watch.stretched && <p className="mt-1 text-[12px] text-ink-3">Stretched from {watch.configured} s because of the number of repositories: {watch.repos} repositories every {watch.effective} s is 300 requests a minute in total (two per repository and check). Lower the number of repositories to check faster.</p>}
           </div>
         </Panel>
         {setup && (

@@ -9,6 +9,9 @@ import { ActionForm } from "@/components/forms/ActionForm";
 import { Banner, EmptyState, PageHeader, Panel } from "@/components/ui/primitives";
 import { FolderGit2, Plus, RefreshCw } from "@/components/ui/icons";
 import { importPublicAction } from "@/app/actions";
+import { watchView } from "@/lib/local/repo-watch";
+import { watchLabel, watchTitle } from "@/lib/local/watch-format";
+import { instantRepoIds } from "@/lib/hub/instant-badges";
 import { RepoList, type RepoRow } from "@/components/repos/RepoList";
 
 export const metadata = { title: "Repositories" };
@@ -17,6 +20,9 @@ export default async function Repositories({ searchParams: _searchParams }: { se
   const { viewer } = await requireViewer();
   const now = new Date();
   const [repos, spaces] = await Promise.all([listRepositories(db, viewer), db.space.findMany({ where: { access: "OK" }, orderBy: [{ kind: "asc" }, { name: "asc" }] })]);
+  // Repositories the team's GitHub App covers (last result of "Add my tracked repositories"; local data, no GitHub request).
+  const instant = await instantRepoIds(db);
+  const watch = await watchView(db, instant);
   const spaceById = new Map(spaces.map((s) => [s.id, s]));
   const writable = spaces.filter((s) => s.canWrite);
   // A fork's parent name is shown only if that parent is not a tracked repository hidden from this viewer.
@@ -50,6 +56,8 @@ export default async function Repositories({ searchParams: _searchParams }: { se
       spaceName: sp?.name ?? null,
       canUnshare: !!sp?.canWrite,
       projects: r.projects.map((p) => p.project.name),
+      instant: instant.has(r.githubId.toString()),
+      watch: watch.ids.has(r.githubId.toString()) ? { label: `Auto-sync ${watchLabel(watch.summary.effective)}`, title: watchTitle(watch.summary.effective) } : null,
     };
   });
   const problems = repos.filter((r) => r.trackingStatus === "DISCONNECTED" || r.rateLimited || r.syncError);

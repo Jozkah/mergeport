@@ -1,5 +1,6 @@
 "use server";
 
+import { commonSpaceIdForSharing } from "@/lib/services/project-sharing";
 import { applyAutoSetup } from "@/lib/services/auto-setup";
 import { setProjectReviewers } from "@/lib/services/project-reviewers";
 import { notifyChange } from "@/lib/local/runtime";
@@ -23,6 +24,7 @@ import type { Discovery } from "@/lib/github/port";
 import { GithubError } from "@/lib/github/port";
 import { enqueue } from "@/lib/jobs";
 import { slugify } from "@/lib/slug";
+import { parseOptional, parseWatchMaxRepos, parseWatchSeconds, readWatchConfig, saveWatchSettings } from "@/lib/local/watch-settings";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const strs = (fd: FormData, k: string) => fd.getAll(k).map(String).filter(Boolean);
@@ -265,12 +267,14 @@ export async function createProjectAction(fd: FormData): Promise<ActionResult> {
     const { viewer } = await requireAdminViewer();
     const name = str(fd, "name");
     if (!name) throw new ValidationError("Name the project");
-    const p = await db.project.create({ data: { workspaceId: viewer.workspaceId, name, slug: slugify(name), description: str(fd, "description") || null } });
+    // Resolved before anything is created, so a share that cannot happen never leaves a half-made project behind.
+    const spaceId = str(fd, "share") ? await commonSpaceIdForSharing(db) : null;
+    const p = await db.project.create({ data: { workspaceId: viewer.workspaceId, name, slug: slugify(name), description: str(fd, "description") || null, spaceId } });
     await createColumnsForProject(db, p.id);
     if (str(fd, "reviewers")) await setProjectReviewers(db, viewer.workspaceId, p.id, p.name, str(fd, "reviewers"));
     await audit(db, viewer, "project.create", { type: "Project", id: p.id });
     revalidatePath("/admin/projects");
-    return { ok: true, message: "Project created" };
+    return { ok: true, message: spaceId ? "Project created and shared with the team" : "Project created" };
   });
 }
 
@@ -590,6 +594,29 @@ export async function setTimezoneAction(fd: FormData): Promise<ActionResult> {
     await db.user.update({ where: { id: user.id }, data: { timezone: tz } });
     revalidatePath("/", "layout");
     return { ok: true, message: "Timezone saved" };
+  });
+}
+
+/**
+ * Auto-sync of repositories without webhooks (repo-watch.ts). The unchecked switch is simply absent from the form. A blank
+ * number means "use the default (environment or built-in)" and clears the saved value; only fields that changed are written.
+ */
+export async function setRepoWatchAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    await requireViewer();
+    const enabled = fd.get("enabled") === "on" || fd.get("enabled") === "true";
+    const seconds = parseOptional(fd.get("seconds"), parseWatchSeconds);
+    const maxRepos = parseOptional(fd.get("max"), parseWatchMaxRepos);
+    const cur = await readWatchConfig(db);
+    await saveWatchSettings(db, {
+      enabled: enabled !== cur.enabled ? enabled : undefined,
+      seconds: seconds !== cur.stored.seconds ? seconds : undefined,
+      maxRepos: maxRepos !== cur.stored.maxRepos ? maxRepos : undefined,
+    });
+    revalidatePath("/settings");
+    revalidatePath("/repositories");
+    const now = await readWatchConfig(db);
+    return { ok: true, message: now.enabled ? `Checking up to ${now.maxRepos} repositories every ${now.seconds} seconds while Mergeport is open` : "Automatic checks are off. Repositories still refresh every 15 minutes." };
   });
 }
 

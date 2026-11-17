@@ -4,6 +4,7 @@ import { ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs"
 import { checkProfile } from "@/lib/local/identity";
 import { pollMode } from "@/lib/local/activity";
 import { RECONCILE_EVERY_MS, handlers } from "@/lib/local/handlers";
+import { startRepoWatch, stopRepoWatch } from "@/lib/local/repo-watch";
 import { getEngine, notifyChange } from "@/lib/local/runtime";
 import { recoverDiscovery, shutdownDiscovery, tickDiscovery } from "@/lib/local/discovery-jobs";
 
@@ -51,6 +52,24 @@ export async function tickOnce(now = Date.now()): Promise<{ coordination: number
   return out;
 }
 
+/**
+ * Runs the due jobs now instead of at the next 5 s tick (a webhook-triggered refresh should not wait for it). It uses the
+ * scheduler's own `busy` flag, so it never runs beside a tick: if one is running, that tick's drain (or the next tick) picks
+ * the job up. A no-op when the scheduler was not started in this process.
+ */
+export async function runJobsNow(): Promise<void> {
+  const s = g.__mpScheduler;
+  if (!s || s.busy || isDemo()) return;
+  s.busy = true;
+  try {
+    await drainJobs();
+  } catch (e) {
+    console.error("job run failed", e instanceof Error ? e.message : e);
+  } finally {
+    s.busy = false;
+  }
+}
+
 export function startLocalScheduler(intervalMs = 5000) {
   if (g.__mpScheduler) return;
   void recoverDiscovery().catch(() => {}); // an attempt a crash interrupted must not stay "retrying" for ever
@@ -58,6 +77,8 @@ export function startLocalScheduler(intervalMs = 5000) {
   process.once("exit", shutdownDiscovery);
   process.once("SIGTERM", shutdownDiscovery);
   process.once("SIGINT", shutdownDiscovery);
+  process.once("exit", stopRepoWatch);
+  startRepoWatch(); // auto-sync of repositories without webhooks; idle unless a tab is open
   const state = { busy: false, lastTick: 0, timer: undefined as unknown as ReturnType<typeof setInterval> };
   state.timer = setInterval(async () => {
     if (state.busy) return;

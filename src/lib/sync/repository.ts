@@ -3,15 +3,19 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { shouldApplyUpdate } from "@/lib/domain/sync";
 import { classifyCompare, classifyUpstreamMerge } from "@/lib/domain/forks";
-import { GithubError, type GithubPort, type RemoteWorkItem } from "@/lib/github/port";
+import { GithubError, type GithubPort, type RemoteComment, type RemoteWorkItem } from "@/lib/github/port";
 import { mapLimit } from "@/lib/util";
 import { indexList, sameLogin } from "@/lib/domain/text-index";
+import { refreshHubWatch } from "@/lib/hub/watch";
 import { parsePrefs, wantsInApp } from "@/lib/domain/notify-prefs";
 
 /**
  * Repository synchronization. Runs in the worker, with the installation's/connection's broad credential.
  * Nothing here is served to browsers directly: all reads go back through viewer-scoped queries.
  */
+
+/** A database or an open transaction: the webhook path applies one event atomically. */
+export type Tx = Db | Prisma.TransactionClient;
 
 export type SyncResult = { items: number; applied: number; skippedStale: number; pages: number; discussionSkipped?: number };
 
@@ -22,8 +26,10 @@ const SKEW_MS = 2 * 60_000;
  * stay REMOVED. Without this guard a late sync could flip it back to ACTIVE or DISCONNECTED and make it (and its
  * old grants) visible again.
  */
-export function setStatus(db: Db, repositoryId: string, data: Prisma.RepositoryUpdateManyMutationInput) {
-  return db.repository.updateMany({ where: { id: repositoryId, trackingStatus: { not: "REMOVED" } }, data });
+export async function setStatus(db: Db, repositoryId: string, data: Prisma.RepositoryUpdateManyMutationInput) {
+  const r = await db.repository.updateMany({ where: { id: repositoryId, trackingStatus: { not: "REMOVED" } }, data });
+  if (data.trackingStatus !== undefined) refreshHubWatch(); // ACTIVE <-> DISCONNECTED changes what the hub should relay
+  return r;
 }
 
 function itemData(i: RemoteWorkItem): Prisma.WorkItemUncheckedUpdateInput {
@@ -50,21 +56,59 @@ function itemData(i: RemoteWorkItem): Prisma.WorkItemUncheckedUpdateInput {
   };
 }
 
-/** Upsert one item, idempotently and never backwards in time. Returns whether anything was written. */
-export async function applyWorkItem(db: Db, repositoryId: string, i: RemoteWorkItem, pr?: Partial<RemoteWorkItem> & { checks?: "NONE" | "PENDING" | "SUCCESS" | "FAILURE" | "UNKNOWN" }): Promise<boolean> {
+/**
+ * Upsert one item, idempotently and never backwards in time. Returns whether anything was written.
+ * `opts.partial` (webhook payloads) keeps the stored mergeable state, checks state and size counters when the incoming
+ * pull request has no value for them, instead of resetting them the way a full sync (which always has them) would.
+ */
+export async function applyWorkItem(db: Tx, repositoryId: string, i: RemoteWorkItem, pr?: Partial<RemoteWorkItem> & { checks?: "NONE" | "PENDING" | "SUCCESS" | "FAILURE" | "UNKNOWN" }, opts: { partial?: boolean } = {}): Promise<boolean> {
   const existing = await db.workItem.findUnique({ where: { repositoryId_number: { repositoryId, number: i.number } }, select: { id: true, updatedAtGh: true } });
   if (!shouldApplyUpdate(existing, i.updatedAt)) return false;
-  const prFields: Prisma.WorkItemUncheckedUpdateInput = pr
+  let prFields: Prisma.WorkItemUncheckedUpdateInput = pr
     ? { headSha: pr.headSha ?? null, headRef: pr.headRef ?? null, baseRef: pr.baseRef ?? null, mergeable: pr.mergeable ?? "UNKNOWN", additions: pr.additions ?? null, deletions: pr.deletions ?? null, changedFiles: pr.changedFiles ?? null, checksState: pr.checks ?? "NONE" }
     : {};
+  if (pr && opts.partial) {
+    prFields = { headSha: pr.headSha ?? null, headRef: pr.headRef ?? null, baseRef: pr.baseRef ?? null };
+    if (pr.mergeable !== undefined) prFields.mergeable = pr.mergeable;
+    if (pr.additions != null) prFields.additions = pr.additions;
+    if (pr.deletions != null) prFields.deletions = pr.deletions;
+    if (pr.changedFiles != null) prFields.changedFiles = pr.changedFiles;
+    if (pr.checks !== undefined) prFields.checksState = pr.checks;
+  }
+  const create = { ...(itemData(i) as object), ...(prFields as object), repositoryId, githubId: i.githubId, number: i.number, type: i.type } as Prisma.WorkItemUncheckedCreateInput;
+  if (opts.partial) {
+    // Webhook path: the age check and the write are ONE statement, so a newer row is never overwritten even when two writers
+    // interleave between the read above and this write.
+    const r = await db.workItem.updateMany({ where: { repositoryId, number: i.number, updatedAtGh: { lte: i.updatedAt } }, data: { ...itemData(i), ...prFields } });
+    if (r.count === 1) return true;
+    if (existing) return false; // the row exists and is newer
+    try {
+      await db.workItem.create({ data: create });
+      return true;
+    } catch {
+      // created by another writer in between: only an equal or older row may still be updated
+      return (await db.workItem.updateMany({ where: { repositoryId, number: i.number, updatedAtGh: { lte: i.updatedAt } }, data: { ...itemData(i), ...prFields } })).count === 1;
+    }
+  }
   await db.workItem.upsert({
     where: { repositoryId_number: { repositoryId, number: i.number } },
-    create: { ...(itemData(i) as object), ...(prFields as object), repositoryId, githubId: i.githubId, number: i.number, type: i.type } as Prisma.WorkItemUncheckedCreateInput,
+    create,
     update: { ...itemData(i), ...prFields },
   });
   return true;
 }
 
+/** Upsert one issue comment or inline review comment by its GitHub id: the write the full sync and the webhook path share. */
+export function upsertComment(db: Tx, workItemId: string, kind: "ISSUE_COMMENT" | "REVIEW_COMMENT", c: RemoteComment) {
+  return db.workItemComment.upsert({
+    where: { workItemId_kind_githubId: { workItemId, kind, githubId: c.githubId } },
+    create:
+      kind === "ISSUE_COMMENT"
+        ? { workItemId, githubId: c.githubId, kind, authorLogin: c.login, body: c.body, createdAtGh: c.createdAt, updatedAtGh: c.updatedAt }
+        : { workItemId, githubId: c.githubId, kind, authorLogin: c.login, body: c.body, path: c.path, line: c.line, commitSha: c.commitSha, threadKey: c.threadKey, createdAtGh: c.createdAt, updatedAtGh: c.updatedAt },
+    update: { body: c.body, updatedAtGh: c.updatedAt },
+  });
+}
 const COMMENT_FETCH_CAP = 3000; // the adapter reads at most 30 pages of 100
 
 async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: string, repositoryId: string, i: RemoteWorkItem, now: Date) {
@@ -78,20 +122,8 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
   };
   await reconcile("ISSUE_COMMENT", issueComments);
   if (i.type === "PULL_REQUEST") await reconcile("REVIEW_COMMENT", reviewComments);
-  for (const c of issueComments) {
-    await db.workItemComment.upsert({
-      where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "ISSUE_COMMENT", githubId: c.githubId } },
-      create: { workItemId: wi.id, githubId: c.githubId, kind: "ISSUE_COMMENT", authorLogin: c.login, body: c.body, createdAtGh: c.createdAt, updatedAtGh: c.updatedAt },
-      update: { body: c.body, updatedAtGh: c.updatedAt },
-    });
-  }
-  for (const c of reviewComments) {
-    await db.workItemComment.upsert({
-      where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "REVIEW_COMMENT", githubId: c.githubId } },
-      create: { workItemId: wi.id, githubId: c.githubId, kind: "REVIEW_COMMENT", authorLogin: c.login, body: c.body, path: c.path, line: c.line, commitSha: c.commitSha, threadKey: c.threadKey, createdAtGh: c.createdAt, updatedAtGh: c.updatedAt },
-      update: { body: c.body, updatedAtGh: c.updatedAt },
-    });
-  }
+  for (const c of issueComments) await upsertComment(db, wi.id, "ISSUE_COMMENT", c);
+  for (const c of reviewComments) await upsertComment(db, wi.id, "REVIEW_COMMENT", c);
   if (i.type === "PULL_REQUEST") {
     // Thread resolution lives only in GitHub's GraphQL API. If it cannot be read, the flag stays as it was (unknown stays unknown).
     const threads = await port.listReviewThreads(owner, repo, i.number).catch(() => null);
