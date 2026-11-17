@@ -41,9 +41,10 @@ export function ByHandValuesView({ v }: { v: ByHandValues }) {
       <div>
         <p className="label">Repository permissions</p>
         <table className="w-full text-left text-[12.5px]">
+          <caption className="sr-only">Repository permissions to grant, all read-only</caption>
           <tbody>
             {v.permissions.map((p) => (
-              <tr key={p.name} className="border-b border-line last:border-b-0"><td className="py-1.5 mono">{p.name}</td><td className="py-1.5 text-ink-3">{p.access}</td></tr>
+              <tr key={p.name} className="border-b border-line last:border-b-0"><th scope="row" className="py-1.5 pr-3 text-left font-normal mono">{p.name}</th><td className="py-1.5 text-ink-3">{p.access}</td></tr>
             ))}
           </tbody>
         </table>
@@ -79,7 +80,7 @@ export function WebhookByHand({ teamName, hubOrigin, enabled }: { teamName: stri
         {v && (
           <>
             <ByHandValuesView v={v} />
-            <ActionForm action={saveWebhookSecretAction} submitLabel="Save secret on the server" pendingLabel="Saving…" resetOnSuccess={false} className="rounded-[10px] border border-line bg-canvas p-3">
+            <ActionForm action={saveWebhookSecretAction} submitLabel="Save secret on the server" pendingLabel="Saving…" resetOnSuccess={false} submitClassName="btn btn-primary !h-10" className="rounded-[10px] border border-line bg-canvas p-3">
               <input type="hidden" name="secret" value={v.secret} />
               <label className="label" htmlFor="by-hand-slug">The App&rsquo;s short name on GitHub (optional, from its web address)</label>
               <input id="by-hand-slug" name="appSlug" className="input !h-10 !w-full sm:!w-64" autoComplete="off" placeholder="mergeport-my-team-abcd" pattern="[A-Za-z0-9\-]{1,100}" />
