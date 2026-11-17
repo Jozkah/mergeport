@@ -9,6 +9,7 @@ import { expectedConsistencyDelaySeconds } from "@/lib/sync/engine";
 import { formatInstant } from "@/lib/format";
 import { deriveSourceStatus } from "@/lib/sync/source-status";
 import { ActionForm } from "@/components/forms/ActionForm";
+import { Sheet } from "@/components/ui/dialog";
 import { SyncBadge } from "@/components/sync/SyncBadge";
 import { Banner, EmptyState, Mono, PageHeader, Panel, Time } from "@/components/ui/primitives";
 import { FolderGit2, RefreshCw, ShieldCheck } from "@/components/ui/icons";
@@ -142,25 +143,30 @@ export default async function SyncPage() {
       {restores.length > 0 && (
         <div className="mt-5">
           <Panel title={`Server restored from a backup (${restores.length})`} icon={ShieldCheck} id="restored">
-            <div className="flex flex-col gap-3 p-4 text-[13px]">
-              <p className="text-ink-3">The team server went back to an earlier copy of its data. Your computer now matches the server, so some of your newer saved copies were replaced. Edits you had not sent yet were kept. What was replaced is listed here so nothing is lost without you knowing.</p>
+            <div className="flex flex-col text-[13px]">
+              <p className="max-w-[75ch] text-pretty p-4 text-ink-3">The team server went back to an earlier copy of its data. Your computer now matches the server, so some of your newer saved copies were replaced. Edits you had not sent yet were kept. What was replaced is listed here so nothing is lost without you knowing.</p>
+              <ul>
               {restores.map((r) => {
                 const entries = r.detail as unknown as { type: string; entityId: string; deleted: boolean; data: Record<string, unknown>; resend: boolean }[];
                 const sendable = entries.filter((e) => e.resend).length;
                 return (
-                  <div key={r.id} className="flex flex-col gap-2 rounded-[10px] border border-line p-3">
-                    <span><strong>{r.rolledBack}</strong> item(s) replaced by the server&apos;s older copy{r.kept > 0 ? <>, <strong>{r.kept}</strong> with unsent edits kept</> : null}. Detected <Time value={r.at} formatted={formatInstant(r.at, viewer.timezone)} />.</span>
-                    <ul className="text-[12.5px] text-ink-3">
-                      {entries.slice(0, 8).map((e) => <li key={`${e.type}/${e.entityId}`}>{e.type} <Mono>{typeof e.data.title === "string" ? e.data.title : typeof e.data.name === "string" ? e.data.name : e.entityId}</Mono>{e.deleted ? " (you had deleted it)" : ""}</li>)}
+                  <li key={r.id} className="flex flex-col gap-2 border-t border-line p-4">
+                    <span><strong className="tnum">{r.rolledBack}</strong> {r.rolledBack === 1 ? "item" : "items"} in <strong>{r.space.name}</strong> replaced by the server&apos;s older copy{r.kept > 0 ? <>, <strong className="tnum">{r.kept}</strong> with unsent edits kept</> : null}. Detected <Time value={r.at} formatted={formatInstant(r.at, viewer.timezone)} />.</span>
+                    <ul className="text-[12.5px] text-ink-3" aria-label="What was replaced">
+                      {entries.slice(0, 8).map((e) => <li key={`${e.type}/${e.entityId}`} className="break-words">{e.type} <Mono>{typeof e.data.title === "string" ? e.data.title : typeof e.data.name === "string" ? e.data.name : e.entityId}</Mono>{e.deleted ? " (you had deleted it)" : ""}</li>)}
                       {r.rolledBack > Math.min(entries.length, 8) && <li>and {r.rolledBack - Math.min(entries.length, 8)} more</li>}
                     </ul>
-                    <span className="flex flex-wrap gap-2">
+                    <span className="flex flex-wrap items-start gap-2">
                       {sendable > 0 && <ActionForm action={resendRestoredAction} submitLabel={`Send my copies again (${sendable})`} submitAriaLabel="Send my newer copies to the server again" submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={r.id} /></ActionForm>}
-                      <ActionForm action={dismissRestoredAction} submitLabel="Keep the server's version" submitAriaLabel="Dismiss this notice and keep the server's version" submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={r.id} /></ActionForm>
+                      <Sheet title="Keep the server's version?" description={`Your computer keeps what the server has. The ${r.rolledBack === 1 ? "replaced copy" : `${r.rolledBack} replaced copies`} will no longer be listed here, and you cannot send ${r.rolledBack === 1 ? "it" : "them"} again later.`} trigger={<button type="button" className="btn" aria-label="Keep the server's version and drop the replaced copies">Keep the server&apos;s version</button>}>
+                        <ActionForm action={dismissRestoredAction} submitLabel="Keep the server's version" pendingLabel="Saving…" submitClassName="btn btn-primary" closeOnSuccess><input type="hidden" name="id" value={r.id} /></ActionForm>
+                      </Sheet>
                     </span>
-                  </div>
+                    {sendable > 0 && <p className="max-w-[75ch] text-pretty text-[12px] text-ink-3">Sending again puts your {sendable === 1 ? "copy" : "copies"} back on the server as new edits, and your teammates will see {sendable === 1 ? "it" : "them"}.</p>}
+                  </li>
                 );
               })}
+              </ul>
             </div>
           </Panel>
         </div>
