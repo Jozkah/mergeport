@@ -15,7 +15,7 @@ const skillAt = (dir: string) => path.join(home, dir, "skills", "mergeport", "SK
 
 describe("the shipped skill", () => {
   it("has the frontmatter an agent needs and stays short", () => {
-    const md = fs.readFileSync(path.join(source, "SKILL.md"), "utf8");
+    const md = fs.readFileSync(path.join(source, "SKILL.md"), "utf8").replace(/\r\n/g, "\n"); // a Windows checkout may have CRLF line ends
     expect(md).toMatch(/^---\nname: mergeport\ndescription: .{100,}\n---\n/);
     for (const phrase of ["add this to mergeport", "assign", "under <repo> repo", "mergeport board", "mergeport todo", "label it bug", "In progress"]) expect(md.toLowerCase()).toContain(phrase.toLowerCase());
     expect(md.split("\n").length).toBeLessThanOrEqual(120);
