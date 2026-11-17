@@ -43,11 +43,12 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
   const crumbs = parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
   return (
     <>
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-canvas/90 px-4 backdrop-blur-sm lg:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-line bg-canvas/90 px-3 backdrop-blur-sm sm:gap-3 sm:px-4 lg:px-6">
       {menu}
       <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
         <ol className="flex min-w-0 items-center gap-1.5 text-[13px] text-ink-3">
-          <li className="flex shrink-0 items-center gap-1.5">
+          {/* On a narrow bar only the current page is named; the Overview link stays when there is no other crumb. */}
+          <li className={`${crumbs.length ? "hidden sm:flex" : "flex"} shrink-0 items-center gap-1.5`}>
             <Link href="/" className="inline-flex items-center gap-1.5 hover:text-ink" aria-label="Overview">
               <LayoutDashboard size={14} aria-hidden />
               <span className="hidden sm:inline">Overview</span>
@@ -55,7 +56,7 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
           </li>
           {crumbs.map((c, i) => (
             <li key={c.href} className="flex min-w-0 items-center gap-1.5">
-              <ChevronRight size={12} aria-hidden className="shrink-0" />
+              <ChevronRight size={12} aria-hidden className={i === 0 ? "hidden shrink-0 sm:block" : "shrink-0"} />
               {i === crumbs.length - 1 ? (
                 <span aria-current="page" className="truncate font-medium text-ink">{c.label}</span>
               ) : (
