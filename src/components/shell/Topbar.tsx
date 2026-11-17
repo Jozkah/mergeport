@@ -42,6 +42,7 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
   const parts = path.split("/").filter(Boolean);
   const crumbs = parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
   return (
+    <>
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-canvas/90 px-4 backdrop-blur-sm lg:px-6">
       {menu}
       <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
@@ -64,7 +65,7 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
           ))}
         </ol>
       </nav>
-      {workspaces ? <WorkspaceSwitcher {...workspaces} /> : null}
+      {workspaces ? <div className="hidden sm:block"><WorkspaceSwitcher {...workspaces} /></div> : null}
       {scopePicker}
       {syncNote && <span className="hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
       {sync && <SyncBadge {...sync} href="/sync" />}
@@ -81,5 +82,8 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
         <Tip label="Sign out of this browser session"><button className="btn btn-quiet btn-icon" aria-label="Sign out"><LogOut size={16} aria-hidden /></button></Tip>
       </form>
     </header>
+    {/* Narrow screens have no room for a third control in the bar: the switcher gets its own row under it. */}
+    {workspaces ? <div className="border-b border-line px-4 py-2 sm:hidden"><WorkspaceSwitcher {...workspaces} className="w-full" /></div> : null}
+    </>
   );
 }

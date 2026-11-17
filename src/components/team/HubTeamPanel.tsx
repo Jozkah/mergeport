@@ -10,6 +10,7 @@ import { HubSignOut } from "@/components/team/HubSignOut";
 import type { HubAdminSpace, HubLinkStatus, HubMember, HubSpaceMember } from "@/lib/hub/ports";
 import type { HubOverview } from "@/lib/team/hub-service";
 
+export const REMOVE_MEMBER_WARNING = (login: string) => `@${login} loses access to the team and to every restricted space, on every computer. Only the server's owner can reinstate them, and only into the common space.`;
 export const DELETE_SPACE_WARNING = "Deleting this space removes its projects, cards and tasks from every member's computer.";
 
 export type HubTeamError = { kind: "unauthorized" } | { kind: "forbidden" } | { kind: "request"; message: string };
@@ -26,7 +27,7 @@ export function ConnectionPill({ status }: { status: HubLinkStatus }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <SimplePill tone={l.tone}>{l.label}</SimplePill>
-      {status.pendingOps > 0 && <span className="text-[12.5px] text-ink-3">{status.pendingOps} pending</span>}
+      {status.pendingOps > 0 && <span className="tnum text-[12.5px] text-ink-3">{status.pendingOps} pending</span>}
     </span>
   );
 }
@@ -37,7 +38,7 @@ function SpaceMembers({ members, people }: { members?: HubSpaceMember[]; people:
   return (
     <ul className="mt-2 flex flex-wrap gap-2" aria-label="Members of this space">
       {members.map((m) => (
-        <li key={m.githubId} className="inline-flex items-center gap-1.5 text-[12.5px]">
+        <li key={m.githubId} className="inline-flex min-w-0 max-w-full items-center gap-1.5 break-all text-[12.5px]">
           @{people.find((p) => p.githubId === m.githubId)?.login ?? `user ${m.githubId}`}
           <SimplePill tone={m.canWrite ? "ok" : "unknown"}>{m.canWrite ? "Can edit" : "Read only"}</SimplePill>
         </li>
@@ -89,7 +90,7 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
       {o && (
         <div className="flex flex-col gap-5">
           {instantUpdates}
-          <Panel title={`Members (${members.length})`} icon={Users} id="members">
+          <Panel title={<>Members (<span className="tnum">{members.length}</span>)</>} icon={Users} id="members">
             <ul>
               {members.map((m) => {
                 const self = m.githubId === o.me.githubId;
@@ -99,20 +100,22 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
                     <div className="flex min-w-0 items-center gap-3">
                       <Avatar login={m.login} url={m.avatarUrl} size={28} />
                       <div className="min-w-0">
-                        <p className="truncate font-medium">{m.name ?? `@${m.login}`}{self && <span className="ml-1 text-ink-3">(you)</span>}</p>
-                        <p className="truncate text-[12.5px] text-ink-3">@{m.login}</p>
+                        <p className="truncate font-medium">{m.name ?? `@${m.login}`}{self && <span className="ml-1 font-normal text-ink-3">(you)</span>}</p>
+                        {m.name && <p className="truncate text-[12.5px] text-ink-3">@{m.login}</p>}
                       </div>
                       <SimplePill tone={m.status === "INVITED" ? "waiting" : "needs"}>{m.status === "INVITED" ? "Invited" : ROLE_LABEL[m.role]}</SimplePill>
                     </div>
                     {editable && (
                       <div className="flex flex-wrap items-start gap-2">
-                        <ActionForm action={hubChangeRoleAction} submitLabel="Save role" pendingLabel="Saving…" submitClassName="btn !h-10" resetOnSuccess={false} className="flex flex-wrap items-center gap-2">
+                        <ActionForm action={hubChangeRoleAction} submitLabel="Save role" pendingLabel="Saving…" submitClassName="btn !h-10" resetOnSuccess={false} className="flex flex-wrap items-start gap-2 [&>div:last-child]:!mt-0">
                           <input type="hidden" name="githubId" value={m.githubId} />
                           <Select name="role" aria-label={`Role for @${m.login}`} defaultValue={m.role} className="select !h-10 !w-32">{ROLE_OPTIONS}</Select>
                         </ActionForm>
-                        <ActionForm action={hubRemoveMemberAction} submitLabel="Remove" pendingLabel="Removing…" submitClassName="btn btn-danger !h-10" submitAriaLabel={`Remove @${m.login}`}>
-                          <input type="hidden" name="githubId" value={m.githubId} />
-                        </ActionForm>
+                        <Sheet title={`Remove @${m.login} from the team?`} description={REMOVE_MEMBER_WARNING(m.login)} trigger={<button type="button" className="btn btn-danger !h-10" aria-label={`Remove @${m.login}`}>Remove</button>}>
+                          <ActionForm action={hubRemoveMemberAction} submitLabel="Remove from the team" pendingLabel="Removing…" submitClassName="btn btn-danger !h-10" closeOnSuccess>
+                            <input type="hidden" name="githubId" value={m.githubId} />
+                          </ActionForm>
+                        </Sheet>
                       </div>
                     )}
                   </li>
@@ -121,13 +124,15 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
             </ul>
             {removedMembers.length > 0 && (
               <div className="border-t border-line p-4">
-                <p className="mb-2 text-[12.5px] text-ink-3">Removed people can be reinstated by the owner. They return to the common space only; restricted spaces are granted again on purpose.</p>
-                <ul>
+                <h3 className="text-[13px] font-medium">Removed (<span className="tnum">{removedMembers.length}</span>)</h3>
+                <p className="mb-2 mt-0.5 max-w-[70ch] text-pretty text-[12.5px] text-ink-3">Removed people can be reinstated by the owner. They return to the common space only; restricted spaces are granted again on purpose.</p>
+                <ul className="max-h-72 overflow-y-auto" aria-label="Removed people">
                   {removedMembers.map((m) => (
                     <li key={m.githubId} className="flex flex-wrap items-center justify-between gap-3 py-2">
-                      <span className="truncate">@{m.login} <span className="text-ink-3">(removed)</span></span>
-                      <ActionForm action={hubReinstateMemberAction} submitLabel="Reinstate" pendingLabel="Reinstating…" submitClassName="btn !h-10" submitAriaLabel={`Reinstate @${m.login}`} className="flex flex-wrap items-center gap-2">
+                      <span className="min-w-0 max-w-full break-all">@{m.login} <span className="text-ink-3">(removed)</span></span>
+                      <ActionForm action={hubReinstateMemberAction} submitLabel="Reinstate" pendingLabel="Reinstating…" submitClassName="btn !h-10" submitAriaLabel={`Reinstate @${m.login}`} className="flex flex-wrap items-start gap-2 [&>div:last-child]:!mt-0">
                         <input type="hidden" name="githubId" value={m.githubId} />
+                        <span className="inline-flex h-10 items-center text-[12.5px] text-ink-3" aria-hidden>as</span>
                         <Select name="role" aria-label={`Role for @${m.login} when reinstated`} defaultValue="MEMBER" className="select !h-10 !w-32">{ROLE_OPTIONS}</Select>
                       </ActionForm>
                     </li>
@@ -138,14 +143,14 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
             {o.canAdmin && (
               <div className="border-t border-line p-4">
                 <ActionForm action={hubInviteAction} submitLabel="Invite" pendingLabel="Inviting…" submitClassName="btn btn-primary !h-10" className="flex flex-wrap items-end gap-3">
-                  <div className="min-w-0 flex-1"><label className="label" htmlFor="hub-invite-login">GitHub username</label><input id="hub-invite-login" name="login" className="input !h-10 !w-full sm:!w-56" placeholder="alice" autoComplete="off" required /></div>
+                  <div className="min-w-0 max-sm:basis-full"><label className="label" htmlFor="hub-invite-login">GitHub username</label><input id="hub-invite-login" name="login" className="input !h-10 !w-full sm:!w-56" placeholder="alice" autoComplete="off" required /></div>
                   <div><label className="label" htmlFor="hub-invite-role">Role</label><Select id="hub-invite-role" name="role" defaultValue="MEMBER" className="select !h-10 !w-32">{ROLE_OPTIONS}</Select></div>
                 </ActionForm>
               </div>
             )}
           </Panel>
 
-          <Panel title={`Restricted spaces (${restricted.length})`} icon={ShieldCheck} id="spaces">
+          <Panel title={<>Restricted spaces (<span className="tnum">{restricted.length}</span>)</>} icon={ShieldCheck} id="spaces">
             {restricted.length === 0 ? (
               <EmptyState icon={Lock} title="No restricted spaces">Everyone on the team shares the common space. A restricted space is visible only to the people you pick.</EmptyState>
             ) : (
@@ -176,11 +181,11 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
                   <input id="hub-space-name" name="name" className="input !h-10 !w-full sm:!w-64" required />
                   <fieldset className="mt-3">
                     <legend className="label">Who can see it</legend>
-                    <ul className="flex flex-col">
+                    <ul className="flex max-h-72 flex-col overflow-y-auto">
                       {members.filter((m) => m.status === "ACTIVE").map((m) => (
-                        <li key={m.githubId} className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
-                          <label className="flex items-center gap-2"><input type="checkbox" name="member" value={m.githubId} defaultChecked={m.githubId === o.me.githubId} /> @{m.login}</label>
-                          <label className="flex items-center gap-2 text-ink-3"><input type="checkbox" name="write" value={m.githubId} defaultChecked /> can edit</label>
+                        <li key={m.githubId} className="flex flex-wrap items-center gap-x-4 text-[13px]">
+                          <label className="flex min-h-10 items-center gap-2"><input type="checkbox" name="member" value={m.githubId} defaultChecked={m.githubId === o.me.githubId} /> @{m.login}</label>
+                          <label className="flex min-h-10 items-center gap-2 text-ink-3"><input type="checkbox" name="write" value={m.githubId} defaultChecked /> can edit</label>
                         </li>
                       ))}
                     </ul>

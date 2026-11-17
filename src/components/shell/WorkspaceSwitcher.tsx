@@ -11,7 +11,7 @@ const CONNECT = "__connect__";
 type Switch = { launchUrl: string; previousBootId: string | null; expectedBackend: string };
 
 /** Picks which workspace the app runs on. A choice restarts the app, so the overlay is rendered here, in place, until the new one answers. */
-export function WorkspaceSwitcher({ entries, active, switchable }: { entries: WorkspaceEntry[]; active: string; switchable: boolean }) {
+export function WorkspaceSwitcher({ entries, active, switchable, className = "w-[13rem] shrink-0" }: { entries: WorkspaceEntry[]; active: string; switchable: boolean; className?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [sw, setSw] = useState<Switch | null>(null);
@@ -39,14 +39,14 @@ export function WorkspaceSwitcher({ entries, active, switchable }: { entries: Wo
     }
   }
 
-  if (!switchable) return <span className="max-w-[7.5rem] shrink-0 truncate text-[12px] text-ink-3 sm:max-w-none">GitHub (repositories)</span>;
+  if (!switchable) return <span className={`${className} truncate text-[12px] text-ink-3`}>GitHub (repositories)</span>;
   return (
     <>
-      <div className="w-[7.5rem] shrink-0 sm:w-[13rem]">
+      <div className={className}>
         <Select aria-label="Workspace" aria-busy={busy} className="select !h-10 text-[13px]" value={active} disabled={busy} onChange={(e) => void choose(e.target.value)}>
           {entries.map((e) => (
             <option key={e.backend} value={e.backend} disabled={!e.available}>
-              {e.detail ? `${e.label} · ${e.detail}` : e.label}
+              {(e.detail ? `${e.label} · ${e.detail}` : e.label) + (e.available ? "" : " (unavailable)")}
             </option>
           ))}
           <option value={CONNECT}>Connect to a server…</option>
