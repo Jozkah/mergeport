@@ -58,6 +58,10 @@ Pull requests open on **Conversation**, **Files changed** and **Commits** tabs t
 
 **Tasks** is a GitLab-style work list on top of the planning cards: create a task, give it to someone by GitHub username, set status, priority, due date and labels, and discuss it in a comment thread with a history of who changed what. Filters: assigned to me, assigned by me, unassigned, all. Tasks assigned to you also show in **My attention**. In a team, tasks and comments sync like the rest of the shared data, so a task you assign appears on your teammate's computer.
 
+### Daily digest
+
+Each morning (after 08:00 by default, adjustable in **Settings**) Mergeport writes you a digest of the previous day: what you finished, what was left undone, what needs your attention and what is waiting on other people, with a link to each item. It is built only from the data already on your computer, with no AI, no network call and nothing sent to GitHub. If Mergeport was closed at that hour, the digest is made the next time it opens. Read it under **Daily digest** (older days included), on the Overview card, or from the bell. See `docs/architecture.md`.
+
 ### Joining an existing team
 
 1. Accept the GitHub invitation (Team page, or from GitHub).

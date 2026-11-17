@@ -56,6 +56,7 @@ export {
   Sun,
   Moon,
   Milestone,
+  Newspaper,
   PanelLeft,
   Pencil,
   Plus,

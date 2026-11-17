@@ -8,13 +8,14 @@ import { milestoneProgress } from "@/lib/services/planning";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { formatDateOnly, formatDuration, formatInstant, isoDate } from "@/lib/format";
 import { Avatar, EmptyState, Mono, Panel, StatusPill, Time } from "@/components/ui/primitives";
-import { Activity, ArrowRight, BellRing, GitFork, Hourglass, Milestone, CircleAlert } from "@/components/ui/icons";
+import { Activity, ArrowRight, BellRing, GitFork, Hourglass, Milestone, Newspaper, CircleAlert } from "@/components/ui/icons";
 import { itemHref } from "@/components/work/WorkTable";
 import { OpenedChart } from "@/components/work/OpenedChart";
 import { Metric as AnimatedNumber } from "@/components/ui/Metric";
 import { todayIn } from "@/lib/domain/planning";
 import { GettingStarted } from "@/components/onboarding/GettingStarted";
 import { gettingStarted } from "@/lib/services/getting-started";
+import { latestDigest } from "@/lib/services/digest";
 
 export const metadata = { title: "Overview" };
 
@@ -43,6 +44,7 @@ export default async function Overview() {
   const repoCount = await db.repository.count({ where: repoWhere(viewer) });
   const none = o.openIssues + o.openPrs === 0 && q.needsMyReview.length === 0;
   const steps = await gettingStarted(db, viewer);
+  const digest = await latestDigest(db, viewer, now);
 
   return (
     <>
@@ -98,6 +100,20 @@ export default async function Overview() {
               <li><Link href="/pull-requests" className="flex items-center justify-between px-4 py-3 hover:bg-faint">Open pull requests<span className="font-medium"><AnimatedNumber value={o.openPrs} /></span></Link></li>
               <li className="border-t border-line"><Link href="/issues" className="flex items-center justify-between px-4 py-3 hover:bg-faint">Open issues<span className="font-medium"><AnimatedNumber value={o.openIssues} /></span></Link></li>
             </ul>
+          </Panel>
+
+          <Panel title="Daily digest" icon={Newspaper} id="digest" actions={<Link href="/digest" className="btn">Open</Link>}>
+            {!digest ? <EmptyState icon={Newspaper} title="No digest yet">The first one is made on a morning Mergeport is open.</EmptyState> : (
+              <Link href={`/digest?day=${digest.day}`} className="block px-4 py-3 text-[13px] hover:bg-faint">
+                <p className="font-medium">{formatDateOnly(new Date(digest.day + "T00:00:00Z"))}{digest.readAt ? "" : " · new"}</p>
+                <dl className="tnum mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[12.5px]">
+                  <div className="flex justify-between"><dt className="text-ink-3">Done</dt><dd>{digest.payload.counts.done}</dd></div>
+                  <div className="flex justify-between"><dt className="text-ink-3">Left undone</dt><dd>{digest.payload.counts.undone}</dd></div>
+                  <div className="flex justify-between"><dt className="text-ink-3">Needs you</dt><dd>{digest.payload.counts.mine}</dd></div>
+                  <div className="flex justify-between"><dt className="text-ink-3">Waiting on others</dt><dd>{digest.payload.counts.others}</dd></div>
+                </dl>
+              </Link>
+            )}
           </Panel>
 
           <Panel title="Upcoming milestone" icon={Milestone} id="ms" actions={<Link href="/planning?view=roadmap" className="btn">Roadmap</Link>}>
