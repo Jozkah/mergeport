@@ -8,6 +8,7 @@ import { wantsInApp } from "@/lib/domain/notify-prefs";
 import { inbox } from "./inbox";
 import { getPrefs } from "./notification-prefs";
 import { attention, planningWhere, type AttentionQueues } from "./queries";
+import { upstreamUpdateAttention } from "./upstream-update";
 
 /**
  * The daily digest: what was done yesterday, what was left undone, and what needs the person's attention or other people's.
@@ -255,6 +256,23 @@ function section(entries: DigestEntry[], order: ((a: DigestEntry, b: DigestEntry
   return { entries: unique.slice(0, cap), total: unique.length, more: Math.max(0, unique.length - cap) };
 }
 
+const UPDATE_LOOKBACK_DAYS = 7;
+const UPDATE_REASON: Record<string, string> = {
+  conflict: "Upstream update stopped on a merge conflict",
+  "verify-failed": "Upstream update failed its verification",
+  failed: "Upstream update failed",
+  "pr-opened": "Upstream update is waiting for review",
+  "merged-untested": "Upstream update is waiting for review (not verified)",
+};
+/** Upstream auto-update runs that need the person: the latest settled run of each fork, when it is a problem or a pull request to review. */
+const upstreamUpdateSource: DigestSource = async (ctx) => {
+  const since = new Date(ctx.end.getTime() - UPDATE_LOOKBACK_DAYS * 86_400_000);
+  const runs = await upstreamUpdateAttention(ctx.db, ctx.viewer, { since });
+  return {
+    mine: runs.map((r) => entry(ctx, { key: `upstream-update:${r.mappingId}`, title: `${r.upstream} into ${r.fork}`, repo: r.fork, href: "/forks", reason: UPDATE_REASON[r.state] ?? "Upstream update needs you", since: r.finishedAt })),
+  };
+};
+
 export type BuildOptions = { now?: Date; tz?: string; /** The local day to report; default: the day before `now`. */ day?: string; cap?: number; sources?: DigestSource[] };
 
 export async function buildDigest(db: Db, viewer: Viewer, opts: BuildOptions = {}): Promise<DigestPayload> {
@@ -266,7 +284,7 @@ export async function buildDigest(db: Db, viewer: Viewer, opts: BuildOptions = {
   const q = await attention(db, viewer, { now });
   const [done, undone, mine, others] = await Promise.all([doneEntries(ctx), undoneEntries(ctx), mineEntries(ctx, q), othersEntries(ctx)]);
   const extra: Record<DigestKind, DigestEntry[]> = { done: [], undone: [], mine: [], others: [] };
-  for (const source of [...registry.values(), ...(opts.sources ?? [])]) {
+  for (const source of [upstreamUpdateSource, ...registry.values(), ...(opts.sources ?? [])]) {
     try {
       const r = await source(ctx);
       for (const k of Object.keys(extra) as DigestKind[]) extra[k].push(...(r[k] ?? []));

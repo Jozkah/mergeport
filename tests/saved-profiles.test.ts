@@ -44,6 +44,7 @@ describe("offline start: saved profiles", () => {
   it("treats only network failures as offline, never a refused or signed-out account", () => {
     expect(looksOffline("error connecting to api.github.com")).toBe(true);
     expect(looksOffline("gh timed out after 20s")).toBe(true);
+    expect(looksOffline("gh: API rate limit exceeded for user ID 1. If you reach out to GitHub Support")).toBe(true);
     expect(looksOffline("gh: Bad credentials (HTTP 401)")).toBe(false);
     expect(looksOffline("You are not logged in")).toBe(false);
   });
