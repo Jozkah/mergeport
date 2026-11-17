@@ -228,6 +228,14 @@ An opt-in, per-mapping updater for forks (`src/lib/local/upstream-updater.ts`, s
 
 `src/lib/authz/viewer.ts` is the single place visibility is defined. `repoWhere(viewer)` is a SQL filter evaluated per request, not a cached list. Locally a person always has full capabilities over what they track; for repositories that arrived through a space, access derives from that space's membership. Missing and hidden both produce the same `NotFoundError`; `ForbiddenError` is used only when the item is visible and the capability is not. Planning cards linked to a GitHub item inherit that repository's visibility; a hidden blocker still blocks and appears as an opaque marker.
 
+## Agents and the command line
+
+`scripts/mp.ts` is a thin shell around `runMp(argv, { db, viewer, now, out })` in `src/lib/cli/mp.ts`. It finds the profile database without network or gh (`MERGEPORT_DB`, else `MERGEPORT_HOME/active.json` honoring the active team context, else the only saved github.com profile), refuses to run when there is no profile or the stored user is not the expected account, and builds the Viewer with `loadViewer` for the profile's own non-demo user. All reads and writes go through the existing services (`createTask`, `updateTask`, `listTasks`, `assigneeCandidates`), so authorization (`projectWhere`/`planningWhere`), validation limits, task history and audit entries are identical to the UI; the CLI only adds a history line "from the command line". It never reads credentials and never calls GitHub.
+
+The app and the CLI share one SQLite file (WAL). The driver waits up to 10 s for a lock; `withBusyRetry` adds spaced retries on SQLITE_BUSY for reads and idempotent updates, and task creation checks for a half-written card before retrying. No endpoint is added: the running app's `SyncEngine.capture()` diffs the local read model on its next scheduler tick, so a task created here reaches a team space at that tick, not instantly, and an open browser page shows it after its next navigation or refresh.
+
+The agent skill lives in `docs/agent-skill/mergeport/SKILL.md`; `npm run skill:install` (`src/lib/cli/skill-install.ts`) copies it into the global skills folders of Claude, Codex, `~/.agents` and Gemini without overwriting differing files unless `--force`.
+
 ## Local worktrees
 
 Read-only, on this computer only. Folders are mapped explicitly; scans run a fixed allow-list of read-only `git` subcommands as argument arrays (no shell, no hooks); only branch names, paths and counts of changed files are kept, never contents or diffs. Snapshots stay in the local database and are never written to an outbox or a space. Sharing worktree data with teammates is not implemented.

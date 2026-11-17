@@ -43,8 +43,8 @@ export default async function DigestPage({ searchParams }: { searchParams: Promi
         subtitle={<>Built {formatInstant(digest.generatedAt, viewer.timezone)} from the data on this computer: nothing was fetched or sent. What is open and what needs attention is as of that moment.</>}
         actions={
           <>
-            {older ? <Link href={`/digest?day=${older}`} className="btn" aria-label={`Older digest, ${label(older)}`}><ArrowLeft size={14} aria-hidden /> {label(older)}</Link> : <span className="btn" aria-disabled="true">Older</span>}
-            {newer ? <Link href={`/digest?day=${newer}`} className="btn" aria-label={`Newer digest, ${label(newer)}`}>{label(newer)} <ArrowRight size={14} aria-hidden /></Link> : <span className="btn" aria-disabled="true">Newer</span>}
+            {older ? <Link href={`/digest?day=${older}`} className="btn" aria-label={`Older digest, ${label(older)}`}><ArrowLeft size={14} aria-hidden /> {label(older)}</Link> : <button type="button" className="btn" disabled>Older</button>}
+            {newer ? <Link href={`/digest?day=${newer}`} className="btn" aria-label={`Newer digest, ${label(newer)}`}>{label(newer)} <ArrowRight size={14} aria-hidden /></Link> : <button type="button" className="btn" disabled>Newer</button>}
             <DigestActions day={digest.day} read={!!digest.readAt} />
           </>
         }

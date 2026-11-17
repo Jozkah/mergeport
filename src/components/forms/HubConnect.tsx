@@ -37,12 +37,26 @@ export function HubConnect() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const alive = useRef(true);
+  const box = useRef<HTMLDivElement>(null);
+  const stepSeen = useRef<Step["s"]>("url");
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
     };
   }, []);
+
+  // A step replaces the control that had focus, so focus goes to the next thing to do (not on first render: the page is not ours to steal focus on).
+  useEffect(() => {
+    if (stepSeen.current === step.s) return;
+    stepSeen.current = step.s;
+    box.current?.querySelector<HTMLElement>("[data-next]")?.focus();
+  }, [step.s]);
+
+  // The button that was pressed is disabled while the request runs, which drops focus; a failed check hands it back to the address.
+  useEffect(() => {
+    if (err && step.s === "url") box.current?.querySelector<HTMLElement>("[data-next]")?.focus();
+  }, [err, step.s]);
 
   const reset = (message: string | null) => {
     setErr(message);
@@ -57,7 +71,7 @@ export function HubConnect() {
       if (r.ok) setStep({ s: "checked", origin: r.origin, teamName: r.teamName });
       else setErr(r.error);
     } catch {
-      setErr("Could not check that server.");
+      setErr("Could not check that server. Check the address and your connection, then try again.");
     }
     setBusy(false);
   }
@@ -70,7 +84,7 @@ export function HubConnect() {
       if (r.ok) setStep({ s: "code", origin, userCode: r.userCode, verificationUri: r.verificationUri, interval: r.interval, pollId: r.pollId });
       else setErr(r.error);
     } catch {
-      setErr("Could not start sign-in.");
+      setErr("Could not start sign-in with that server. Try again.");
     }
     setBusy(false);
   }
@@ -103,8 +117,8 @@ export function HubConnect() {
   if (step.s === "switching") return <SwitchingOverlay launchUrl={step.sw.launchUrl} previousBootId={step.sw.previousBootId} expectedBackend={step.sw.expectedBackend} />;
 
   return (
-    <div className="flex flex-col gap-3 text-[13px]">
-      {err && <Banner tone="error" title="Could not connect">{err}</Banner>}
+    <div ref={box} className="flex flex-col gap-3 text-[13px]">
+      {err && <div id="hub-connect-error"><Banner tone="error" title="Could not connect">{err}</Banner></div>}
 
       {step.s === "url" && (
         <form
@@ -115,7 +129,8 @@ export function HubConnect() {
           }}
         >
           <label htmlFor="hub-url" className="text-ink-2">Server address</label>
-          <input id="hub-url" className="input mono !h-10" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mergeport.example.com" inputMode="url" autoComplete="off" spellCheck={false} />
+          <input id="hub-url" data-next className="input mono !h-10 aria-[invalid=true]:border-blocked-line" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mergeport.example.com" inputMode="url" autoComplete="off" spellCheck={false} aria-invalid={err ? true : undefined} aria-describedby={err ? "hub-url-hint hub-connect-error" : "hub-url-hint"} />
+          <p id="hub-url-hint" className="text-[12px] text-ink-3">The web address the server&apos;s owner gave you. Nothing is saved until you connect.</p>
           <button className="btn !h-10 w-fit" disabled={busy || !url.trim()}>
             {busy && <LoaderCircle size={14} aria-hidden className="animate-spin" />} Check server
           </button>
@@ -127,22 +142,26 @@ export function HubConnect() {
           <p>
             {step.teamName ? <strong>{step.teamName}</strong> : "This server has no team yet."} <span className="text-ink-3">at</span> <span className="mono break-all">{step.origin}</span>
           </p>
-          <div className="flex gap-2">
-            <button className="btn btn-primary !h-10" disabled={busy} onClick={() => void connect(step.origin)}>
+          <div className="flex flex-wrap gap-2">
+            <button data-next className="btn btn-primary !h-10" disabled={busy} onClick={() => void connect(step.origin)}>
               {busy && <LoaderCircle size={14} aria-hidden className="animate-spin" />} Connect
             </button>
-            <button className="btn !h-10" disabled={busy} onClick={() => reset(null)}>Change</button>
+            <button className="btn !h-10" disabled={busy} onClick={() => reset(null)}>Use another address</button>
           </div>
         </div>
       )}
 
       {step.s === "code" && (
-        <div className="flex flex-col gap-3" role="status">
-          <p>Enter this code on GitHub to sign in to the server.</p>
-          <p className="mono rounded-[8px] border border-line bg-canvas p-3 text-center text-[20px] tracking-widest">{step.userCode}</p>
-          <a className="btn btn-primary !h-10 w-fit" href={step.verificationUri} target="_blank" rel="noopener noreferrer">Open GitHub</a>
-          <p className="flex items-center gap-2 text-ink-3"><LoaderCircle size={14} aria-hidden className="animate-spin" />Waiting for you to approve…</p>
-          <button className="btn !h-10 w-fit" onClick={() => reset(null)}>Cancel</button>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3" role="status">
+            <p>Enter this code on GitHub to sign in to the server.</p>
+            <p className="mono select-all rounded-[8px] border border-line bg-canvas p-3 text-center text-[20px] tracking-widest">{step.userCode}</p>
+            <p className="flex items-center gap-2 text-ink-3"><LoaderCircle size={14} aria-hidden className="animate-spin" />Waiting for you to approve on GitHub…</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a data-next className="btn btn-primary !h-10" href={step.verificationUri} target="_blank" rel="noopener noreferrer">Open GitHub<span className="sr-only"> (opens in a new tab)</span></a>
+            <button className="btn !h-10" onClick={() => reset(null)}>Cancel</button>
+          </div>
         </div>
       )}
     </div>

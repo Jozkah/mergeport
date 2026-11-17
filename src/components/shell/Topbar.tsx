@@ -14,6 +14,7 @@ import type { ThemePreference } from "@/lib/theme";
 const LABELS: Record<string, string> = {
   attention: "My attention",
   inbox: "Inbox",
+  digest: "Daily digest",
   "pull-requests": "Pull requests",
   issues: "Issues",
   planning: "Planning",
@@ -41,11 +42,13 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
   const parts = path.split("/").filter(Boolean);
   const crumbs = parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-canvas/90 px-4 backdrop-blur-sm lg:px-6">
+    <>
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-line bg-canvas/90 px-3 backdrop-blur-sm sm:gap-3 sm:px-4 lg:px-6">
       {menu}
       <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
         <ol className="flex min-w-0 items-center gap-1.5 text-[13px] text-ink-3">
-          <li className="flex shrink-0 items-center gap-1.5">
+          {/* On a narrow bar only the current page is named; the Overview link stays when there is no other crumb. */}
+          <li className={`${crumbs.length ? "hidden sm:flex" : "flex"} shrink-0 items-center gap-1.5`}>
             <Link href="/" className="inline-flex items-center gap-1.5 hover:text-ink" aria-label="Overview">
               <LayoutDashboard size={14} aria-hidden />
               <span className="hidden sm:inline">Overview</span>
@@ -53,7 +56,7 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
           </li>
           {crumbs.map((c, i) => (
             <li key={c.href} className="flex min-w-0 items-center gap-1.5">
-              <ChevronRight size={12} aria-hidden className="shrink-0" />
+              <ChevronRight size={12} aria-hidden className={i === 0 ? "hidden shrink-0 sm:block" : "shrink-0"} />
               {i === crumbs.length - 1 ? (
                 <span aria-current="page" className="truncate font-medium text-ink">{c.label}</span>
               ) : (
@@ -63,7 +66,7 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
           ))}
         </ol>
       </nav>
-      {workspaces ? <WorkspaceSwitcher {...workspaces} /> : null}
+      {workspaces ? <div className="hidden sm:block"><WorkspaceSwitcher {...workspaces} /></div> : null}
       {scopePicker}
       {syncNote && <span className="hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
       {sync && <SyncBadge {...sync} href="/sync" />}
@@ -80,5 +83,8 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
         <Tip label="Sign out of this browser session"><button className="btn btn-quiet btn-icon" aria-label="Sign out"><LogOut size={16} aria-hidden /></button></Tip>
       </form>
     </header>
+    {/* Narrow screens have no room for a third control in the bar: the switcher gets its own row under it. */}
+    {workspaces ? <div className="border-b border-line px-4 py-2 sm:hidden"><WorkspaceSwitcher {...workspaces} className="w-full" /></div> : null}
+    </>
   );
 }

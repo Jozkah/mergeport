@@ -227,7 +227,8 @@
 .chevron {
   transition: transform var(--duration-fast) var(--ease-smooth-out);
 }
-.chevron[data-open="true"] {
+.chevron[data-open="true"],
+details[open] > summary > .chevron {
   transform: rotate(180deg);
 }
 
@@ -277,6 +278,8 @@
 }
 .num-in { display: inline-block; animation: number-in var(--duration-fast) var(--ease-in-out); }
 .empty-in { animation: fade-in var(--duration-quick) var(--ease-out); }
+/* The workspace-switch overlay appears with the modal open duration (a fade, so nothing travels). */
+.overlay-in { animation: fade-in var(--duration-fast) var(--ease-out); }
 
 /* ---------- Sync state ---------- */
 .sync-pill {

@@ -78,8 +78,8 @@ export function GithubAppCreate() {
           </div>
         )}
       </fieldset>
-      <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={teammates} onChange={(e) => setTeammates(e.target.checked)} /> <span>Let teammates install it on their own repositories<span className="block text-[12px] text-ink-3">A private App can only be installed by the account that owns it.</span></span></label>
-      <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={contents} onChange={(e) => setContents(e.target.checked)} /> <span>Also refresh branches and commits instantly</span></label>
+      <label className="flex min-h-10 items-start gap-2 py-2"><input type="checkbox" className="mt-0.5" checked={teammates} onChange={(e) => setTeammates(e.target.checked)} /> <span>Let teammates install it on their own repositories<span className="block text-[12px] text-ink-3">A private App can only be installed by the account that owns it.</span></span></label>
+      <label className="flex min-h-10 items-start gap-2 py-2"><input type="checkbox" className="mt-0.5" checked={contents} onChange={(e) => setContents(e.target.checked)} /> <span>Also refresh branches and commits instantly</span></label>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn btn-primary !h-10" onClick={go} disabled={pending || (account === "org" && !org.trim())} data-loading={pending}>
           {pending ? <LoaderCircle size={14} aria-hidden className="animate-spin" /> : null}
@@ -87,7 +87,7 @@ export function GithubAppCreate() {
         </button>
         <p role="alert" className="text-[12.5px] text-blocked">{error}</p>
       </div>
-      <p className="text-[12px] text-ink-3">GitHub shows the App prefilled. You may change its name (it must be unique), then press &ldquo;Create GitHub App&rdquo;. Mergeport keeps only the webhook secret and discards the App&rsquo;s private key.</p>
+      <p className="max-w-[75ch] text-pretty text-[12px] text-ink-3">GitHub shows the App prefilled. You may change its name (it must be unique), then press &ldquo;Create GitHub App&rdquo;. Mergeport keeps only the webhook secret and discards the App&rsquo;s private key.</p>
       {answer && <ManifestForm {...answer} formRef={form} />}
     </div>
   );
