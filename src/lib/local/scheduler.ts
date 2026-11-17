@@ -7,6 +7,7 @@ import { RECONCILE_EVERY_MS, handlers } from "@/lib/local/handlers";
 import { startRepoWatch, stopRepoWatch } from "@/lib/local/repo-watch";
 import { getEngine, notifyChange } from "@/lib/local/runtime";
 import { recoverDiscovery, shutdownDiscovery, tickDiscovery } from "@/lib/local/discovery-jobs";
+import { recoverUpdateRuns } from "@/lib/local/upstream-updater-job";
 
 /**
  * In-process background work for the LOCAL app. It runs while this process runs, and only then: nothing here pretends a
@@ -73,6 +74,7 @@ export async function runJobsNow(): Promise<void> {
 export function startLocalScheduler(intervalMs = 5000) {
   if (g.__mpScheduler) return;
   void recoverDiscovery().catch(() => {}); // an attempt a crash interrupted must not stay "retrying" for ever
+  void recoverUpdateRuns(db).catch(() => {}); // likewise an auto-update run the last process never finished
   // Shutdown: cancel background refreshes and kill any gh process still running, so none outlives the app.
   process.once("exit", shutdownDiscovery);
   process.once("SIGTERM", shutdownDiscovery);

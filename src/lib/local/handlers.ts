@@ -3,6 +3,7 @@ import { canSpend } from "@/lib/domain/sync";
 import { portForSync } from "@/lib/github/factory";
 import { GithubError } from "@/lib/github/port";
 import type { Handler } from "@/lib/jobs";
+import { maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
 import { setStatus, syncFork, syncItem, syncRepository } from "@/lib/sync/repository";
 
 /**
@@ -55,7 +56,9 @@ export const handlers: Record<string, Handler> = {
     await guardSourceBudget();
     const port = await portForSync(db, m.forkRepoId);
     if (port) await syncFork(db, port, p.mappingId);
+    await maybeRequestUpdate(db, p.mappingId); // opt-in upstream auto-update, when the fork is now known to be behind
   }) as Handler,
+  ...updateHandlers(db),
   // Recurrence is owned by the runner (ensureRecurring), never by this handler.
   "reconcile.all": (async () => {
     const { enqueue } = await import("@/lib/jobs");
