@@ -469,4 +469,14 @@ export class OctokitPort implements GithubPort {
       throw e;
     }
   }
+  async openOrUpdatePull(owner: string, repo: string, input: { head: string; base: string; title: string; body: string }) {
+    // The list is filtered by head AND base, so only the updater's own pull request is ever found, and it is only ever edited, never closed or merged.
+    const open = await this.send<any[]>("GET /repos/{owner}/{repo}/pulls", { owner, repo, state: "open", head: `${owner}:${input.head}`, base: input.base, per_page: 1 });
+    if (open[0]) {
+      const p = await this.send<any>("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo, pull_number: open[0].number, title: input.title, body: input.body });
+      return { number: Number(p.number ?? open[0].number), htmlUrl: String(p.html_url ?? open[0].html_url), created: false };
+    }
+    const p = await this.send<any>("POST /repos/{owner}/{repo}/pulls", { owner, repo, head: input.head, base: input.base, title: input.title, body: input.body, maintainer_can_modify: false });
+    return { number: Number(p.number), htmlUrl: String(p.html_url), created: true };
+  }
 }
