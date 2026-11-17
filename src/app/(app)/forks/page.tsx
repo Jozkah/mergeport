@@ -5,6 +5,7 @@ import { WatchlistForm } from "@/components/forms/WatchlistForm";
 import { UpstreamIssues } from "@/components/forks/UpstreamIssues";
 import { UpstreamPrs } from "@/components/forks/UpstreamPrs";
 import { MappingTools, SubscriptionsPanel } from "@/components/forks/UpstreamTools";
+import { UpstreamUpdate } from "@/components/forks/UpstreamUpdate";
 import { byOwnerFirst } from "@/lib/domain/ordering";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -112,6 +113,7 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
                     <p className="mb-2 text-[12px] text-ink-3">Issues are discussions, not commits. Decide per fork whether each matters here. A status saves as soon as you pick it.</p>
                     <UpstreamIssues canEdit={caps.manageWork} rows={issues.map((i) => ({ id: i.id, number: i.issueNumber, title: i.title, url: i.htmlUrl, status: i.status, note: i.note }))} />
                   </section>
+                  <UpstreamUpdate db={db} viewer={viewer} mappingId={m.id} forkBranch={m.forkBranch} forkName={m.fork.fullName} upstreamName={m.upstream.fullName} />
                   <MappingTools db={db} viewer={viewer} mappingId={m.id} forkBranch={m.forkBranch} upstreamName={m.upstream.fullName} adopt={sp.adopt === m.id && sp.items && sp.branch && sp.project ? { items: sp.items, branch: sp.branch, project: sp.project } : null} />
                 </div>
               </Panel>

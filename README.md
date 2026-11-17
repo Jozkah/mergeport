@@ -54,6 +54,10 @@ Teams can alternatively run their own small **hub server** (one Node process and
 
 Pull requests open on **Conversation**, **Files changed** and **Commits** tabs that switch instantly (the diff is fetched once, cached by commit, and warmed in the background). The diff looks like GitHub's: a file tree, unified or split layout, line numbers on both sides, Primer syntax colours in light and dark, expandable context between hunks, per-file **Viewed** marks that reset when the file changes again, each commit reviewable on its own, existing inline comments, and new inline comments posted to GitHub as you. **Repositories → Browse code** opens any tracked repository at any branch with a folder view, README, and highlighted files with line anchors. Code blocks in Markdown use the same colours.
 
+### Upstream auto-update
+
+Off by default, per fork (**Forks** page). When a mapped fork falls behind its upstream, Mergeport merges the newest upstream commit into its own `mergeport/upstream-sync` branch in a **private clone** (`<Mergeport home>/updater/<mapping>/`), optionally runs a check command you wrote (for example `npm test`) on this computer, and opens or updates **one pull request** into your fork branch. A conflicting or failing commit is skipped for the next older one (up to 6 back); a newer upstream commit restarts the attempt. It never touches your own working folders, never deletes a branch, never pushes to upstream, and pushes only the sync branch unless you choose the riskier `push` mode (a plain fast-forward of the fork branch, only after the check passed). Details and limits: `docs/architecture.md`, "Upstream auto-update".
+
 ### Tasks
 
 **Tasks** is a GitLab-style work list on top of the planning cards: create a task, give it to someone by GitHub username, set status, priority, due date and labels, and discuss it in a comment thread with a history of who changed what. Filters: assigned to me, assigned by me, unassigned, all. Tasks assigned to you also show in **My attention**. In a team, tasks and comments sync like the rest of the shared data, so a task you assign appears on your teammate's computer.

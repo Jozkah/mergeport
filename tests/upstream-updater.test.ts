@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeGithub } from "@/lib/github/fake";
-import { runUpdate } from "@/lib/local/upstream-updater";
+import { runUpdate, updaterDir } from "@/lib/local/upstream-updater";
 import { World, depsFor, git, setupMapping } from "./updater-world";
 import { testDb } from "./helpers";
 
@@ -234,8 +234,9 @@ describe("upstream updater: conflicts, fallbacks, restarts, timeouts", () => {
     const run = (await runUpdate(depsFor(w, db, port, { afterStep: (step) => { if (step === "merged" && !fired) { fired = true; newer = w.commitUpstream({ "b.txt": "b\n" }, "feat: b"); } } }), s.mapping.id))!;
     expect(run.state).toBe("pr-opened");
     expect(run.upstreamSha).toBe(newer);
-    expect(run.triedShas[0]).toBe(first);
-    expect(run.triedShas.at(-1)).toBe(newer);
+    const tried = run.triedShas as string[];
+    expect(tried[0]).toBe(first);
+    expect(tried.at(-1)).toBe(newer);
     expect(w.show(w.fork, SYNC, "b.txt")).toBe("b");
     expect(run.logTail).toContain("newer upstream commit");
   });
@@ -351,7 +352,7 @@ describe("upstream updater: reporting", () => {
   it("works only inside the updater folder: a hostile mapping id is refused before anything is created", async () => {
     await setupMapping(db, { verifyCommand: null });
     await expect(runUpdate(depsFor(w, db, port), "../../escape")).resolves.toBeNull(); // no such mapping
-    expect(() => require("@/lib/local/upstream-updater").updaterDir(w.home, "../../escape")).toThrow();
+    expect(() => updaterDir(w.home, "../../escape")).toThrow();
     expect(fs.existsSync(`${w.root}/escape`)).toBe(false);
   });
 });

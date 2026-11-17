@@ -112,7 +112,7 @@ describe("attention list for the digest", () => {
     const since = new Date("2026-11-10T00:00:00Z");
     expect(await upstreamUpdateAttention(db, s.viewer, { since })).toEqual([]);
     await finished(s.mapping.id, "conflict", "2026-11-11T10:00:00Z", { filesConflicted: ["a.txt"] });
-    let list = await upstreamUpdateAttention(db, s.viewer, { since });
+    const list = await upstreamUpdateAttention(db, s.viewer, { since });
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ state: "conflict", files: ["a.txt"], fork: "owner/proj", upstream: "upstream/proj", mappingId: s.mapping.id });
     // a later run that went through replaces the old problem

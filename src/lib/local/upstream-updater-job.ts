@@ -110,7 +110,13 @@ export async function recoverUpdateRuns(db: Db, queue: UpdateQueue | undefined =
 }
 
 function queueFor(db: Db): UpdateQueue {
-  return (g.__mpUpdateQueue ??= new UpdateQueue((mappingId, manual) => runUpdate(productionDeps(db), mappingId, { manual })));
+  return (g.__mpUpdateQueue ??= new UpdateQueue(async (mappingId, manual) => {
+    try {
+      await runUpdate(productionDeps(db), mappingId, { manual });
+    } finally {
+      void import("@/lib/local/runtime").then((m) => m.notifyChange("state")).catch(() => {}); // redraw open pages: the history changed
+    }
+  }));
 }
 
 /**
