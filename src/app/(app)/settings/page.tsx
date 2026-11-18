@@ -11,6 +11,7 @@ import { Mono, PageHeader, Panel, SimplePill } from "@/components/ui/primitives"
 import { KeyRound, RefreshCw, Settings } from "@/components/ui/icons";
 import { autoSetupAction, setRepoWatchAction, setTimezoneAction } from "@/app/actions";
 import { saveDigestSettingsAction } from "@/app/digest-actions";
+import { setPollSecondsAction } from "@/app/team-actions";
 import { watchView } from "@/lib/local/repo-watch";
 import { WATCH_MAX_REPOS_LIMIT, WATCH_MAX_REPOS_MIN, WATCH_MAX_SECONDS, WATCH_MIN_SECONDS } from "@/lib/local/watch-format";
 import { planAutoSetup } from "@/lib/services/auto-setup";
@@ -32,29 +33,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const setup = viewer.isAdmin && !isDemo() ? await planAutoSetup(db, viewer, { clonesFolder: clones }) : null;
   const prefs = await getPrefs(db, user.id);
   const { summary: watch, config: wcfg } = await watchView(db);
+  const poll = (await db.teamConfig.findUnique({ where: { id: "team" } }))?.pollSeconds ?? 30;
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
     <>
-      <PageHeader title="Settings" subtitle={`Signed in as @${user.login}${viewer.isAdmin ? " (administrator of the team space)" : ""}. These settings belong to this computer.`} />
+      <PageHeader
+        title="Settings"
+        subtitle={`Signed in as @${user.login}${viewer.isAdmin ? " (administrator of the team space)" : ""}.`}
+        help={<>These settings belong to this computer. The daily digest uses your timezone ({user.timezone}); it is built only from the data on this computer, with no network call, and shows in the bell and on Overview.</>}
+      />
       <div className="fit-grid" style={{ "--fit-min": "520px" } as React.CSSProperties}>
-        {viewer.isAdmin && (
-          <Panel title="Backup and restore" icon={Settings} id="backup">
-            <BackupPanel />
-          </Panel>
-        )}
-        <Panel title="Notifications" icon={Bell} id="notifications">
-          <NotificationSettings initial={prefs} />
-        </Panel>
-        <Panel title="Daily digest" icon={Newspaper} id="digest">
-          <div className="p-4">
-            <ActionForm action={saveDigestSettingsAction} submitLabel="Save" resetOnSuccess={false} className="max-w-md">
-              <label className="-my-2 flex min-h-10 w-fit cursor-pointer items-center gap-2 text-[13px]"><input type="checkbox" name="enabled" defaultChecked={prefs.digest.enabled} /> Make a digest of the previous day each day</label>
-              <label className="label mt-3" htmlFor="digest-hour">Make it after (hour, 0 to 23)</label>
-              <input id="digest-hour" name="hour" type="number" inputMode="numeric" min={0} max={23} step={1} defaultValue={prefs.digest.hour} aria-describedby="digest-hour-help" className="input tnum max-w-[8rem]" />
-              <p id="digest-hour-help" className="mt-1 max-w-[60ch] text-[12px] text-ink-3 text-pretty">Your local time ({user.timezone}). It is built only from the data on this computer, with no network call. If Mergeport was closed at that hour it is made when you next open it. It shows in the bell and on Overview.</p>
-            </ActionForm>
-          </div>
-        </Panel>
         <Panel title="Display" icon={Settings} id="display">
           <div className="grid gap-5 p-4">
             <ThemeSelect initial={theme} />
@@ -65,7 +53,34 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </ActionForm>
           </div>
         </Panel>
-        <Panel title="Auto-sync of repositories" icon={RefreshCw} id="auto-sync">
+        <Panel title="Notifications" icon={Bell} id="notifications">
+          <NotificationSettings initial={prefs} />
+        </Panel>
+        <Panel title="Daily digest" icon={Newspaper} id="digest">
+          <div className="p-4">
+            <ActionForm action={saveDigestSettingsAction} submitLabel="Save" resetOnSuccess={false} className="max-w-md">
+              <label className="-my-2 flex min-h-10 w-fit cursor-pointer items-center gap-2 text-[13px]"><input type="checkbox" name="enabled" defaultChecked={prefs.digest.enabled} /> Make a digest of the previous day each day</label>
+              <label className="label mt-3" htmlFor="digest-hour">Make it after (hour, 0 to 23)</label>
+              <input id="digest-hour" name="hour" type="number" inputMode="numeric" min={0} max={23} step={1} defaultValue={prefs.digest.hour} aria-describedby="digest-hour-help" className="input tnum max-w-[8rem]" />
+              <p id="digest-hour-help" className="mt-1 max-w-[60ch] text-[12px] text-ink-3 text-pretty">Local time. Made on next open if Mergeport was closed.</p>
+            </ActionForm>
+          </div>
+        </Panel>
+        <Panel title="Sync" icon={RefreshCw} id="polling">
+          <div className="p-4">
+            <ActionForm action={setPollSecondsAction} submitLabel="Save" resetOnSuccess={false} className="max-w-xs">
+              <label className="label" htmlFor="poll">Active polling interval (seconds, 15 to 600)</label>
+              <input id="poll" name="seconds" type="number" min={15} max={600} defaultValue={poll} className="input" />
+              <p className="mt-1 text-[12px] text-ink-3">Shorter means fresher data and more GitHub requests. Shared-state requests have their own budget, separate from source repository refreshes.</p>
+            </ActionForm>
+          </div>
+        </Panel>
+        {viewer.isAdmin && (
+          <Panel title="Backup and restore" icon={Settings} id="backup" defaultOpen={false} summary="Export a copy or restore from one">
+            <BackupPanel />
+          </Panel>
+        )}
+        <Panel title="Auto-sync of repositories" icon={RefreshCw} id="auto-sync" defaultOpen={false} summary={!watch.enabled ? "Off" : `On, every ${watch.effective} s`}>
           <div className="p-4">
             <ActionForm action={setRepoWatchAction} submitLabel="Save" resetOnSuccess={false} className="max-w-md">
               <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" name="enabled" defaultChecked={watch.enabled} /> Check repositories I don&apos;t own while Mergeport is open</label>
@@ -105,7 +120,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </div>
           </Panel>
         )}
-        <Panel title="GitHub account" icon={KeyRound} id="gh">
+        <Panel title="GitHub account" icon={KeyRound} id="gh" defaultOpen={false} summary={gh === null ? "Demo mode" : gh.state === "ok" ? `@${gh.identity.login} via the GitHub CLI` : "Not connected"}>
           <div className="flex flex-col gap-3 p-4 text-[13px]">
             {gh === null ? (
               <p className="text-ink-3">Demo mode: nothing here talks to GitHub.</p>
@@ -116,12 +131,15 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             ) : (
               <p><SimplePill tone="blocked">{gh.state === "missing-gh" ? "GitHub CLI not found" : gh.state === "not-logged-in" ? "Not signed in" : "GitHub CLI error"}</SimplePill> Cached data stays readable; nothing is sent to GitHub until <Mono>gh auth login</Mono> succeeds.</p>
             )}
-            <ul className="list-disc space-y-1 pl-5 text-[12.5px] text-ink-3">
-              <li>Mergeport never stores your token. It asks the GitHub CLI for each request, and the credential stays in the CLI&apos;s store (your operating system&apos;s keychain where available).</li>
+            <p className="text-[12.5px] text-ink-3">Mergeport never stores your token. It asks the GitHub CLI for each request, and the credential stays in the CLI&apos;s store (your operating system&apos;s keychain where available).</p>
+            <details className="text-[12.5px] text-ink-3">
+              <summary className="inline-flex min-h-10 cursor-pointer items-center rounded-[6px] text-ink-2 hover:text-ink">More about credentials</summary>
+              <ul className="list-disc space-y-1 pl-5">
               <li>The CLI&apos;s default sign-in grants broad scopes (classic <Mono>repo</Mono> can write to every repository you can reach). Mergeport only reads from source repositories unless you press an action; the scope itself is not read-only.</li>
               <li>To use a narrower credential, sign in with a fine-grained token limited to the repositories you track, then restart Mergeport.</li>
               <li>If you switch accounts in the CLI, Mergeport locks this profile instead of mixing data. Each account has its own database.</li>
-            </ul>
+              </ul>
+            </details>
           </div>
         </Panel>
       </div>
