@@ -28,7 +28,10 @@ export type RepoRow = {
   openItems: number | null;
   status: "ok" | "disconnected" | "rate" | "failed";
   statusDetail: string | null;
+  /** Age of the last sync ("11m") or "never synced". */
   synced: string;
+  /** Exact last-sync time, for the tooltip. */
+  syncedAt?: string | null;
   spaceId: string | null;
   spaceName: string | null;
   canUnshare: boolean;
@@ -78,6 +81,8 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
   const needle = q.trim().toLowerCase();
   const visible = rows.filter((r) => match(r) && (!needle || `${r.fullName} ${r.projects.join(" ")} ${r.spaceName ?? ""}`.toLowerCase().includes(needle)));
   const shown = visible.slice(0, limit);
+  // The "Shared with" column only earns its space when at least one repository is shared.
+  const anyShared = counts.shared > 0;
   const allPicked = shown.length > 0 && shown.every((r) => picked.has(r.id));
 
   const run = (label: string, jobs: Promise<{ ok: boolean; error?: string }>[]) =>
@@ -134,9 +139,9 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
             <input type="checkbox" aria-label="Select all shown" checked={allPicked} onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((r) => r.id)) : new Set())} />
             <span className="min-w-0 flex-1">Repository</span>
             <span className="hidden w-44 md:block">Status</span>
-            <span className="hidden w-48 lg:block">Shared with</span>
+            {anyShared && <span className="hidden w-48 lg:block">Shared with</span>}
             <span className="hidden w-40 xl:block">Projects</span>
-            <span className="w-[8.5rem] text-right"><span className="sr-only">Actions</span></span>
+            <span className="w-10 text-right md:w-[8.5rem]"><span className="sr-only">Actions</span></span>
           </li>
           {shown.map((r) => (
             <li key={r.id} data-ctx={ctx([{ label: "Browse code", href: `/repositories/${r.id}/code` }, { label: "Open on GitHub", href: `https://github.com/${r.fullName}`, external: true }, "sep", { label: "Copy repository name", copy: r.fullName }, { label: "Copy clone URL", copy: `https://github.com/${r.fullName}.git` }])} className="flex items-center gap-3 border-b border-line px-3 py-2.5 last:border-b-0 hover:bg-hover/50">
@@ -148,7 +153,6 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
                     <Link href={`/repositories/${r.id}/code`} className="truncate text-[14px] font-medium text-ink hover:underline">{r.name}</Link>
                     <span title={r.visibility === "PUBLIC" ? "Public" : "Private"} className="inline-flex shrink-0 items-center text-ink-3">{r.visibility === "PUBLIC" ? <Globe size={12} aria-label="Public" /> : <Lock size={12} aria-label="Private" />}</span>
                     {r.archived && <span className="pill pill-unknown">Archived</span>}
-                    {r.demo && <span className="pill pill-needs">Demo</span>}
                     {r.instant && <span className="pill pill-ok"><Zap size={12} aria-hidden /> Instant</span>}
                     {!r.instant && r.watch && <span className="pill pill-unknown" title={r.watch.title}>{r.watch.label}</span>}
                   </p>
@@ -157,21 +161,24 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
                     {r.fork && <span className="inline-flex items-center gap-1"><GitFork size={11} aria-hidden />fork{r.fork.of ? ` of ${r.fork.of}` : ""}</span>}
                     {!/unknown/i.test(r.access.label) && <span title={r.access.detail}>{r.access.label}</span>}
                     <span>{r.openItems === null ? "not synced yet" : `${r.openItems} open`}</span>
+                    <span className="md:hidden" title={r.syncedAt ?? undefined}>{statusWord(r)} · {r.synced}</span>
                   </p>
                 </div>
               </div>
               <div className="hidden w-44 shrink-0 md:block">
-                {r.status === "disconnected" ? <span className="pill pill-blocked"><Unplug size={12} aria-hidden /> Disconnected</span> : r.status === "rate" ? <span className="pill pill-waiting">Rate limited</span> : r.status === "failed" ? <span className="pill pill-changes" title={r.statusDetail ?? undefined}>Sync failed</span> : <span className="pill pill-ok">Active</span>}
-                <p className="mt-0.5 text-[11.5px] text-ink-3">{r.synced}</p>
+                <p className="flex items-center gap-1.5 whitespace-nowrap" title={r.syncedAt ?? undefined}>
+                  {r.status === "disconnected" ? <span className="pill pill-blocked"><Unplug size={12} aria-hidden /> Disconnected</span> : r.status === "rate" ? <span className="pill pill-waiting">Rate limited</span> : r.status === "failed" ? <span className="pill pill-changes" title={r.statusDetail ?? undefined}>Sync failed</span> : <span className="pill pill-ok">Active</span>}
+                  <span className="text-[11.5px] text-ink-3">· {r.synced}</span>
+                </p>
               </div>
-              <div className="hidden w-48 shrink-0 text-[12.5px] lg:block">
+              {anyShared && <div className="hidden w-48 shrink-0 text-[12.5px] lg:block">
                 {r.spaceId ? <span className="inline-flex items-center gap-1.5 text-ink-2"><Users size={13} aria-hidden className="text-ink-3" /><span className="truncate">{r.spaceName ?? "a team space"}</span></span> : <span className="text-ink-3">Only on this computer</span>}
-              </div>
+              </div>}
               <div className="hidden w-40 shrink-0 text-[12.5px] xl:block">
                 {r.projects.length === 0 ? <span className="text-ink-3">No project</span> : <span className="flex flex-wrap gap-1">{r.projects.slice(0, 2).map((p) => <span key={p} className="rounded-full border border-line px-2 py-0.5 text-[11.5px]">{p}</span>)}{r.projects.length > 2 && <span className="text-ink-3">+{r.projects.length - 2}</span>}</span>}
               </div>
-              <div className="flex w-[8.5rem] shrink-0 items-center justify-end gap-1">
-                <Link href={`/repositories/${r.id}/code`} className="btn !h-8" aria-label={`Browse code of ${r.fullName}`}>Browse</Link>
+              <div className="flex w-10 shrink-0 items-center justify-end gap-1 md:w-[8.5rem]">
+                <Link href={`/repositories/${r.id}/code`} className="btn !hidden !h-8 md:!inline-flex" aria-label={`Browse code of ${r.fullName}`}>Browse</Link>
                 <ActionMenu
                   label={`More actions for ${r.fullName}`}
                   items={[
@@ -188,15 +195,18 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
           ))}
         </ul>
       )}
+      {!anyShared && visible.length > 0 && <p className="text-[12px] text-ink-3">All repositories are only on this computer.</p>}
       {visible.length > shown.length && <button type="button" className="btn self-start" onClick={() => setLimit((l) => l + PAGE)}>Show {Math.min(PAGE, visible.length - shown.length)} more <span className="text-ink-3">of {visible.length - shown.length} left</span></button>}
 
-      <Dialog open={dialog?.kind === "untrack"} onClose={() => setDialog(null)} title={dialog && dialog.ids.length > 1 ? `Stop tracking ${dialog.ids.length} repositories?` : "Stop tracking this repository?"} description="It disappears from this app on this computer. Nothing is deleted or changed on GitHub, and you can connect it again later.">
+      <Dialog open={dialog?.kind === "untrack"} onClose={() => setDialog(null)} title={dialog && dialog.ids.length > 1 ? `Stop tracking ${dialog.ids.length} repositories?` : "Stop tracking this repository?"} description="Stopping tracking removes it from the dashboard on this computer only. Nothing is deleted or changed on GitHub, and you can connect it again later.">
         <button type="button" className="btn btn-danger" onClick={() => { const ids = dialog!.ids; setDialog(null); run(ids.length === 1 ? "Removed from tracking." : `${ids.length} repositories removed from tracking.`, ids.map((id) => untrackRepositoryAction(fd({ repositoryId: id })) as Promise<{ ok: boolean; error?: string }>)); }}>Stop tracking</button>
       </Dialog>
       <ShareDialog open={dialog?.kind === "share"} id={dialog?.ids[0]} name={rows.find((r) => r.id === dialog?.ids[0])?.fullName ?? ""} spaces={writable} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); show("ok", msg); router.refresh(); }} onError={(m) => show("error", m)} />
     </div>
   );
 }
+
+const statusWord = (r: RepoRow) => (r.status === "disconnected" ? "Disconnected" : r.status === "rate" ? "Rate limited" : r.status === "failed" ? "Sync failed" : "Active");
 
 function Dialog({ open, onClose, title, description, children }: { open: boolean; onClose: () => void; title: string; description: string; children: React.ReactNode }) {
   return (
