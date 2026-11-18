@@ -82,7 +82,7 @@ export default async function SyncPage() {
         </div>
       )}
 
-      <div className="mb-5"><Banner title={`Checks every ${poll} s while open; slower when idle.`} action={<Link href="/settings#polling" className="btn">Change interval</Link>} /></div>
+      <div className="mb-5"><Banner title={`Checks every ${poll} s while open; slower when idle.`} action={<Link href="/settings#polling-title" className="btn">Change interval</Link>} /></div>
 
       {source && (
         <div className="mb-5">
