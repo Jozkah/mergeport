@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { run, type ActionResult } from "@/lib/action-result";
 import { requireViewer } from "@/lib/auth/current";
 import { db } from "@/lib/db";
@@ -35,7 +36,8 @@ export async function markReleasesSeenAction(mappingId: string): Promise<void> {
   try {
     const { viewer } = await requireViewer();
     await markReleasesSeen(db, viewer, String(mappingId).slice(0, 64));
-  } catch {
+  } catch (e) {
+    unstable_rethrow(e); // an ended session still goes to sign-in
     /* looking at a page must never fail because of this */
   }
 }

@@ -1,3 +1,4 @@
+import { unstable_rethrow } from "next/navigation";
 import { ConflictError, ForbiddenError, NotFoundError, UnauthenticatedError, ValidationError } from "@/lib/errors";
 import { GithubError } from "@/lib/github/port";
 
@@ -11,6 +12,8 @@ export async function run(fn: () => Promise<ActionResult | void>): Promise<Actio
     if (!r || r.ok) void import("@/lib/local/runtime").then((m) => m.syncSoon()).catch(() => {});
     return r ?? { ok: true };
   } catch (e) {
+    // redirect()/notFound() work by throwing: let Next handle them (an ended session must reach sign-in, not become a message).
+    unstable_rethrow(e);
     if (e instanceof NotFoundError) return { ok: false, error: "That item was not found, or you do not have access to it." };
     if (e instanceof ForbiddenError || e instanceof ValidationError || e instanceof ConflictError) return { ok: false, error: e.message, retryable: e instanceof ConflictError };
     if (e instanceof UnauthenticatedError) return { ok: false, error: "Your session has ended. Sign in again." };
