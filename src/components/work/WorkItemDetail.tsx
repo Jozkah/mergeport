@@ -160,7 +160,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         </Panel>
       )}
       {isPr && (
-        <Panel title="Who should review (CODEOWNERS)" icon={Eye} id="owners" defaultOpen={false} summary="Suggestions only">
+        <Panel title="Code owners" icon={Eye} id="owners" defaultOpen={false} summary="Suggestions only">
           <OwnersPanel itemId={item.id} />
         </Panel>
       )}
