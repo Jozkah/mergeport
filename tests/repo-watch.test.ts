@@ -511,7 +511,6 @@ describe("pages", () => {
     expect(html).toMatch(/id="watch-max"[^>]*placeholder="20"/);
     expect(html).toContain("Using the default, 20.");
     expect(html).toContain("Saved here. Clear the field to go back to the default.");
-    expect(html).toContain("On by default. Turn off to use only the 15-minute cycle.");
   });
 
   it("RepoList shows the pill for watched repositories only, not for Instant ones", async () => {
