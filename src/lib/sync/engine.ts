@@ -3,6 +3,8 @@ import type { Prisma, Space } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { GithubError } from "@/lib/github/port";
 import { HubError, type Backend, type EntityEvent, type HubClient } from "@/lib/hub/types";
+import { assertBackendMatch, BackendMismatchError } from "@/lib/local/backend-guard";
+import type { Backend as ProfileBackend } from "@/lib/local/backends";
 import { mapLimit } from "@/lib/util";
 import { ENTITY_SCHEMA, ENTITY_TYPES, entityDef, entityPath, parseEntityPath, type Ctx, type EntityDef, type Listed } from "./entities";
 import { same, threeWayMerge, type Data } from "./merge";
@@ -66,6 +68,8 @@ export type EngineDeps = {
   onChange?: (e: { spaceId: string; reason: "pulled" | "pushed" | "state" }) => void;
   hub?: (space: Space) => HubClient;
   hubLive?: () => boolean;
+  /** The running profile's backend. When set, a space of the other backend is refused before any network call or write. */
+  profileBackend?: ProfileBackend;
 };
 
 const PERMISSION_RECHECK_MS = 5 * 60_000;
@@ -92,6 +96,10 @@ export class SyncEngine {
   }
   private emit(spaceId: string, reason: "pulled" | "pushed" | "state") {
     this.d.onChange?.({ spaceId, reason });
+  }
+  /** Throws BackendMismatchError when a space of this backend may not be opened by the running profile. */
+  assertBackend(backend: "GITHUB" | "HUB"): void {
+    if (this.d.profileBackend) assertBackendMatch({ backend: this.d.profileBackend }, { backend });
   }
   private backendOf(space: Space): Backend {
     if (space.backend === "HUB") {
@@ -174,6 +182,7 @@ export class SyncEngine {
   // ---------- pull ----------
 
   async pullSpace(space0: Space): Promise<{ changed: boolean; applied: number }> {
+    this.assertBackend(space0.backend);
     if (space0.backend === "HUB") return this.pullHub(space0);
     return this.pullGithub(space0);
   }
@@ -636,6 +645,7 @@ export class SyncEngine {
   // ---------- push ----------
 
   async pushSpace(space0: Space): Promise<{ sent: number }> {
+    this.assertBackend(space0.backend);
     if (space0.backend === "HUB") return this.pushHub(space0);
     return this.pushGithub(space0);
   }
@@ -820,6 +830,15 @@ export class SyncEngine {
 
   async syncSpace(space: Space): Promise<void> {
     if (this.syncing.has(space.id)) return; // never two cycles for one space in one process
+    try {
+      this.assertBackend(space.backend);
+    } catch (e) {
+      if (!(e instanceof BackendMismatchError)) throw e;
+      // Shown as the space's sync error; the slow schedule keeps the poller from retrying it every tick.
+      await this.db.space.update({ where: { id: space.id }, data: { lastError: e.message, lastPolledAt: this.now(), nextPollAt: new Date(this.now().getTime() + MAX_POLL_MS) } });
+      this.emit(space.id, "state");
+      return;
+    }
     this.syncing.add(space.id);
     this.emit(space.id, "state");
     try {

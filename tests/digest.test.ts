@@ -11,7 +11,7 @@ import { freshSeed } from "./helpers";
 const mocks = vi.hoisted(() => ({ viewer: null as null | Record<string, unknown> }));
 vi.mock("@/lib/auth/current", () => ({ requireViewer: async () => ({ user: { githubId: 1n, login: "alice-demo", name: "Alice" }, viewer: mocks.viewer, csrf: "x" }) }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/digest", useRouter: () => ({ push: () => {}, refresh: () => {} }), redirect: () => {} }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/digest", useRouter: () => ({ push: () => {}, refresh: () => {} }), redirect: () => {}, unstable_rethrow: () => {} }));
 
 // The seed is anchored at 2026-10-28 12:00 UTC. "Now" is the next morning, so the reported day is 2026-10-28 (UTC viewers).
 const NOW = new Date("2026-10-29T09:00:00Z");

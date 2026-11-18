@@ -22,6 +22,8 @@ import { NOT_RESTORED, Supervisor } from "../src/lib/local/supervisor";
 import { looksOffline, savedProfiles } from "../src/lib/local/saved-profiles";
 import { seedDemo } from "../src/lib/demo/seed";
 import { activeDbFile, profileDirOf, readIndex } from "../src/lib/local/contexts";
+import { buildReason, buildWithRetry, onChildExit, writeStamp } from "../src/lib/local/launcher";
+import { LAUNCH_TOKEN_TTL_MS } from "../src/lib/local/launch-token";
 
 const args = process.argv.slice(2);
 const demo = args.includes("--demo");
@@ -75,14 +77,28 @@ async function main() {
   }
 
   const next = path.join("node_modules", "next", "dist", "bin", "next");
-  if (!fs.existsSync(".next/BUILD_ID")) {
-    console.log("First run: building the app (one time)…");
+  // Rebuild whenever the code changed since the last build (git pull), not only when there is none: an old build must not run
+  // against a database this launcher just migrated for the new code.
+  const root = process.cwd();
+  const reason = buildReason(root);
+  if (reason) {
+    console.log(`Building the app (${reason}; about half a minute)…`);
     const buildEnv = { ...process.env, MERGEPORT_DB: dbFile, MERGEPORT_PORT: String(port), DEMO_MODE: demo ? "true" : "false", NODE_ENV: "production" } as unknown as NodeJS.ProcessEnv;
-    await new Promise<void>((resolve, reject) => spawn(process.execPath, [next, "build"], { stdio: "inherit", env: buildEnv }).on("exit", (c) => (c === 0 ? resolve() : reject(new Error("build failed")))));
+    const run = () =>
+      new Promise<{ code: number | null; output: string }>((resolve) => {
+        let output = "";
+        const p = spawn(process.execPath, [next, "build"], { stdio: ["ignore", "pipe", "pipe"], env: buildEnv });
+        p.stdout.on("data", (d) => ((output += d), process.stdout.write(d)));
+        p.stderr.on("data", (d) => ((output += d), process.stderr.write(d)));
+        p.on("error", (e) => resolve({ code: null, output: output + e.message }));
+        p.on("exit", (code) => resolve({ code, output }));
+      });
+    const b = await buildWithRetry(root, run);
+    if (!b.ok) throw new Error(`Building Mergeport failed (next build exit code ${b.code}, ${b.attempts} attempt${b.attempts > 1 ? "s" : ""}). The build output is above; fix it and run this again.`);
+    writeStamp(root);
   }
 
-  // Team contexts: one profile can hold several databases. A child that exits with RESTART asked to be reopened on the profile's (new) active one.
-  const RESTART = 75;
+  // Team contexts: one profile can hold several databases. A child that exits with RESTART_EXIT_CODE asked to be reopened on the profile's (new) active one.
   const baseOf = (file: string) => {
     const dir = profileDirOf(file);
     return path.basename(path.dirname(file)) === "contexts" ? path.join(dir, readIndex(dir, path.basename(file)).base) : file;
@@ -122,16 +138,14 @@ async function main() {
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
   // A child that dies outside a switch ends the launcher, as before.
+  // Exit 75 (context switch) relaunches and opens the new link even under --no-open: see onChildExit.
   supervisor.on("child-exit", (c) => {
-    if (c !== RESTART) return process.exit(c ?? 0);
-    console.log("Switching context: restarting Mergeport…");
-    void openContext(lastBase)
-      .then((file) => supervisor.start({ dbFile: file, backend: lastBackend }))
-      .then(({ launchUrl }) => openLink(launchUrl))
-      .catch((e) => {
-        console.error(e instanceof Error ? e.message : e);
-        process.exit(1);
-      });
+    void onChildExit(c, {
+      relaunch: () => openContext(lastBase).then((file) => supervisor.start({ dbFile: file, backend: lastBackend })).then((r) => r.launchUrl),
+      openInBrowser: (u) => openLink(u, true),
+      exit: (code) => process.exit(code),
+      log: console.log,
+    });
   });
   // A switch that failed after the browser was told it was accepted has no other way to be reported.
   supervisor.on("switch-failed", (err) => {
@@ -139,11 +153,13 @@ async function main() {
     if (err.message === NOT_RESTORED) void supervisor.stop().finally(() => process.exit(1)); // no child is running any more
   });
 
-  const openLink = (url: string) => {
-    if (!noOpen) {
+  // --no-open applies to the first start only; `force` is the relaunch a user started from the browser.
+  const openLink = (url: string, force = false) => {
+    if (!noOpen || force) {
       const [cmd, a] = process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
       execFile(cmd as string, a as string[], () => {});
-    } else console.log("Open this one-time link:\n" + url);
+    } else
+      console.log(`Open this one-time link (it works once, within ${LAUNCH_TOKEN_TTL_MS / 60000} minutes):\n${url}\nFor a fresh link later, stop Mergeport and start it again (or use the desktop shortcut, which restarts it).`);
   };
   const started = Date.now();
   const { launchUrl: url } = await supervisor.start({ dbFile: await openContext(dbFile), backend: startBackend }).catch(async (e) => {

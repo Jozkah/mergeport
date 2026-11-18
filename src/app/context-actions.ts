@@ -6,6 +6,7 @@ import { run, type ActionResult } from "@/lib/action-result";
 import { requireViewer } from "@/lib/auth/current";
 import { ValidationError } from "@/lib/errors";
 import { createContext, profileDirOf, renameContext, setActive } from "@/lib/local/contexts";
+import { RESTART_EXIT_CODE } from "@/lib/local/restart-code";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 
@@ -59,7 +60,7 @@ export async function switchContextAction(fd: FormData): Promise<ActionResult> {
       throw new ValidationError(e instanceof Error ? e.message : "Could not switch");
     }
     const underLauncher = process.env.MERGEPORT_LAUNCHER === "1";
-    if (underLauncher) setTimeout(() => process.exit(75), 700); // after this response is sent
+    if (underLauncher) setTimeout(() => process.exit(RESTART_EXIT_CODE), 700); // after this response is sent; the launcher reopens the browser
     return { ok: true, message: underLauncher ? "Switching. Mergeport is restarting and will open in your browser again in a moment." : "Switched. Stop and start Mergeport (npm run local) to open it.", data: { restarting: underLauncher } };
   });
 }

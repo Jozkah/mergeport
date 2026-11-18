@@ -14,7 +14,7 @@ import { CoordinationStore } from "@/lib/sync/store";
 import { TeamService } from "@/lib/team/service";
 import { HubTeamService } from "@/lib/team/hub-service";
 import { httpHubAdmin, hubSessionPort, keyFileFor, registerHubLinkState } from "@/lib/hub/ports-impl";
-import { hubBackendId } from "@/lib/local/backends";
+import { GITHUB_BACKEND, hubBackendId, isHubBackend, type Backend } from "@/lib/local/backends";
 import { mergeportHome } from "@/lib/local/profile";
 import { readHubs } from "@/lib/local/registry";
 import { env } from "@/lib/env";
@@ -95,10 +95,14 @@ async function buildEngine(): Promise<SyncEngine | null> {
   };
   const team = await db.teamConfig.findUnique({ where: { id: "team" } });
   const hubOrigin = team?.backend === "HUB" ? team.hubOrigin : null;
+  // The launcher's MERGEPORT_BACKEND names what this profile directory is; without a launcher, TeamConfig decides.
+  const launched = process.env.MERGEPORT_BACKEND;
+  const profileBackend = launched === GITHUB_BACKEND || (launched && isHubBackend(launched)) ? (launched as Backend) : hubOrigin ? hubBackendId(hubOrigin) : GITHUB_BACKEND;
   if (!hubOrigin) {
     state.engine = new SyncEngine({
       db,
       actor,
+      profileBackend,
       store: (s: Space) => new CoordinationStore(new GitHubRest(f), s.repoOwner, s.repoName),
       onChange,
     });
@@ -110,6 +114,7 @@ async function buildEngine(): Promise<SyncEngine | null> {
     actor,
     store: (s: Space) => new CoordinationStore(new GitHubRest(f), s.repoOwner, s.repoName),
     hub: () => client,
+    profileBackend,
     hubLive: () => state.live?.live() ?? false,
     onChange,
   });

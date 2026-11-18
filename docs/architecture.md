@@ -1,6 +1,6 @@
 # Architecture
 
-Mergeport is a local-first application. Each person runs it on their own computer, against their own SQLite database, authenticated to GitHub through the official GitHub CLI. A team shares Mergeport-owned data through private GitHub repositories. There is no server to deploy.
+Mergeport is a local-first application. Each person runs it on their own computer, against their own SQLite database, authenticated to GitHub through the official GitHub CLI. By default a team shares Mergeport-owned data through private GitHub repositories, and there is no server to deploy. A team may instead run the optional Mergeport hub (`hub/`, see "Workspaces and hub profiles" and "Hub backend (client)"); the diagram below shows the default GitHub mode.
 
 ```
  your computer                                     GitHub
@@ -21,7 +21,7 @@ Mergeport is a local-first application. Each person runs it on their own compute
 | GitHub is the source of truth for issues, PRs, reviews, labels | Fetched with the acting person's access and cached locally; Mergeport never claims to know more than the last successful fetch, and says how old it is |
 | Mergeport-owned data lives in private "space" repositories | The repository **is** the audience. Privacy is a property of where data is stored, not of what the UI hides |
 | One JSON file per entity, optimistic concurrency by blob SHA and non-force ref updates | Independent edits merge; same-record edits surface as a conflict; no server arbitration needed |
-| Polling, not webhooks | A local app has no public address and must not need a tunnel. Consistency is eventual and the delay is published |
+| Polling, not webhooks, in the default mode | A local app has no public address and must not need a tunnel. Consistency is eventual and the delay is published. The optional hub adds a live WebSocket link and can relay GitHub App webhooks to apps ("Hub webhook relay"); the local app itself never receives a webhook |
 | Roles from GitHub permissions | An editable role string would be a forgery vector |
 | GSAP only for board layout animation; everything else CSS | One owner per animated element; dnd-kit keeps the drag transform |
 
@@ -105,7 +105,7 @@ The hub UI was built against ports (`src/lib/hub/ports.ts`); `src/lib/hub/ports-
 - `getEngine()` reads `TeamConfig`: on `backend = HUB` it builds the engine with an `HttpHubClient` and starts `startHubLive`; a GitHub profile keeps the GitHub store unchanged.
 - `tests/hub-e2e.test.ts` runs two local clients against the real in-process hub (`tests/hub/harness.ts`).
 
-Still open: `currentBackend()` in `src/lib/local/workspaces.ts` reads `MERGEPORT_BACKEND`/`active.json`, not `TeamConfig`; `assertBackendMatch` is not yet called from the `SyncEngine`.
+`SyncEngine` calls the guard before every pull and push of a space and `TeamService`/`syncHubSpaces` call it before creating or joining one; a mismatch is recorded as that space's sync error (shown on the Sync page) and is not retried in a loop. The runtime takes the profile backend from `MERGEPORT_BACKEND` when the launcher set it, else from `TeamConfig`. Still open: `currentBackend()` in `src/lib/local/workspaces.ts` reads `MERGEPORT_BACKEND`/`active.json`, not `TeamConfig`.
 
 ### Manual verification (spec) not yet run
 
@@ -130,7 +130,7 @@ Each person's database holds the working copy. `SyncEngine` (`src/lib/sync/engin
 
 Per-space state shown to the person: **Pending, Syncing, Synced, Offline, Conflict, Access revoked** (plus Rate limited, Update needed, Read only).
 
-**Consistency delay (published in the UI).** Polling base is 30 s while the app is open and visible (configurable, minimum 15 s). Unchanged polls back off (×2 per 4 unchanged, capped at 10 min) with ±20% jitter; a hidden tab or closed app polls rarely or not at all. A teammate's change typically appears within about `poll/2 + 2` s when active. It is **not real time**.
+**Consistency delay (published in the UI).** Polling base is 30 s while the app is open and visible (configurable, minimum 15 s). Unchanged polls back off (the interval doubles for every 4 unchanged polls: 30 s, then 60 s, then the cap of 2 min, `MAX_POLL_MS` in `src/lib/sync/engine.ts`) with ±20% jitter, and any change resets it. The scheduler ticks every 5 s; with a hidden tab or none open (no page report for 90 s) the engine ticks at most once a minute, and with the app closed nothing runs. Source repositories have their own cycle: `reconcile.all` every 15 minutes, plus the visible-tab repository watcher below (default every 15 s per repository). Hub spaces are left to the live socket while it is up ("Live link"). A teammate's change typically appears within about `poll/2 + 2` s when active. It is **not real time**.
 
 **Rate limits.** Two lanes with separate budgets: the coordination lane (`engine.tick()`) and the source-repository job queue. Exhausting one never starves the other. `Retry-After` / reset times set `rateLimitedUntil`.
 
@@ -144,7 +144,7 @@ The hub can relay GitHub webhooks (`hub/src/webhook-routes.ts`, `hub/src/setting
 
 ## Hub backend (client)
 
-A team may sync through a Mergeport hub (HTTP plus WebSocket) instead of a GitHub coordination repository. This section describes the client half that exists in `src/lib/hub/` and `src/lib/sync/engine.ts`. It is not wired into the running app yet (see "What plan 3 must wire").
+A team may sync through a Mergeport hub (HTTP plus WebSocket) instead of a GitHub coordination repository. This section describes the client half that exists in `src/lib/hub/` and `src/lib/sync/engine.ts`. It is wired into the running app ("Hub integration" above, "What the app wires" below); the hub server itself is in `hub/` of this repository.
 
 **Transport abstraction.** `src/lib/hub/types.ts` defines `HubClient` (`me`, `pull(spaceId, since)`, `snapshot(spaceId)`, `push(spaceId, ops)`) and `Backend = { kind: "github"; store } | { kind: "hub"; client }`. `SyncEngine.backendOf(space)` picks the backend from `Space.backend` (`GITHUB` or `HUB`). `pull` and `push` dispatch on `space.backend` to `pullHub`/`pushHub` or `pullGithub`/`pushGithub`; the GitHub path is the former `pull`/`push` moved unchanged, and `tests/team-sync.test.ts` and `tests/review-fixes.test.ts` are untouched. `EngineDeps` gained `hub?: (space) => HubClient` and `hubLive?: () => boolean`; without `hub`, a hub space throws "No hub client configured". `HttpHubClient` (`src/lib/hub/client.ts`) is the implementation; `normalizeHubOrigin` accepts only https, or http on loopback.
 
@@ -166,20 +166,19 @@ A team may sync through a Mergeport hub (HTTP plus WebSocket) instead of a GitHu
 
 **Schema changes** (migration `20261030130000_hub_client`). Enums `SpaceBackend` and `TeamBackend` (`GITHUB`, `HUB`); `Space.backend`, `Space.hubSpaceId` (empty for GitHub), `Space.hubCursor`; the unique key on `Space` becomes `[backend, repoOwner, repoName, hubSpaceId]`; `TeamConfig.backend`, `TeamConfig.hubOrigin`; table `HubSession`. Existing rows default to `GITHUB`.
 
-**Test strategy.** The hub server is not in this repository, so `tests/hub-client/fake-hub.ts` (`FakeHub`) is a real local HTTP server plus in-memory `FakeSocket`s that implements `/health`, `/me`, entities pull (with `410`, paging, `seq` regression), snapshot, ops (per-op results, stale), and failure injection. `tests/hub-client/harness.ts` (`makeHubClient`) builds an isolated database, `HttpHubClient`, engine and optional `startHubLive` per simulated member. Link timing tests use manual timers (`manual-timers.ts`). Suites: `client`, `dispatch`, `link`, `schema`, `session-vault`, `spaces` in `tests/hub-client/`, and `tests/hub-sync.test.ts` for pull, push, live and revocation end to end.
+**Test strategy.** The client tests do not start the real hub (the server in `hub/` has its own tests, and `tests/hub-e2e.test.ts` runs two clients against it in process), so `tests/hub-client/fake-hub.ts` (`FakeHub`) is a real local HTTP server plus in-memory `FakeSocket`s that implements `/health`, `/me`, entities pull (with `410`, paging, `seq` regression), snapshot, ops (per-op results, stale), and failure injection. `tests/hub-client/harness.ts` (`makeHubClient`) builds an isolated database, `HttpHubClient`, engine and optional `startHubLive` per simulated member. Link timing tests use manual timers (`manual-timers.ts`). Suites: `client`, `dispatch`, `link`, `schema`, `session-vault`, `spaces` in `tests/hub-client/`, and `tests/hub-sync.test.ts` for pull, push, live and revocation end to end.
 
-### What plan 3 must wire
+### What the app wires
 
-Nothing below exists in the running app yet; the engine and `src/lib/hub/` are complete and tested only through the harness.
+The pieces of `src/lib/hub/` are connected in the running app:
 
-- `src/lib/local/runtime.ts` `getEngine()`: pass `hub: (space) => client` (an `HttpHubClient` for the saved origin whose `getToken` reads the stored session) and `hubLive: () => live?.live() ?? false` into `EngineDeps`. Today it passes only `store`.
-- Call `startHubLive({ db, engine, client, origin, getToken })` after sign-in and at start-up when a session exists; keep the handle and call `stop()` on sign-out or profile switch.
-- Vault key path: `<profile dir>/key`, passed to `openVault`.
-- Load the session with `loadHubSession(db, vault)` at start; `saveHubSession` after sign-in; `clearHubSession` on sign-out. `null` from load means sign in again.
-- Call `checkHubHealth(origin)` when the user connects to a hub, before storing anything.
-- Call `syncHubSpaces(db, engine, await client.me())` after connect (live does it on `hello`).
-- A `HubTeamService` (team/member management against the hub) does not exist; `TeamService` is GitHub-only.
-- Sign-in UI, profile switching, and surfacing `HubLinkState` / `expectedConsistencyDelaySeconds(.., { live })` in the UI.
+- `src/lib/local/runtime.ts` `getEngine()`: for `TeamConfig.backend = HUB` it passes `hub: () => client` (an `HttpHubClient` whose `getToken` reads the stored session through `loadHubSession` and the vault) and `hubLive: () => state.live?.live() ?? false` into `EngineDeps`, and calls `startHubLive` once per process. `resetRuntime()` stops it. A GitHub profile passes only `store`.
+- Vault key path: `<profile dir>/key` (`keyFileFor` in `src/lib/hub/ports-impl.ts`), passed to `openVault`. `saveHubSession` runs from `hubSessionPort` after sign-in and `clearHubSession` on "Sign out of this server".
+- Connect flow (`src/lib/hub/connect.ts`): the hub's `/health` is checked before anything is stored. `syncHubSpaces` runs on the live link's `hello` (`startHubLive`).
+- Hub team management is `HubTeamService` (`src/lib/team/hub-service.ts`); `TeamService` stays GitHub-only.
+- Sign-in card, workspace switcher with the switching overlay, the hub Team page, and the live-link state (`HubLinkState`) on the Sync and Team pages. The consistency-delay text on those pages is computed without the `{ live }` option, so it shows the polling figure.
+
+Not wired: `checkHubHealth` in `src/lib/hub/client.ts` has no caller in `src/` (the connect flow has its own health check).
 
 ### Hub client limitations
 
@@ -289,7 +288,7 @@ Run on 29 Oct 2026, Windows 11, Node 24.12, `gh` 2.102.0 with one existing signe
 | Check | Result |
 | --- | --- |
 | `npx tsc --noEmit`, `npx eslint .`, `npm run build` | all clean after the last edit (build: no warnings) |
-| Unit and integration suite (`npx vitest run --maxWorkers=4`) | 18 files, 222 tests passing; the 5 live tests are skipped unless `MERGEPORT_LIVE=1` |
+| Unit and integration suite (`npm test`, which is `vitest run --maxWorkers=4`) | passed when this record was written (29 Oct 2026); the file and test counts change with every commit, so run the command for the current numbers (not re-verified here). The live tests in `tests/live` are skipped unless `MERGEPORT_LIVE=1` |
 | Reproducible install | isolated copy without `.env`, databases, `node_modules`, `.next` or `src/generated`: `npm ci` in 16 s (659 packages), one `better-sqlite3` 13.0.3 loaded from its shipped `prebuilds/win32-x64.node`, production build clean, `npm run local` built on first run and served |
 | Ctrl+C through the real Windows console (`npm run local`, hidden console, `GenerateConsoleCtrlEvent`) | idle: server and children gone, port released; with discovery stalled and a hung `gh` child running: the hung child and the whole tree gone; only npm's `cmd.exe` batch wrapper waiting on "Terminate batch job (Y/N)?", which was ended by the test (only its own process) |
 | After shutdown | `PRAGMA integrity_check` = ok, the pending outbox edit still `PENDING`, restart served in 63 ms, an interrupted refresh was recovered and completed |

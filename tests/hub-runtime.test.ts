@@ -74,7 +74,7 @@ describe("runtime engine per backend", () => {
     const space = await hubSpace();
     const engine = await getEngine();
     expect(engine).not.toBeNull();
-    await expect(engine!.pullSpace(space)).rejects.toThrow("No hub client configured");
+    await expect(engine!.pullSpace(space)).rejects.toThrow("This workspace belongs to a different kind of connection."); // the backend guard refuses it first
     expect(calls).toHaveLength(0);
   });
 

@@ -10,7 +10,7 @@ web, served by a local process on the user's own computer (127.0.0.1)
 
 ## Stack
 
-TypeScript, Next.js App Router on a local Node process, SQLite (one database per GitHub account, via Prisma and better-sqlite3), Tailwind CSS, Octokit over the official GitHub CLI (`gh api`), Lucide, dnd-kit, GSAP for the few layout animations CSS cannot express. No Docker, Postgres, VPS, tunnel, public webhook, GitHub App or shared secret.
+TypeScript, Next.js App Router on a local Node process, SQLite (one database per GitHub account, via Prisma and better-sqlite3), Tailwind CSS, Octokit over the official GitHub CLI (`gh api`), Lucide, dnd-kit, GSAP for the few layout animations CSS cannot express. The default GitHub-repository mode needs no Docker, Postgres, VPS, tunnel, public webhook, GitHub App or shared secret. A team may optionally run its own hub (`hub/`, one Node process and one SQLite file) for live sync and, if its owner sets it up, a GitHub App webhook relay; the local app itself never exposes a public address.
 
 ## Users
 
@@ -21,7 +21,7 @@ TypeScript, Next.js App Router on a local Node process, SQLite (one database per
 
 ## Product Purpose
 
-A local-first control center for selected GitHub repositories: attention queues (needs my review vs waiting on others), planning across repos, fork/upstream intelligence, and read-only local worktree visibility. A team's Mergeport-owned data syncs through private GitHub repositories instead of a server. Success: nobody opens GitHub tabs to answer "what do I review, what is blocked on whom, what upstream work is my fork missing", and nobody runs infrastructure to share a board.
+A local-first control center for selected GitHub repositories: attention queues (needs my review vs waiting on others), planning across repos, fork/upstream intelligence, and read-only local worktree visibility. By default a team's Mergeport-owned data syncs through private GitHub repositories instead of a server (running the optional hub is a choice, never a requirement). Success: nobody opens GitHub tabs to answer "what do I review, what is blocked on whom, what upstream work is my fork missing", and nobody has to run infrastructure to share a board.
 
 ## Positioning
 
@@ -29,7 +29,7 @@ GitHub stays the source of truth for issues, pull requests, reviews and labels, 
 
 ## Operating Context
 
-One person, one computer, one account profile; optional teams. Offline-tolerant: edits are saved locally first and sent when GitHub is reachable. Shared state is eventually consistent by polling (about 30 s while open, backing off to 10 min), stated plainly in the UI. Demo mode (synthetic data, no GitHub) is separate from connected mode.
+One person, one computer, one account profile; optional teams. Offline-tolerant: edits are saved locally first and sent when GitHub is reachable. Shared state is eventually consistent by polling (about 30 s while open, slowing to at most 2 min when nothing changes; teams on a hub get live updates), stated plainly in the UI. Demo mode (synthetic data, no GitHub) is separate from connected mode.
 
 ## Capabilities and Constraints
 
