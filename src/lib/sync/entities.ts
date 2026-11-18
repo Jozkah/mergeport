@@ -18,13 +18,26 @@ export const ENTITY_SCHEMA = 1;
 export type Ctx = { workspaceId: string; localMemberId: string; space: Space; commonSpaceId: string | null };
 export type Listed = { id: string; spaceId: string | null; data: Data };
 
+/**
+ * What apply() answers. `false`: a prerequisite entity is not materialized yet; the pull does not record the entity and retries it.
+ * APPLY_INVALID: this entity can never be applied here (malformed, or it would take over a repository this person did not share into
+ * the space); it is skipped, not recorded and not retried until the file changes. Anything else: applied.
+ */
+export const APPLY_INVALID = "invalid" as const;
+export type ApplyOutcome = boolean | void | typeof APPLY_INVALID;
+
+/** Entity ids this client accepts from a remote (file names and hub events alike). */
+export const ENTITY_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
 export type EntityDef = {
   type: string;
   order: number;
   setKeys?: string[];
   list(db: Db, ctx: { commonSpaceId: string | null }): Promise<Listed[]>;
-  /** Returns false when a prerequisite entity is not materialized yet; the pull will not record the entity and retries it next time. */
-  apply(db: Db, ctx: Ctx, id: string, data: Data | null, version: number): Promise<boolean | void>;
+  /** See ApplyOutcome. Never throws for a malformed entity: `valid` rejects it first. */
+  apply(db: Db, ctx: Ctx, id: string, data: Data | null, version: number): Promise<ApplyOutcome>;
+  /** Shape check of a remote entity (data null: a deletion). Anything apply() would choke on is refused here. */
+  valid?(id: string, data: Data | null): boolean;
   /** Runs once after every entity of this type in a pull has been applied (cross-entity links). */
   post?(db: Db, ctx: Ctx, applied: { id: string; data: Data }[]): Promise<void>;
 };
@@ -33,7 +46,19 @@ const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
 const toDate = (s: unknown) => (typeof s === "string" && s ? new Date(s.length === 10 ? s + "T00:00:00Z" : s) : null);
 const repoEntityId = (githubId: bigint | string) => `repo-${githubId}`;
+export const availabilityId = (login: string) => `avail-${login.toLowerCase()}`;
 const bigOrNull = (v: unknown) => (v === null || v === undefined ? null : BigInt(String(v)));
+
+// Shape checks for what arrives from a remote. Everything there is untrusted: a teammate's (or anyone's) bad file must be skipped, not thrown.
+const isStr = (v: unknown): v is string => typeof v === "string";
+const optStr = (v: unknown) => v === null || v === undefined || typeof v === "string";
+const isGid = (v: unknown) => (typeof v === "string" || typeof v === "number") && /^\d{1,20}$/.test(String(v));
+const optGid = (v: unknown) => v === null || v === undefined || v === "" || isGid(v);
+const optDate = (v: unknown) => v === null || v === undefined || v === "" || (typeof v === "string" && !Number.isNaN(toDate(v)!.getTime()));
+const optStrs = (v: unknown) => v === null || v === undefined || (Array.isArray(v) && v.every(isStr));
+const num = (v: unknown) => v === null || v === undefined || Number.isFinite(Number(v));
+const oneOf = (v: unknown, xs: readonly string[]) => typeof v === "string" && xs.includes(v);
+const SCOPES = ["REPOSITORY", "OWNER", "PROJECT", "WORKSPACE"] as const;
 
 async function repoByGithubId(db: Db, workspaceId: string, githubId: unknown) {
   if (githubId === null || githubId === undefined) return null;
@@ -57,6 +82,24 @@ const repo: EntityDef = {
       },
     }));
   },
+  valid(id, data) {
+    if (!/^repo-\d{1,20}$/.test(id)) return false;
+    if (!data) return true;
+    const o = data.owner as Record<string, unknown> | null;
+    return (
+      isGid(data.githubId) && id === repoEntityId(String(data.githubId)) && isStr(data.fullName) && /^[^/\s]+\/[^/\s]+$/.test(data.fullName) && isStr(data.name) && isStr(data.htmlUrl) &&
+      optStr(data.description) && oneOf(data.visibility, ["PUBLIC", "PRIVATE", "INTERNAL", "UNKNOWN"]) && optGid(data.parentGithubId) && optStr(data.parentFullName) && optStr(data.defaultBranch) &&
+      !!o && typeof o === "object" && isGid(o.githubId) && isStr(o.login) && oneOf(o.type, ["USER", "ORGANIZATION", "UNKNOWN"]) && optStr(o.avatarUrl)
+    );
+  },
+  /**
+   * A remote entity only ever touches a repository that is in THIS space, or that is not here at all yet. A repository this person keeps
+   * local-only (or placed in another space) is never re-spaced, renamed or shared by a teammate's file: that would let them point this
+   * person's local automation (the upstream auto-updater, say) at another repository. The one exception is a row this space shared before
+   * and then removed (its spaceId was cleared by the removal), which a re-share brings back.
+   * Inside the space, name and owner follow the shared file: renames are legitimate, and refusing them would make two devices push their
+   * own spelling back and forth. Local automation does not trust them: the auto-updater pins the names it was enabled with.
+   */
   async apply(db, ctx, id, data) {
     if (!data) {
       const gid = BigInt(id.replace(/^repo-/, ""));
@@ -68,6 +111,13 @@ const repo: EntityDef = {
       }
       return;
     }
+    const githubId = BigInt(String(data.githubId));
+    const existing = await repoByGithubId(db, ctx.workspaceId, githubId);
+    if (existing && existing.spaceId !== ctx.space.id) {
+      if (existing.spaceId !== null) return APPLY_INVALID;
+      const sharedHereBefore = await db.syncEntity.findUnique({ where: { spaceId_type_entityId: { spaceId: ctx.space.id, type: "repo", entityId: id } }, select: { spaceId: true } });
+      if (!sharedHereBefore || existing.trackingStatus !== "REMOVED") return APPLY_INVALID;
+    }
     const o = data.owner as { githubId: string; login: string; type: "USER" | "ORGANIZATION" | "UNKNOWN"; avatarUrl: string | null };
     const owner = await db.githubOwner.upsert({ where: { githubId: BigInt(o.githubId) }, create: { githubId: BigInt(o.githubId), login: o.login, type: o.type, avatarUrl: o.avatarUrl }, update: { login: o.login, type: o.type, avatarUrl: o.avatarUrl } });
     const f = {
@@ -75,7 +125,6 @@ const repo: EntityDef = {
       visibility: data.visibility as "PUBLIC" | "PRIVATE" | "INTERNAL" | "UNKNOWN", isFork: !!data.isFork, parentGithubId: bigOrNull(data.parentGithubId), parentFullName: (data.parentFullName as string | null) ?? null,
       defaultBranch: (data.defaultBranch as string | null) ?? null, archived: !!data.archived, spaceId: ctx.space.id, trackingStatus: "ACTIVE" as const,
     };
-    const githubId = BigInt(String(data.githubId));
     const r = await db.repository.upsert({ where: { workspaceId_githubId: { workspaceId: ctx.workspaceId, githubId } }, create: { workspaceId: ctx.workspaceId, githubId, ...f }, update: f });
     // Application-level visibility mirrors the space audience: this person may see what the space shares.
     await db.repositoryGrant.upsert({
@@ -100,6 +149,7 @@ const project: EntityDef = {
       data: { name: p.name, slug: p.slug, description: p.description, automation: p.automation, repoIds: p.repositories.map((x) => repoEntityId(x.repository.githubId)).sort() },
     }));
   },
+  valid: (_id, d) => !d || (isStr(d.name) && isStr(d.slug) && optStr(d.description) && optStrs(d.repoIds)),
   async apply(db, ctx, id, data) {
     if (!data) {
       await db.project.deleteMany({ where: { id } });
@@ -136,6 +186,10 @@ const milestone: EntityDef = {
       },
     }));
   },
+  valid: (_id, d) =>
+    !d ||
+    (isStr(d.name) && optStr(d.description) && optStr(d.projectId) && optDate(d.startDate) && optDate(d.targetDate) && optStr(d.status) && optStr(d.releaseTag) && optStr(d.releaseUrl) && optDate(d.shippedAt) &&
+      optStrs(d.repoLinks) && ((d.repoLinks as string[] | null) ?? []).every((l) => /^\d{1,20}#\d{1,9}$/.test(l))),
   async apply(db, ctx, id, data) {
     if (!data) {
       await db.dashboardMilestone.deleteMany({ where: { id } });
@@ -179,6 +233,10 @@ const card: EntityDef = {
       },
     }));
   },
+  valid: (_id, d) =>
+    !d ||
+    (isStr(d.projectId) && isStr(d.columnKey) && isStr(d.title) && num(d.position) && optStr(d.description) && optGid(d.workRepoGithubId) && num(d.workNumber) && optStr(d.assigneeLogin) && optStr(d.assignedByLogin) &&
+      optStr(d.authorLogin) && num(d.priority) && optDate(d.due) && optStr(d.milestoneId) && optStr(d.epicId) && optStr(d.iterationId) && optStr(d.branchRef) && optStrs(d.blockedBy) && optStrs(d.related) && optStrs(d.duplicates)),
   async apply(db, ctx, id, data, version) {
     if (!data) {
       await db.planningItem.deleteMany({ where: { id } });
@@ -223,6 +281,7 @@ const taskcomment: EntityDef = {
     const rows = await db.taskComment.findMany({ where: { item: { project: { spaceId: { not: null } } } }, include: { item: { include: { project: true } } } });
     return rows.map((c) => ({ id: c.id, spaceId: c.item.project.spaceId, data: { itemId: c.itemId, authorLogin: c.authorLogin, kind: c.kind, body: c.body, createdAt: iso(c.createdAt), editedAt: iso(c.editedAt) } }));
   },
+  valid: (_id, d) => !d || (isStr(d.itemId) && isStr(d.authorLogin) && isStr(d.body) && optStr(d.kind) && optDate(d.createdAt) && optDate(d.editedAt)),
   async apply(db, _ctx, id, data) {
     if (!data) {
       await db.taskComment.deleteMany({ where: { id } });
@@ -244,6 +303,7 @@ const checkitem: EntityDef = {
     const rows = await db.taskCheckItem.findMany({ where: { item: { project: { spaceId: { not: null } } } }, include: { item: { include: { project: true } } } });
     return rows.map((c) => ({ id: c.id, spaceId: c.item.project.spaceId, data: { itemId: c.itemId, text: c.text, done: c.done, position: c.position, doneByLogin: c.doneByLogin, doneAt: iso(c.doneAt), createdAt: iso(c.createdAt) } }));
   },
+  valid: (_id, d) => !d || (isStr(d.itemId) && isStr(d.text) && num(d.position) && optStr(d.doneByLogin) && optDate(d.doneAt) && optDate(d.createdAt)),
   async apply(db, _ctx, id, data) {
     if (!data) {
       await db.taskCheckItem.deleteMany({ where: { id } });
@@ -269,6 +329,7 @@ const rule: EntityDef = {
       data: { scope: r.scope, repoGithubId: r.repository?.githubId.toString() ?? null, projectId: r.projectId, ownerLogin: r.ownerLogin, labels: r.labels, reviewers: r.reviewers, semantics: r.semantics, reason: r.reason, enabled: r.enabled },
     }));
   },
+  valid: (_id, d) => !d || (oneOf(d.scope, SCOPES) && optGid(d.repoGithubId) && optStr(d.projectId) && optStr(d.ownerLogin) && oneOf(d.semantics, ["ANY", "ALL"]) && isStr(d.reason)),
   async apply(db, ctx, id, data) {
     if (!data) {
       await db.reviewRule.deleteMany({ where: { id } });
@@ -296,6 +357,7 @@ const waitrule: EntityDef = {
       data: { scope: r.scope, repoGithubId: r.repository?.githubId.toString() ?? null, projectId: r.projectId, ownerLogin: r.ownerLogin, itemType: r.itemType, labels: r.labels, authors: r.authors, includeDrafts: r.includeDrafts, waitingOn: r.waitingOn, reason: r.reason, stage: r.stage, enabled: r.enabled },
     }));
   },
+  valid: (_id, d) => !d || (oneOf(d.scope, SCOPES) && optGid(d.repoGithubId) && optStr(d.projectId) && optStr(d.ownerLogin) && optStr(d.itemType) && isStr(d.reason) && optStr(d.stage)),
   async apply(db, ctx, id, data) {
     if (!data) {
       await db.waitingRule.deleteMany({ where: { id } });
@@ -324,6 +386,7 @@ const view: EntityDef = {
     const rows = await db.savedFilter.findMany({ where: { shared: true, userId: me.id } });
     return rows.map((r) => ({ id: r.id, spaceId: commonSpaceId, data: { scope: r.scope, name: r.name, query: r.query, ownerLogin: r.ownerLogin ?? me.login } }));
   },
+  valid: (_id, d) => !d || (isStr(d.scope) && isStr(d.name) && optStr(d.query) && optStr(d.ownerLogin)),
   async apply(db, ctx, id, data) {
     if (!data) {
       await db.savedFilter.deleteMany({ where: { id, shared: true } });
@@ -347,6 +410,7 @@ const board: EntityDef = {
     const rows = await db.planBoard.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
     return rows.map((b) => ({ id: b.id, spaceId: b.project.spaceId, data: { projectId: b.projectId, name: b.name, template: b.template, columns: b.columns, groupBy: b.groupBy, density: b.density, position: b.position } }));
   },
+  valid: (_id, d) => !d || (isStr(d.projectId) && isStr(d.name) && optStr(d.template) && optStr(d.groupBy) && optStr(d.density) && num(d.position)),
   async apply(db, _ctx, id, data) {
     if (!data) {
       await db.planBoard.deleteMany({ where: { id } });
@@ -365,6 +429,7 @@ const epic: EntityDef = {
     const rows = await db.epic.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
     return rows.map((e) => ({ id: e.id, spaceId: e.project.spaceId, data: { projectId: e.projectId, title: e.title, description: e.description, ownerLogin: e.ownerLogin, start: day(e.startDate), target: day(e.targetDate), status: e.status, decisions: e.decisions } }));
   },
+  valid: (_id, d) => !d || (isStr(d.projectId) && isStr(d.title) && optStr(d.description) && optStr(d.ownerLogin) && optDate(d.start) && optDate(d.target) && optStr(d.status) && optStr(d.decisions)),
   async apply(db, _ctx, id, data) {
     if (!data) {
       await db.epic.deleteMany({ where: { id } });
@@ -383,6 +448,7 @@ const iteration: EntityDef = {
     const rows = await db.iteration.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
     return rows.map((i) => ({ id: i.id, spaceId: i.project.spaceId, data: { projectId: i.projectId, name: i.name, start: day(i.startDate), end: day(i.endDate), closedAt: iso(i.closedAt) } }));
   },
+  valid: (_id, d) => !d || (isStr(d.projectId) && isStr(d.name) && optDate(d.start) && optDate(d.end) && optDate(d.closedAt)),
   async apply(db, _ctx, id, data) {
     if (!data) {
       await db.iteration.deleteMany({ where: { id } });
@@ -402,6 +468,7 @@ const planevent: EntityDef = {
     const rows = await db.planEvent.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
     return rows.map((e) => ({ id: e.id, spaceId: e.project.spaceId, data: { projectId: e.projectId, itemId: e.itemId, kind: e.kind, fromKey: e.fromKey, toKey: e.toKey, refId: e.refId, actorLogin: e.actorLogin, at: iso(e.at) } }));
   },
+  valid: (_id, d) => !d || (isStr(d.projectId) && isStr(d.itemId) && isStr(d.kind) && optStr(d.fromKey) && optStr(d.toKey) && optStr(d.refId) && optStr(d.actorLogin) && optDate(d.at)),
   async apply(db, _ctx, id, data) {
     if (!data) {
       await db.planEvent.deleteMany({ where: { id } });
@@ -424,6 +491,7 @@ const labelmap: EntityDef = {
     const repos = new Map((await db.repository.findMany({ where: { id: { in: rows.flatMap((r) => (r.repoKey ? [r.repoKey] : [])) } }, select: { id: true, githubId: true } })).map((r) => [r.id, r.githubId.toString()]));
     return rows.map((m) => ({ id: m.id, spaceId: commonSpaceId, data: { concept: m.concept, spelling: m.spelling, repoGithubId: m.repoKey ? (repos.get(m.repoKey) ?? null) : null } }));
   },
+  valid: (_id, d) => !d || (isStr(d.concept) && isStr(d.spelling) && optGid(d.repoGithubId)),
   async apply(db, ctx, id, data) {
     if (!data) {
       await db.labelMap.deleteMany({ where: { id } });
@@ -448,6 +516,7 @@ const upstreamsub: EntityDef = {
     const maps = new Map((await db.forkMapping.findMany({ where: { id: { in: rows.flatMap((r) => (r.mappingId ? [r.mappingId] : [])) } } })).map((m) => [m.id, m]));
     return rows.map((s) => ({ id: s.id, spaceId: commonSpaceId, data: { name: s.name, mappingId: s.mappingId && maps.has(s.mappingId) ? s.mappingId : null, criteria: s.criteria, muted: s.muted } }));
   },
+  valid: (_id, d) => !d || (isStr(d.name) && optStr(d.mappingId)),
   async apply(db, ctx, id, data) {
     if (!data) {
       await db.upstreamSubscription.deleteMany({ where: { id } });
@@ -467,6 +536,7 @@ const backport: EntityDef = {
     const rows = await db.backportRecord.findMany({ include: { mapping: { include: { fork: true } } } });
     return rows.map((b) => ({ id: b.id, spaceId: b.mapping.fork.spaceId, data: { mappingId: b.mappingId, upstreamNumber: b.upstreamNumber, targetBranch: b.targetBranch, state: b.state, evidence: b.evidence, localSha: b.localSha, note: b.note, byLogin: b.byLogin } }));
   },
+  valid: (_id, d) => !d || (isStr(d.mappingId) && isStr(d.targetBranch) && Number.isInteger(Number(d.upstreamNumber)) && optStr(d.state) && optStr(d.evidence) && optStr(d.localSha) && optStr(d.note) && optStr(d.byLogin)),
   async apply(db, _ctx, id, data) {
     if (!data) {
       await db.backportRecord.deleteMany({ where: { id } });
@@ -484,16 +554,29 @@ const availability: EntityDef = {
   type: "availability",
   order: 9,
   async list(db, { commonSpaceId }) {
+    // The entity id is derived from the login, not the row id: two devices that set one person's availability write the SAME entity
+    // (an ordinary merge) instead of two random ids that each side adopts and then tombstones. Rows made with an old random id are read
+    // under the derived id too, so they converge on the next capture.
     const rows = await db.reviewerAvailability.findMany();
-    return rows.map((a) => ({ id: a.id, spaceId: commonSpaceId, data: { login: a.login, from: iso(a.unavailableFrom), until: iso(a.unavailableUntil), backup: a.backupLogin, note: a.note } }));
+    return rows.filter((a) => ENTITY_ID.test(availabilityId(a.login))).map((a) => ({ id: availabilityId(a.login), spaceId: commonSpaceId, data: { login: a.login, from: iso(a.unavailableFrom), until: iso(a.unavailableUntil), backup: a.backupLogin, note: a.note } }));
   },
+  valid: (id, d) => !d || (isStr(d.login) && !!d.login && (!id.startsWith("avail-") || id === availabilityId(d.login)) && optDate(d.from) && optDate(d.until) && optStr(d.backup) && optStr(d.note)),
   async apply(db, ctx, id, data) {
     if (!data) {
-      await db.reviewerAvailability.deleteMany({ where: { id } });
+      // A derived id names the login. An old random id names nothing any more (its row is listed under the derived id): ignoring its
+      // tombstone is what keeps the old id's retirement from deleting the person's availability.
+      if (!id.startsWith("avail-")) return;
+      const rows = await db.reviewerAvailability.findMany({ where: { workspaceId: ctx.workspaceId } });
+      const gone = rows.filter((r) => availabilityId(r.login) === id).map((r) => r.id);
+      if (gone.length) await db.reviewerAvailability.deleteMany({ where: { id: { in: gone } } });
       return;
     }
     const f = { unavailableFrom: toDate(data.from), unavailableUntil: toDate(data.until), backupLogin: (data.backup as string | null) ?? null, note: (data.note as string | null) ?? null };
-    await db.reviewerAvailability.upsert({ where: { workspaceId_login: { workspaceId: ctx.workspaceId, login: String(data.login) } }, create: { id, workspaceId: ctx.workspaceId, login: String(data.login), ...f }, update: { id, ...f } });
+    const login = String(data.login);
+    // One row per person, whatever its id or the case of the login: the existing row is updated in place, never re-keyed.
+    const mine = (await db.reviewerAvailability.findMany({ where: { workspaceId: ctx.workspaceId } })).find((r) => availabilityId(r.login) === availabilityId(login));
+    if (mine) await db.reviewerAvailability.update({ where: { id: mine.id }, data: f });
+    else await db.reviewerAvailability.create({ data: { id: availabilityId(login), workspaceId: ctx.workspaceId, login, ...f } });
   },
 };
 
@@ -506,13 +589,18 @@ const forkmap: EntityDef = {
     const rows = await db.forkMapping.findMany({ where: { fork: { spaceId: { not: null } } }, include: { fork: true, upstream: true } });
     return rows.map((m) => ({ id: m.id, spaceId: m.fork.spaceId, data: { forkRepoGithubId: m.fork.githubId.toString(), upstreamRepoGithubId: m.upstream.githubId.toString(), forkBranch: m.forkBranch, upstreamBranch: m.upstreamBranch } }));
   },
+  valid: (_id, d) => !d || (isGid(d.forkRepoGithubId) && isGid(d.upstreamRepoGithubId) && isStr(d.forkBranch) && !!d.forkBranch && isStr(d.upstreamBranch) && !!d.upstreamBranch),
   async apply(db, ctx, id, data) {
+    // A mapping whose fork is not in this space (local-only, or another space) is this person's own: a remote file neither changes nor deletes it.
+    const current = await db.forkMapping.findUnique({ where: { id }, include: { fork: { select: { spaceId: true } } } });
+    if (current && current.fork.spaceId !== ctx.space.id) return APPLY_INVALID;
     if (!data) {
       await db.forkMapping.deleteMany({ where: { id } });
       return;
     }
     const fork = await repoByGithubId(db, ctx.workspaceId, data.forkRepoGithubId);
     const up = await repoByGithubId(db, ctx.workspaceId, data.upstreamRepoGithubId);
+    if (fork && fork.spaceId !== ctx.space.id) return APPLY_INVALID;
     if (!fork || !up) return false;
     const f = { forkRepoId: fork.id, upstreamRepoId: up.id, forkBranch: String(data.forkBranch), upstreamBranch: String(data.upstreamBranch) };
     await db.forkMapping.upsert({ where: { id }, create: { id, ...f }, update: f });
@@ -526,6 +614,8 @@ const triage: EntityDef = {
     const rows = await db.upstreamIssueTriage.findMany({ where: { mapping: { fork: { spaceId: { not: null } } } }, include: { mapping: { include: { fork: true } } } });
     return rows.map((t) => ({ id: t.id, spaceId: t.mapping.fork.spaceId, data: { mappingId: t.mappingId, issueNumber: t.issueNumber, title: t.title, htmlUrl: t.htmlUrl, status: t.status, note: t.note } }));
   },
+  valid: (_id, d) =>
+    !d || (isStr(d.mappingId) && Number.isInteger(Number(d.issueNumber)) && isStr(d.title) && isStr(d.htmlUrl) && oneOf(d.status, ["UNTRIAGED", "WATCHING", "RELEVANT", "ADDRESSED", "IGNORED"]) && optStr(d.note)),
   async apply(db, _ctx, id, data) {
     if (!data) {
       await db.upstreamIssueTriage.deleteMany({ where: { id } });
@@ -558,6 +648,10 @@ const waiting: EntityDef = {
     }
     return out;
   },
+  valid: (_id, d) =>
+    !d ||
+    (optGid(d.workRepoGithubId) && num(d.workNumber) && optStr(d.cardId) && oneOf(d.reviewerKind, ["USER", "TEAM", "EXTERNAL_ROLE"]) && isStr(d.reviewerRef) && isStr(d.reason) && optStr(d.stage) &&
+      oneOf(d.status, ["PENDING", "SATISFIED", "CANCELLED", "STALE"]) && isStr(d.startedAt) && optDate(d.startedAt) && optDate(d.clearedAt) && optStr(d.clearReason)),
   async apply(db, ctx, id, data) {
     if (!data) {
       await db.waitingRecord.deleteMany({ where: { id } });
@@ -576,10 +670,21 @@ const waiting: EntityDef = {
   },
 };
 
-export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, epic, iteration, card, board, planevent, taskcomment, checkitem, rule, waitrule, forkmap, triage, waiting, view, availability, labelmap, upstreamsub, backport];
+/** Every apply checks the id and the shape first, so a malformed remote entity answers APPLY_INVALID instead of throwing mid-pull. */
+const guarded = (d: EntityDef): EntityDef => ({
+  ...d,
+  async apply(db, ctx, id, data, version) {
+    if (typeof id !== "string" || !ENTITY_ID.test(id)) return APPLY_INVALID;
+    if (data !== null && (typeof data !== "object" || Array.isArray(data))) return APPLY_INVALID;
+    if (d.valid && !d.valid(id, data)) return APPLY_INVALID;
+    return d.apply(db, ctx, id, data, version);
+  },
+});
+
+export const ENTITY_TYPES: EntityDef[] = [repo, project, milestone, epic, iteration, card, board, planevent, taskcomment, checkitem, rule, waitrule, forkmap, triage, waiting, view, availability, labelmap, upstreamsub, backport].map(guarded);
 export const entityDef = (type: string) => ENTITY_TYPES.find((t) => t.type === type);
 export const entityPath = (type: string, id: string) => `entities/${type}/${id}.json`;
 export const parseEntityPath = (path: string): { type: string; id: string } | null => {
-  const m = /^entities\/([a-z]+)\/([A-Za-z0-9_-]+)\.json$/.exec(path);
+  const m = /^entities\/([a-z]+)\/([A-Za-z0-9_-]{1,128})\.json$/.exec(path);
   return m ? { type: m[1], id: m[2] } : null;
 };

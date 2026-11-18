@@ -21,6 +21,8 @@ export class FakeGitHubOAuth {
   readonly tokens = new Map<string, bigint>();
   readonly requests: { method: string; path: string; body: Record<string, string> }[] = [];
   url = "";
+  /** When set, `/users/{login}` lookups wait for it (a test acts on the hub while an invite lookup is in flight). */
+  lookupGate: Promise<void> | null = null;
 
   async start(): Promise<void> {
     await new Promise<void>((r) => this.server.listen(0, "127.0.0.1", r));
@@ -111,6 +113,7 @@ export class FakeGitHubOAuth {
       // api.github.com/users/{login}: public profile; the hub sends the OAuth App's Basic credentials, anything else is refused.
       const auth = req.headers.authorization ?? "";
       if (auth !== `Basic ${Buffer.from("test-client:test-secret").toString("base64")}`) return send(401, { message: "Bad credentials" });
+      await this.lookupGate;
       const login = decodeURIComponent(userByLogin[1]).toLowerCase();
       const u = [...this.users.values()].find((x) => x.login.toLowerCase() === login);
       if (!u) return send(404, { message: "Not Found" });

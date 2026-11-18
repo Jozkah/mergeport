@@ -19,6 +19,7 @@ export type HubLinkStatus = { state: "live" | "reconnecting" | "offline"; pendin
 
 export type HubRole = "OWNER" | "ADMIN" | "MEMBER" | "READER";
 export type HubMember = { githubId: string; login: string; name: string | null; avatarUrl: string | null; role: HubRole; status: "INVITED" | "ACTIVE" | "REMOVED" };
+export type HubPendingInvite = { id: string; login: string; githubId: string | null; role: HubRole; invitedBy: string | null; createdAt: string; expiresAt: string };
 export type HubSpaceInfo = { id: string; kind: "COMMON" | "RESTRICTED"; name: string; canWrite: boolean; seq: string };
 export type HubSpaceMember = { githubId: string; canWrite: boolean };
 export type HubAdminSpace = { id: string; kind: "COMMON" | "RESTRICTED"; name: string; members: HubSpaceMember[] };
@@ -31,6 +32,10 @@ export type HubAdminApi = {
   me(): Promise<{ member: HubMember; team: { name: string }; members: HubMember[]; spaces: HubSpaceInfo[]; webhooks: HubWebhooks }>;
   invite(login: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void>;
   removeMember(githubId: string): Promise<void>;
+  /** ADMIN+ only: invites not yet used or expired. */
+  pendingInvites(): Promise<HubPendingInvite[]>;
+  /** ADMIN+ only (an ADMIN-role invite needs the owner): withdraws a pending invite. */
+  cancelInvite(id: string): Promise<void>;
   /** OWNER only: removed members, who /me no longer lists. */
   removedMembers(): Promise<HubMember[]>;
   /** OWNER only: gives a removed member access again, as `role`, in the common space only. */

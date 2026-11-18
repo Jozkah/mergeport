@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, Space } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { GithubError } from "@/lib/github/port";
-import { HubError, type Backend, type EntityEvent, type HubClient } from "@/lib/hub/types";
+import { HubError, isHubRevocationAnswer, type Backend, type EntityEvent, type HubClient } from "@/lib/hub/types";
 import { assertBackendMatch, BackendMismatchError } from "@/lib/local/backend-guard";
 import type { Backend as ProfileBackend } from "@/lib/local/backends";
 import { mapLimit } from "@/lib/util";
-import { ENTITY_SCHEMA, ENTITY_TYPES, entityDef, entityPath, parseEntityPath, type Ctx, type EntityDef, type Listed } from "./entities";
+import { APPLY_INVALID, ENTITY_SCHEMA, ENTITY_TYPES, entityDef, entityPath, parseEntityPath, type Ctx, type EntityDef, type Listed } from "./entities";
 import { same, threeWayMerge, type Data } from "./merge";
 import { CoordinationStore, HeadMovedError, type Head } from "./store";
 
@@ -44,6 +44,24 @@ export function parseManifest(text: string): Manifest | { error: string } {
 /** One local copy a hub restore replaced. */
 export type RestoreEntry = { type: string; entityId: string; deleted: boolean; data: Data; resend: boolean; /** The hub's version of the entity when the restore was detected (0: absent). */ hubVersion: number };
 const RESTORE_DETAIL_CAP = 100;
+
+/**
+ * A hub entity that could not be applied (a related entity is missing, or applying it failed) does not hold the cursor: it is kept on the
+ * space and retried on later pulls, at most this many times and for at most this long, then given up with a visible note.
+ */
+export const HUB_DEFER_MAX_ATTEMPTS = 10;
+export const HUB_DEFER_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
+type HubDeferred = { type: string; id: string; seq: string; file: EntityFile; attempts: number; since: string; error: string; gaveUp?: boolean };
+const deferredKey = (d: { type: string; id: string }) => `${d.type}/${d.id}`;
+function readDeferred(v: unknown): HubDeferred[] {
+  return Array.isArray(v) ? (v as HubDeferred[]).filter((d) => d && typeof d.type === "string" && typeof d.id === "string" && typeof d.seq === "string" && !!d.file) : [];
+}
+/** Only the entity file's own fields (an event also carries a bigint seq that JSON cannot hold). */
+const fileOnly = (f: EntityFile): EntityFile => ({ schema: f.schema, type: f.type, id: f.id, version: f.version, deleted: f.deleted, appliedOps: f.appliedOps, updatedAt: f.updatedAt, updatedBy: f.updatedBy, data: f.data });
+/** A hub entity this client cannot even try to apply. */
+const malformed = (f: EntityFile) => typeof f.id !== "string" || !Number.isInteger(f.version) || typeof f.schema !== "number" || (!f.deleted && (typeof f.data !== "object" || f.data === null || Array.isArray(f.data)));
+/** SyncEntity.meta keeps `own` (this profile sent the entity to the space) across later pulls. */
+const ownMeta = (meta: unknown) => ((meta as { own?: boolean } | null)?.own ? { own: true } : {});
 
 export type EntityFile = { schema: number; type: string; id: string; version: number; deleted: boolean; appliedOps: string[]; updatedAt: string; updatedBy: { id: string; login: string }; data: Data };
 
@@ -235,7 +253,7 @@ export class SyncEngine {
         break;
       }
     } catch (e) {
-      await this.handleHubError(space, e, "read");
+      await this.handleHubError(space, e, "read", client);
       return { changed: false, applied: 0 };
     }
 
@@ -253,6 +271,24 @@ export class SyncEngine {
       }
       items = [...latest.values()];
     }
+    // Entities deferred by earlier pulls are retried, unless a newer copy arrived (it replaces them) or a snapshot now carries the whole state.
+    const now = this.now();
+    const prevDeferred = new Map(readDeferred(space.hubDeferred).map((d) => [deferredKey(d), d]));
+    const keep: HubDeferred[] = [];
+    if (!snapshot) {
+      const arrived = new Set(items.map((i) => deferredKey(i.file)));
+      for (const d of prevDeferred.values()) {
+        if (arrived.has(deferredKey(d))) continue;
+        if (d.gaveUp) keep.push(d);
+        else items.push({ file: d.file, seq: BigInt(d.seq) });
+      }
+    }
+    const skippedMalformed: string[] = [];
+    items = items.filter((i) => {
+      if (!malformed(i.file)) return true;
+      skippedMalformed.push(`${i.file.type}/${String(i.file.id)}: malformed`);
+      return false;
+    });
     let vanished: { type: string; entityId: string; baseVersion: number }[] = [];
     if (snapshot) {
       const present = new Set(snapshot.entities.map((f) => `${f.type}/${f.id}`));
@@ -261,31 +297,35 @@ export class SyncEngine {
 
     const ctx = await this.ctx(space);
     const replaced = restored && snapshot ? await this.collectRestoreLoss(ctx, snapshot.entities, restored === "certain") : null;
-    const { applied, skipped, failedSeq } = await this.applyHubEntities(ctx, items, vanished);
-    if (failedSeq !== null) {
-      // The cursor stays before the first entity that could not be applied, so the next pull retries it.
-      if (snapshot) {
-        cursor = start;
-        cursorOp = space.hubCursorOp;
-      } else if (failedSeq - 1n < cursor) {
-        cursor = failedSeq - 1n < start ? start : failedSeq - 1n;
-        // The op at a cursor this far back is not known here; the hub skips the position check when it is not given one.
-        cursorOp = cursor === start ? space.hubCursorOp : "";
-      }
-    } else if (replaced && (replaced.rolledBack > 0 || (restored === "certain" && replaced.kept > 0))) {
+    const { applied, skipped, failed } = await this.applyHubEntities(ctx, items, vanished);
+    if (replaced && (replaced.rolledBack > 0 || (restored === "certain" && replaced.kept > 0))) {
       // Unsent edits alone are not a loss; after a mere restart (suspected) they are not worth a notice.
       await this.db.hubRestore.create({ data: { spaceId: space.id, rolledBack: replaced.rolledBack, kept: replaced.kept, detail: replaced.detail as Prisma.InputJsonValue } });
       this.emit(space.id, "state");
     }
+    // The cursor always moves past what was read. What could not be applied waits on the space instead, so one bad entity never makes every
+    // later pull re-read the tail (or take a snapshot) and never pins the hub's history for the whole space.
+    const notes = [...skippedMalformed, ...skipped];
+    for (const f of failed) {
+      const prev = prevDeferred.get(deferredKey(f.file));
+      const again = prev && prev.seq === String(f.seq) && prev.file.version === f.file.version;
+      const attempts = (again ? prev.attempts : 0) + 1;
+      const since = again ? prev.since : now.toISOString();
+      const gaveUp = attempts >= HUB_DEFER_MAX_ATTEMPTS || now.getTime() - new Date(since).getTime() >= HUB_DEFER_MAX_AGE_MS;
+      keep.push({ type: f.file.type, id: f.file.id, seq: String(f.seq), file: fileOnly(f.file), attempts, since, error: f.error, ...(gaveUp ? { gaveUp: true } : {}) });
+      notes.push(gaveUp ? `${f.file.type}/${f.file.id}: gave up after ${attempts} attempt(s): ${f.error}` : `${f.file.type}/${f.file.id}: ${f.error}`);
+    }
+    for (const d of keep) if (d.gaveUp && !failed.some((f) => deferredKey(f.file) === deferredKey(d))) notes.push(`${d.type}/${d.id}: gave up after ${d.attempts} attempt(s): ${d.error}`);
 
-    const now = this.now();
     const moved = cursor !== start;
     await this.db.space.update({
       where: { id: space.id },
       data: {
-        hubCursor: cursor, hubCursorOp: cursorOp, hubEpoch: failedSeq !== null && snapshot ? space.hubEpoch : epoch, lastPolledAt: now, ...(applied || moved ? { lastChangedAt: now, unchangedPolls: 0 } : {}),
+        hubCursor: cursor, hubCursorOp: cursorOp, hubEpoch: epoch, lastPolledAt: now, ...(applied || moved ? { lastChangedAt: now, unchangedPolls: 0 } : {}),
         rateLimitedUntil: null,
-        lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity(ies): ${skipped[0]}` : null,
+        hubDeferred: keep as unknown as Prisma.InputJsonValue,
+        deferredCount: keep.filter((d) => !d.gaveUp).length,
+        lastError: notes.length ? `Skipped ${notes.length} unreadable entity(ies): ${notes[0]}` : null,
       },
     });
     await this.schedule({ ...space, unchangedPolls: applied || moved ? 0 : space.unchangedPolls }, applied || moved ? "changed" : "unchanged");
@@ -362,11 +402,8 @@ export class SyncEngine {
     const space = ctx.space;
     let applied = 0;
     const skipped: string[] = [];
-    let failedSeq: bigint | null = null;
-    const fail = (seq: bigint, msg: string) => {
-      skipped.push(msg);
-      if (failedSeq === null || seq < failedSeq) failedSeq = seq;
-    };
+    const failed: { file: EntityFile; seq: bigint; error: string }[] = [];
+    const fail = (file: EntityFile, seq: bigint, error: string) => failed.push({ file, seq, error });
     for (const def of ENTITY_TYPES) {
       const local = await this.localMap(def, ctx.commonSpaceId);
       const appliedHere: { id: string; data: Data }[] = [];
@@ -386,12 +423,13 @@ export class SyncEngine {
             applied++;
             if (r.data) appliedHere.push({ id: file.id, data: r.data });
           } else {
-            // Not recorded: a prerequisite entity is not there yet. Hold the cursor so it is retried.
+            // Not recorded: a prerequisite entity is not there yet. Deferred and retried by later pulls.
             const se = await this.db.syncEntity.findUnique({ where: { spaceId_type_entityId: { spaceId: space.id, type: def.type, entityId: file.id } } });
-            if (!se || se.baseVersion !== file.version) fail(seq, `${name}: waiting for a related entity`);
+            if (!se || se.baseVersion !== file.version) fail(file, seq, "waiting for a related entity");
           }
         } catch (e) {
-          fail(seq, `${name}: ${e instanceof Error ? e.message : "could not be applied"}`);
+          // Applying garbage must never abort the pull: the entity is deferred like a missing prerequisite.
+          fail(file, seq, e instanceof Error ? e.message : "could not be applied");
         }
       }
       for (const v of vanished.filter((s) => s.type === def.type)) {
@@ -399,13 +437,24 @@ export class SyncEngine {
         if (owner?.spaceId && owner.spaceId !== space.id) continue;
         const hasLocalEdits = (await this.db.outboxOp.count({ where: { spaceId: space.id, entityType: def.type, entityId: v.entityId, status: { in: ["PENDING", "SENT", "CONFLICT"] } } })) > 0;
         if (hasLocalEdits) continue;
-        await def.apply(this.db, ctx, v.entityId, null, v.baseVersion);
+        try {
+          await def.apply(this.db, ctx, v.entityId, null, v.baseVersion);
+        } catch (e) {
+          skipped.push(`${def.type}/${v.entityId}: ${e instanceof Error ? e.message : "could not be removed"}`);
+          continue;
+        }
         await this.db.syncEntity.update({ where: { spaceId_type_entityId: { spaceId: space.id, type: def.type, entityId: v.entityId } }, data: { deleted: true, remoteSha: null } });
         applied++;
       }
-      if (def.post && appliedHere.length) await def.post(this.db, ctx, appliedHere);
+      if (def.post && appliedHere.length) {
+        try {
+          await def.post(this.db, ctx, appliedHere);
+        } catch (e) {
+          skipped.push(`${def.type}: ${e instanceof Error ? e.message : "links could not be applied"}`);
+        }
+      }
     }
-    return { applied, skipped, failedSeq: failedSeq as bigint | null };
+    return { applied, skipped, failed };
   }
 
   private async pullGithub(space0: Space): Promise<{ changed: boolean; applied: number }> {
@@ -496,7 +545,7 @@ export class SyncEngine {
         // overwritten, moved or deleted by a file (or tombstone) arriving from here.
         const row = local.get(f.id);
         if (row?.spaceId && row.spaceId !== space.id) continue;
-        let r: { applied: boolean; data: Data | null; deferred?: boolean };
+        let r: { applied: boolean; data: Data | null; deferred?: boolean; invalid?: boolean };
         try {
           r = await this.reconcile(ctx, def, parsed, f.sha, row?.data ?? null);
         } catch (e) {
@@ -504,6 +553,7 @@ export class SyncEngine {
           continue;
         }
         if (r.deferred) deferred++;
+        if (r.invalid) skipped.push(`${f.type}/${f.id}: not applicable here`);
         if (r.applied) {
           applied++;
           if (r.data) appliedHere.push({ id: f.id, data: r.data });
@@ -530,7 +580,7 @@ export class SyncEngine {
   }
 
   /** One entity: apply remote, merge with local edits, or record a conflict. */
-  private async reconcile(ctx: Ctx, def: EntityDef, file: EntityFile, sha: string, local: Data | null): Promise<{ applied: boolean; data: Data | null; deferred?: boolean }> {
+  private async reconcile(ctx: Ctx, def: EntityDef, file: EntityFile, sha: string, local: Data | null): Promise<{ applied: boolean; data: Data | null; deferred?: boolean; invalid?: boolean }> {
     const spaceId = ctx.space.id;
     const key = { spaceId_type_entityId: { spaceId, type: def.type, entityId: file.id } };
     const se = await this.db.syncEntity.findUnique({ where: key });
@@ -553,13 +603,13 @@ export class SyncEngine {
     }
     // The remote file is exactly what we last agreed on (our own push, seen again): only remember its blob id.
     if (se && se.baseVersion === file.version && file.deleted === se.deleted && (file.deleted || same(file.data, base))) {
-      await this.db.syncEntity.update({ where: key, data: { remoteSha: sha, meta: { applied: file.appliedOps } as Prisma.InputJsonValue } });
+      await this.db.syncEntity.update({ where: key, data: { remoteSha: sha, meta: { ...ownMeta(se.meta), applied: file.appliedOps } as Prisma.InputJsonValue } });
       return { applied: false, data: null };
     }
     const localChanged = !!pending || (!!se && local !== null && !same(local, base)) || localDeleted;
 
     const record = async (data: Data | null) => {
-      const meta = { applied: file.appliedOps };
+      const meta = { ...ownMeta(se?.meta), applied: file.appliedOps };
       const row = { path: entityPath(def.type, file.id), remoteSha: sha, baseVersion: file.version, baseData: (data ?? {}) as Prisma.InputJsonValue, meta: meta as Prisma.InputJsonValue, deleted: data === null };
       await this.db.syncEntity.upsert({ where: key, create: { spaceId, type: def.type, entityId: file.id, ...row }, update: row });
     };
@@ -567,6 +617,7 @@ export class SyncEngine {
     if (!localChanged) {
       const ok = await def.apply(this.db, ctx, file.id, remoteData, file.version);
       if (ok === false) return { applied: false, data: null, deferred: true };
+      if (ok === APPLY_INVALID) return { applied: false, data: null, invalid: true }; // never recorded: recording it would make capture push a deletion
       await record(remoteData);
       return { applied: true, data: remoteData };
     }
@@ -676,7 +727,7 @@ export class SyncEngine {
       } catch (e) {
         // Whether the hub applied them is unknown for network errors: the operation id makes the retry idempotent.
         await this.db.outboxOp.updateMany({ where: { id: { in: ops.map((o) => o.id) }, status: "SENT" }, data: { status: "PENDING", error: e instanceof Error ? e.message : String(e) } });
-        await this.handleHubError(space, e, "write");
+        await this.handleHubError(space, e, "write", client);
         return { sent };
       }
       // Access removed while the request was in flight: revokeSpace already quarantined these operations and dropped the
@@ -690,7 +741,8 @@ export class SyncEngine {
         const se = await this.db.syncEntity.findUnique({ where: keyOf(op.entityType, op.entityId) });
         const settle = async (version: number) => {
           const applied = [...(((se?.meta as { applied?: string[] } | null)?.applied ?? []).slice(-49)), op.id];
-          const row = { path: entityPath(op.entityType, op.entityId), remoteSha: null, baseVersion: version, baseData: ((op.kind === "DELETE" ? {} : op.data) ?? {}) as Prisma.InputJsonValue, meta: { applied } as Prisma.InputJsonValue, deleted: op.kind === "DELETE" };
+          // `own`: this profile put the entity in the space (it existed here first), so a revocation detaches it instead of purging it.
+          const row = { path: entityPath(op.entityType, op.entityId), remoteSha: null, baseVersion: version, baseData: ((op.kind === "DELETE" ? {} : op.data) ?? {}) as Prisma.InputJsonValue, meta: { ...(se ? ownMeta(se.meta) : { own: true }), applied } as Prisma.InputJsonValue, deleted: op.kind === "DELETE" };
           await this.db.syncEntity.upsert({ where: keyOf(op.entityType, op.entityId), create: { spaceId: space.id, type: op.entityType, entityId: op.entityId, ...row }, update: row });
         };
         if (!r) {
@@ -733,7 +785,7 @@ export class SyncEngine {
       } catch (e) {
         // A local failure while recording results must not strand operations in SENT: the hub's duplicate answer makes the retry safe.
         await this.db.outboxOp.updateMany({ where: { id: { in: ops.map((o) => o.id) }, status: "SENT" }, data: { status: "PENDING", error: e instanceof Error ? e.message : String(e) } });
-        await this.handleHubError(space, e, "write");
+        await this.handleHubError(space, e, "write", client);
         return { sent };
       }
       if (!rewritten) break;
@@ -942,7 +994,18 @@ export class SyncEngine {
     return !s || s.access === "REVOKED";
   }
 
-  private async handleHubError(space: Space, e: unknown, phase: "read" | "write"): Promise<void> {
+  /** True only when the hub itself confirms: /me answers 403 `removed`, or lists this member's spaces without this one. */
+  private async hubConfirmsRevoked(space: Space, client: HubClient | undefined): Promise<boolean> {
+    if (!client) return false;
+    try {
+      const me = await client.me();
+      return Array.isArray(me?.spaces) && !me.spaces.some((s) => s.id === space.hubSpaceId);
+    } catch (err) {
+      return isHubRevocationAnswer(err) && (err as HubError).kind === "forbidden";
+    }
+  }
+
+  private async handleHubError(space: Space, e: unknown, phase: "read" | "write", client?: HubClient): Promise<void> {
     if (!(e instanceof HubError)) {
       await this.schedule(space, "error");
       await this.db.space.update({ where: { id: space.id }, data: { lastError: e instanceof Error ? e.message : String(e) } });
@@ -955,9 +1018,18 @@ export class SyncEngine {
     } else if (e.kind === "auth") {
       await this.schedule(space, "error");
       await this.db.space.update({ where: { id: space.id }, data: { lastError: "Sign in to the server again" } });
-    } else if (e.kind === "not-found" || (e.kind === "forbidden" && phase === "read")) {
-      await this.revokeSpace(space.id, "Access to this space was removed");
-    } else if (e.kind === "forbidden") {
+    } else if (isHubRevocationAnswer(e)) {
+      // The hub's own "not yours any more" answer. Before anything is purged, its member listing must agree.
+      if (await this.hubConfirmsRevoked(space, client)) await this.revokeSpace(space.id, "Access to this space was removed");
+      else {
+        await this.schedule(space, "error");
+        await this.db.space.update({ where: { id: space.id }, data: { lastError: "The server said this space is not available, but still lists it for you. Nothing was removed; retrying." } });
+      }
+    } else if ((e.kind === "not-found" || e.kind === "forbidden") && e.reason === undefined) {
+      // Not the hub's JSON error: a proxy's default site, a firewall page, a misrouted request. Treated like a network error.
+      await this.schedule(space, "error");
+      await this.db.space.update({ where: { id: space.id }, data: { lastError: `The server address answered ${e.status ?? e.kind} without a Mergeport error (a proxy or firewall?). Nothing was removed; retrying.` } });
+    } else if (e.kind === "forbidden" && phase === "write") {
       // Lost write permission but maybe still readable: fall back to read-only and keep the edits for a person to decide on.
       await this.db.space.update({ where: { id: space.id }, data: { canWrite: false, lastError: "You no longer have write access to this space." } });
       await this.db.outboxOp.updateMany({ where: { spaceId: space.id, status: { in: ["PENDING", "SENT"] } }, data: { status: "QUARANTINED", error: "Write access was removed" } });
@@ -987,9 +1059,24 @@ export class SyncEngine {
     } else {
       const ctx = await this.ctx(space);
       const entities = await this.db.syncEntity.findMany({ where: { spaceId } });
+      // Hub spaces never carry an admin bit. What this profile put into a hub space itself (it existed here first) is detached and stays
+      // local, like the admin branch above; only what exists here solely because the space delivered it is purged.
+      const own = (se: { meta: unknown }) => space.backend === "HUB" && !!ownMeta(se.meta).own;
+      const keepRepos = new Set(entities.filter((se) => se.type === "repo" && own(se) && /^repo-\d+$/.test(se.entityId)).map((se) => BigInt(se.entityId.replace(/^repo-/, ""))));
+      const ownMaps = entities.filter((se) => se.type === "forkmap" && own(se)).map((se) => se.entityId);
+      for (const m of ownMaps.length ? await this.db.forkMapping.findMany({ where: { id: { in: ownMaps } }, include: { fork: true, upstream: true } }) : []) {
+        keepRepos.add(m.fork.githubId);
+        keepRepos.add(m.upstream.githubId);
+      }
+      const ownProjects = entities.filter((se) => se.type === "project" && own(se)).map((se) => se.entityId);
+      if (ownProjects.length) await this.db.project.updateMany({ where: { spaceId, id: { in: ownProjects } }, data: { spaceId: null } });
+      if (keepRepos.size) await this.db.repository.updateMany({ where: { spaceId, githubId: { in: [...keepRepos] } }, data: { spaceId: null } });
       for (const def of [...ENTITY_TYPES].reverse()) {
         if (def.type === "repo") continue;
-        for (const se of entities.filter((e) => e.type === def.type)) await def.apply(this.db, ctx, se.entityId, null, se.baseVersion).catch(() => {});
+        for (const se of entities.filter((e) => e.type === def.type)) {
+          if (own(se)) continue;
+          await def.apply(this.db, ctx, se.entityId, null, se.baseVersion).catch(() => {});
+        }
       }
       // Repositories last: removing them cascades their cached issues, pull requests and comments.
       await this.db.repository.deleteMany({ where: { spaceId } });
@@ -1020,6 +1107,8 @@ export class SyncEngine {
   async refreshRole(): Promise<void> {
     const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
     if (!team || team.mode === "PERSONAL") return;
+    // A hub profile's role is the hub's member role (set by syncHubSpaces); hub spaces never carry an admin bit, so never downgrade from one.
+    if (team.backend === "HUB") return;
     const common = team.commonSpaceId ? await this.db.space.findUnique({ where: { id: team.commonSpaceId } }) : null;
     const admin = !!common && common.access === "OK" && common.canAdmin;
     await this.db.member.updateMany({ where: { status: "ACTIVE" }, data: { role: admin ? "ADMIN" : "MEMBER" } });

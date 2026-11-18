@@ -6,7 +6,7 @@ import { ValidationError } from "@/lib/errors";
 import { audit } from "./audit";
 import { addCheckItems } from "./checklist";
 import { createIssue } from "./work-actions";
-import { createTask, loadTask } from "./tasks";
+import { createTask, loadTask, loadTaskForWrite } from "./tasks";
 
 /** Starting a task from a built-in template, and turning a local task into a GitHub issue without losing its identity. */
 
@@ -58,6 +58,7 @@ export async function previewPromotion(db: Db, v: Viewer, taskId: string, reposi
  * identity. A task that already follows an item cannot be promoted twice.
  */
 export async function promoteTask(db: Db, v: Viewer, taskId: string, repositoryId: string, port?: GithubPort) {
+  await loadTaskForWrite(db, v, taskId); // links the shared card to the new issue, so a read-only project must refuse before anything is created on GitHub
   const preview = await previewPromotion(db, v, taskId, repositoryId);
   const repo = await requireRepo(db, v, repositoryId, "manageWork");
   const created = await createIssue({ db, v, port }, repositoryId, { title: preview.title, body: preview.body, labels: preview.labels });

@@ -132,7 +132,7 @@ describe("hub guards", () => {
     expect(sp.hubCursor).toBe(hub.seq("common"));
   });
 
-  it("an entity that throws is retried next pull, cursor held, others applied", async () => {
+  it("an entity that throws is deferred and retried, the cursor moves on, others applied", async () => {
     hub.inject("common", { type: "project", id: "p1", data: projectData("Atlas", "atlas") });
     hub.inject("common", { type: "project", id: "p2", data: projectData("Clash", "atlas") }); // unique slug violation
     hub.inject("common", { type: "card", id: "c1", data: cardData("p1", "Fine") });
@@ -140,7 +140,7 @@ describe("hub guards", () => {
     expect(await alice.db.project.findUnique({ where: { id: "p2" } })).toBeNull();
     expect(await alice.db.planningItem.findUnique({ where: { id: "c1" } })).not.toBeNull();
     let sp = await alice.space("common");
-    expect(sp.hubCursor).toBe(1n);
+    expect(sp.hubCursor).toBe(hub.seq("common"));
     expect(sp.lastError).toMatch(/^Skipped 1 unreadable entity/);
     hub.inject("common", { type: "project", id: "p2", data: projectData("Clash", "clash") });
     await alice.sync();
@@ -686,16 +686,20 @@ describe("hub live", () => {
     expect(await alice.db.outboxOp.count()).toBe(0);
   });
 
-  it("403 on read revokes the space; 404 on write revokes it and quarantines unsent ops", async () => {
+  it("the hub's 403 `removed` on read revokes the space; its 404 `space not found` on write, confirmed by /me, revokes it and quarantines unsent ops", async () => {
     await prepare(alice, olive);
-    hub.failNext(1, "forbidden");
+    hub.failNext(1, "forbidden"); // a bare 403 is not the hub's answer: nothing is removed
+    await alice.engine.syncSpace(await alice.space("common"));
+    expect((await alice.space("common")).access).toBe("OK");
+    hub.removeMember("2");
     await alice.engine.syncSpace(await alice.space("common"));
     expect((await alice.space("common")).access).toBe("REVOKED");
     expect(await alice.db.project.count()).toBe(0);
 
     await olive.db.planningItem.update({ where: { id: "c1" }, data: { title: "Unsent" } });
     await olive.engine.capture();
-    vi.spyOn(olive.client, "push").mockRejectedValueOnce(new HubError("not-found", "gone", { status: 404 }));
+    hub.deleteSpace("common");
+    vi.spyOn(olive.client, "push").mockRejectedValueOnce(new HubError("not-found", "gone", { status: 404, reason: "space not found" }));
     await olive.engine.pushSpace(await olive.space("common"));
     expect((await olive.space("common")).access).toBe("REVOKED");
     expect((await olive.db.outboxOp.findMany()).map((o) => o.status)).toEqual(["QUARANTINED"]);

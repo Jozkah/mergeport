@@ -124,8 +124,8 @@ export function adminRoutes(): Route<HubContext>[] {
         req,
         z.object({ githubLogin: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/), role: z.enum(["READER", "MEMBER", "ADMIN"]) }),
       );
-      const actor = fresh(ctx, first.githubId, "ADMIN");
-      if (body.role === "ADMIN") requireRole(actor, "OWNER");
+      const early = fresh(ctx, first.githubId, "ADMIN");
+      if (body.role === "ADMIN") requireRole(early, "OWNER");
       const active = ctx.db.prepare("SELECT 1 FROM member WHERE lower(login) = lower(?) AND status = 'ACTIVE'").get(body.githubLogin);
       if (active) throw new HttpError(409, "already a member");
       const removed = ctx.db.prepare("SELECT 1 FROM member WHERE lower(login) = lower(?) AND status = 'REMOVED'").get(body.githubLogin);
@@ -133,6 +133,9 @@ export function adminRoutes(): Route<HubContext>[] {
       // Bind the invite to the numeric id now: a login can be renamed or reassigned, an id cannot.
       const gh = await lookupGithubUser(ctx.config, body.githubLogin);
       if (!gh) throw new HttpError(404, "GitHub user not found");
+      // The lookup is a network wait: the inviter may have been demoted or removed meanwhile, so re-apply the floor right before the insert.
+      const actor = fresh(ctx, first.githubId, "ADMIN");
+      if (body.role === "ADMIN") requireRole(actor, "OWNER");
       const byId = getMember(ctx.db, gh.id);
       if (byId?.status === "ACTIVE") throw new HttpError(409, "already a member");
       if (byId?.status === "REMOVED") throw new HttpError(409, "member was removed; the owner can reinstate them");
@@ -149,6 +152,44 @@ export function adminRoutes(): Route<HubContext>[] {
         .prepare("INSERT INTO invite (id, github_login, github_id, role, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .run(invite.id, invite.githubLogin, gh.id, invite.role, actor.githubId, invite.createdAt, invite.expiresAt);
       json(res, 201, { invite });
+    }),
+
+    /** Pending = unused and unexpired, the same test the sign-in path applies. Never returns anything secret. */
+    route<HubContext>("GET", "/admin/invites", (ctx, req, res) => {
+      admin(ctx, req);
+      const rows = ctx.db
+        .prepare(
+          `SELECT i.id, i.github_login, i.github_id, i.role, i.created_at, i.expires_at, m.login AS invited_by
+           FROM invite i LEFT JOIN member m ON m.github_id = i.created_by
+           WHERE i.used_at IS NULL AND i.expires_at > ? ORDER BY i.created_at, i.id`,
+        )
+        .safeIntegers(true)
+        .all(new Date(ctx.now()).toISOString()) as { id: string; github_login: string; github_id: bigint | null; role: string; created_at: string; expires_at: string; invited_by: string | null }[];
+      json(res, 200, {
+        invites: rows.map((r) => ({
+          id: r.id,
+          login: r.github_login,
+          githubId: r.github_id === null ? null : r.github_id.toString(),
+          role: r.role,
+          invitedBy: r.invited_by,
+          createdAt: r.created_at,
+          expiresAt: r.expires_at,
+        })),
+      });
+    }),
+
+    /** Withdraws a pending invite (row deleted, so sign-in no longer finds it). An ADMIN cannot withdraw an ADMIN-role invite, as they cannot create one. */
+    route<HubContext>("DELETE", "/admin/invites/:id", (ctx, req, res, params) => {
+      const first = admin(ctx, req);
+      ctx.db.transaction(() => {
+        const actor = fresh(ctx, first.githubId, "ADMIN");
+        const inv = ctx.db.prepare("SELECT role FROM invite WHERE id = ? AND used_at IS NULL AND expires_at > ?").get(params.id, new Date(ctx.now()).toISOString()) as { role: string } | undefined;
+        if (!inv) throw new HttpError(404, "invite not found");
+        if (inv.role === "ADMIN") requireRole(actor, "OWNER");
+        ctx.db.prepare("DELETE FROM invite WHERE id = ?").run(params.id);
+      })();
+      ctx.log.info("invite cancelled", { inviteId: params.id });
+      noContent(res);
     }),
 
     route<HubContext>("DELETE", "/admin/members/:githubId", (ctx, req, res, params) => {

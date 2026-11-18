@@ -130,7 +130,7 @@ describe("redelivery after a failed relay", () => {
 
 describe("shared-space lookup index", () => {
   it("the query uses entity_repo_github, not a table scan", () => {
-    const plan = (hub.db.prepare("EXPLAIN QUERY PLAN " + SHARED_REPO_SQL).all(1n, "1") as { detail: string }[]).map((r) => r.detail).join("\n");
+    const plan = (hub.db.prepare("EXPLAIN QUERY PLAN " + SHARED_REPO_SQL).all(1n, "1", 1n) as { detail: string }[]).map((r) => r.detail).join("\n");
     expect(plan).toContain("entity_repo_github");
     expect(plan).not.toMatch(/SCAN entity\b/);
   });

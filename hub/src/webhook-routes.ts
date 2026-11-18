@@ -2,6 +2,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getMember, requireSession, type Member } from "./auth";
+import { clientIp } from "./auth-routes";
 import { requireRole } from "./authz";
 import { applyCoverage } from "./coverage";
 import { HttpError, json, readJson, readRaw, route, type Route } from "./http";
@@ -13,8 +14,11 @@ export const MAX_WEBHOOK_BODY = 1024 * 1024;
 export const MAX_RELAY_PAYLOAD = 256 * 1024;
 const DEDUPE_MS = 10 * 60 * 1000;
 const DEDUPE_MAX = 5000;
-/** Bodies being read at once; the next one is refused before its body is read. */
-const MAX_INFLIGHT = 16;
+/**
+ * Bodies being read at once (the next one is refused before its body is read), at most `maxPerIp` from one address, and a body not
+ * complete after `bodyDeadlineMs` is answered 408 so a stalled unsigned upload frees its slot. Mutable only so tests can shorten them.
+ */
+export const webhookLimits = { maxInflight: 16, maxPerIp: 4, bodyDeadlineMs: 10_000 };
 const BUCKET = { key: "webhook:github", limit: 600, windowMs: 60_000 };
 
 /** Recorded in the status, never relayed. */
@@ -52,6 +56,7 @@ export function webhookRoutes(): Route<HubContext>[] {
   };
   /** Delivery id -> time first seen. Insertion order is time order, so the oldest entries are at the front. */
   let inflight = 0;
+  const inflightByIp = new Map<string, number>();
   const seen = new Map<string, number>();
 
   return [
@@ -77,13 +82,31 @@ export function webhookRoutes(): Route<HubContext>[] {
     route<HubContext>("POST", "/webhooks/github", async (ctx, req, res) => {
       const secret = ctx.webhooks.secret();
       if (!secret) throw new HttpError(404, "not found");
-      if (inflight >= MAX_INFLIGHT) throw new HttpError(503, "busy", { "retry-after": "1", connection: "close" });
+      const ip = clientIp(req, ctx.config.trustProxy);
+      const fromIp = inflightByIp.get(ip) ?? 0;
+      if (inflight >= webhookLimits.maxInflight || fromIp >= webhookLimits.maxPerIp) throw new HttpError(503, "busy", { "retry-after": "1", connection: "close" });
       inflight++;
+      inflightByIp.set(ip, fromIp + 1);
       let raw: Buffer;
+      let deadline: NodeJS.Timeout | undefined;
       try {
-        raw = await readRaw(req, res, MAX_WEBHOOK_BODY);
+        raw = await Promise.race([
+          readRaw(req, res, MAX_WEBHOOK_BODY),
+          new Promise<never>((_, reject) => {
+            deadline = setTimeout(() => {
+              // Answer, then cut the connection so the rest of the body is never waited for.
+              res.once("finish", () => req.destroy());
+              reject(new HttpError(408, "body timeout", { connection: "close" }));
+            }, webhookLimits.bodyDeadlineMs);
+            deadline.unref();
+          }),
+        ]);
       } finally {
+        clearTimeout(deadline);
         inflight--;
+        const left = (inflightByIp.get(ip) ?? 1) - 1;
+        if (left > 0) inflightByIp.set(ip, left);
+        else inflightByIp.delete(ip);
       }
       if (!validSignature(secret, raw, header(req, "x-hub-signature-256"))) throw new HttpError(401, "invalid signature");
 

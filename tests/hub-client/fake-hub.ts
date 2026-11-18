@@ -80,10 +80,15 @@ export class FakeHub {
   setSchema(n: number) {
     this.schema = n;
   }
-  failNext(n: number, kind: "network" | "auth" | "forbidden" | "not-found" | "rate-limited" | "unknown" = "network") {
+  /** `body` replaces the default "{}" (an HTML body is sent as text/html, like a proxy's error page). */
+  failNext(n: number, kind: "network" | "auth" | "forbidden" | "not-found" | "rate-limited" | "unknown" = "network", body?: string) {
     this.failures = n;
     this.failKind = kind;
+    this.failBody = body;
   }
+  private failBody: string | undefined;
+  /** When set, pulls and snapshots carry it as the hub process epoch (a restart is simulated by changing it). */
+  epoch: string | undefined;
   /** The member's token stops working: every request answers 401. */
   revokeToken(githubId: string) {
     this.revoked.add(githubId);
@@ -245,13 +250,14 @@ export class FakeHub {
       this.failures--;
       if (this.failKind === "network") return req.socket.destroy();
       const code = { auth: 401, forbidden: 403, "not-found": 404, "rate-limited": 429, unknown: 500 }[this.failKind];
-      res.writeHead(code, { "content-type": "application/json", ...(code === 429 ? { "retry-after": "30" } : {}) });
-      return res.end("{}");
+      const body = this.failBody ?? "{}";
+      res.writeHead(code, { "content-type": body.startsWith("<") ? "text/html" : "application/json", ...(code === 429 ? { "retry-after": "30" } : {}) });
+      return res.end(body);
     }
     if (url.pathname === "/health") return send(200, { ok: true, team: { name: "Team" }, schema: this.schema, publicUrl: this.publicUrl ?? this.origin(), githubHost: this.githubHost });
     const m = this.byToken(/^Bearer (.+)$/i.exec(req.headers.authorization ?? "")?.[1] ?? null);
     if (!m) return send(401, { error: "unauthorized" });
-    if (m.status !== "ACTIVE") return send(403, { error: "forbidden" });
+    if (m.status !== "ACTIVE") return send(403, { error: "removed" }); // the real hub's answer for a removed member
     if (url.pathname === "/me") {
       const members = [...this.members.values()].map((x) => ({ githubId: x.githubId, login: x.login, name: null, avatarUrl: null, role: x.role, status: x.status }));
       const spaces = this.visible(m).map((s) => ({ id: s.id, kind: s.kind, name: s.name, canWrite: m.role !== "READER", seq: String(s.seq) }));
@@ -259,15 +265,16 @@ export class FakeHub {
     }
     const route = /^\/spaces\/([^/]+)\/(entities|snapshot|ops)$/.exec(url.pathname);
     const s = route ? this.spaces.get(decodeURIComponent(route[1])) : undefined;
-    if (!route || !s || !this.canRead(m, s)) return send(404, { error: "not found" });
-    if (route[2] === "snapshot") return send(200, { seq: String(s.seq), entities: [...s.entities.values()] });
+    if (!route) return send(404, { error: "not found" });
+    if (!s || !this.canRead(m, s)) return send(404, { error: "space not found" }); // the real hub's answer
+    if (route[2] === "snapshot") return send(200, { epoch: this.epoch, seq: String(s.seq), entities: [...s.entities.values()] });
     if (route[2] === "entities") {
       const since = BigInt(url.searchParams.get("since") ?? "0");
       if (since + 1n < s.minSeq && since < s.seq) return send(410, { error: "gone" });
       const newer = s.events.filter((e) => e.seq > since);
       const page = newer.slice(0, 500);
       const events: EventJson[] = page.map((e) => ({ ...e.entity, seq: String(e.seq), opId: e.opId }));
-      return send(200, { seq: String(page.length ? page[page.length - 1].seq : s.seq), events, more: newer.length > page.length });
+      return send(200, { epoch: this.epoch, seq: String(page.length ? page[page.length - 1].seq : s.seq), events, more: newer.length > page.length });
     }
     if (req.method !== "POST") return send(405, { error: "method" });
     this.opsRequests++;

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createPrisma, resolveDbFile, type Db } from "@/lib/db";
-import { HubForbidden, HubRequestError, HubUnauthorized, type HubAdminApi, type HubAdminSpace, type HubLinkStatus, type HubMember, type HubSessionPort, type HubWebhooks } from "@/lib/hub/ports";
+import { HubForbidden, HubRequestError, HubUnauthorized, type HubAdminApi, type HubAdminSpace, type HubLinkStatus, type HubMember, type HubPendingInvite, type HubSessionPort, type HubWebhooks } from "@/lib/hub/ports";
 import { clearHubSession, loadHubSession, openVault, saveHubSession } from "@/lib/hub/session-vault";
 import type { HubLinkState } from "@/lib/hub/link";
 
@@ -106,6 +106,14 @@ export function httpHubAdmin(origin: string, token: () => Promise<string | null>
     invite: async (login, role) => void (await call("POST", "/admin/invites", { githubLogin: login, role })),
     // DELETE /admin/members/:githubId -> 204
     removeMember: async (id) => void (await call("DELETE", `/admin/members/${seg(id)}`)),
+    // GET /admin/invites -> { invites: [{ id, login, githubId, role, invitedBy, createdAt, expiresAt }] } (ADMIN+)
+    pendingInvites: async () => {
+      const list = ((await call("GET", "/admin/invites")) as { invites?: unknown } | null)?.invites;
+      if (!Array.isArray(list)) throw new HubRequestError("The server sent an unreadable answer", 200);
+      return (list as HubPendingInvite[]).filter((i) => i && typeof i.id === "string" && typeof i.login === "string");
+    },
+    // DELETE /admin/invites/:id -> 204 (404 when no longer pending)
+    cancelInvite: async (id) => void (await call("DELETE", `/admin/invites/${seg(id)}`)),
     // GET /admin/members -> { members: [{ githubId, login, name, avatarUrl, role, status }] } (all statuses; ADMIN+)
     removedMembers: async () => {
       const list = ((await call("GET", "/admin/members")) as { members?: unknown } | null)?.members;

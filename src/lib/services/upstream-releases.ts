@@ -4,6 +4,7 @@ import { RELEASE_CHECK_MIN_MS, pickNewReleases, plainExcerpt, safeReleaseUrl, ty
 import type { GithubPort } from "@/lib/github/port";
 import { enqueue } from "@/lib/jobs";
 import { notifyUpstream } from "./upstream-notify";
+import { pinBlocks } from "./upstream-pin";
 
 /**
  * The upstream auto-updater's "warn about releases only" mode. It asks GitHub for the upstream repository's releases and tells the
@@ -37,6 +38,7 @@ export async function runReleaseCheck(db: Db, port: GithubPort, mappingId: strin
   const cfg = m?.updateConfig;
   if (!m || !cfg?.enabled || cfg.mode !== "releases") return { result: "skipped", warned: 0 };
   if (!o.manual && !releaseCheckDue(cfg.releasesCheckedAt, now())) return { result: "skipped", warned: 0 };
+  if (await pinBlocks(db, { ...m, updateConfig: cfg }, now(), o.manual ? "manual" : "auto")) return { result: "skipped", warned: 0 };
 
   let list;
   try {

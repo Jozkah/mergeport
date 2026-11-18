@@ -1,4 +1,5 @@
 import type { Db } from "@/lib/db";
+import { assertProjectWritable } from "@/lib/authz/viewer";
 
 /** The reason text marks the rule a project's "required reviewers" setting owns, so editing the setting never touches rules written by hand. */
 export const projectRuleReason = (projectName: string) => `Required by project ${projectName}: its pull requests need a review from the named people`;
@@ -22,6 +23,7 @@ export function parseReviewerRefs(input: string): string[] {
  * The author of a pull request can never be its own approver, so a reviewer who also authors one is shown as such, not counted.
  */
 export async function setProjectReviewers(db: Db, workspaceId: string, projectId: string, projectName: string, input: string) {
+  await assertProjectWritable(db, projectId); // the rule is published with the project
   const refs = parseReviewerRefs(input);
   const existing = await db.reviewRule.findFirst({ where: { workspaceId, scope: "PROJECT", projectId, reason: { startsWith: OWNED } } });
   if (refs.length === 0) {

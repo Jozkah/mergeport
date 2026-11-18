@@ -41,6 +41,8 @@ function apiFor(me: string, webhooks: HubWebhooks, calls: string[] = []): HubAdm
     me: async () => ({ member: people.find((p) => p.githubId === me)!, team: { name: "Fake Team" }, members: people, spaces: [], webhooks }),
     invite: async () => {},
     removeMember: async () => {},
+    pendingInvites: async () => [],
+    cancelInvite: async () => {},
     removedMembers: async () => [],
     reinstateMember: async () => {},
     setRole: async () => {},

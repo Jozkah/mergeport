@@ -42,7 +42,8 @@ export async function HubTeamPage({ backend, githubApp }: { backend: string; git
   // Members of each space are an admin-only extra; if it fails the page keeps the name-only list.
   let spaceMembers: HubAdminSpace[] | null = null;
   if (overview?.canAdmin) spaceMembers = await svc.adminSpaces().catch(() => null);
+  const pendingInvites = overview?.canAdmin ? await svc.pendingInvites().catch(() => []) : [];
   const removedMembers = overview ? await svc.removedMembers().catch(() => []) : [];
   const instantUpdates = overview && !error ? await instantUpdatesPanel({ overview, origin, viewerWorkspaceId: viewer.workspaceId, githubApp }) : null;
-  return <HubTeamPanel origin={origin} status={status} overview={overview} error={error} spaceMembers={spaceMembers} removedMembers={removedMembers} instantUpdates={instantUpdates} />;
+  return <HubTeamPanel origin={origin} status={status} overview={overview} error={error} spaceMembers={spaceMembers} removedMembers={removedMembers} pendingInvites={pendingInvites} instantUpdates={instantUpdates} />;
 }
