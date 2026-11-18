@@ -102,3 +102,23 @@ export async function requireProject(db: Db, v: Viewer, projectId: string) {
   if (!p) throw new NotFoundError();
   return p;
 }
+
+/**
+ * A project shared into a space publishes its edits there, so a person whose own access to that space is read-only must not
+ * make them: the edit would stay on this computer, never reach the team, and later show up as a merge nobody can resolve.
+ * Local-only projects (no space) are always writable.
+ */
+export async function assertProjectWritable(db: Db, projectId: string | null | undefined): Promise<void> {
+  if (!projectId) return;
+  const p = await db.project.findUnique({ where: { id: projectId }, select: { spaceId: true } });
+  if (!p?.spaceId) return;
+  const space = await db.space.findUnique({ where: { id: p.spaceId }, select: { canWrite: true } });
+  if (space && !space.canWrite) throw new ForbiddenError("This project is shared read-only with you");
+}
+
+/** requireProject plus the write check: visible first (hidden stays NotFound), then writable. */
+export async function requireProjectWrite(db: Db, v: Viewer, projectId: string) {
+  const p = await requireProject(db, v, projectId);
+  await assertProjectWritable(db, p.id);
+  return p;
+}

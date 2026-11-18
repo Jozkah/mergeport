@@ -1,6 +1,6 @@
 import type { Db } from "@/lib/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
-import { repoWhere, requireProject, requireRepo, requireWorkItem, type Viewer } from "@/lib/authz/viewer";
+import { assertProjectWritable, repoWhere, requireProject, requireProjectWrite, requireRepo, requireWorkItem, type Viewer } from "@/lib/authz/viewer";
 import { checkVersion, computeProgress, positionBetween, type PlanItem } from "@/lib/domain/planning";
 import { blockerFinished, blocksCycle, isLinkKind } from "@/lib/domain/deps";
 import { STAGE_KEYS, type StageKey } from "@/lib/domain/stages";
@@ -39,7 +39,7 @@ export async function createCard(
   v: Viewer,
   input: { projectId: string; title?: string; workItemId?: string; columnKey?: string; priority?: number; dueDate?: Date | null; assigneeLogin?: string | null; milestoneId?: string | null },
 ) {
-  const project = await requireProject(db, v, input.projectId);
+  const project = await requireProjectWrite(db, v, input.projectId);
   if (!input.workItemId && !input.title?.trim()) throw new ValidationError("Give the task a title");
   let title = input.title?.trim() ?? "";
   if (input.workItemId) {
@@ -97,6 +97,7 @@ export async function assertSameAudience(db: Db, projectSpaceId: string | null, 
 
 export async function moveCard(db: Db, v: Viewer, input: { itemId: string; toColumnKey: string; beforePosition?: number | null; afterPosition?: number | null; expectedVersion: number }) {
   const item = await requireItem(db, v, input.itemId);
+  await assertProjectWritable(db, item.projectId);
   await requireManage(db, v, item);
   const column = await db.planningColumn.findFirst({ where: { projectId: item.projectId, key: input.toColumnKey } });
   if (!column) throw new ValidationError("Unknown column");
@@ -123,6 +124,7 @@ export async function moveCard(db: Db, v: Viewer, input: { itemId: string; toCol
 export async function addDependency(db: Db, v: Viewer, blockerId: string, blockedId: string, kind: string = "blocks") {
   if (!isLinkKind(kind)) throw new ValidationError("Unknown link type");
   const [a, b] = await Promise.all([requireItem(db, v, blockerId), requireItem(db, v, blockedId)]);
+  await assertProjectWritable(db, b.projectId);
   await requireManage(db, v, b);
   if (a.id === b.id) throw new ValidationError("A card cannot be linked to itself");
   if (a.projectId !== b.projectId) {
@@ -141,6 +143,7 @@ export async function addDependency(db: Db, v: Viewer, blockerId: string, blocke
 
 export async function removeDependency(db: Db, v: Viewer, fromId: string, toId: string) {
   const [a, b] = await Promise.all([requireItem(db, v, fromId), requireItem(db, v, toId)]);
+  await assertProjectWritable(db, b.projectId);
   await requireManage(db, v, b);
   await db.planningLink.deleteMany({ where: { fromId: a.id, toId: b.id } });
   await audit(db, v, "planning.unlink", { type: "PlanningItem", id: b.id }, { from: a.id });
