@@ -57,7 +57,13 @@ export const handlers: Record<string, Handler> = {
     if (!m) return;
     await guardSourceBudget();
     const port = await portForSync(db, m.forkRepoId);
-    if (port) await syncFork(db, port, p.mappingId);
+    if (port) {
+      try {
+        await syncFork(db, port, p.mappingId); // a rate limit is rethrown here, so the job backs off until the reset
+      } finally {
+        await recordRate(port.lastRate());
+      }
+    }
     await maybeRequestUpdate(db, p.mappingId); // opt-in upstream auto-update, when the fork is now known to be behind
     await maybeRequestReleaseCheck(db, p.mappingId); // opt-in release watch (its own 15-minute cap), whether or not the fork is behind
   }) as Handler,

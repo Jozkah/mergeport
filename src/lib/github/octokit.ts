@@ -94,21 +94,22 @@ export class OctokitPort implements GithubPort {
   }
 
   /** GET with ETag caching and in-process coalescing of identical concurrent requests. */
-  private async get<T>(route: string, params: Record<string, unknown> = {}): Promise<{ data: T; headers: Record<string, string | undefined> }> {
+  private async get<T>(route: string, params: Record<string, unknown> = {}, o: { uncached?: boolean } = {}): Promise<{ data: T; headers: Record<string, string | undefined> }> {
     const key = route + " " + JSON.stringify(params);
     const existing = this.inflight.get(key) as Promise<{ data: T; headers: Record<string, string | undefined> }> | undefined;
     if (existing) return existing;
+    const cache = o.uncached ? undefined : this.opts.cache;
     const p = (async () => {
       // A cached page is only usable if it kept its Link header: GitHub's 304 carries none, and without it pagination silently
       // stops after the first page (a repository would look "synchronized" with most of its items missing). Older cache
       // entries without the header are refetched in full.
-      const raw = this.opts.cache ? await this.opts.cache.get(key) : null;
+      const raw = cache ? await cache.get(key) : null;
       const cached = raw && isStored(raw.body) ? { etag: raw.etag, stored: raw.body } : null;
       try {
         const res = await this.ok.request(route, { ...params, headers: cached?.etag ? { "if-none-match": cached.etag } : {} });
         this.note(res.headers as any);
         const etag = (res.headers as any).etag ?? null;
-        if (this.opts.cache && etag) await this.opts.cache.set(key, etag, { __mp: 1, data: res.data, link: ((res.headers as any).link as string | undefined) ?? null } satisfies Stored);
+        if (cache && etag) await cache.set(key, etag, { __mp: 1, data: res.data, link: ((res.headers as any).link as string | undefined) ?? null } satisfies Stored);
         return { data: res.data as T, headers: res.headers as any };
       } catch (e: any) {
         if (e?.status === 304 && cached) {
@@ -176,7 +177,9 @@ export class OctokitPort implements GithubPort {
 
   async listIssuesAndPulls(owner: string, repo: string, o: { since?: Date; page: number }): Promise<Page<RemoteWorkItem>> {
     // The issues endpoint returns issues AND pull requests; each item appears once, keyed by number.
-    const { data, headers } = await this.get<any[]>("GET /repos/{owner}/{repo}/issues", { owner, repo, state: "all", sort: "updated", direction: "desc", per_page: 100, page: o.page, ...(o.since ? { since: o.since.toISOString() } : {}) });
+    // A `since` list is never cached: `since` moves every run, so its key never repeats (no 304 is ever possible) and each run
+    // would only add a dead cache row. Dropping `since` from the key instead could answer one window with another's body.
+    const { data, headers } = await this.get<any[]>("GET /repos/{owner}/{repo}/issues", { owner, repo, state: "all", sort: "updated", direction: "desc", per_page: 100, page: o.page, ...(o.since ? { since: o.since.toISOString() } : {}) }, { uncached: !!o.since });
     return { items: data.map(OctokitPort.toWorkItem), nextPage: OctokitPort.nextPage(headers.link), rate: this.rate ?? undefined };
   }
 
@@ -375,7 +378,8 @@ export class OctokitPort implements GithubPort {
   async compare(upstream: { owner: string; repo: string; branch: string }, fork: { owner: string; branch: string }): Promise<CompareOutcome> {
     try {
       // BASE = upstream branch, HEAD = `forkOwner:forkBranch` (same repository network).
-      const basehead = `${encodeURIComponent(upstream.branch)}...${encodeURIComponent(fork.owner)}:${encodeURIComponent(fork.branch)}`;
+      // Not pre-encoded: Octokit encodes `{basehead}` itself, so encoding here too sent `feat%252Fx` for a branch `feat/x`.
+      const basehead = `${upstream.branch}...${fork.owner}:${fork.branch}`;
       const { data } = await this.get<any>("GET /repos/{owner}/{repo}/compare/{basehead}", { owner: upstream.owner, repo: upstream.repo, basehead, per_page: 1 });
       // The compare endpoint lists at most 250 commits; counts stay exact, the listing is what truncates.
       return { kind: "ok", data: { status: data.status === "ahead" || data.status === "behind" || data.status === "identical" ? data.status : "diverged", ahead_by: data.ahead_by, behind_by: data.behind_by, total_commits: data.total_commits, commits_returned: Math.min(data.total_commits, 250), base_sha: data.base_commit?.sha ?? "", head_sha: "" } };
@@ -396,7 +400,9 @@ export class OctokitPort implements GithubPort {
       // compare sha...tip: tip is "ahead" or "identical" iff sha is an ancestor of tip.
       const { data } = await this.get<any>("GET /repos/{owner}/{repo}/compare/{basehead}", { owner: repo.owner, repo: repo.repo, basehead: `${sha}...${branchTip}`, per_page: 1 });
       return data.status === "ahead" || data.status === "identical" ? ("ancestor" as const) : ("not-ancestor" as const);
-    } catch {
+    } catch (e) {
+      // A rate limit is not "unknown ancestry": the caller must stop instead of recording a guess for every remaining PR.
+      if (e instanceof GithubError && e.kind === "rate-limited") throw e;
       return "unknown" as const;
     }
   }
