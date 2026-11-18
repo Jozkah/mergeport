@@ -19,8 +19,16 @@ const SMALL_FRAME = 4096;
 /** More than this many client frames inside the window closes the socket (1008). A ping every 25 s is far below it. */
 const FRAME_BUDGET = 30;
 const FRAME_WINDOW_MS = 10_000;
-/** Shared-space lookup; the expression text must match the `entity_repo_github` index so SQLite uses it. */
-export const SHARED_REPO_SQL = "SELECT DISTINCT space_id FROM entity WHERE type = 'repo' AND deleted = 0 AND json_extract(data, '$.githubId') IN (?, ?)";
+/**
+ * Shared-space lookup; the expression text must match the `entity_repo_github` index so SQLite uses it. Any writer can post a `repo`
+ * entity, so a share counts only when one of its writers (repo_sharer) is the repository's GitHub owner (third parameter; NULL when
+ * unknown) or is an ACTIVE ADMIN/OWNER now: a demoted or removed sharer stops counting.
+ */
+export const SHARED_REPO_SQL = `SELECT DISTINCT e.space_id FROM entity e
+  JOIN repo_sharer s ON s.space_id = e.space_id AND s.entity_id = e.entity_id
+  LEFT JOIN member m ON m.github_id = s.github_id
+  WHERE e.type = 'repo' AND e.deleted = 0 AND json_extract(e.data, '$.githubId') IN (?, ?)
+    AND (s.github_id = ? OR (m.status = 'ACTIVE' AND m.role IN ('ADMIN', 'OWNER')))`;
 /** Most repositories one connection may watch. */
 export const MAX_WATCH = 2000;
 const PROTOCOL = "mergeport.v1";
@@ -242,7 +250,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
         if (!m) continue;
         let allowed = !r.isPrivate || (r.ownerId !== null ? m.githubId === BigInt(r.ownerId) : m.login.toLowerCase() === r.ownerLogin.toLowerCase());
         if (!allowed) {
-          sharedIn ??= (deps.db.prepare(SHARED_REPO_SQL).all(BigInt(r.repoId), r.repoId) as { space_id: string }[]).map((x) => x.space_id);
+          sharedIn ??= (deps.db.prepare(SHARED_REPO_SQL).all(BigInt(r.repoId), r.repoId, r.ownerId === null ? null : BigInt(r.ownerId)) as { space_id: string }[]).map((x) => x.space_id);
           allowed = sharedIn.some((id) => spaceAccess(deps.db, m, id).canRead);
         }
         if (allowed && c.ws.readyState === c.ws.OPEN) {
