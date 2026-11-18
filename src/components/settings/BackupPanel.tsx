@@ -31,12 +31,12 @@ export function BackupPanel() {
     <div className="flex flex-col gap-4 p-4 text-[13px]">
       <div>
         <p className="font-medium">Back up</p>
-        <p className="mt-0.5 text-ink-3">A file of everything Mergeport owns: planning, rules, views, preferences and edits still waiting to be sent. It contains no credentials, no folder paths and nothing that GitHub owns.</p>
+        <p className="mt-0.5 text-ink-3">A file of planning, rules, views, preferences and unsent edits. No credentials or folder paths.</p>
         <a className="btn mt-2 inline-flex" href="/api/backup/export" download>Download a backup</a>
       </div>
       <div className="border-t border-line pt-4">
         <p className="font-medium">Restore</p>
-        <p className="mt-0.5 text-ink-3">Adds what is missing and updates what differs. It never deletes. You see exactly what would change before anything is written.</p>
+        <p className="mt-0.5 text-ink-3">Adds and updates, never deletes. You see the changes before anything is written.</p>
         <label className="label mt-2" htmlFor="restore-file">Backup file</label>
         <input id="restore-file" type="file" accept="application/json,.json" className="input !h-auto py-1.5" onChange={(e) => { const f = e.target.files?.[0]; setPreview(null); setMsg(null); if (!f) return setText(null); setName(f.name); void f.text().then(setText); }} />
         {text && !preview && <button type="button" className="btn mt-2" disabled={busy} onClick={async () => setPreview(await call("/api/backup/preview"))}>{busy ? "Reading…" : "Preview the restore"}</button>}

@@ -52,7 +52,7 @@ export default async function SyncPage() {
 
   return (
     <>
-      <PageHeader title="Sync" subtitle="Your edits are saved on this computer first. This page shows what has reached GitHub, what is waiting, and what needs a decision." actions={engine ? <ActionForm action={refreshSyncAction} submitLabel="Refresh now" submitClassName="btn" resetOnSuccess={false}>{null}</ActionForm> : undefined}
+      <PageHeader title="Sync" subtitle="Edits save here first. See what reached GitHub, what waits, and what needs a decision." actions={engine ? <ActionForm action={refreshSyncAction} submitLabel="Refresh now" submitClassName="btn" resetOnSuccess={false}>{null}</ActionForm> : undefined}
         help={<>Mergeport polls GitHub; it is not real time. With the app open and visible it checks every {poll} seconds, so a teammate&apos;s change typically shows up within about {delay.typical} seconds. When nothing changes, checks back off to at most every {MAX_POLL_MS / 60_000} minutes; with no visible tab it checks about once a minute, and not at all while the app is closed. Background sync runs only while this app is running.</>}
       />
       {isDemo() && <div className="mb-4"><Banner title="Demo mode">Nothing syncs in demo mode.</Banner></div>}
@@ -76,7 +76,7 @@ export default async function SyncPage() {
                   <p className="mt-2 text-[12px] text-ink-3">{c.lastPolledAt ? `Last checked for teammates' changes ${formatInstant(c.lastPolledAt, viewer.timezone)}` : "Not checked yet"}{c.nextPollAt ? ` · next check ${formatInstant(c.nextPollAt, viewer.timezone)}` : ""}</p>
                 </section>
               ))}
-              <p className="text-[12px] text-ink-3">Mergeport only syncs while it is open. A change you publish reaches a teammate when their app next checks; nothing here means &ldquo;delivered to them&rdquo;.</p>
+              <p className="text-[12px] text-ink-3">Syncs only while open. Nothing here means &ldquo;delivered to a teammate&rdquo;.</p>
             </div>
           </Panel>
         </div>
@@ -120,7 +120,7 @@ export default async function SyncPage() {
                       <ActionForm action={resolveConflictAction} submitLabel="Keep mine" submitAriaLabel={`Keep my version of ${c.entityType} in ${c.space.repoName}`} submitClassName="btn btn-primary" resetOnSuccess={false}><input type="hidden" name="id" value={c.id} /><input type="hidden" name="choice" value="mine" /></ActionForm>
                       <ActionForm action={resolveConflictAction} submitLabel="Take theirs" submitAriaLabel={`Take the teammate\u2019s version of ${c.entityType} in ${c.space.repoName}`} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={c.id} /><input type="hidden" name="choice" value="theirs" /></ActionForm>
                     </div>
-                    <p className="text-[12px] text-ink-3">Neither version is discarded until you choose. Your version stays here meanwhile.</p>
+                    <p className="text-[12px] text-ink-3">Nothing is discarded until you choose.</p>
                   </li>
                 );
               })}
@@ -130,7 +130,7 @@ export default async function SyncPage() {
       )}
 
       <Panel title="Spaces" icon={RefreshCw} id="spaces">
-        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet" action={<Link href="/team" className="btn btn-primary">Set up a team</Link>}>You work alone right now, so everything stays on this computer. Create or join a team to share projects and tasks.</EmptyState> : (
+        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet" action={<Link href="/team" className="btn btn-primary">Set up a team</Link>}>Everything stays on this computer. Create or join a team to share.</EmptyState> : (
           <ul>
             {states.map(([s, st]) => (
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 text-[13px] last:border-b-0">
@@ -146,7 +146,7 @@ export default async function SyncPage() {
         <div className="mt-5">
           <Panel title={`Server restored from a backup (${restores.length})`} icon={ShieldCheck} id="restored">
             <div className="flex flex-col text-[13px]">
-              <p className="max-w-[75ch] text-pretty p-4 text-ink-3">The team server went back to an earlier copy of its data. Your computer now matches the server, so some of your newer saved copies were replaced. Edits you had not sent yet were kept. What was replaced is listed here so nothing is lost without you knowing.</p>
+              <p className="max-w-[75ch] text-pretty p-4 text-ink-3">The team server went back to an earlier copy, so some newer copies here were replaced. Unsent edits were kept.</p>
               <ul>
               {restores.map((r) => {
                 const entries = r.detail as unknown as { type: string; entityId: string; deleted: boolean; data: Record<string, unknown>; resend: boolean }[];
@@ -164,7 +164,7 @@ export default async function SyncPage() {
                         <ActionForm action={dismissRestoredAction} submitLabel="Keep the server's version" pendingLabel="Saving…" submitClassName="btn btn-primary" closeOnSuccess><input type="hidden" name="id" value={r.id} /></ActionForm>
                       </Sheet>
                     </span>
-                    {sendable > 0 && <p className="max-w-[75ch] text-pretty text-[12px] text-ink-3">Sending again puts your {sendable === 1 ? "copy" : "copies"} back on the server as new edits, and your teammates will see {sendable === 1 ? "it" : "them"}.</p>}
+                    {sendable > 0 && <p className="max-w-[75ch] text-pretty text-[12px] text-ink-3">Sending again puts your {sendable === 1 ? "copy" : "copies"} back as new edits that teammates will see.</p>}
                   </li>
                 );
               })}
@@ -182,7 +182,7 @@ export default async function SyncPage() {
         <div className="mt-5">
           <Panel title={`Edits set aside (${quarantined.length})`} icon={ShieldCheck} id="quarantine">
             <div className="flex flex-col gap-3 p-4 text-[13px]">
-              <p className="text-ink-3">GitHub access to a space was removed, so these edits were not sent. They are kept here. If access returns you can send them; otherwise discard them.</p>
+              <p className="text-ink-3">GitHub access to a space was removed, so these edits were not sent. Retry if access returns, or discard.</p>
               {[...new Set(quarantined.map((q) => q.spaceId))].map((spaceId) => {
                 const sp = quarantined.find((q) => q.spaceId === spaceId)!.space;
                 return (
