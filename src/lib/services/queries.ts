@@ -76,7 +76,8 @@ async function loadRuleContext(db: Db, v: Viewer) {
   return { ruleRows, waitingRows, internalLogins, projectsByRepo, blockers };
 }
 
-type PrRow = Prisma.WorkItemGetPayload<{ include: { repository: { include: { owner: true } }; comments: true; reviewRequests: true; waiting: true } }>;
+const slimComments = { select: { kind: true, authorLogin: true, reviewState: true, commitSha: true, createdAtGh: true, updatedAtGh: true } } as const;
+type PrRow = Prisma.WorkItemGetPayload<{ include: { repository: { include: { owner: true } }; comments: typeof slimComments; reviewRequests: true; waiting: true } }>;
 
 export type DerivedItem = {
   item: PrRow;
@@ -126,7 +127,8 @@ function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<type
   return { item: row, derivation, ruleConflict: res.kind === "conflict" ? res.message : null, manualWaiting, stages, dependencyBlockers: input.blockedByDependencies ?? 0 };
 }
 
-const prInclude = { repository: { include: { owner: true } }, comments: true, reviewRequests: true, waiting: true } as const;
+// Review state only needs who/when/which commit, never the comment text: the bodies stay in the database.
+const prInclude = { repository: { include: { owner: true } }, comments: slimComments, reviewRequests: true, waiting: true } as const;
 
 /** Every open item with its derivation, for views that look across people (capacity) rather than at one person's queues. */
 export async function derivedOpen(db: Db, v: Viewer, opts: { now?: Date; repositoryIds?: string[] } = {}): Promise<DerivedItem[]> {

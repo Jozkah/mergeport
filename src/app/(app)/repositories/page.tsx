@@ -77,7 +77,12 @@ export default async function Repositories({ searchParams: _searchParams }: { se
             Filter: Needs attention.
             <details className="mt-1.5">
               <summary className="cursor-pointer text-[12px] opacity-80">Details</summary>
-              <p className="mt-1 text-[12px]">{problems.length === 1 ? "Its numbers are" : "Their numbers are"} from the last successful sync, not from GitHub right now (often a short GitHub outage or rate limit that clears by itself). Use the “Needs attention” filter below to see which, and “Refresh” to try again.</p>
+              <p className="mt-1 text-[12px]">
+                {problems.some((r) => r.trackingStatus === "DISCONNECTED")
+                  ? "A disconnected repository was deleted, renamed or lost your access on GitHub. Its numbers are from the last sync. If it is gone for good, use “Stop tracking” in its row menu. "
+                  : `${problems.length === 1 ? "Its numbers are" : "Their numbers are"} from the last successful sync, not from GitHub right now (often a short outage or rate limit that clears by itself). `}
+                Use the “Needs attention” filter below to see which, and “Refresh” to try again.
+              </p>
               <ul className="mt-1 list-disc pl-5 text-[12px]">
                 {problems.slice(0, 12).map((r) => <li key={r.id}><strong className="font-medium">{r.fullName}</strong>: {r.trackingStatus === "DISCONNECTED" ? "disconnected" : r.rateLimited ? "GitHub rate limit reached" : "last sync failed"}{(r.statusDetail ?? r.syncError) ? ` (${r.statusDetail ?? r.syncError})` : ""}</li>)}
                 {problems.length > 12 && <li>and {problems.length - 12} more</li>}

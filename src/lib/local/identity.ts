@@ -11,8 +11,8 @@ import { ghStatus, type GhStatus } from "@/lib/github/gh";
 
 type Cache = { at: number; status: GhStatus };
 const g = globalThis as typeof globalThis & { __mpIdentity?: Cache; __mpIdentityInflight?: Promise<GhStatus> };
-/** Short on purpose: after `gh auth switch`, at most this long passes before the app notices and stops acting. */
-const TTL_MS = 10_000;
+/** After `gh auth switch`, at most this long passes before the banner notices (writes stay safe regardless, see bound.ts). One `gh api user` a minute, not one every few seconds. */
+const TTL_MS = 60_000;
 
 export async function currentGhStatus(force = false, o: { swr?: boolean; timeoutMs?: number } = {}): Promise<GhStatus> {
   const c = g.__mpIdentity;
