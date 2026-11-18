@@ -13,6 +13,7 @@ import {
   type Page,
   type RateInfo,
   type RemoteBranch,
+  type ReleaseList,
   type RemoteComment,
   type RemoteRequested,
   type RemoteReview,
@@ -403,6 +404,22 @@ export class OctokitPort implements GithubPort {
   async getPullMergeSha(owner: string, repo: string, number: number) {
     const { data } = await this.get<any>("GET /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo, pull_number: number });
     return data.merge_commit_sha ?? null;
+  }
+
+  async listReleases(owner: string, repo: string, o: { etag?: string | null } = {}): Promise<ReleaseList> {
+    try {
+      // A direct conditional request (not `get`): the caller keeps the ETag, and a 304 must be told apart from a fresh answer.
+      const res = await this.ok.request("GET /repos/{owner}/{repo}/releases", { owner, repo, per_page: 30, headers: o.etag ? { "if-none-match": o.etag } : {} });
+      this.note(res.headers as any);
+      const rows = res.data as any[];
+      return { kind: "ok", etag: ((res.headers as any).etag as string | undefined) ?? null, releases: rows.map((r) => ({ id: String(r.id), tag: String(r.tag_name ?? ""), name: r.name ?? null, htmlUrl: r.html_url ?? null, publishedAt: r.published_at ? new Date(r.published_at) : null, draft: !!r.draft, prerelease: !!r.prerelease, body: r.body ?? null })) };
+    } catch (e: any) {
+      if (e?.status === 304) {
+        this.note(e.response?.headers);
+        return { kind: "not-modified" };
+      }
+      throw mapError(e);
+    }
   }
 
   // ---------- writes (acting user's credential) ----------

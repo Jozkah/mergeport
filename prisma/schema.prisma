@@ -665,6 +665,16 @@ model UpstreamUpdateConfig {
   branchName    String    @default("mergeport/upstream-sync")
   lastRunAt     DateTime?
   updatedAt     DateTime  @default(now()) @updatedAt
+  /// merge | releases. `releases` never uses git, the verify command or `promote`: it only reads the upstream's releases and warns.
+  mode               String    @default("merge")
+  includePrereleases Boolean   @default(false)
+  /// The first check after the mode is switched on only records the newest release (no warning for history).
+  releasesBaselined  Boolean   @default(false)
+  lastReleaseId      String?
+  lastReleaseTag     String?
+  lastReleaseAt      DateTime?
+  releasesEtag       String?
+  releasesCheckedAt  DateTime?
 
   mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
 }
@@ -675,7 +685,7 @@ model UpstreamUpdateRun {
   mappingId      String
   startedAt      DateTime  @default(now())
   finishedAt     DateTime?
-  /// running | promoted | pr-opened | up-to-date | conflict | verify-failed | failed | cancelled | merged-untested
+  /// running | promoted | pr-opened | up-to-date | conflict | verify-failed | failed | cancelled | merged-untested | release-found
   state          String    @default("running")
   /// auto | manual
   trigger        String    @default("auto")
@@ -688,10 +698,15 @@ model UpstreamUpdateRun {
   commits        Json
   logTail        String    @default("")
   error          String?
+  /// release-found only: the upstream release id (never warned twice), what it said, and when the person first looked at it.
+  releaseId      String?
+  release        Json?
+  seenAt         DateTime?
 
   mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
 
   @@index([mappingId, startedAt])
+  @@index([mappingId, releaseId])
 }
 
 model ForkComparison {

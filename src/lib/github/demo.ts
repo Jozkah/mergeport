@@ -4,7 +4,7 @@ import type { RepoMeta } from "@/lib/services/repositories";
 import type { CompareOutcome } from "@/lib/domain/forks";
 import { sameLogin, indexList } from "@/lib/domain/text-index";
 import { DEMO_CHANGES, DEMO_FILES, makePatch } from "@/lib/demo/repo-files";
-import { GithubError, type Contents, type TreeEntry, type GithubPort, type MergeMethod, type Page, type RemoteBranch, type RemoteComment, type RemoteRequested, type RemoteReview, type RemoteWorkItem } from "./port";
+import { GithubError, type Contents, type TreeEntry, type GithubPort, type MergeMethod, type Page, type ReleaseList, type RemoteBranch, type RemoteComment, type RemoteRequested, type RemoteReview, type RemoteWorkItem } from "./port";
 
 /**
  * Demo-mode GitHub. The seeded database IS the demo "remote": reads reflect it and writes persist into it,
@@ -163,6 +163,9 @@ export class DemoPort implements GithubPort {
   }
   async getPullMergeSha() {
     return null;
+  }
+  async listReleases(): Promise<ReleaseList> {
+    return { kind: "ok", etag: null, releases: [] }; // demo repositories publish no releases
   }
 
   // ---------- writes ----------

@@ -71,6 +71,11 @@ export type Discovery = { repos: RepoMeta[]; nextPage: number | null; notes: Dis
 
 export type MergeMethod = "merge" | "squash" | "rebase";
 
+/** One release of a repository as GitHub lists it (`id` is kept as text: it is only ever compared and stored). */
+export type RemoteRelease = { id: string; tag: string; name: string | null; htmlUrl: string | null; publishedAt: Date | null; draft: boolean; prerelease: boolean; body: string | null };
+/** `not-modified`: the caller's ETag still matches, GitHub answered 304 and nothing was spent. */
+export type ReleaseList = { kind: "not-modified" } | { kind: "ok"; etag: string | null; releases: RemoteRelease[] };
+
 export interface GithubPort {
   readonly mode: "live" | "demo";
   /** Last rate-limit observation from this client, if any. */
@@ -107,6 +112,8 @@ export interface GithubPort {
   /** Is `sha` an ancestor of `branchTip` in `repo`'s network? */
   isAncestor(repo: { owner: string; repo: string }, sha: string, branchTip: string): Promise<"ancestor" | "not-ancestor" | "unknown">;
   getPullMergeSha(owner: string, repo: string, number: number): Promise<string | null>;
+  /** The newest releases (one page, drafts included: callers drop them). With the `etag` of an earlier answer, an unchanged list is `not-modified`. */
+  listReleases(owner: string, repo: string, o?: { etag?: string | null }): Promise<ReleaseList>;
 
   // ---- writes: always with the ACTING USER's credential, never silently an administrator's ----
   createIssue(owner: string, repo: string, input: { title: string; body?: string; labels?: string[] }): Promise<RemoteWorkItem>;

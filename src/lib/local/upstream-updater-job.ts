@@ -126,7 +126,7 @@ function queueFor(db: Db): UpdateQueue {
  */
 export async function maybeRequestUpdate(db: Db, mappingId: string): Promise<boolean> {
   const cfg = await db.upstreamUpdateConfig.findUnique({ where: { mappingId } });
-  if (!cfg?.enabled) return false;
+  if (!cfg?.enabled || cfg.mode !== "merge") return false; // `releases` mode has its own check (services/upstream-releases)
   const cmp = await db.forkComparison.findFirst({ where: { mappingId }, orderBy: { comparedAt: "desc" } });
   if (!cmp || !(cmp.status === "behind" || cmp.status === "fork-behind" || cmp.status === "diverged") || !(cmp.behindBy && cmp.behindBy > 0)) return false;
   const last = await db.upstreamUpdateRun.findFirst({ where: { mappingId, finishedAt: { not: null } }, orderBy: { startedAt: "desc" } });
