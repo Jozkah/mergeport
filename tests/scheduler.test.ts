@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GithubError } from "@/lib/github/port";
 import { enqueue, ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs";
 import { truncateAll } from "@/lib/demo/seed";
-import { drainJobs } from "@/lib/local/scheduler";
+import { drainJobs, paceReconcile, RECONCILE_IDLE_EVERY_MS, RECONCILE_START_DELAY_MS, runJobLane, step } from "@/lib/local/scheduler";
+import { RECONCILE_EVERY_MS } from "@/lib/local/handlers";
 import { testDb } from "./helpers";
 
 const db = testDb();
@@ -187,5 +188,116 @@ describe("background job progress reaches open pages", () => {
     expect(j.dirty).toBe(false);
     expect(await runOne(db, h, T0)).toBe("done");
     expect(seen).toEqual([1, 2]);
+  });
+});
+
+describe("independent lanes (a hung job never stalls coordination or the other jobs)", () => {
+  const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it("a handler that never resolves: engine.tick keeps running each tick and digest.daily still runs", async () => {
+    const past = new Date(Date.now() - MIN);
+    await enqueue(db, { type: "hang", payload: {}, dedupeKey: "hang", runAt: past });
+    await ensureRecurring(db, { type: "digest.daily", key: "digest", intervalMs: 10 * MIN, firstRunAt: new Date(past.getTime() + 1) });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let engineTicks = 0;
+    let digests = 0;
+    const h = { hang: (() => new Promise<void>(() => {})) as Handler, "digest.daily": (async () => void digests++) as Handler };
+    const s = { busy: false, coordBusy: false };
+    const lanes = { coordinate: async () => void engineTicks++, drain: () => drainJobs(h, () => {}, 5, 50) };
+    const t1 = step(s, lanes); // the job lane claims "hang" and blocks on it
+    await t1.coordination;
+    await settle(10);
+    expect(s.busy).toBe(true);
+    const t2 = step(s, lanes); // coordination is not held up by the hung job; the job lane is not started twice
+    expect(t2.jobs).toBeUndefined();
+    await t2.coordination;
+    expect(engineTicks).toBe(2);
+    expect(await t1.jobs).toBe(true); // the budget released the lane
+    expect(errors.mock.calls.some((c) => /budget/.test(String(c[0])))).toBe(true);
+    expect(s.busy).toBe(false);
+    const t3 = step(s, lanes);
+    await Promise.all([t3.coordination, t3.jobs]);
+    expect(engineTicks).toBe(3);
+    expect(digests).toBe(1);
+    expect((await db.job.findUniqueOrThrow({ where: { dedupeKey: "hang" } })).status).toBe("RUNNING"); // visible, reclaimStuck owns it
+    errors.mockRestore();
+  });
+
+  it("a failing coordination lane is logged and the job lane still runs, and the other way round", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const s = { busy: false, coordBusy: false };
+    let drains = 0;
+    const a = step(s, { coordinate: async () => { throw new Error("coord down"); }, drain: async () => ++drains });
+    await Promise.all([a.coordination, a.jobs]);
+    expect(drains).toBe(1);
+    let coords = 0;
+    const b = step(s, { coordinate: async () => ++coords, drain: async () => { throw new Error("jobs down"); } });
+    await Promise.all([b.coordination, b.jobs]);
+    expect(coords).toBe(1);
+    expect(s).toEqual({ busy: false, coordBusy: false });
+    expect(errors.mock.calls.map((c) => String(c[1]))).toEqual(["coord down", "jobs down"]);
+    errors.mockRestore();
+  });
+
+  it("runJobsNow-style drains and tick drains never overlap", async () => {
+    const s = { busy: false, coordBusy: false };
+    let live = 0;
+    let peak = 0;
+    let runs = 0;
+    const drain = async () => {
+      live++;
+      peak = Math.max(peak, live);
+      runs++;
+      await settle(20);
+      live--;
+      return 0;
+    };
+    const started = [runJobLane(s, drain), step(s, { coordinate: async () => {}, drain }).jobs, runJobLane(s, drain), runJobLane(s, drain)];
+    const res = await Promise.all(started.map((p) => p ?? Promise.resolve(false)));
+    expect(res).toEqual([true, false, false, false]);
+    expect(peak).toBe(1);
+    expect(runs).toBe(1);
+  });
+});
+
+describe("reconcile cadence follows activity", () => {
+  const T = T0.getTime();
+  const row = () => db.job.findUniqueOrThrow({ where: { dedupeKey: "reconcile" } });
+
+  it("the first reconcile after start waits the start delay instead of firing at once", async () => {
+    await paceReconcile("active", T, T);
+    expect((await row()).runAt).toEqual(new Date(T + RECONCILE_START_DELAY_MS));
+    // An overdue row from an earlier run of the app is also pushed past the start delay.
+    await db.job.updateMany({ data: { runAt: new Date(T - 3 * 60 * MIN) } });
+    await paceReconcile("idle", T + MIN, T);
+    expect((await row()).runAt).toEqual(new Date(T + RECONCILE_START_DELAY_MS));
+  });
+
+  it("idle stretches the interval to 60 min, active restores 15 min", async () => {
+    expect(RECONCILE_IDLE_EVERY_MS).toBe(60 * MIN);
+    await paceReconcile("active", T, T - 60 * MIN); // started long ago: no start delay
+    let runs = 0;
+    const h = { "reconcile.all": (async () => void runs++) as Handler };
+    expect(await runOne(db, h, at(0))).toBe("requeued");
+    expect((await row()).runAt).toEqual(at(RECONCILE_EVERY_MS));
+    await paceReconcile("idle", T + MIN, T - 60 * MIN);
+    let j = await row();
+    expect(j.intervalMs).toBe(RECONCILE_IDLE_EVERY_MS);
+    expect(j.runAt).toEqual(at(60 * MIN)); // the pending run moved out
+    expect(await runOne(db, h, at(20 * MIN))).toBe("idle");
+    expect(await runOne(db, h, at(60 * MIN))).toBe("requeued");
+    expect((await row()).runAt).toEqual(at(120 * MIN)); // idle cadence after an idle run
+    await paceReconcile("active", T + 61 * MIN, T - 60 * MIN);
+    j = await row();
+    expect(j.intervalMs).toBe(RECONCILE_EVERY_MS);
+    expect(j.runAt).toEqual(at(75 * MIN)); // a tab came back: 15 min after the last run
+    expect(runs).toBe(2);
+  });
+
+  it("a retry back-off is not moved by the cadence", async () => {
+    await paceReconcile("active", T, T - 60 * MIN);
+    await db.job.updateMany({ data: { finishedAt: at(0), runAt: at(2 * MIN) } });
+    await paceReconcile("idle", T + MIN, T - 60 * MIN);
+    expect((await row()).runAt).toEqual(at(2 * MIN));
   });
 });
