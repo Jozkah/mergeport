@@ -57,6 +57,7 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
   };
   const repos = [...reposRaw].sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
   const currentQuery = qs({ page: undefined }).replace(/^\?/, "");
+  const moreActive = Boolean(params.projectId || params.label || params.author || one(searchParams.sort));
   const from = list.total === 0 ? 0 : (list.page - 1) * list.pageSize + 1;
   const to = Math.min(list.total, list.page * list.pageSize);
   const Icon = type === "PULL_REQUEST" ? GitPullRequest : CircleDot;
@@ -111,13 +112,18 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
             <div className="relative"><Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-[9px] text-ink-3" /><input id="f-q" name="q" defaultValue={params.q} className="input !pl-8" placeholder="e.g. pagination or 14" /></div>
           </div>
           <div className="w-[190px]"><label className="label" htmlFor="f-repo">Repository</label><Select id="f-repo" name="repo" defaultValue={one(searchParams.repo)} className="select"><option value="">All visible</option>{repos.map((r) => <option key={r.id} value={r.id}>{r.fullName}</option>)}</Select></div>
-          <div className="w-[150px]"><label className="label" htmlFor="f-project">Project</label><Select id="f-project" name="project" defaultValue={one(searchParams.project)} className="select"><option value="">All projects</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></div>
-          <div className="w-[140px]"><label className="label" htmlFor="f-label">Label</label><input id="f-label" name="label" defaultValue={params.label} className="input" /></div>
-          <div className="w-[130px]"><label className="label" htmlFor="f-author">Author</label><input id="f-author" name="author" defaultValue={params.author} className="input" /></div>
-          <div className="w-[140px]"><label className="label" htmlFor="f-sort">Sort</label><Select id="f-sort" name="sort" defaultValue={params.sort} className="select"><option value="updated">Recently updated</option><option value="created">Newest</option><option value="number">Number</option><option value="title">Title</option></Select></div>
           <input type="hidden" name="state" value={state === "OPEN" ? "" : state} />
           <button className="btn"><Filter size={14} aria-hidden /> Apply</button>
           {currentQuery && <Link href={base} className="btn btn-quiet">Clear</Link>}
+          <details open={moreActive} className="w-full">
+            <summary className="btn btn-quiet inline-flex cursor-pointer list-none">More filters{moreActive ? " (active)" : ""}</summary>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <div className="w-[150px]"><label className="label" htmlFor="f-project">Project</label><Select id="f-project" name="project" defaultValue={one(searchParams.project)} className="select"><option value="">All projects</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></div>
+              <div className="w-[140px]"><label className="label" htmlFor="f-label">Label</label><input id="f-label" name="label" defaultValue={params.label} className="input" /></div>
+              <div className="w-[130px]"><label className="label" htmlFor="f-author">Author</label><input id="f-author" name="author" defaultValue={params.author} className="input" /></div>
+              <div className="w-[140px]"><label className="label" htmlFor="f-sort">Sort</label><Select id="f-sort" name="sort" defaultValue={params.sort} className="select"><option value="updated">Recently updated</option><option value="created">Newest</option><option value="number">Number</option><option value="title">Title</option></Select></div>
+            </div>
+          </details>
         </form>
         {(saved.length > 0 || currentQuery) && (
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-[12.5px]">
@@ -143,6 +149,8 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
           tz={viewer.timezone}
           now={now}
           showReview={type === "PULL_REQUEST"}
+          showType={false}
+          showDemo={false}
           empty={
             <EmptyState icon={Icon} title={repos.length === 0 ? "No repositories yet" : "Nothing matches these filters"}>
               {repos.length === 0 ? "You have no repositories assigned. Ask an administrator for access, or connect your own from Repositories." : "Try clearing a filter. Only work in repositories you can access is searched."}
