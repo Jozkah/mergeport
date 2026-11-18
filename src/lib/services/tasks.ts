@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
-import { requireProject, type Viewer } from "@/lib/authz/viewer";
+import { assertProjectWritable, requireProject, type Viewer } from "@/lib/authz/viewer";
 import { positionBetween } from "@/lib/domain/planning";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { audit } from "./audit";
@@ -42,6 +42,13 @@ export async function loadTask(db: Db, v: Viewer, id: string) {
   const where = await planningWhere(db, v);
   const task = await db.planningItem.findFirst({ where: { AND: [where, { id }] }, include: { column: true, project: true } });
   if (!task) throw new NotFoundError();
+  return task;
+}
+
+/** loadTask for a mutation: also refuses when the task's project is shared into a space this person can only read. */
+export async function loadTaskForWrite(db: Db, v: Viewer, id: string) {
+  const task = await loadTask(db, v, id);
+  await assertProjectWritable(db, task.projectId);
   return task;
 }
 
@@ -136,7 +143,7 @@ const PRIORITY = ["No priority", "Low", "Medium", "High", "Urgent"];
 export const priorityName = (p: number) => PRIORITY[Math.max(0, Math.min(PRIORITY.length - 1, p))] ?? "No priority";
 
 export async function updateTask(db: Db, v: Viewer, id: string, patch: TaskPatch) {
-  const t = await loadTask(db, v, id);
+  const t = await loadTaskForWrite(db, v, id);
   const data: Prisma.PlanningItemUpdateInput = { version: { increment: 1 } };
   const said: string[] = [];
   let movedFrom: string | null = null;
@@ -219,7 +226,7 @@ export async function getTask(db: Db, v: Viewer, id: string) {
 }
 
 export async function addComment(db: Db, v: Viewer, taskId: string, body: string) {
-  await loadTask(db, v, taskId);
+  await loadTaskForWrite(db, v, taskId);
   const text = body.trim();
   if (!text) throw new ValidationError("Write a comment first");
   if (text.length > 8000) throw new ValidationError("A comment can have at most 8000 characters");
@@ -231,7 +238,7 @@ export async function addComment(db: Db, v: Viewer, taskId: string, body: string
 async function ownComment(db: Db, v: Viewer, commentId: string) {
   const c = await db.taskComment.findUnique({ where: { id: commentId } });
   if (!c) throw new NotFoundError();
-  await loadTask(db, v, c.itemId);
+  await loadTaskForWrite(db, v, c.itemId);
   if (c.kind !== "COMMENT") throw new ForbiddenError("System entries cannot be changed");
   return c;
 }
@@ -252,7 +259,7 @@ export async function deleteComment(db: Db, v: Viewer, commentId: string) {
 }
 
 export async function deleteTask(db: Db, v: Viewer, id: string) {
-  const t = await loadTask(db, v, id);
+  const t = await loadTaskForWrite(db, v, id);
   if (t.workItemId) throw new ValidationError("This card follows a GitHub item. Remove it from the board instead");
   if (!v.isAdmin && t.authorLogin?.toLowerCase() !== v.login.toLowerCase() && t.createdById !== v.memberId) throw new ForbiddenError("Only the author or an administrator can delete a task");
   await db.planningItem.delete({ where: { id } });

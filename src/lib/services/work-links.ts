@@ -2,7 +2,7 @@ import type { Db } from "@/lib/db";
 import { requireWorkItem, type Viewer } from "@/lib/authz/viewer";
 import { worktreesOnBranch, type LinkedWorktree } from "@/lib/domain/worktree-links";
 import { NotFoundError, ValidationError } from "@/lib/errors";
-import { requireProject } from "@/lib/authz/viewer";
+import { requireProjectWrite } from "@/lib/authz/viewer";
 import { worktreesFor } from "./worktrees";
 import { loadTask } from "./tasks";
 
@@ -51,7 +51,7 @@ const BRANCH = /^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}$/;
 /** Writes the branch name on a task so it can be matched to a worktree. The name is shared with the team; no path is. */
 export async function setTaskBranch(db: Db, v: Viewer, taskId: string, branch: string | null) {
   const t = await loadTask(db, v, taskId);
-  await requireProject(db, v, t.projectId);
+  await requireProjectWrite(db, v, t.projectId);
   const b = branch?.trim().replace(/^refs\/heads\//, "") || null;
   if (b && (!BRANCH.test(b) || b.includes(".."))) throw new ValidationError("That is not a branch name");
   if (!t) throw new NotFoundError();

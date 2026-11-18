@@ -1,5 +1,5 @@
 import type { Db } from "@/lib/db";
-import { requireProject, requireRepo, type Viewer } from "@/lib/authz/viewer";
+import { assertProjectWritable, requireProject, requireProjectWrite, requireRepo, type Viewer } from "@/lib/authz/viewer";
 import { positionBetween } from "@/lib/domain/planning";
 import { BOARD_TEMPLATES, DENSITIES, GROUPINGS, cleanBoardColumns, type BoardColumn, type GroupBy } from "@/lib/domain/boards";
 import { NotFoundError, ValidationError } from "@/lib/errors";
@@ -12,6 +12,7 @@ import { planningWhere } from "./queries";
 async function item(db: Db, v: Viewer, id: string) {
   const it = await db.planningItem.findFirst({ where: { id, ...(await planningWhere(db, v)) }, include: { column: true, workItem: true } });
   if (!it) throw new NotFoundError();
+  await assertProjectWritable(db, it.projectId); // every caller of item() mutates the card
   if (it.workItem) await requireRepo(db, v, it.workItem.repositoryId, "manageWork");
   return it;
 }
@@ -31,7 +32,7 @@ export async function listBoards(db: Db, v: Viewer, projectId: string) {
 }
 
 export async function createBoard(db: Db, v: Viewer, input: { projectId: string; name?: string; template?: string; columns?: unknown; groupBy?: string; density?: string }) {
-  await requireProject(db, v, input.projectId);
+  await requireProjectWrite(db, v, input.projectId);
   const tpl = input.template ? BOARD_TEMPLATES.find((t) => t.key === input.template) : undefined;
   if (input.template && !tpl) throw new ValidationError("Unknown board template");
   const keys = await projectKeys(db, input.projectId);
@@ -49,7 +50,7 @@ export async function createBoard(db: Db, v: Viewer, input: { projectId: string;
 export async function updateBoard(db: Db, v: Viewer, id: string, patch: { name?: string; columns?: unknown; groupBy?: GroupBy; density?: string }) {
   const b = await db.planBoard.findUnique({ where: { id } });
   if (!b) throw new NotFoundError();
-  await requireProject(db, v, b.projectId);
+  await requireProjectWrite(db, v, b.projectId);
   const data: Record<string, unknown> = {};
   if (patch.name !== undefined) {
     data.name = cleanName(patch.name, "board");
@@ -70,7 +71,7 @@ export async function updateBoard(db: Db, v: Viewer, id: string, patch: { name?:
 export async function deleteBoard(db: Db, v: Viewer, id: string) {
   const b = await db.planBoard.findUnique({ where: { id } });
   if (!b) throw new NotFoundError();
-  await requireProject(db, v, b.projectId);
+  await requireProjectWrite(db, v, b.projectId);
   await db.planBoard.delete({ where: { id } }); // cards are untouched: a board only ever shows them
 }
 
@@ -79,7 +80,7 @@ export const boardColumns = (b: { columns: unknown }) => b.columns as BoardColum
 // ---------- epics ----------
 
 export async function createEpic(db: Db, v: Viewer, input: { projectId: string; title: string; description?: string; ownerLogin?: string | null; startDate?: Date | null; targetDate?: Date | null; decisions?: string }) {
-  await requireProject(db, v, input.projectId);
+  await requireProjectWrite(db, v, input.projectId);
   if (input.startDate && input.targetDate && input.targetDate < input.startDate) throw new ValidationError("The target date is before the start");
   const e = await db.epic.create({ data: { projectId: input.projectId, title: cleanName(input.title, "epic"), description: input.description?.trim() || null, ownerLogin: input.ownerLogin?.trim().replace(/^@/, "").toLowerCase() || null, startDate: input.startDate ?? null, targetDate: input.targetDate ?? null, decisions: input.decisions?.trim() || null } });
   await audit(db, v, "epic.create", { type: "Epic", id: e.id });
@@ -89,7 +90,7 @@ export async function createEpic(db: Db, v: Viewer, input: { projectId: string; 
 export async function updateEpic(db: Db, v: Viewer, id: string, patch: { title?: string; description?: string | null; ownerLogin?: string | null; startDate?: Date | null; targetDate?: Date | null; status?: "OPEN" | "DONE"; decisions?: string | null }) {
   const e = await db.epic.findUnique({ where: { id } });
   if (!e) throw new NotFoundError();
-  await requireProject(db, v, e.projectId);
+  await requireProjectWrite(db, v, e.projectId);
   const start = patch.startDate !== undefined ? patch.startDate : e.startDate;
   const end = patch.targetDate !== undefined ? patch.targetDate : e.targetDate;
   if (start && end && end < start) throw new ValidationError("The target date is before the start");
@@ -107,7 +108,7 @@ export async function updateEpic(db: Db, v: Viewer, id: string, patch: { title?:
 export async function deleteEpic(db: Db, v: Viewer, id: string) {
   const e = await db.epic.findUnique({ where: { id } });
   if (!e) throw new NotFoundError();
-  await requireProject(db, v, e.projectId);
+  await requireProjectWrite(db, v, e.projectId);
   await db.planningItem.updateMany({ where: { epicId: id }, data: { epicId: null } }); // children stay; only the grouping goes
   await db.epic.delete({ where: { id } });
 }
@@ -142,7 +143,7 @@ export async function listEpics(db: Db, v: Viewer, projectId: string): Promise<E
 // ---------- iterations ----------
 
 export async function createIteration(db: Db, v: Viewer, input: { projectId: string; name: string; startDate: Date; endDate: Date }) {
-  await requireProject(db, v, input.projectId);
+  await requireProjectWrite(db, v, input.projectId);
   if (input.endDate <= input.startDate) throw new ValidationError("An iteration must end after it starts");
   const clash = await db.iteration.findFirst({ where: { projectId: input.projectId, startDate: { lt: input.endDate }, endDate: { gt: input.startDate } } });
   if (clash) throw new ValidationError(`That overlaps ${clash.name}`);
@@ -166,7 +167,7 @@ export async function assignIteration(db: Db, v: Viewer, itemId: string, iterati
 export async function closeIteration(db: Db, v: Viewer, iterationId: string, carryTo: string | null) {
   const it = await db.iteration.findUnique({ where: { id: iterationId } });
   if (!it) throw new NotFoundError();
-  await requireProject(db, v, it.projectId);
+  await requireProjectWrite(db, v, it.projectId);
   if (it.closedAt) throw new ValidationError("That iteration is already closed");
   if (carryTo) {
     const next = await db.iteration.findFirst({ where: { id: carryTo, projectId: it.projectId, closedAt: null, NOT: { id: iterationId } } });
@@ -227,6 +228,7 @@ export async function setShipped(db: Db, v: Viewer, milestoneId: string, shipped
   const ms = await db.dashboardMilestone.findFirst({ where: { id: milestoneId, workspaceId: v.workspaceId } });
   if (!ms) throw new NotFoundError();
   if (!v.isAdmin) throw new ValidationError("Only an administrator can mark a release as shipped");
+  await assertProjectWritable(db, ms.projectId);
   const url = info.url?.trim() || null;
   if (url && !/^https:\/\//i.test(url)) throw new ValidationError("The release link must start with https://");
   await db.dashboardMilestone.update({ where: { id: milestoneId }, data: shipped ? { shippedAt: new Date(), releaseTag: info.tag?.trim().slice(0, 80) || null, releaseUrl: url } : { shippedAt: null } });
@@ -237,7 +239,7 @@ export async function setShipped(db: Db, v: Viewer, milestoneId: string, shipped
 
 export async function setAutomation(db: Db, v: Viewer, projectId: string, mode: "off" | "suggest") {
   if (!v.isAdmin) throw new ValidationError("Only an administrator can change a project's automation");
-  await requireProject(db, v, projectId);
+  await requireProjectWrite(db, v, projectId);
   await db.project.update({ where: { id: projectId }, data: { automation: mode } });
   await audit(db, v, "project.automation", { type: "Project", id: projectId }, { mode });
 }

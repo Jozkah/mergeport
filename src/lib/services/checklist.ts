@@ -2,7 +2,7 @@ import type { Db } from "@/lib/db";
 import type { Viewer } from "@/lib/authz/viewer";
 import { positionBetween } from "@/lib/domain/planning";
 import { NotFoundError, ValidationError } from "@/lib/errors";
-import { loadTask } from "./tasks";
+import { loadTaskForWrite } from "./tasks";
 
 export const CHECKLIST_MAX_ITEMS = 100;
 export const CHECKLIST_ITEM_MAX = 200;
@@ -32,7 +32,7 @@ const cleanItemText = (raw: string) => {
 
 /** Adds one item per line. Returns the created items. */
 export async function addCheckItems(db: Db, v: Viewer, taskId: string, raw: string) {
-  await loadTask(db, v, taskId);
+  await loadTaskForWrite(db, v, taskId);
   const parsed = parseChecklistLines(raw);
   if (!parsed.length) throw new ValidationError("Write the checklist item first");
   // Validate the whole paste before writing anything, then write it as one unit: a rejected paste changes nothing.
@@ -55,7 +55,7 @@ export async function addCheckItems(db: Db, v: Viewer, taskId: string, raw: stri
 async function loadCheckItem(db: Db, v: Viewer, id: string) {
   const c = await db.taskCheckItem.findUnique({ where: { id } });
   if (!c) throw new NotFoundError();
-  await loadTask(db, v, c.itemId);
+  await loadTaskForWrite(db, v, c.itemId);
   return c;
 }
 

@@ -11,7 +11,7 @@ import { STAGE_KEYS } from "@/lib/domain/stages";
 import { run, type ActionResult } from "@/lib/action-result";
 import { requireAdminViewer, requireViewer } from "@/lib/auth/current";
 import { NotFoundError, ValidationError } from "@/lib/errors";
-import { requireAdmin, requireRepo } from "@/lib/authz/viewer";
+import { assertProjectWritable, requireAdmin, requireRepo } from "@/lib/authz/viewer";
 import { removeFromTracking, trackLocally, upsertRepository, type RepoMeta } from "@/lib/services/repositories";
 import * as work from "@/lib/services/work-actions";
 import { addDependency, assertSameAudience, createCard, moveCard, requestManualReview, resolveManualReview, createColumnsForProject } from "@/lib/services/planning";
@@ -228,6 +228,7 @@ export async function createMilestoneAction(fd: FormData): Promise<ActionResult>
     const start = str(fd, "start");
     const target = str(fd, "target");
     const project = str(fd, "projectId");
+    await assertProjectWritable(db, project || null);
     await db.dashboardMilestone.create({ data: { workspaceId: viewer.workspaceId, projectId: project || null, name, description: str(fd, "description") || null, ownerId: viewer.memberId, startDate: start ? new Date(start + "T00:00:00Z") : null, targetDate: target ? new Date(target + "T00:00:00Z") : null } });
     await audit(db, viewer, "milestone.create");
     revalidatePath("/planning");
@@ -310,6 +311,7 @@ export async function setProjectReposAction(fd: FormData): Promise<ActionResult>
     const projectId = str(fd, "projectId");
     const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
     if (!p) throw new ValidationError("Unknown project");
+    await assertProjectWritable(db, p.id);
     const ids = strs(fd, "repo");
     const repos = await db.repository.findMany({ where: { id: { in: ids }, workspaceId: viewer.workspaceId } });
     if (repos.length !== ids.length) throw new ValidationError("Unknown repository");
@@ -327,6 +329,7 @@ export async function setProjectMembersAction(fd: FormData): Promise<ActionResul
     const projectId = str(fd, "projectId");
     const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
     if (!p) throw new ValidationError("Unknown project");
+    await assertProjectWritable(db, p.id);
     const ids = strs(fd, "member");
     const members = await db.member.findMany({ where: { id: { in: ids }, workspaceId: viewer.workspaceId, status: "ACTIVE" } });
     if (members.length !== ids.length) throw new ValidationError("Unknown member");
@@ -351,6 +354,7 @@ export async function saveRuleAction(fd: FormData): Promise<ActionResult> {
     if (scope === "REPOSITORY" && !(await db.repository.findFirst({ where: { id: repositoryId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a repository");
     if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a project");
     if (scope === "OWNER" && !ownerLogin) throw new ValidationError("Enter the GitHub owner");
+    if (scope === "PROJECT") await assertProjectWritable(db, projectId);
     const rule = await db.reviewRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, labels: csv(str(fd, "labels")), reviewers, semantics: str(fd, "semantics") === "ALL" ? "ALL" : "ANY", reason } });
     await audit(db, viewer, "rule.create", { type: "ReviewRule", id: rule.id });
     revalidatePath("/admin/rules");
