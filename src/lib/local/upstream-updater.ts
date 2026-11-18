@@ -6,6 +6,7 @@ import { LOG_TAIL_CHARS, MAX_BACK, MAX_COMMITS, NOTABLE, branchNameOk, exhausted
 import type { GithubPort } from "@/lib/github/port";
 import { assertInside, createGitWriter, redactUrls, type GitWriter } from "@/lib/local/git-write";
 import { runVerify } from "@/lib/local/verify-run";
+import { notifyUpstream } from "@/lib/services/upstream-notify";
 
 /**
  * The upstream auto-updater's pipeline for ONE mapping, ported in idea (not code) from a server-side updater: take the newest upstream
@@ -83,7 +84,7 @@ export async function runUpdate(deps: UpdaterDeps, mappingId: string, opts: { ma
   const { db } = deps;
   const now = deps.now ?? (() => new Date());
   const m = await db.forkMapping.findUnique({ where: { id: mappingId }, include: { fork: { include: { owner: true } }, upstream: { include: { owner: true } }, updateConfig: true } });
-  if (!m || !m.updateConfig?.enabled || m.fork.isDemo) return null;
+  if (!m || !m.updateConfig?.enabled || m.updateConfig.mode !== "merge" || m.fork.isDemo) return null; // `releases` mode never reaches git
   const cfg = m.updateConfig;
   const dir = updaterDir(deps.home, mappingId);
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
@@ -144,7 +145,7 @@ export async function runUpdate(deps: UpdaterDeps, mappingId: string, opts: { ma
     const cancelled = async () => {
       if (deps.signal?.aborted) throw new Cancelled("Stopped because Mergeport is closing");
       const c = await db.upstreamUpdateConfig.findUnique({ where: { mappingId } });
-      if (!c?.enabled) throw new Cancelled("Auto-update was turned off during the run");
+      if (!c?.enabled || c.mode !== "merge") throw new Cancelled("Auto-update was turned off during the run");
     };
 
     // 1. a private clone of the fork, with the upstream as a second remote
@@ -315,7 +316,7 @@ export async function runUpdate(deps: UpdaterDeps, mappingId: string, opts: { ma
   }
 }
 
-/** One in-app notification per notable outcome, to the administrators who can see the fork, unless they turned the kind off. */
+/** One in-app notification per notable outcome (to the administrators who can see the fork, unless they turned the kind off). */
 async function notifyRun(db: Db, r: { mappingId: string; forkRepoId: string; workspaceId: string; forkName: string; state: UpdateState; prUrl?: string | null; error?: string | null; sha?: string | null }) {
   const what: Partial<Record<UpdateState, string>> = {
     "pr-opened": "Upstream update ready for review",
@@ -326,12 +327,5 @@ async function notifyRun(db: Db, r: { mappingId: string; forkRepoId: string; wor
     failed: "Upstream update failed",
   };
   const title = `${what[r.state] ?? "Upstream update"}: ${r.forkName}${r.sha ? ` (${r.sha.slice(0, 7)})` : ""}`;
-  const admins = await db.member.findMany({ where: { workspaceId: r.workspaceId, status: "ACTIVE", role: "ADMIN" }, select: { userId: true } });
-  for (const a of admins) {
-    const pref = await db.notificationPref.findUnique({ where: { userId: a.userId } });
-    // The kind is not in the Settings list yet (that list is fixed by tests/notify.test.ts); a stored `inApp: false` for it is honoured.
-    const own = (pref?.prefs as { kinds?: Record<string, { inApp?: unknown }> } | null | undefined)?.kinds?.["upstream-update"];
-    if (own?.inApp === false) continue;
-    await db.notification.create({ data: { workspaceId: r.workspaceId, userId: a.userId, repositoryId: r.forkRepoId, kind: "upstream-update", title: title.slice(0, 200), href: `/forks#m-${r.mappingId}` } });
-  }
+  await notifyUpstream(db, { kind: "upstream-update", mappingId: r.mappingId, forkRepoId: r.forkRepoId, workspaceId: r.workspaceId, title });
 }

@@ -13,8 +13,18 @@ export const MIN_TIMEOUT_SEC = 10;
 export const MAX_TIMEOUT_SEC = 2 * 60 * 60;
 export const LOG_TAIL_CHARS = 4000;
 
-export type UpdateState = "running" | "promoted" | "pr-opened" | "up-to-date" | "conflict" | "verify-failed" | "failed" | "cancelled" | "merged-untested";
+export type UpdateState = "running" | "promoted" | "pr-opened" | "up-to-date" | "conflict" | "verify-failed" | "failed" | "cancelled" | "merged-untested" | "release-found";
 export type PromoteMode = "pr" | "push";
+/** `merge`: merge upstream commits in a private clone. `releases`: only read the upstream's releases and warn (no git, no verify, no PR). */
+export type UpdateMode = "merge" | "releases";
+
+/** Release watch limits. One check per mapping per ~15 minutes (a hair under, so the 15-minute reconcile cycle is never skipped by jitter). */
+export const RELEASE_CHECK_MIN_MS = 14 * 60_000;
+/** Warnings made by one check; the rest is counted in a "+N more" note. */
+export const RELEASE_MAX_PER_CHECK = 5;
+export const RELEASE_NOTES_CHARS = 600;
+/** A release warning stays under "needs me" in the digest until it was looked at, or this many days. */
+export const RELEASE_ATTENTION_DAYS = 14;
 
 /** Outcomes that mean the person has something to look at: they create a notification and appear in `upstreamUpdateAttention`. */
 export const NOTABLE: readonly UpdateState[] = ["pr-opened", "merged-untested", "promoted", "conflict", "verify-failed", "failed"];
@@ -22,6 +32,21 @@ export const NOTABLE: readonly UpdateState[] = ["pr-opened", "merged-untested", 
 export const NEEDS_PERSON: readonly UpdateState[] = ["pr-opened", "merged-untested", "conflict", "verify-failed", "failed"];
 
 export type CommitInfo = { sha: string; subject: string; author: string; url: string };
+
+/** What a `release-found` run stores about the release. All text is untrusted: it is only ever rendered as text. */
+export type ReleaseInfo = {
+  id: string;
+  tag: string;
+  name: string | null;
+  url: string | null;
+  publishedAt: string | null;
+  prerelease: boolean;
+  notes: string;
+  /** Does the fork's branch already contain the tag? null: not known (nothing is guessed). */
+  inFork: boolean | null;
+  /** Releases the same check found beyond the cap. */
+  more: number;
+};
 
 export class CommandError extends Error {}
 
@@ -88,6 +113,59 @@ export function cleanConfig(raw: { enabled?: unknown; verifyCommand?: unknown; p
   if (!branchNameOk(branchName)) throw new CommandError("That is not a usable branch name");
   if (branchName === mapping.forkBranch || branchName === mapping.upstreamBranch) throw new CommandError("The sync branch must be a different branch from the fork and upstream branches");
   return { enabled: raw.enabled === true || raw.enabled === "on" || raw.enabled === "true", verifyCommand: verify || null, promote, timeoutSec, branchName };
+}
+
+/** What the Forks page saves: `merge` carries the merge settings, `releases` carries none (stored merge settings are left as they are). */
+export type SettingsInput = ({ mode: "merge" } & ConfigInput) | { mode: "releases"; enabled: boolean };
+
+const on = (v: unknown) => v === true || v === "on" || v === "true";
+
+/**
+ * Mode-aware validation. In `releases` mode nothing about git is used, so the verify command, promote mode, time limit and branch name
+ * are neither required nor looked at (a half-edited command cannot block saving a release watch). `push` still needs a verify command
+ * in `merge` mode. `includePrereleases` is null when the caller did not say (keep what is stored).
+ */
+export function cleanSettings(raw: { mode?: unknown; enabled?: unknown; verifyCommand?: unknown; promote?: unknown; timeoutSec?: unknown; branchName?: unknown; includePrereleases?: unknown }, mapping: { forkBranch: string; upstreamBranch: string }): SettingsInput & { includePrereleases: boolean | null } {
+  const includePrereleases = raw.includePrereleases === undefined ? null : on(raw.includePrereleases);
+  if (raw.mode === "releases") return { mode: "releases", enabled: on(raw.enabled), includePrereleases };
+  return { mode: "merge", ...cleanConfig(raw, mapping), includePrereleases };
+}
+
+/** Release notes are untrusted text: control characters out, runs of blank lines collapsed, cut at `max` characters. Plain text, never HTML. */
+export function plainExcerpt(text: string | null | undefined, max = RELEASE_NOTES_CHARS): string {
+  const t = (text ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return t.length > max ? `${t.slice(0, max).trimEnd()}…` : t;
+}
+
+/** A release link is only kept when it is http(s) and points into the UPSTREAM repository on the configured host. */
+export function safeReleaseUrl(url: string | null | undefined, upstreamFullName: string, host = "github.com"): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    if (u.hostname.toLowerCase() !== host.toLowerCase() || u.username || u.password) return null;
+    return u.pathname.toLowerCase().startsWith(`/${upstreamFullName.toLowerCase()}/`) ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which releases to warn about. Drafts are never considered; prereleases only with the option. New = published after the cursor and not
+ * warned before; the newest `cap` are kept (oldest first) and the rest counted. `newest` is the new cursor.
+ */
+export function pickNewReleases<R extends { id: string; draft: boolean; prerelease: boolean; publishedAt: Date | null }>(
+  releases: R[],
+  o: { after: Date | null; warned: ReadonlySet<string>; includePrereleases: boolean; cap?: number },
+): { fresh: R[]; more: number; newest: R | null } {
+  const usable = releases.filter((r) => !r.draft && r.publishedAt && (o.includePrereleases || !r.prerelease)).sort((a, b) => a.publishedAt!.getTime() - b.publishedAt!.getTime());
+  const unseen = usable.filter((r) => (!o.after || r.publishedAt! > o.after) && !o.warned.has(r.id));
+  const cap = o.cap ?? RELEASE_MAX_PER_CHECK;
+  return { fresh: unseen.slice(-cap), more: Math.max(0, unseen.length - cap), newest: usable.at(-1) ?? null };
 }
 
 /** Subject lines are untrusted text that ends up in a pull request: shown as code so nothing is mentioned, linked or rendered. */

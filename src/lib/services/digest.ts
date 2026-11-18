@@ -8,6 +8,7 @@ import { wantsInApp } from "@/lib/domain/notify-prefs";
 import { inbox } from "./inbox";
 import { getPrefs } from "./notification-prefs";
 import { attention, planningWhere, type AttentionQueues } from "./queries";
+import { RELEASE_ATTENTION_DAYS } from "@/lib/domain/upstream-update";
 import { upstreamUpdateAttention } from "./upstream-update";
 
 /**
@@ -264,12 +265,21 @@ const UPDATE_REASON: Record<string, string> = {
   "pr-opened": "Upstream update is waiting for review",
   "merged-untested": "Upstream update is waiting for review (not verified)",
 };
-/** Upstream auto-update runs that need the person: the latest settled run of each fork, when it is a problem or a pull request to review. */
+/**
+ * Upstream auto-update runs that need the person: the latest settled run of each fork, when it is a problem or a pull request to review,
+ * and every release warning (`release-found`) not yet looked at. A release warning drops out once the Forks page was opened (`seenAt`) or
+ * after RELEASE_ATTENTION_DAYS days, whichever comes first; the 7-day lookback above is for merge runs only.
+ */
 const upstreamUpdateSource: DigestSource = async (ctx) => {
   const since = new Date(ctx.end.getTime() - UPDATE_LOOKBACK_DAYS * 86_400_000);
-  const runs = await upstreamUpdateAttention(ctx.db, ctx.viewer, { since });
+  const releaseSince = new Date(ctx.end.getTime() - RELEASE_ATTENTION_DAYS * 86_400_000);
+  const runs = await upstreamUpdateAttention(ctx.db, ctx.viewer, { since, releaseSince });
   return {
-    mine: runs.map((r) => entry(ctx, { key: `upstream-update:${r.mappingId}`, title: `${r.upstream} into ${r.fork}`, repo: r.fork, href: "/forks", reason: UPDATE_REASON[r.state] ?? "Upstream update needs you", since: r.finishedAt })),
+    mine: runs.map((r) =>
+      r.state === "release-found" && r.release
+        ? entry(ctx, { key: `upstream-release:${r.id}`, title: `${r.upstream} for ${r.fork}`, repo: r.fork, href: "/forks", reason: `New upstream release ${r.release.tag}${r.release.more ? ` (+${r.release.more} more)` : ""}`, since: r.finishedAt })
+        : entry(ctx, { key: `upstream-update:${r.mappingId}`, title: `${r.upstream} into ${r.fork}`, repo: r.fork, href: "/forks", reason: UPDATE_REASON[r.state] ?? "Upstream update needs you", since: r.finishedAt }),
+    ),
   };
 };
 

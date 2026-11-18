@@ -105,13 +105,13 @@ export class World {
 const meta = (id: bigint, owner: string, name: string): RepoMeta => ({ githubId: id, fullName: `${owner}/${name}`, name, htmlUrl: `https://github.com/${owner}/${name}`, visibility: "PUBLIC", isFork: owner === "owner", defaultBranch: "main", archived: false, owner: { githubId: id + 1000n, login: owner, type: "USER" } });
 
 /** A fresh profile (administrator), a fork `owner/proj`, its upstream `upstream/proj` and the mapping between them. */
-export async function setupMapping(db: Db, cfg: { enabled?: boolean; verifyCommand?: string | null; promote?: "pr" | "push"; timeoutSec?: number; branchName?: string } | null = {}) {
+export async function setupMapping(db: Db, cfg: { enabled?: boolean; verifyCommand?: string | null; promote?: "pr" | "push"; timeoutSec?: number; branchName?: string; mode?: "merge" | "releases"; includePrereleases?: boolean } | null = {}) {
   await truncateAll(db);
   const p = await ensureLocalProfile(db, { id: 1n, login: "owner", name: "Owner", avatarUrl: null, host: "github.com" });
   const fork = await upsertRepository(db, p.workspace.id, meta(11n, "owner", "proj"));
   const upstream = await upsertRepository(db, p.workspace.id, meta(12n, "upstream", "proj"));
   const mapping = await db.forkMapping.create({ data: { forkRepoId: fork.id, upstreamRepoId: upstream.id, forkBranch: "main", upstreamBranch: "main" } });
-  if (cfg) await db.upstreamUpdateConfig.create({ data: { mappingId: mapping.id, enabled: cfg.enabled ?? true, verifyCommand: cfg.verifyCommand ?? null, promote: cfg.promote ?? "pr", timeoutSec: cfg.timeoutSec ?? 60, branchName: cfg.branchName ?? "mergeport/upstream-sync" } });
+  if (cfg) await db.upstreamUpdateConfig.create({ data: { mappingId: mapping.id, enabled: cfg.enabled ?? true, verifyCommand: cfg.verifyCommand ?? null, promote: cfg.promote ?? "pr", timeoutSec: cfg.timeoutSec ?? 60, branchName: cfg.branchName ?? "mergeport/upstream-sync", mode: cfg.mode ?? "merge", includePrereleases: cfg.includePrereleases ?? false } });
   const viewer = (await loadViewer(db, p.user.id))!;
   return { ...p, fork, upstream, mapping, viewer };
 }

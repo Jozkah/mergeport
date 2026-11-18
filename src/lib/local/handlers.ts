@@ -4,6 +4,7 @@ import { portForSync } from "@/lib/github/factory";
 import { GithubError } from "@/lib/github/port";
 import type { Handler } from "@/lib/jobs";
 import { maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
+import { RELEASES_JOB, maybeRequestReleaseCheck, runReleaseCheck } from "@/lib/services/upstream-releases";
 import { setStatus, syncFork, syncItem, syncRepository } from "@/lib/sync/repository";
 
 /**
@@ -58,13 +59,31 @@ export const handlers: Record<string, Handler> = {
     const port = await portForSync(db, m.forkRepoId);
     if (port) await syncFork(db, port, p.mappingId);
     await maybeRequestUpdate(db, p.mappingId); // opt-in upstream auto-update, when the fork is now known to be behind
+    await maybeRequestReleaseCheck(db, p.mappingId); // opt-in release watch (its own 15-minute cap), whether or not the fork is behind
   }) as Handler,
   ...updateHandlers(db),
+  // Release watch: reads the upstream's releases through the GitHub API only (no clone, no git, no command), within the same rate-limit budget.
+  [RELEASES_JOB]: (async (p: { mappingId: string; manual?: boolean }) => {
+    const m = await db.forkMapping.findUnique({ where: { id: p.mappingId } });
+    if (!m) return;
+    await guardSourceBudget();
+    const port = await portForSync(db, m.forkRepoId);
+    if (!port) return;
+    try {
+      await runReleaseCheck(db, port, p.mappingId, { manual: p.manual === true });
+    } finally {
+      await recordRate(port.lastRate());
+      (await import("@/lib/local/runtime")).notifyChange("state"); // redraw open pages: the history may have changed
+    }
+  }) as Handler,
   // Recurrence is owned by the runner (ensureRecurring), never by this handler.
   "reconcile.all": (async () => {
     const { enqueue } = await import("@/lib/jobs");
     const repos = await db.repository.findMany({ where: { trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
     for (const r of repos) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}` });
+    // A fork that is NOT behind never reaches an update request, so release watches are asked for here as well (each capped to one check per ~15 minutes).
+    const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases" }, select: { mappingId: true } });
+    for (const w of watches) await maybeRequestReleaseCheck(db, w.mappingId);
   }) as Handler,
   // Local only (no GitHub, no network): makes the daily digest once per local day, and catches up after the app was closed.
   "digest.daily": (async () => {

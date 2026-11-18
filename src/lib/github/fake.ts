@@ -1,6 +1,6 @@
 import type { RepoMeta } from "@/lib/services/repositories";
 import type { CompareOutcome } from "@/lib/domain/forks";
-import { GithubError, type Discovery, type GithubPort, type MergeMethod, type Page, type RateInfo, type RemoteBranch, type RemoteComment, type RemoteRequested, type RemoteReview, type RemoteWorkItem } from "./port";
+import { GithubError, type Discovery, type GithubPort, type MergeMethod, type Page, type RateInfo, type ReleaseList, type RemoteBranch, type RemoteRelease, type RemoteComment, type RemoteRequested, type RemoteReview, type RemoteWorkItem } from "./port";
 
 /**
  * In-memory fake GitHub used by tests and by local development without credentials.
@@ -132,6 +132,19 @@ export class FakeGithub implements GithubPort {
   }
   async getPullMergeSha(o: string, r: string, n: number) {
     return this.mergeShas.get(this.kn(o, r, n)) ?? null;
+  }
+  /** Releases per owner/repo. The ETag is a counter bumped by `setReleases`, so an unchanged list answers `not-modified` like GitHub's 304. */
+  releases = new Map<string, { etag: string; list: RemoteRelease[] }>();
+  setReleases(o: string, r: string, list: RemoteRelease[]) {
+    const prev = this.releases.get(this.k(o, r));
+    this.releases.set(this.k(o, r), { etag: `"r${Number(prev?.etag.replace(/\D/g, "") ?? 0) + 1}"`, list });
+  }
+  async listReleases(o: string, r: string, opts: { etag?: string | null } = {}): Promise<ReleaseList> {
+    this.maybeFail("listReleases");
+    const row = this.releases.get(this.k(o, r));
+    if (!row) return { kind: "ok", etag: null, releases: [] };
+    if (opts.etag && opts.etag === row.etag) return { kind: "not-modified" };
+    return { kind: "ok", etag: row.etag, releases: row.list.map((x) => ({ ...x })) };
   }
 
   // writes just record intent; tests assert on what would have been sent and with whose credential

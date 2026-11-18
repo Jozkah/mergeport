@@ -14,6 +14,8 @@ type FakeRepo = {
   collaborators: Map<string, Perm>; invitations: Map<number, Invitation>;
   objects: Map<string, Obj>; refs: Map<string, string>;
   pulls?: Map<number, { number: number; state: "open" | "closed"; head: string; base: string; title: string; body: string }>;
+  /** Releases as GitHub's REST lists them, newest first. */
+  releases?: { id: number; tag_name: string; name: string | null; html_url: string; published_at: string | null; draft: boolean; prerelease: boolean; body: string | null }[];
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
@@ -256,6 +258,13 @@ export class FakeGitHubServer {
       if (cur && !b.force && !this.isAncestor(r, cur, b.sha)) return json(422, { message: "Update is not a fast forward" });
       r.refs.set(ref, b.sha);
       return json(200, { ref: `refs/${ref}`, object: { sha: b.sha } });
+    }
+    // releases (read only; the ETag is a hash of the list, so an unchanged list answers 304 as GitHub does)
+    if (method === "GET" && sub === "/releases") {
+      const list = r.releases ?? [];
+      const etag = `W/"${sha1(JSON.stringify(list))}"`;
+      if (headers.get("if-none-match") === etag) return json(304, null, { etag });
+      return json(200, list, { etag });
     }
     // pull requests (same-repository head/base only: what the upstream auto-updater needs)
     const pulls = (r.pulls ??= new Map());
