@@ -105,7 +105,7 @@ The hub UI was built against ports (`src/lib/hub/ports.ts`); `src/lib/hub/ports-
 - `getEngine()` reads `TeamConfig`: on `backend = HUB` it builds the engine with an `HttpHubClient` and starts `startHubLive`; a GitHub profile keeps the GitHub store unchanged.
 - `tests/hub-e2e.test.ts` runs two local clients against the real in-process hub (`tests/hub/harness.ts`).
 
-Still open: `currentBackend()` in `src/lib/local/workspaces.ts` reads `MERGEPORT_BACKEND`/`active.json`, not `TeamConfig`; `assertBackendMatch` is not yet called from the `SyncEngine`.
+`SyncEngine` calls the guard before every pull and push of a space and `TeamService`/`syncHubSpaces` call it before creating or joining one; a mismatch is recorded as that space's sync error (shown on the Sync page) and is not retried in a loop. The runtime takes the profile backend from `MERGEPORT_BACKEND` when the launcher set it, else from `TeamConfig`. Still open: `currentBackend()` in `src/lib/local/workspaces.ts` reads `MERGEPORT_BACKEND`/`active.json`, not `TeamConfig`.
 
 ### Manual verification (spec) not yet run
 
@@ -178,7 +178,7 @@ The pieces of `src/lib/hub/` are connected in the running app:
 - Hub team management is `HubTeamService` (`src/lib/team/hub-service.ts`); `TeamService` stays GitHub-only.
 - Sign-in card, workspace switcher with the switching overlay, the hub Team page, and the live-link state (`HubLinkState`) on the Sync and Team pages. The consistency-delay text on those pages is computed without the `{ live }` option, so it shows the polling figure.
 
-Not wired: `assertBackendMatch` is exercised by tests only (`tests/profile-switch.test.ts`) and is not called from the engine; `checkHubHealth` in `src/lib/hub/client.ts` has no caller in `src/` (the connect flow has its own health check).
+Not wired: `checkHubHealth` in `src/lib/hub/client.ts` has no caller in `src/` (the connect flow has its own health check).
 
 ### Hub client limitations
 
