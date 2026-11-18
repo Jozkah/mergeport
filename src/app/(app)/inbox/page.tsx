@@ -2,8 +2,8 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { inbox, type InboxStatus } from "@/lib/services/inbox";
-import { formatInstant } from "@/lib/format";
-import { EmptyState, PageHeader, Panel, Segmented, StatusPill, Avatar } from "@/components/ui/primitives";
+import { formatInstant, formatInstantDated, relativeTime } from "@/lib/format";
+import { EmptyState, PageHeader, Panel, Segmented, StatusPill, Avatar, Time } from "@/components/ui/primitives";
 import { RepoChip } from "@/components/ui/RepoChip";
 import { Inbox } from "@/components/ui/icons";
 import { itemHref } from "@/components/work/WorkTable";
@@ -41,7 +41,11 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
           </EmptyState>
         ) : (
           <ul className="divide-y divide-line">
-            {entries.map((e) => (
+            {entries.map((e) => {
+              const me = viewer.login.toLowerCase();
+              const requested = e.item.reviewRequests.filter((r) => !r.removedAt && r.kind === "USER" && r.reviewerRef.toLowerCase() === me).reduce((m, r) => Math.max(m, r.requestedAt.getTime()), 0);
+              const at = (d: Date) => <Time value={d} formatted={formatInstantDated(d, viewer.timezone, now)} />;
+              return (
               <li key={e.item.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -55,10 +59,16 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     <StatusPill status={e.derived.derivation.primary} />
                     {e.snoozeUntil && <span>Back {formatInstant(e.snoozeUntil, viewer.timezone)}</span>}
                   </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-3">
+                    {requested > 0 && <span>Requested {at(new Date(requested))}</span>}
+                    <span>Opened {at(e.item.createdAtGh)}</span>
+                    <span>Updated {at(e.item.updatedAtGh)} <span className="text-ink-3">({relativeTime(e.item.updatedAtGh, now)})</span></span>
+                  </div>
                 </div>
                 <InboxRowActions itemId={e.item.id} status={e.status} />
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </Panel>

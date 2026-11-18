@@ -9,6 +9,16 @@ export function formatInstant(d: Date | null | undefined, tz: string): string {
   }
 }
 
+/** Like `formatInstant`, with the year when it is not the current one, for lists where an item can be old. */
+export function formatInstantDated(d: Date, tz: string, now: Date): string {
+  try {
+    const year = (x: Date) => new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric" }).format(x);
+    return new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric", ...(year(d) === year(now) ? {} : { year: "numeric" }), hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
+  } catch {
+    return d.toISOString();
+  }
+}
+
 /** Date-only values (due dates, milestone targets) carry no time or zone: always read them as UTC calendar dates. */
 export function formatDateOnly(d: Date | null | undefined): string {
   if (!d) return "—";
