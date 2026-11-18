@@ -5,7 +5,7 @@ import { requireViewer } from "@/lib/authz-page";
 import { isDemo } from "@/lib/env";
 import { getEngine, getTeamService } from "@/lib/local/runtime";
 import { syncCenter } from "@/lib/services/sync-center";
-import { expectedConsistencyDelaySeconds } from "@/lib/sync/engine";
+import { MAX_POLL_MS, expectedConsistencyDelaySeconds } from "@/lib/sync/engine";
 import { formatInstant } from "@/lib/format";
 import { deriveSourceStatus } from "@/lib/sync/source-status";
 import { ActionForm } from "@/components/forms/ActionForm";
@@ -13,7 +13,7 @@ import { Sheet } from "@/components/ui/dialog";
 import { SyncBadge } from "@/components/sync/SyncBadge";
 import { Banner, EmptyState, Mono, PageHeader, Panel, Time } from "@/components/ui/primitives";
 import { FolderGit2, RefreshCw, ShieldCheck } from "@/components/ui/icons";
-import { dismissRestoredAction, refreshSyncAction, releaseQuarantineAction, resendRestoredAction, resolveConflictAction, setPollSecondsAction } from "@/app/team-actions";
+import { dismissRestoredAction, refreshSyncAction, releaseQuarantineAction, resendRestoredAction, resolveConflictAction } from "@/app/team-actions";
 
 export const metadata = { title: "Sync" };
 export const dynamic = "force-dynamic";
@@ -52,7 +52,9 @@ export default async function SyncPage() {
 
   return (
     <>
-      <PageHeader title="Sync" subtitle="Your edits are saved on this computer first. This page shows what has reached GitHub, what is waiting, and what needs a decision." actions={engine ? <ActionForm action={refreshSyncAction} submitLabel="Refresh now" submitClassName="btn" resetOnSuccess={false}>{null}</ActionForm> : undefined} />
+      <PageHeader title="Sync" subtitle="Your edits are saved on this computer first. This page shows what has reached GitHub, what is waiting, and what needs a decision." actions={engine ? <ActionForm action={refreshSyncAction} submitLabel="Refresh now" submitClassName="btn" resetOnSuccess={false}>{null}</ActionForm> : undefined}
+        help={<>Mergeport polls GitHub; it is not real time. With the app open and visible it checks every {poll} seconds, so a teammate&apos;s change typically shows up within about {delay.typical} seconds. When nothing changes, checks back off to at most every {MAX_POLL_MS / 60_000} minutes; with no visible tab it checks about once a minute, and not at all while the app is closed. Background sync runs only while this app is running.</>}
+      />
       {isDemo() && <div className="mb-4"><Banner title="Demo mode">Nothing syncs in demo mode.</Banner></div>}
 
       {center.length > 0 && (
@@ -80,7 +82,7 @@ export default async function SyncPage() {
         </div>
       )}
 
-      <div className="mb-5"><Banner title="How fresh is shared data?">Mergeport polls GitHub; it is not real time. With the app open and visible it checks every {poll} seconds, so a teammate&apos;s change typically shows up within about {delay.typical} seconds (longer when nothing changes: checks back off to at most 10 minutes, and a hidden or closed tab checks about once a minute or not at all). Background sync runs only while this app is running.</Banner></div>
+      <div className="mb-5"><Banner title={`Checks every ${poll} s while open; slower when idle.`} action={<Link href="/settings#polling" className="btn">Change interval</Link>} /></div>
 
       {source && (
         <div className="mb-5">
@@ -197,18 +199,6 @@ export default async function SyncPage() {
           </Panel>
         </div>
       )}
-
-      <div className="mt-5">
-        <Panel title="Polling" icon={RefreshCw} id="polling">
-          <div className="p-4">
-            <ActionForm action={setPollSecondsAction} submitLabel="Save" resetOnSuccess={false} className="max-w-xs">
-              <label className="label" htmlFor="poll">Active polling interval (seconds, 15 to 600)</label>
-              <input id="poll" name="seconds" type="number" min={15} max={600} defaultValue={poll} className="input" />
-              <p className="mt-1 text-[12px] text-ink-3">Shorter means fresher data and more GitHub requests. Shared-state requests have their own budget, separate from source repository refreshes.</p>
-            </ActionForm>
-          </div>
-        </Panel>
-      </div>
     </>
   );
 }
