@@ -44,8 +44,7 @@ export default async function Branches({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <PageHeader title="Branches" subtitle="Remote branches come from GitHub; local worktrees from folders you choose." />
-      <p className="mb-5 text-[12.5px] text-ink-3" title="Mergeport reads branch names, paths and counts of changed files with a fixed set of read-only git commands. It never reads file contents or diffs, never runs hooks or scripts from a repository, and never writes worktree data to a shared repository. There are no create, remove, reset or checkout controls.">Read-only. Nothing here leaves this computer.</p>
+      <PageHeader title="Branches" subtitle="Remote branches from GitHub, local worktrees from folders you choose. Read-only; nothing leaves this computer." help="Mergeport reads branch names, paths and counts of changed files with a fixed set of read-only git commands. It never reads file contents or diffs, never runs hooks or scripts from a repository, and never writes worktree data to a shared repository. There are no create, remove, reset or checkout controls." />
 
       <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
         <nav aria-label="Repositories" className="panel lg:sticky lg:top-3">
