@@ -35,12 +35,12 @@ export function InstantUpdatesPanel({ teamName, origin, isOwner, webhooks, track
       <div>
         {appResult?.result === "created" && <div className="p-4 pb-0"><Banner tone="info" title="Created. The secret is saved on your server.">Next, install the App on your repositories (steps 2 and 3).</Banner></div>}
         {appResult?.result === "failed" && <div className="p-4 pb-0"><Banner tone="error" title="The GitHub App was not set up">{appFailureText(appResult.reason)}</Banner></div>}
-        <p className="max-w-[75ch] text-pretty border-b border-line p-4 text-[13px] text-ink-3">GitHub tells your server when an issue, pull request or comment changes, and the server passes it to the apps that may see it. Without it, Mergeport checks GitHub every 15 minutes.</p>
+        <p className="max-w-[75ch] text-pretty border-b border-line p-4 text-[13px] text-ink-3">GitHub notifies your server of changes. Without this, Mergeport checks GitHub every 15 minutes.</p>
 
         {isOwner && (
           <Step n={1} title="Create the GitHub App">
             {webhooks.enabled ? (
-              <p className="text-[13px] text-ink-2">Done.{slug && <> The App is <Mono>{slug}</Mono>.</>} The secret is saved on your server.</p>
+              <p className="text-[13px] text-ink-2">Done.{slug && <> The App is <Mono>{slug}</Mono>.</>} Secret saved on your server.</p>
             ) : (
               <GithubAppCreate />
             )}
@@ -76,7 +76,7 @@ export function InstantUpdatesPanel({ teamName, origin, isOwner, webhooks, track
               )}
               {slug && tracked.length > 0 && (
                 <ActionForm action={addTrackedRepositoriesAction} submitLabel="Add my tracked repositories" submitAriaLabel="Add my tracked repositories: try to add them through GitHub's API" pendingLabel="Adding…" resetOnSuccess={false} submitClassName="btn !h-10">
-                  <p className="text-[12.5px] text-ink-3">Optional. Try to add them through GitHub&apos;s API, as you. GitHub often refuses this; the install link above always works. It never changes anything else.</p>
+                  <p className="text-[12.5px] text-ink-3">Optional. GitHub often refuses this; the install link above always works.</p>
                 </ActionForm>
               )}
             </>

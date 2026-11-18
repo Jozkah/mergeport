@@ -55,7 +55,7 @@ export async function UpstreamUpdate({ db, viewer, mappingId, forkBranch, forkNa
       <div className="mt-2 flex max-w-[72ch] flex-col gap-1 text-[12.5px] text-ink-3 text-pretty">
         {watching ? (
           <>
-            <p>In this mode Mergeport only reads the releases of <Mono>{upstreamName}</Mono> from GitHub and tells you when a new one is published. Nothing is changed.</p>
+            <p>Mergeport only reads the releases of <Mono>{upstreamName}</Mono> and warns about new ones. Nothing is changed.</p>
             {cfg.enabled && (
               <p className="tnum">
                 {cfg.releasesBaselined ? <>Watching from <Mono>{cfg.lastReleaseTag ?? "the first release"}</Mono>, the newest release when the first check ran. </> : <>Not checked yet. The first check only notes the newest release; it does not warn about older ones. </>}
@@ -110,13 +110,13 @@ export async function UpstreamUpdate({ db, viewer, mappingId, forkBranch, forkNa
             releaseFields={
               <>
                 <label className="flex min-h-10 items-center gap-2 text-[13px]"><input type="checkbox" name="includePrereleases" defaultChecked={cfg.includePrereleases} /> <span>Also warn about pre-releases</span></label>
-                <p className="-mt-2 max-w-[72ch] text-[12px] text-ink-3 text-pretty">Drafts are never counted. The check command, merge mode, time limit and sync branch are not used here; what you stored for them is kept if you switch back.</p>
+                <p className="-mt-2 max-w-[72ch] text-[12px] text-ink-3 text-pretty">Drafts are never counted. Merge settings are kept if you switch back.</p>
               </>
             }
           />
         </ActionForm>
       ) : (
-        <p className="mt-2 text-[12.5px] text-ink-3">An administrator of this profile sets auto-update up, because its check command runs on this computer.</p>
+        <p className="mt-2 text-[12.5px] text-ink-3">Only a profile administrator can change this.</p>
       )}
 
       <h4 className="mt-5 text-[13px] font-medium">History</h4>

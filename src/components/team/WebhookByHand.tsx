@@ -71,7 +71,7 @@ export function WebhookByHand({ teamName, hubOrigin, enabled }: { teamName: stri
     <details className="rounded-[10px] border border-line p-3 text-[13px]">
       <summary className="min-h-10 cursor-pointer font-medium leading-10">Set it up by hand</summary>
       <div className="mt-2 flex flex-col gap-3">
-        <p className="text-ink-3">For an owner who cannot use the button above. Register a GitHub App yourself with the values below; the secret is made in this browser and goes nowhere until you save it.</p>
+        <p className="text-ink-3">For owners who cannot use the button above. The secret stays in this browser until you save it.</p>
         <div>
           <button type="button" className="btn !h-10" onClick={() => setV(byHandValues({ teamName, hubOrigin, letters: randomLetters(), secret: generateSecret() }))}>
             {v ? "Generate again" : "Generate"}
