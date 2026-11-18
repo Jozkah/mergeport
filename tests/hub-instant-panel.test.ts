@@ -22,7 +22,7 @@ const h = vi.hoisted(() => ({
   link: { state: "live", pendingOps: 0, needsSignIn: false } as { state: string; pendingOps: number; needsSignIn: boolean },
 }));
 // Main's section tiles read the current path, which is null when a component is rendered outside Next.
-vi.mock("next/navigation", () => ({ usePathname: () => "/team", useRouter: () => ({ push: () => {}, refresh: () => {} }), redirect: () => {} }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/team", useRouter: () => ({ push: () => {}, refresh: () => {} }), redirect: () => {}, unstable_rethrow: () => {} }));
 vi.mock("@/lib/db", async (orig) => ({ ...(await orig<typeof import("@/lib/db")>()), get db() { return h.db; } }));
 vi.mock("@/lib/local/runtime", () => ({ getTeamService: async () => null, getEngine: async () => null, getHubTeamService: h.getHubTeamService, syncSoon: () => {} }));
 vi.mock("@/lib/local/workspaces", () => ({ currentBackend: async () => hubBackendId("https://hub.example.com") }));

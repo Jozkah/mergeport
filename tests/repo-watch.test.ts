@@ -17,7 +17,7 @@ import { db as appDb } from "@/lib/db";
 import { testDb } from "./helpers";
 
 const h = vi.hoisted(() => ({ viewer: null as unknown, user: null as unknown }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/settings", useRouter: () => ({ push: () => {}, refresh: () => {} }), redirect: () => {} }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/settings", useRouter: () => ({ push: () => {}, refresh: () => {} }), redirect: () => {}, unstable_rethrow: () => {} }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }));
 vi.mock("@/lib/auth/current", () => ({
