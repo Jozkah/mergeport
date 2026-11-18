@@ -18,6 +18,8 @@ describe("starting several processes at once", () => {
   it("applies every migration exactly once and none of them fails (real processes)", async () => {
     const results = await Promise.all(Array.from({ length: 12 }, run));
     for (const r of results) expect(r.err.includes("already exists") ? r.err : "").toBe("");
+    // Print a failing child's stderr so a flake shows its cause instead of just "exit 1".
+    for (const r of results) if (r.code !== 0) console.error(`child exited ${r.code}:\n${r.err}`);
     expect(results.map((r) => r.code)).toEqual(Array(12).fill(0));
     const db = new Database(file, { readonly: true });
     try {
