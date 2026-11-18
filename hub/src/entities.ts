@@ -68,7 +68,8 @@ export function applyOps(db: HubDb, spaceId: string, actor: { githubId: bigint; 
      ON CONFLICT (space_id, type, entity_id) DO UPDATE SET version = excluded.version, deleted = excluded.deleted, data = excluded.data, applied_ops = excluded.applied_ops,
        updated_at = excluded.updated_at, updated_by = excluded.updated_by, seq = excluded.seq`,
   );
-  const bump = q(db, "UPDATE space SET seq = seq + 1 WHERE id = ?");
+  const putSharer = db.prepare("INSERT OR IGNORE INTO repo_sharer (space_id, entity_id, github_id) VALUES (?, ?, ?)");
+  const bump = q(db,"UPDATE space SET seq = seq + 1 WHERE id = ?");
   const readSeq = q(db, "SELECT seq FROM space WHERE id = ?");
   const putEvent = db.prepare(
     "INSERT INTO entity_event (space_id, seq, type, entity_id, version, deleted, data, op_id, actor_github_id, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -99,6 +100,8 @@ export function applyOps(db: HubDb, spaceId: string, actor: { githubId: bigint; 
       const seq = (readSeq.get(spaceId) as { seq: bigint }).seq;
       putEntity.run(spaceId, op.type, op.entityId, next, deleted ? 1 : 0, data, JSON.stringify([...applied, op.opId].slice(-APPLIED_OPS_KEEP)), at, actor.githubId, seq);
       putEvent.run(spaceId, seq, op.type, op.entityId, next, deleted ? 1 : 0, data, op.opId, actor.githubId, at);
+      // Relay provenance (notify.ts): who wrote this repository share.
+      if (op.type === "repo") putSharer.run(spaceId, op.entityId, actor.githubId);
       results.push({ opId: op.opId, status: "applied", version: next });
     }
     const seq = (readSeq.get(spaceId) as { seq: bigint } | undefined)?.seq ?? 0n;
@@ -227,7 +230,8 @@ export function entitiesChanged(ctx: HubContext, spaceId: string, seq: bigint): 
 const opSchema = z.object({
   opId: z.string().min(1).max(128),
   type: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
-  entityId: z.string().min(1).max(128),
+  // The charset the client accepts on its side; anything else would be an id it can never apply and would pin its cursor.
+  entityId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
   kind: z.enum(["UPSERT", "DELETE"]),
   baseVersion: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   data: z
