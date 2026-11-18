@@ -72,7 +72,7 @@ export default async function Planning({ searchParams }: { searchParams: Promise
     <>
       <PageHeader
         title="Planning"
-        subtitle={`${project.name}: ${cards.length} card${cards.length === 1 ? "" : "s"} you can see. Dragging a card changes only the board, never the GitHub issue or its labels.`}
+        subtitle={`${project.name} · ${cards.length} card${cards.length === 1 ? "" : "s"}. Moving a card never changes GitHub.`}
         actions={
           <>
             <Sheet title="Add a card" description="Link an open GitHub item, or write an internal task for project members." trigger={<button className="btn btn-primary"><Plus size={14} aria-hidden /> Add card</button>}>
