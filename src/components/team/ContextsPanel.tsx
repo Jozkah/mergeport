@@ -19,9 +19,9 @@ export function ContextsPanel({ tz }: { tz: string }) {
   const idx = readIndex(dir, baseName);
   const current = contextIdOf(dir, baseName, dbFile);
   return (
-    <Panel title="Team contexts" icon={Users} id="contexts">
+    <Panel title="Team contexts" icon={Users} id="contexts" defaultOpen={false} summary={`${idx.contexts.length} context${idx.contexts.length === 1 ? "" : "s"}`}>
       <div className="flex flex-col gap-3 p-4 text-[13px]">
-        <p className="text-ink-3">Use more than one team without leaving any. Each context is its own database, so one team&rsquo;s records are never stored or searched alongside another&rsquo;s. Switching restarts Mergeport; the context you leave is kept exactly as it was and syncs again when you return. Only the open context syncs.</p>
+        <p className="text-ink-3">Each context is a separate database. Switching restarts Mergeport.</p>
         <ul className="flex flex-col gap-2">
           {idx.contexts.map((c) => {
             const active = c.id === current;

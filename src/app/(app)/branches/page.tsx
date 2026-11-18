@@ -7,7 +7,7 @@ import { worktreesFor } from "@/lib/services/worktrees";
 import { describeWorktree, worktreesOnBranch, type Worktree } from "@/lib/domain/worktree-links";
 import { formatDuration, formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
-import { Banner, EmptyState, Mono, PageHeader, Panel, SimplePill, Time } from "@/components/ui/primitives";
+import { EmptyState, Mono, PageHeader, Panel, SimplePill, Time } from "@/components/ui/primitives";
 import { GitBranch, Laptop, Lock } from "@/components/ui/icons";
 import { mapRootAction, scanRootAction, unmapRootAction } from "@/app/actions";
 
@@ -38,13 +38,14 @@ export default async function Branches({ searchParams }: { searchParams: Promise
   const snapBy = new Map(snaps.map((x) => [x.repositoryId, (x.data as unknown as { worktrees: Worktree[] }).worktrees ?? []]));
   const repoName = new Map(repos.map((r) => [r.id, r.fullName]));
   const prRows = openPrs.map((p) => ({ p, wts: worktreesOnBranch(snapBy.get(p.repositoryId) ?? [], p.headRef) })).sort((a, b) => Number(b.wts.length > 0) - Number(a.wts.length > 0) || (repoName.get(a.p.repositoryId) ?? "").localeCompare(repoName.get(b.p.repositoryId) ?? "") || b.p.number - a.p.number);
+  const localPrRows = prRows.filter(({ p }) => mappedIds.has(p.repositoryId));
   const href = (id: string) => `/branches?repo=${id}${sp.q ? `&q=${encodeURIComponent(sp.q)}` : ""}`;
   const prFor = (repoId: string, branch: string | null) => (branch ? openPrs.find((p) => p.repositoryId === repoId && p.headRef === branch) : undefined);
 
   return (
     <>
       <PageHeader title="Branches" subtitle="Remote branches come from GitHub. Local worktrees are read from folders you choose on this computer. Each list says which it is and how old it is." />
-      <div className="mb-5"><Banner title="Read-only and private to this computer">Mergeport reads branch names, paths and counts of changed files with a fixed set of read-only git commands. It never reads file contents or diffs, never runs hooks or scripts from a repository, and never writes worktree data to a shared repository. There are no create, remove, reset or checkout controls.</Banner></div>
+      <p className="mb-5 text-[12.5px] text-ink-3" title="Mergeport reads branch names, paths and counts of changed files with a fixed set of read-only git commands. It never reads file contents or diffs, never runs hooks or scripts from a repository, and never writes worktree data to a shared repository. There are no create, remove, reset or checkout controls.">Read-only. Nothing here leaves this computer.</p>
 
       <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
         <nav aria-label="Repositories" className="panel lg:sticky lg:top-3">
@@ -129,17 +130,17 @@ export default async function Branches({ searchParams }: { searchParams: Promise
         })}
         {repos.length > 0 && (
           <Panel title={`Open pull requests (${openPrs.length})`} icon={GitBranch} id="open-prs">
-            {prRows.length === 0 ? <p className="p-4 text-[13px] text-ink-3">No open pull requests in the repositories you can see.</p> : (
+            {openPrs.length === 0 ? <p className="p-4 text-[13px] text-ink-3">No open pull requests in the repositories you can see.</p> : localPrRows.length === 0 ? <p className="p-4 text-[13px] text-ink-3">No open pull request has a local folder.</p> : (
               <ul className="scroll-region !max-h-[28rem] divide-y divide-line text-[13px]">
-                {prRows.slice(0, 60).map(({ p, wts }) => (
+                {localPrRows.slice(0, 60).map(({ p, wts }) => (
                   <li key={p.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 px-4 py-2.5">
                     <div className="min-w-0"><Link href={`/pull-requests/${p.id}`} className="font-medium underline-offset-2 hover:underline [overflow-wrap:anywhere]">{p.title}</Link><p className="text-[12px] text-ink-3"><Mono>{repoName.get(p.repositoryId)}#{p.number}</Mono>{p.headRef ? <> · <Mono>{p.headRef}</Mono></> : null}</p></div>
-                    <p className="shrink-0 text-[12px] text-ink-3">{wts.length === 0 ? (snapBy.has(p.repositoryId) ? "Not checked out here" : "No local folder") : wts.map((w) => describeWorktree(w)).join("; ")}</p>
+                    <p className="shrink-0 text-[12px] text-ink-3">{wts.length === 0 ? "Not checked out here" : wts.map((w) => describeWorktree(w)).join("; ")}</p>
                   </li>
                 ))}
               </ul>
             )}
-            {prRows.length > 60 && <p className="border-t border-line px-4 py-2 text-[12px] text-ink-3">Showing 60 of {prRows.length}.</p>}
+            {localPrRows.length > 60 && <p className="border-t border-line px-4 py-2 text-[12px] text-ink-3">Showing 60 of {localPrRows.length}.</p>}
           </Panel>
         )}
         </div>

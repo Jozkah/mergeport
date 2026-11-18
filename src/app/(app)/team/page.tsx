@@ -76,14 +76,14 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <PageHeader title="Team" subtitle="Mergeport runs on your computer. A team shares Mergeport-owned planning data through private GitHub repositories. Nobody hosts a server." />
-      {demo && <div className="mb-4"><Banner title="Demo mode">Teams need your real GitHub account. Run <span className="mono">npm run local</span> to create or join one.</Banner></div>}
-
+      <PageHeader title="Team" subtitle="Mergeport runs on your computer. A team shares Mergeport-owned planning data through private GitHub repositories." />
       <div className="mb-5">
-        <Banner title={cfg?.mode === "TEAM" ? `Team mode: ${cfg.name}` : "Personal mode"}>
-          {cfg?.mode === "TEAM"
-            ? `Shared data is eventually consistent: a teammate's change reaches you within about ${delay.typical} seconds while both apps are open and polling (up to ${Math.round(delay.worst / 60)} minutes when idle). If GitHub is unreachable or rate-limited, edits queue on this computer. Background sync runs only while this app runs; shared data stays in GitHub when everyone is offline.`
-            : "Your configuration and cache stay on this computer. Create a team to share planning with teammates, or join one you were invited to."}
+        <Banner title={demo ? "Demo mode" : cfg?.mode === "TEAM" ? `Team mode: ${cfg.name}` : "Personal mode"}>
+          {demo
+            ? <>Teams need your real GitHub account. Run <span className="mono">npm run local</span> to create or join one. Your configuration and cache stay on this computer.</>
+            : cfg?.mode === "TEAM"
+              ? `Shared data is eventually consistent: a teammate's change reaches you within about ${delay.typical} seconds while both apps are open and polling (up to ${Math.round(delay.worst / 60)} minutes when idle). If GitHub is unreachable or rate-limited, edits queue on this computer. Background sync runs only while this app runs; shared data stays in GitHub when everyone is offline.`
+              : "Your configuration and cache stay on this computer. Create a team to share planning with teammates, or join one you were invited to."}
         </Banner>
       </div>
 
