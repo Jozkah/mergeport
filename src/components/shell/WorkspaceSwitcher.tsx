@@ -39,7 +39,8 @@ export function WorkspaceSwitcher({ entries, active, switchable, className = "w-
     }
   }
 
-  if (!switchable) return <span className={`${className} truncate text-[12px] text-ink-3`}>GitHub (repositories)</span>;
+  // With GitHub as the only workspace there is nothing to pick: a plain label, and the Team page links to "Connect to a server".
+  if (!switchable || entries.length < 2) return <span className={`${className} truncate text-[12px] text-ink-3`}>GitHub (repositories)</span>;
   return (
     <>
       <div className={className}>

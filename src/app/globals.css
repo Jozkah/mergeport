@@ -235,6 +235,10 @@ input[type="radio"] {
   outline-offset: 2px;
   border-radius: 4px;
 }
+/* Menu rows show the focus with the sliding highlight pill, not an outline. */
+.select-pop :focus-visible {
+  outline: none;
+}
 input,
 textarea,
 select {

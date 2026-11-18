@@ -1,3 +1,4 @@
+import NextLink from "next/link";
 import { Select } from "@/components/ui/Select";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -77,6 +78,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   return (
     <>
       <PageHeader title="Team" subtitle="A team shares planning data through private GitHub repositories." />
+      {!demo && <p className="mb-4 text-[12.5px] text-ink-3">Have a Mergeport server? <NextLink className="underline" href="/sign-in?connect=1">Connect to it</NextLink>.</p>}
       <div className="mb-5">
         <Banner title={demo ? "Demo mode" : cfg?.mode === "TEAM" ? `Team mode: ${cfg.name}` : "Personal mode"}>
           {demo
