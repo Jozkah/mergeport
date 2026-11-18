@@ -982,6 +982,9 @@ model Space {
   hubCursorOp    String      @default("")
   /// The hub process this cursor was read from. A different one may be serving a restored database.
   hubEpoch       String      @default("")
+  /// Hub entities the cursor moved past that could not be applied yet (a related entity was missing, or applying failed), retried on later pulls
+  /// a bounded number of times; entries marked `gaveUp` are only kept as a visible note until the entity changes again.
+  hubDeferred    Json?
 
   restores  HubRestore[]
   entities  SyncEntity[]
