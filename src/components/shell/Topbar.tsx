@@ -45,7 +45,7 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
     <>
     <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-line bg-canvas/90 px-3 backdrop-blur-sm sm:gap-3 sm:px-4 lg:px-6">
       {menu}
-      <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
+      <nav aria-label="Breadcrumb" className="min-w-[6rem] flex-1">
         <ol className="flex min-w-0 items-center gap-1.5 text-[13px] text-ink-3">
           {/* On a narrow bar only the current page is named; the Overview link stays when there is no other crumb. */}
           <li className={`${crumbs.length ? "hidden sm:flex" : "flex"} shrink-0 items-center gap-1.5`}>
