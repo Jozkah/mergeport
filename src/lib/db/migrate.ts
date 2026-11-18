@@ -8,6 +8,22 @@ import path from "node:path";
  * `_prisma_migrations`) is recognised, so developers can mix both.
  */
 
+const BUSY_TIMEOUT_MS = 10_000;
+
+/** Retries `fn` on SQLITE_BUSY/SQLITE_LOCKED with bounded exponential backoff (about 10s in total). */
+function retryBusy<T>(fn: () => T): T {
+  for (let attempt = 0, wait = 10; ; attempt++, wait = Math.min(wait * 2, 1000)) {
+    try {
+      return fn();
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? "";
+      if (!code.startsWith("SQLITE_BUSY") && !code.startsWith("SQLITE_LOCKED")) throw e;
+      if (attempt >= 15) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait);
+    }
+  }
+}
+
 export type MigrationResult = { applied: string[]; alreadyApplied: number };
 
 export function migrationsDir(): string {
@@ -16,11 +32,13 @@ export function migrationsDir(): string {
 
 export function applyMigrations(dbFile: string, dir = migrationsDir()): MigrationResult {
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
-  const db = new Database(dbFile);
+  // busy_timeout is set by the constructor, before any statement runs (same 10s the Prisma driver uses in src/lib/db.ts):
+  // on a fresh file, several processes switching to WAL and creating the table at once otherwise race into SQLITE_BUSY.
+  const db = new Database(dbFile, { timeout: BUSY_TIMEOUT_MS });
   try {
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
-    db.exec("CREATE TABLE IF NOT EXISTS _mergeport_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
+    // Switching the journal mode can report SQLITE_BUSY without waiting on the busy handler, so retry it (and the first write).
+    retryBusy(() => db.pragma("journal_mode = WAL"));
+    retryBusy(() => db.exec("CREATE TABLE IF NOT EXISTS _mergeport_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"));
     const done = new Set<string>(db.prepare("SELECT name FROM _mergeport_migrations").all().map((r) => (r as { name: string }).name));
     const hasPrisma = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='_prisma_migrations'").get();
     if (hasPrisma) for (const r of db.prepare("SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL").all() as { migration_name: string }[]) done.add(r.migration_name);
@@ -40,14 +58,25 @@ export function applyMigrations(dbFile: string, dir = migrationsDir()): Migratio
     const applyOne = db.transaction((n: string, sql: string) => {
       if (isDone.get(n)) return false;
       db.exec(sql);
+      // Foreign keys are off for the migration (below), so check them before COMMIT; any violation rolls the migration back.
+      const bad = db.pragma("foreign_key_check") as { table: string; parent: string }[];
+      if (bad.length) throw new Error(`Migration ${n} leaves dangling foreign keys: ${[...new Set(bad.map((r) => `${r.table} -> ${r.parent}`))].join(", ")} (${bad.length} rows). Rolled back.`);
       record.run(n, new Date().toISOString());
       return true;
     });
-    db.pragma("busy_timeout = 30000");
     const applied: string[] = [];
     for (const n of names) {
       if (done.has(n)) continue;
-      if (applyOne.immediate(n, fs.readFileSync(path.join(dir, n, "migration.sql"), "utf8"))) applied.push(n);
+      // SQLite ignores PRAGMA foreign_keys inside a transaction, so a table-rebuild migration (DROP old table, rename new)
+      // would cascade-delete child rows. Turn enforcement off before BEGIN, as SQLite documents for table rebuilds.
+      db.pragma("foreign_keys = OFF");
+      try {
+        const sql = fs.readFileSync(path.join(dir, n, "migration.sql"), "utf8");
+        // BEGIN IMMEDIATE can still time out behind a slow migration in another process; the transaction rolled back, so retry.
+        if (retryBusy(() => applyOne.immediate(n, sql))) applied.push(n);
+      } finally {
+        db.pragma("foreign_keys = ON");
+      }
     }
     return { applied, alreadyApplied: done.size };
   } finally {
