@@ -1,6 +1,6 @@
 # Mergeport
 
-A local-first control center for selected GitHub repositories: review queues ("I should review" vs "waiting on someone else"), planning across repositories, fork and upstream tracking, and read-only visibility of local worktrees. It runs on **your own computer**. A team shares planning state through private GitHub repositories, not through a server.
+A local-first control center for selected GitHub repositories: review queues ("I should review" vs "waiting on someone else"), planning across repositories, fork and upstream tracking, and read-only visibility of local worktrees. It runs on **your own computer**. By default a team shares planning state through private GitHub repositories, not through a server; running your own hub is optional.
 
 Visual character follows <https://kravio-dashboard.vercel.app/> (`DESIGN.md`), in light and dark. Product intent is in `PRODUCT.md`; the design of the system is in `docs/architecture.md`.
 
@@ -27,7 +27,7 @@ All screenshots use the built-in synthetic demo data (`npm run local:demo`): mad
 
 - **Node 24** (declared in `engines`: `>=24 <25`) and npm 10 or newer. The SQLite binding ships prebuilt inside the package (Windows, macOS and Linux; only Windows x64 was exercised) so nothing is compiled during install.
 - The [GitHub CLI](https://cli.github.com/) (`gh`), signed in: `gh auth login` (details and honest scope notes in `docs/github-cli-setup.md`). Mergeport never stores or logs your token and never sends it to the browser. It asks `gh` for the token of THIS profile's account at run time, keeps it in memory, and hands it to `gh` through the child process's environment (never an argument). See "Account binding" below.
-- Nothing else. No Docker, no Postgres, no VPS, no tunnel, no webhooks, no shared `.env`.
+- Nothing else for the default GitHub-repository mode: no Docker, no Postgres, no VPS, no tunnel, no webhooks, no shared `.env`. Only if a team chooses to run the optional hub (see below) does a server exist, and then it is the hub's, not Mergeport's local app.
 
 ## Quick start
 
@@ -48,7 +48,7 @@ Demo mode keeps its own database under `~/.mergeport/demo/`. Everything in it is
 
 Create, invite and join are in the app (**Team**). Creating a team shows the exact repository name, owner, visibility and permissions first and does nothing until you confirm. See `docs/architecture.md`.
 
-Teams can alternatively run their own small **hub server** (one Node process and one SQLite file) instead of GitHub repositories for Mergeport-owned data; see `hub/README.md` to host one.
+Teams can alternatively run their own small **hub server** (one Node process and one SQLite file) instead of GitHub repositories for Mergeport-owned data; it adds live updates and, if its owner sets it up from the Team page, a GitHub App webhook relay for near-instant GitHub changes (the app still works without it). See `hub/README.md` to host one.
 
 ### Reviewing code
 
