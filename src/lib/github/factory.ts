@@ -62,5 +62,7 @@ export async function discoverAll(port: GithubPort, maxPages = 10): Promise<Disc
     all.notes.push(...d.notes);
     page = d.nextPage ?? 0;
   }
+  const seen = new Set<string>();
+  all.repos = all.repos.filter((r) => !seen.has(r.githubId.toString()) && !!seen.add(r.githubId.toString()));
   return all;
 }

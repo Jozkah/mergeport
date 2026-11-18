@@ -17,11 +17,36 @@ export const dynamic = "force-dynamic";
  * Renders from the last known list in the local database. GitHub is asked in the background; the page says how old the
  * list is and, if the last attempt failed, why. A failed refresh never turns into an empty list.
  */
-export default async function Connect() {
+const TABS = [
+  ["all", "All"],
+  ["mine", "Mine"],
+  ["work", "Work"],
+  ["contributed", "Contributed"],
+  ["public", "Public"],
+  ["private", "Private"],
+] as const;
+type Tab = (typeof TABS)[number][0];
+
+export default async function Connect({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
   const { viewer } = await requireViewer();
+  const { show } = await searchParams;
+  const tab: Tab = TABS.some(([k]) => k === show) ? (show as Tab) : "all";
   const view = await cached.repos();
   const tracked = new Set((await db.repository.findMany({ where: { trackingStatus: { not: "REMOVED" } }, select: { githubId: true } })).map((r) => r.githubId.toString()));
-  const repos = (view.payload?.repos ?? []).slice().sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
+  const all = (view.payload?.repos ?? []).slice().sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
+  const mine = (r: (typeof all)[number]) => r.owner.login.toLowerCase() === viewer.login.toLowerCase();
+  // Unknown permissions are not "read only": only a repository GitHub reported without push rights counts as contributed.
+  const canPush = (r: (typeof all)[number]) => !r.permissions || !!(r.permissions.push || r.permissions.admin || r.permissions.maintain);
+  // Mine: you own it. Work: owned by someone else (an organization or a person) and you can push. Contributed: you can only read it.
+  const match: Record<Tab, (r: (typeof all)[number]) => boolean> = {
+    all: () => true,
+    mine,
+    work: (r) => !mine(r) && canPush(r),
+    contributed: (r) => !mine(r) && !canPush(r),
+    public: (r) => r.visibility === "PUBLIC",
+    private: (r) => r.visibility !== "PUBLIC",
+  };
+  const repos = all.filter(match[tab]);
   const notes = view.payload?.notes ?? [];
   return (
     <>
@@ -31,8 +56,17 @@ export default async function Connect() {
       {notes.map((n, i) => (
         <div key={i} className="mb-3"><Banner tone="warn" title={`${n.ownerLogin}: ${n.kind === "org-approval" ? "organization approval needed" : n.kind === "additional-authorization" ? "extra authorization needed" : "not listed"}`}>{n.message}{n.actionUrl ? <> <a className="underline" href={n.actionUrl} target="_blank" rel="noreferrer">Open on GitHub</a></> : null}</Banner></div>
       ))}
+      <nav aria-label="Filter repositories" className="mb-3 flex flex-wrap gap-1.5">
+        {TABS.map(([key, label]) => (
+          <Link key={key} href={key === "all" ? "/repositories/connect" : `/repositories/connect?show=${key}`} aria-current={tab === key ? "page" : undefined} className={`btn ${tab === key ? "bg-faint font-medium text-ink" : "btn-quiet"}`}>
+            {label} <span className="text-ink-3">{all.filter(match[key]).length}</span>
+          </Link>
+        ))}
+      </nav>
       <Panel title={`Available to you (${repos.length})`} icon={FolderGit2} id="available">
-        {repos.length === 0 ? (
+        {repos.length === 0 && all.length > 0 ? (
+          <EmptyState icon={FolderGit2} title="Nothing in this filter">None of the listed repositories match. <Link className="underline" href="/repositories/connect">Show all</Link></EmptyState>
+        ) : repos.length === 0 ? (
           <EmptyState icon={FolderGit2} title={view.fetchedAt ? "No repositories listed" : "No saved list yet"}>
             {view.fetchedAt ? "Your GitHub account listed no repositories when last checked. Public repositories can be added by URL on the Repositories page." : view.state === "EMPTY" || view.state === "RETRYING" ? "Asking GitHub in the background. This page stays usable meanwhile." : "GitHub has not been reachable yet, so nothing is saved. This is not an empty account: use Check again when you are online."}
           </EmptyState>
