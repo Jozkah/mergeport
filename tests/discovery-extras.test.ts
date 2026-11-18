@@ -35,6 +35,17 @@ describe("discovery extras", () => {
     expect(calls).not.toContain("/repos/me/own");
   });
 
+  it("adds the upstream of a fork of yours", async () => {
+    const fork = { ...repo(1, "me/scanruler", true), fork: true, owner: { id: 9, login: "me", type: "User" } };
+    const { port: p } = port({
+      "/user/repos": () => json([fork]),
+      "/repos/me/scanruler": () => json({ ...fork, parent: { id: 5, full_name: "CNC/ScanRuler" } }),
+      "/repos/CNC/ScanRuler": () => json(repo(5, "CNC/ScanRuler")),
+    });
+    const d = await discoverAll(p);
+    expect(d.repos.map((r) => r.fullName).sort()).toEqual(["CNC/ScanRuler", "me/scanruler"]);
+  });
+
   it("keeps the authorized list when the extras fail", async () => {
     const { port: p } = port({ "/user/repos": () => json([repo(1, "me/own", true)]), "/user/orgs": () => json({ message: "boom" }, 500), "/search/issues": () => json({ message: "rate" }, 403) });
     const d = await discoverAll(p);

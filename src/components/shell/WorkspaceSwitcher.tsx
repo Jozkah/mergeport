@@ -11,7 +11,7 @@ const CONNECT = "__connect__";
 type Switch = { launchUrl: string; previousBootId: string | null; expectedBackend: string };
 
 /** Picks which workspace the app runs on. A choice restarts the app, so the overlay is rendered here, in place, until the new one answers. */
-export function WorkspaceSwitcher({ entries, active, switchable, className = "w-[13rem] shrink-0" }: { entries: WorkspaceEntry[]; active: string; switchable: boolean; className?: string }) {
+export function WorkspaceSwitcher({ entries, active, switchable, className = "w-[11rem] shrink-0" }: { entries: WorkspaceEntry[]; active: string; switchable: boolean; className?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [sw, setSw] = useState<Switch | null>(null);
@@ -43,7 +43,7 @@ export function WorkspaceSwitcher({ entries, active, switchable, className = "w-
   return (
     <>
       <div className={className}>
-        <Select aria-label="Workspace" aria-busy={busy} className="select !h-10 text-[13px]" value={active} disabled={busy} onChange={(e) => void choose(e.target.value)}>
+        <Select aria-label="Workspace" aria-busy={busy} className="select !h-8 !py-0 text-[12.5px]" value={active} disabled={busy} onChange={(e) => void choose(e.target.value)}>
           {entries.map((e) => (
             <option key={e.backend} value={e.backend} disabled={!e.available}>
               {(e.detail ? `${e.label} · ${e.detail}` : e.label) + (e.available ? "" : " (unavailable)")}
