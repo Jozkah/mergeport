@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { buildCsp, newNonce } from "@/lib/csp";
 
 /**
  * Local-only guard, run before every request.
@@ -40,7 +41,12 @@ export function proxy(req: NextRequest) {
     } else ok = site === "same-origin" || site === "none";
     if (!ok) return new NextResponse("Cross-origin request refused", { status: 403 });
   }
-  const res = NextResponse.next();
+  // The CSP carries a per-request script nonce. Next reads it from the REQUEST header to stamp its inline scripts, and the browser enforces the response header.
+  const csp = buildCsp(newNonce(), process.env.NODE_ENV === "development");
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("Content-Security-Policy", csp);
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+  res.headers.set("Content-Security-Policy", csp);
   res.headers.set("Cache-Control", cacheControlFor(req.nextUrl.pathname));
   return res;
 }
