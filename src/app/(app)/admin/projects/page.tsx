@@ -46,7 +46,7 @@ export default async function Projects() {
           {projects.map((p) => (
             <Panel key={p.id} title={p.name} icon={Layers} id={`p-${p.id}`} actions={<span className="hidden text-[12px] text-ink-3 sm:inline">{p.repositories.length} repositories · {p.members.length} people{reviewerText.get(p.id) ? ` · reviewers: ${reviewerText.get(p.id)}` : ""} · {p.spaceId ? "shared" : "only on this computer"}</span>}>
               <div className="flex flex-col divide-y divide-line">
-                <details className="group p-4" open>
+                <details className="group p-4">
                   <summary className="cursor-pointer list-none text-[13px] font-medium [&::-webkit-details-marker]:hidden">Repositories <span className="font-normal text-ink-3">({p.repositories.length})</span></summary>
                   <ActionForm action={setProjectReposAction} submitLabel="Save repositories" resetOnSuccess={false} className="mt-3">
                     <input type="hidden" name="projectId" value={p.id} />
