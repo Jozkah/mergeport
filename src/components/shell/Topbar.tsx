@@ -55,8 +55,8 @@ export function Topbar({ unread, menu, syncNote, theme, sync, scopePicker, works
             </Link>
           </li>
           {crumbs.map((c, i) => (
-            <li key={c.href} className="flex min-w-0 items-center gap-1.5">
-              <ChevronRight size={12} aria-hidden className={i === 0 ? "hidden shrink-0 sm:block" : "shrink-0"} />
+            <li key={c.href} className={`${i === crumbs.length - 1 ? "flex" : "hidden sm:flex"} min-w-0 items-center gap-1.5`}>
+              <ChevronRight size={12} aria-hidden className="hidden shrink-0 sm:block" />
               {i === crumbs.length - 1 ? (
                 <span aria-current="page" className="truncate font-medium text-ink">{c.label}</span>
               ) : (
