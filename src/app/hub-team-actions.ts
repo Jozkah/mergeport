@@ -70,6 +70,16 @@ export async function hubRemoveMemberAction(fd: FormData): Promise<ActionResult>
   });
 }
 
+export async function hubCancelInviteAction(fd: FormData): Promise<ActionResult> {
+  return hubRun(async () => {
+    await requireViewer();
+    const { svc } = await hubService();
+    await svc.cancelInvite(str(fd, "inviteId"));
+    revalidatePath("/team");
+    return { ok: true, message: "Invite cancelled." };
+  });
+}
+
 export async function hubReinstateMemberAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
     await requireViewer();

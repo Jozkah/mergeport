@@ -39,6 +39,8 @@ function fakeApi(me: string, over: Partial<HubAdminApi> = {}) {
     clearGithubWebhook: async () => void calls.push("webhook-off"),
     invite: async (l) => void calls.push(`invite:${l}`),
     removeMember: async (id) => void calls.push(`remove:${id}`),
+    pendingInvites: async () => [],
+    cancelInvite: async (id) => void calls.push(`cancel:${id}`),
     removedMembers: async () => [member("9", "gone", "MEMBER", "REMOVED")],
     reinstateMember: async (id, r) => void calls.push(`reinstate:${id}:${r}`),
     setRole: async (id, r) => void calls.push(`role:${id}:${r}`),
@@ -132,6 +134,18 @@ describe("HubTeamPage rendering", () => {
     const adm = (await render("2")).html;
     expect(adm).not.toContain("@gone");
     expect(adm).not.toContain("Reinstate");
+  });
+
+  it("pending invites render with a Cancel control, and nothing when there are none", async () => {
+    const inv = { id: "i1", login: "typo", githubId: "11", role: "MEMBER" as const, invitedBy: "boss", createdAt: "2026-11-01T00:00:00Z", expiresAt: "2026-11-08T00:00:00Z" };
+    const withOne = (await render("2", { pendingInvites: async () => [inv] })).html;
+    expect(withOne).toContain("Pending invites");
+    expect(withOne).toContain("@typo");
+    expect(withOne).toContain("Cancel invite for @typo");
+    const none = (await render("2")).html;
+    expect(none).not.toContain("Pending invites");
+    expect(none).not.toContain("Cancel invite");
+    expect((await render("3", { pendingInvites: async () => [inv] })).html).not.toContain("Pending invites"); // not an admin: never asked
   });
 
   it("admin sees each restricted space's members with their access", async () => {

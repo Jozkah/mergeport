@@ -1,5 +1,5 @@
 import { ValidationError } from "@/lib/errors";
-import type { HubAdminApi, HubAdminSpace, HubMember, HubSessionPort, HubSpaceInfo, HubWebhooks } from "@/lib/hub/ports";
+import type { HubAdminApi, HubAdminSpace, HubMember, HubPendingInvite, HubSessionPort, HubSpaceInfo, HubWebhooks } from "@/lib/hub/ports";
 import { hubSessionPort } from "@/lib/hub/ports-impl";
 
 /**
@@ -56,6 +56,18 @@ export class HubTeamService {
     if (!l || !LOGIN.test(l)) throw new ValidationError("Enter a valid GitHub username.");
     const r = HubTeamService.role(role);
     await this.mutate(() => this.api.invite(l, r));
+  }
+
+  /** Invites still waiting to be accepted. Admins only; the hub re-checks. */
+  async pendingInvites(): Promise<HubPendingInvite[]> {
+    await this.requireAdmin("see pending invites");
+    return this.api.pendingInvites();
+  }
+
+  /** Withdraws a pending invite (re-inviting undoes it). The hub decides whether this admin may cancel that role. */
+  async cancelInvite(id: string): Promise<void> {
+    await this.requireAdmin("cancel invites");
+    await this.mutate(() => this.api.cancelInvite(id));
   }
 
   async changeRole(githubId: string, role: "ADMIN" | "MEMBER" | "READER"): Promise<void> {
