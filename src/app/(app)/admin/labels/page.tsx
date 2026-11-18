@@ -16,7 +16,7 @@ export default async function Labels() {
   const repoName = new Map(repos.map((r) => [r.id, r.fullName]));
   return (
     <>
-      <PageHeader title="Label taxonomy" subtitle="Optional. Scoped labels look like priority::high. A mapping says that a repository's own spelling (for example P1) means the same thing, so lists can filter by the concept. Labels on GitHub are never changed." />
+      <PageHeader title="Label taxonomy" subtitle="Optional. Map a repository's own label (say P1) to a shared one like priority::high so lists can filter by it. Labels on GitHub are never changed." />
       <div className="flex flex-col gap-5">
         <Panel title="Families in use" icon={Tag} id="families">
           {t.families.length === 0 ? <EmptyState icon={Tag} title="No scoped labels yet">Use labels like priority::high or type::bug on GitHub, or map a spelling below.</EmptyState> : (

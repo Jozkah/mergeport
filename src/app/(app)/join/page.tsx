@@ -43,9 +43,7 @@ export default async function Join({ searchParams }: { searchParams: Promise<{ r
           )}
           <ul className="mt-4 list-disc space-y-1 pl-5 text-ink-3">
             <li>You must already have access: accept GitHub&apos;s invitation to the repository first.</li>
-            <li>Mergeport checks it is private, that its manifest is valid, and (once you are in a team) that it belongs to your team and the team&apos;s owner.</li>
-            <li>Nothing in that repository is ever executed or installed.</li>
-            <li>Source-code repositories it mentions still need to be readable by your own GitHub account.</li>
+            <li>Mergeport checks that it is private and valid, and that nothing in it is ever run or installed.</li>
           </ul>
         </div>
       </Panel>

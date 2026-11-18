@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import type { ComponentType, SVGProps } from "react";
-import { Activity, BellRing, CircleHelp, FolderGit2, Kanban, Layers, LayoutDashboard, ListChecks, GitPullRequest, RefreshCw, Route, Settings, Tag, Users } from "@/components/ui/icons";
+import { Activity, BellRing, CircleDot, CircleHelp, FolderGit2, GitBranch, GitFork, Kanban, Layers, LayoutDashboard, ListChecks, GitPullRequest, Inbox, Newspaper, RefreshCw, Route, Search, Settings, Tag, Users } from "@/components/ui/icons";
 import { sectionFor, type Section } from "@/lib/section";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
@@ -10,6 +10,12 @@ type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 // Pages that share a section hue but are not about people get their own icon (the same one as their sidebar entry).
 const PAGE_ICON: [prefix: string, icon: Icon][] = [
   ["/activity", Activity],
+  ["/issues", CircleDot],
+  ["/inbox", Inbox],
+  ["/digest", Newspaper],
+  ["/search", Search],
+  ["/forks", GitFork],
+  ["/branches", GitBranch],
   ["/settings", Settings],
   ["/sync", RefreshCw],
   ["/help", CircleHelp],
