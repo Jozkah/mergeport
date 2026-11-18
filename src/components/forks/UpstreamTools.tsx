@@ -7,7 +7,7 @@ import { listProjects } from "@/lib/services/queries";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Panel } from "@/components/ui/primitives";
 import { Select } from "@/components/ui/Select";
-import { Eye, Flag, GitFork } from "@/components/ui/icons";
+import { ChevronDown, Eye, Flag, GitFork } from "@/components/ui/icons";
 
 const EVIDENCE: Record<string, string> = {
   ancestry: "Present: the upstream commit is part of the branch (Git ancestry)",
@@ -20,7 +20,7 @@ const EVIDENCE: Record<string, string> = {
 export async function SubscriptionsPanel({ db, viewer, mappings }: { db: Db; viewer: Viewer; mappings: { id: string; label: string }[] }) {
   const subs = await listSubscriptions(db, viewer);
   return (
-    <Panel title="What matters to us upstream" icon={Eye} id="subscriptions">
+    <Panel title="What matters to us upstream" icon={Eye} id="subscriptions" defaultOpen={false} summary={`${subs.length} saved`}>
       <div className="flex flex-col gap-3 p-4 text-[13px]">
         {subs.length === 0 ? <p className="text-ink-3">Save the things you care about (a label, a folder, an author, a milestone). Matching upstream items are marked with the reason they matched.</p> : (
           <ul className="divide-y divide-line">
@@ -88,9 +88,11 @@ export async function MappingTools({ db, viewer, mappingId, forkBranch, upstream
         )}
       </section>
 
+      <details open={!!adopt} className="border-t border-line pt-1">
+        <summary className="flex min-h-10 w-fit cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium"><ChevronDown size={14} aria-hidden className="chevron" /> Tools<span className="font-normal text-ink-3">· backports, adoption plan</span></summary>
+        <div className="mt-2 flex flex-col gap-4">
       <section aria-label="Backports">
-        <h3 className="mb-1 flex items-center gap-1.5 text-[13px] font-medium"><GitFork size={13} aria-hidden /> Backports and cherry-picks</h3>
-        <p className="mb-2 text-[12px] text-ink-3">Evidence and decisions are kept apart. Titles and numbers never count as evidence. A check reads the clone mapped on this computer (it needs the upstream commit fetched).</p>
+        <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-medium"><GitFork size={13} aria-hidden /> Backports and cherry-picks</h3>
         {backports.length > 0 && (
           <ul className="mb-2 flex flex-col gap-1.5 text-[12.5px]">
             {backports.map((b) => (
@@ -107,6 +109,7 @@ export async function MappingTools({ db, viewer, mappingId, forkBranch, upstream
           <div><label className="label" htmlFor={`bp-b-${mappingId}`}>Target branch</label><input id={`bp-b-${mappingId}`} name="branch" className="input font-mono" defaultValue={forkBranch} required /></div>
           <div><label className="label" htmlFor={`bp-o-${mappingId}`}>Action</label><Select id={`bp-o-${mappingId}`} name="op" className="select" defaultValue="check"><option value="check">Check my local clone</option><option value="plan">Plan it</option><option value="done">Mark addressed (my decision)</option></Select></div>
         </ActionForm>
+        <p className="mt-1 text-[12px] text-ink-3">A check reads your local clone. Titles never count as evidence.</p>
       </section>
 
       <section aria-label="Plan adoption">
@@ -137,6 +140,8 @@ export async function MappingTools({ db, viewer, mappingId, forkBranch, upstream
         )}
         <span hidden>{upstreamName}</span>
       </section>
+        </div>
+      </details>
     </div>
   );
 }

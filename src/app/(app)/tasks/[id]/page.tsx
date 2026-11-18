@@ -3,17 +3,18 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { NotFoundError } from "@/lib/errors";
-import { assigneeCandidates, getTask, priorityName } from "@/lib/services/tasks";
+import { assigneeCandidates, getTask } from "@/lib/services/tasks";
 import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { formatDateOnly, formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Select } from "@/components/ui/Select";
 import { Avatar, LabelChip, PageHeader, Panel, Time } from "@/components/ui/primitives";
-import { ArrowLeft, CalendarDays, ExternalLink, Flag, ListChecks, MessageSquare, Pencil, Trash2 } from "@/components/ui/icons";
+import { ArrowLeft, ExternalLink, ListChecks, MessageSquare, Pencil, Trash2 } from "@/components/ui/icons";
 import { Checklist } from "@/components/tasks/Checklist";
 import { WorktreePanel } from "@/components/work/WorktreePanel";
 import { linksForTask } from "@/lib/services/work-links";
 import { taskBranchAction } from "@/app/phase4-actions";
+import type { ActionResult } from "@/lib/action-result";
 import { PromotePanel } from "@/components/tasks/TemplatePanels";
 import { TaskFields } from "@/components/tasks/TaskFields";
 import { addCommentAction, deleteCommentAction, deleteTaskAction, editCommentAction, updateTaskAction } from "@/app/task-actions";
@@ -40,6 +41,15 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const labels = task.labels as string[];
   const canDelete = !task.workItemId && (viewer.isAdmin || task.authorLogin?.toLowerCase() === viewer.login.toLowerCase() || task.createdById === viewer.memberId);
   const dueValue = task.dueDate ? task.dueDate.toISOString().slice(0, 10) : "";
+  const worktreeLinks = await linksForTask(db, viewer, task.id);
+
+  /** One Save for the whole Details form: the task fields first, then the branch, each through its own unchanged action. */
+  async function saveDetailsAction(fd: FormData): Promise<ActionResult> {
+    "use server";
+    const saved = await updateTaskAction(fd);
+    if (!saved.ok) return saved;
+    return fd.has("branch") ? taskBranchAction(fd) : saved;
+  }
 
   return (
     <>
@@ -132,54 +142,37 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         </div>
 
         <aside className="flex min-w-0 flex-col gap-5">
-          <Panel title="Details">
-            <div className="flex flex-col gap-3 p-4 text-[13px]">
-              <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2">
-                <dt className="text-ink-3">Assignee</dt>
-                <dd className="flex items-center gap-2">{task.assigneeLogin ? <><Avatar login={task.assigneeLogin} size={20} />{task.assigneeLogin}{task.assignedByLogin && task.assignedByLogin !== task.assigneeLogin ? <span className="text-ink-3">by @{task.assignedByLogin}</span> : null}</> : <span className="text-ink-3">Nobody</span>}</dd>
-                <dt className="text-ink-3">Priority</dt>
-                <dd className="inline-flex items-center gap-1"><Flag size={13} aria-hidden />{priorityName(task.priority)}</dd>
-                <dt className="text-ink-3">Due</dt>
-                <dd className={overdue ? "inline-flex items-center gap-1 text-blocked" : "inline-flex items-center gap-1"}><CalendarDays size={13} aria-hidden />{task.dueDate ? `${formatDateOnly(task.dueDate)}${overdue ? " (overdue)" : ""}` : "None"}</dd>
-                <dt className="text-ink-3">Labels</dt>
-                <dd className="flex flex-wrap gap-1">{labels.length ? labels.map((l) => <Link key={l} href={`/tasks?scope=all&status=all&label=${encodeURIComponent(l)}`}><LabelChip name={l} color="7c8aa5" /></Link>) : <span className="text-ink-3">None</span>}</dd>
-                {full.milestone && (<><dt className="text-ink-3">Milestone</dt><dd>{full.milestone.name}</dd></>)}
-              </dl>
-              {dependencies.length > 0 && (
-                <div className="border-t border-line pt-3 text-[12.5px]">
-                  {(["blocked-by", "blocks"] as const).map((dir) => {
-                    const rows = dependencies.filter((d) => d.direction === dir);
-                    if (!rows.length) return null;
-                    return (
-                      <p key={dir} className="mt-1 text-ink-3 first:mt-0">
-                        {dir === "blocked-by" ? "Blocked by" : "Blocks"}{" "}
-                        {rows.map((d, i) => (d.opaque ? <span key={i} className="mr-2 italic">an item you cannot see</span> : <Link key={d.id} href={`/tasks/${d.id}`} className="link mr-2">{d.title}</Link>))}
-                      </p>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </Panel>
-
-          <WorktreePanel links={await linksForTask(db, viewer, task.id)} tz={viewer.timezone} repositoryId={full.workItem?.repositoryId ?? ""} note="Write the branch you work on below to match this task to a folder on your computer." />
-          <Panel title="Branch">
-            <ActionForm action={taskBranchAction} submitLabel="Save branch" submitClassName="btn" className="flex flex-col gap-2 p-4" resetOnSuccess={false}>
-              <input type="hidden" name="taskId" value={task.id} />
-              <label className="label" htmlFor="tb-branch">Branch this task is worked on in</label>
-              <input id="tb-branch" name="branch" className="input font-mono" defaultValue={task.branchRef ?? ""} placeholder="fix-login" />
-              <p className="text-[12px] text-ink-3">The branch name is shared with your team. Folder paths never are.</p>
-            </ActionForm>
-          </Panel>
+          <WorktreePanel links={worktreeLinks} tz={viewer.timezone} repositoryId={full.workItem?.repositoryId ?? ""} note="Set the branch in Details to match this task to a folder on your computer." defaultOpen={worktreeLinks.mapped} summary={!worktreeLinks.branch ? "No branch set" : worktreeLinks.mapped ? undefined : "Repository not mapped"} />
           <PromotePanel db={db} viewer={viewer} taskId={task.id} linked={!!task.workItemId} promoteTo={promote} />
-          <Panel title="Change">
-            <ActionForm action={updateTaskAction} submitLabel="Save changes" pendingLabel="Saving…" resetOnSuccess={false} className="p-4">
+          <Panel title="Details">
+            <ActionForm action={saveDetailsAction} submitLabel="Save changes" pendingLabel="Saving…" resetOnSuccess={false} className="p-4">
               <input type="hidden" name="id" value={task.id} />
+              <input type="hidden" name="taskId" value={task.id} />
               <div className="flex flex-col gap-3">
+                {(overdue || full.milestone || labels.length > 0 || dependencies.length > 0) && (
+                  <div className="flex flex-col gap-1 border-b border-line pb-3 text-[12.5px] text-ink-3">
+                    {overdue && <p className="text-blocked">Overdue since {formatDateOnly(task.dueDate!)}</p>}
+                    {full.milestone && <p>Milestone {full.milestone.name}</p>}
+                    {labels.length > 0 && <p className="flex flex-wrap items-center gap-1">Labels {labels.map((l) => <Link key={l} href={`/tasks?scope=all&status=all&label=${encodeURIComponent(l)}`}><LabelChip name={l} color="7c8aa5" /></Link>)}</p>}
+                    {(["blocked-by", "blocks"] as const).map((dir) => {
+                      const rows = dependencies.filter((d) => d.direction === dir);
+                      if (!rows.length) return null;
+                      return (
+                        <p key={dir}>
+                          {dir === "blocked-by" ? "Blocked by" : "Blocks"}{" "}
+                          {rows.map((d, i) => (d.opaque ? <span key={i} className="mr-2 italic">an item you cannot see</span> : <Link key={d.id} href={`/tasks/${d.id}`} className="link mr-2">{d.title}</Link>))}
+                        </p>
+                      );
+                    })}
+                  </div>
+                )}
                 <div><label className="label" htmlFor="s-status">Status</label>
                   <Select id="s-status" name="status" className="select" defaultValue={task.column.key}>{columns.map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}</Select></div>
                 {openItems > 0 && <label className="flex items-start gap-2 text-[12.5px] text-ink-2"><input type="checkbox" name="tickOpen" className="mt-0.5" /> <span>If I move this to Done, also check the {openItems} open checklist item{openItems === 1 ? "" : "s"}.</span></label>}
                 <TaskFields people={people} me={viewer.login} values={{ assignee: task.assigneeLogin ?? "", priority: task.priority, due: dueValue, labels: labels.join(", ") }} />
+                <div><label className="label" htmlFor="tb-branch">Branch</label>
+                  <input id="tb-branch" name="branch" className="input font-mono" defaultValue={task.branchRef ?? ""} placeholder="fix-login" aria-describedby="tb-branch-help" />
+                  <p id="tb-branch-help" className="mt-1 text-[12px] text-ink-3">Shared with your team. Folder paths never are.</p></div>
               </div>
             </ActionForm>
           </Panel>

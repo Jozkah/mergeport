@@ -3,7 +3,7 @@ import { ctx } from "@/lib/ctx";
 import { StatusMark } from "@/components/ui/StatusMark";
 import type { ReactNode } from "react";
 import { GitPullRequest, CircleDot, GitMerge } from "@/components/ui/icons";
-import { Avatar, LabelChip, Mono, StatusPill, Time, DemoBadge } from "@/components/ui/primitives";
+import { Avatar, LabelChip, Mono, StatusPill, DemoBadge } from "@/components/ui/primitives";
 import { formatDuration, formatInstant } from "@/lib/format";
 import type { ReviewDerivation } from "@/lib/domain/review";
 import { asLabels, asStrings } from "@/lib/services/queries";
@@ -25,6 +25,9 @@ export type WorkRow = {
   repository: { fullName: string; isDemo: boolean; owner: { type: "USER" | "ORGANIZATION" | "UNKNOWN" } };
 };
 
+/** "1d", "3h", "12m": the largest unit only; the full timestamp is in the title. */
+const shortAge = (ms: number) => formatDuration(ms).split(" ")[0];
+
 export const itemHref = (r: { id: string; type: string }) => (r.type === "PULL_REQUEST" ? `/pull-requests/${r.id}` : `/issues/${r.id}`);
 
 function StateIcon({ r }: { r: WorkRow }) {
@@ -45,7 +48,7 @@ export function ChecksCell({ s }: { s: WorkRow["checksState"] }) {
 }
 
 /** Contained horizontal scroll on narrow screens; first column keeps the item identity. */
-export function WorkTable({ rows, derived, tz, now, showReview, empty }: { rows: WorkRow[]; derived?: Map<string, { derivation: ReviewDerivation; ruleConflict: string | null }>; tz: string; now: Date; showReview: boolean; empty: ReactNode }) {
+export function WorkTable({ rows, derived, tz, now, showReview, empty, showType = true, showDemo = true }: { rows: WorkRow[]; derived?: Map<string, { derivation: ReviewDerivation; ruleConflict: string | null }>; tz: string; now: Date; showReview: boolean; empty: ReactNode; /** Hide the "Pull request"/"Issue" text when every row has the same type. */ showType?: boolean; showDemo?: boolean }) {
   if (rows.length === 0) return <>{empty}</>;
   return (
     <div className="table-wrap" tabIndex={0} role="region" aria-label="Results (scrolls horizontally on narrow screens)">
@@ -73,9 +76,9 @@ export function WorkTable({ rows, derived, tz, now, showReview, empty }: { rows:
                       {r.draft && <span className="ml-2 align-middle text-[11.5px] text-ink-3">Draft</span>}
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-3">
                         <Mono title={r.repository.fullName}>{r.repository.fullName}#{r.number}</Mono>
-                        <span>{r.type === "PULL_REQUEST" ? "Pull request" : "Issue"}{r.state !== "OPEN" ? ` · ${r.state.toLowerCase()}` : ""}</span>
+                        {showType ? <span>{r.type === "PULL_REQUEST" ? "Pull request" : "Issue"}{r.state !== "OPEN" ? ` · ${r.state.toLowerCase()}` : ""}</span> : r.state !== "OPEN" && <span>{r.state.toLowerCase()}</span>}
                         {r.milestoneTitle && <span>· {r.milestoneTitle}</span>}
-                        {r.repository.isDemo && <DemoBadge />}
+                        {showDemo && r.repository.isDemo && <DemoBadge />}
                       </div>
                       {labels.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1">{labels.map((l) => <LabelChip key={l.name} name={l.name} color={l.color} />)}</div>}
                     </div>
@@ -101,7 +104,7 @@ export function WorkTable({ rows, derived, tz, now, showReview, empty }: { rows:
                   </td>
                 )}
                 {showReview && <td>{r.type === "PULL_REQUEST" ? <ChecksCell s={r.checksState} /> : <span className="text-ink-3">{"—"}</span>}</td>}
-                <td><Time value={r.updatedAtGh} formatted={formatInstant(r.updatedAtGh, tz)} /><span className="sr-only"> ({formatDuration(now.getTime() - r.updatedAtGh.getTime())} ago)</span></td>
+                <td className="whitespace-nowrap"><time dateTime={r.updatedAtGh.toISOString()} title={formatInstant(r.updatedAtGh, tz)} className="tnum">{shortAge(now.getTime() - r.updatedAtGh.getTime())}</time><span className="sr-only"> ({formatDuration(now.getTime() - r.updatedAtGh.getTime())} ago)</span></td>
               </tr>
             );
           })}

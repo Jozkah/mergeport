@@ -176,7 +176,7 @@ async function build(db: Db, v: Viewer, opts: SetupOptions): Promise<{ plan: Set
       skipped,
       nothingToConfigure: [
         "Notifications: choose which events notify you, and whether they also pop up on the desktop, in the Notifications panel on this page.",
-        "Automations: refresh runs in the background on its own schedule; the polling interval for shared team data is on the Sync page.",
+        "Automations: refresh runs in the background on its own schedule; the polling interval for shared team data is in Settings, under Sync.",
         "Review rules are only proposed where GitHub's own review requests show a steady pattern; anything else needs your decision under Review routing or on a project.",
       ],
     },

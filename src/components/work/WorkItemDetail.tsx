@@ -23,10 +23,10 @@ import { ActionForm } from "@/components/forms/ActionForm";
 import { checkProfile } from "@/lib/local/identity";
 import { Avatar, Banner, DemoBadge, EmptyState, LabelChip, Mono, Panel, SimplePill, StatusPill, Time } from "@/components/ui/primitives";
 import { ArrowLeft, Building2, CircleAlert, Eye, ExternalLink, GitCommitHorizontal, GitMerge, GitPullRequest, CircleDot, Hourglass, MessageSquare, User } from "@/components/ui/icons";
-import { assigneesAction, commentAction, labelsAction, manualWaitingAction, milestoneAction, requestReviewAction, resolveWaitingAction, submitReviewAction } from "@/app/actions";
+import { commentAction, manualWaitingAction, requestReviewAction, resolveWaitingAction, submitReviewAction } from "@/app/actions";
 import { PrTabs } from "@/components/code/PrTabs";
 import { MergeSheet } from "./MergeSheet";
-import { ChecksCell } from "./WorkTable";
+import { DetailsForm } from "./DetailsForm";
 
 type Tab = "conversation" | "files" | "commits";
 
@@ -57,6 +57,12 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
   const comments = item.comments;
+  const assignees = asStrings(item.assignees);
+  const detailsSummary = [`${labels.length} label${labels.length === 1 ? "" : "s"}`, assignees.length ? assignees.join(", ") : "no assignee", item.milestoneTitle ?? "no milestone"].join(" · ");
+  const firstWait = manualOpen[0];
+  const waitingSummary = firstWait
+    ? `${firstWait.reviewerRef}, ${formatDuration(now.getTime() - firstWait.startedAt.getTime())}${manualOpen.length > 1 ? ` +${manualOpen.length - 1}` : ""}`
+    : derived.stages.length > 0 ? `${derived.stages.length} stage${derived.stages.length === 1 ? "" : "s"} open` : "Nobody";
 
   const conversation = (
     <>
@@ -101,41 +107,6 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   );
   const asideEl = (
     <aside className="flex min-w-0 flex-col gap-5" aria-label="Review and actions">
-      {isPr && (
-        <Panel title="Who should review (CODEOWNERS)" icon={Eye} id="owners">
-          <OwnersPanel itemId={item.id} />
-        </Panel>
-      )}
-      {isPr && readiness && (
-        <Panel title="Ready to merge?" icon={CircleAlert} id="readiness">
-          <ReadinessPanel readiness={readiness} />
-        </Panel>
-      )}
-      {isPr && (
-        <Panel title="Review" icon={Eye} id="review">
-          <div className="flex flex-col gap-3 p-4">
-            <div className="flex flex-wrap items-center gap-2"><StatusPill status={d.primary} />{d.waiting && <span className="tnum text-[12px] text-ink-3">waiting {formatDuration(d.waiting.elapsedMs)}</span>}</div>
-            {d.applicable && d.actors.length > 0 && (
-              <ul className="flex flex-col gap-2">
-                {d.actors.map((a) => (
-                  <li key={a.actor.kind + a.actor.ref} className="rounded-[10px] border border-line p-2.5 text-[12.5px]">
-                    <div className="flex items-center justify-between gap-2"><span className="font-medium">{a.actor.display ?? a.actor.ref}<span className="ml-1.5 font-normal text-ink-3">{a.external ? "external" : "team"}</span></span><span className="text-ink-3">{a.status.replace("_", " ").toLowerCase()}</span></div>
-                    <p className="mt-1 text-ink-3">{a.evidence}</p>
-                    {a.since && <p className="mt-0.5 text-ink-3">since <Time value={a.since} formatted={formatInstant(a.since, viewer.timezone)} /> ({a.sinceBasis === "request" ? "review request first seen" : "became reviewable"})</p>}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {d.explanation.map((x) => <p key={x} className="text-[12.5px] text-ink-3">{x}</p>)}
-            {derived.ruleConflict && <Banner tone="warn" title="Review rule conflict">{derived.ruleConflict}</Banner>}
-            {d.blockedReasons.length > 0 && <Banner tone="error" title="Blocked">{d.blockedReasons.join(". ")}.</Banner>}
-            <div className="flex items-center justify-between text-[12.5px]"><span className="text-ink-3">Checks</span><ChecksCell s={item.checksState} /></div>
-            <p className="text-[11.5px] text-ink-3">Last synchronized <Time value={item.syncedAt} formatted={formatInstant(item.syncedAt, viewer.timezone)} />. Labels route attention; they never grant approval.</p>
-          </div>
-        </Panel>
-      )}
-
-      {isPr && localLinks && <WorktreePanel links={localLinks} tz={viewer.timezone} repositoryId={item.repositoryId} />}
       {isPr && item.state === "OPEN" && (
         <Panel title="Actions" icon={CircleAlert} id="actions">
           <div className="flex flex-col gap-4 p-4">
@@ -165,15 +136,40 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
           </div>
         </Panel>
       )}
+      {isPr && readiness && (
+        <Panel title="Ready to merge?" icon={CircleAlert} id="readiness">
+          <ReadinessPanel
+            readiness={readiness}
+            status={<span className="flex flex-wrap items-center gap-2"><StatusPill status={d.primary} />{d.waiting && <span className="tnum text-[12px] text-ink-3">waiting {formatDuration(d.waiting.elapsedMs)}</span>}</span>}
+            reviewers={d.applicable && d.actors.length > 0 ? (
+              <ul className="mt-0.5 flex flex-col gap-1.5">
+                {d.actors.map((a) => (
+                  <li key={a.actor.kind + a.actor.ref} className="text-ink-3">
+                    <span className="font-medium text-ink-2">{a.actor.display ?? a.actor.ref}</span> · {a.external ? "external" : "team"} · {a.status.replace("_", " ").toLowerCase()}. {a.evidence}
+                    {a.since && <> Since <Time value={a.since} formatted={formatInstant(a.since, viewer.timezone)} /> ({a.sinceBasis === "request" ? "review request first seen" : "became reviewable"}).</>}
+                  </li>
+                ))}
+              </ul>
+            ) : undefined}
+            notes={<>
+              {d.explanation.map((x) => <p key={x} className="text-[12.5px] text-ink-3">{x}</p>)}
+              {derived.ruleConflict && <Banner tone="warn" title="Review rule conflict">{derived.ruleConflict}</Banner>}
+            </>}
+            footer={<> Last synchronized <Time value={item.syncedAt} formatted={formatInstant(item.syncedAt, viewer.timezone)} />.</>}
+          />
+        </Panel>
+      )}
+      {isPr && (
+        <Panel title="Who should review (CODEOWNERS)" icon={Eye} id="owners" defaultOpen={false} summary="Suggestions only">
+          <OwnersPanel itemId={item.id} />
+        </Panel>
+      )}
+      {isPr && localLinks && <WorktreePanel links={localLinks} tz={viewer.timezone} repositoryId={item.repositoryId} defaultOpen={false} />}
 
-      <Panel title="Details" icon={User} id="details">
+      <Panel title="Details" icon={User} id="details" defaultOpen={false} summary={detailsSummary}>
         <div className="flex flex-col gap-4 p-4">
           {caps.manageWork && !writeBlocked ? (
-            <>
-              <ActionForm action={labelsAction} submitLabel="Save labels" submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={item.id} /><label className="label" htmlFor="d-labels">Labels</label><input id="d-labels" name="labels" className="input" defaultValue={labels.map((l) => l.name).join(", ")} /></ActionForm>
-              <ActionForm action={assigneesAction} submitLabel="Save assignees" submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={item.id} /><label className="label" htmlFor="d-assign">Assignees</label><input id="d-assign" name="assignees" className="input" defaultValue={asStrings(item.assignees).join(", ")} /></ActionForm>
-              <ActionForm action={milestoneAction} submitLabel="Save milestone" submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={item.id} /><label className="label" htmlFor="d-ms">Repository milestone number</label><input id="d-ms" name="number" inputMode="numeric" className="input" defaultValue={item.milestoneNumber ?? ""} placeholder={item.milestoneTitle ?? "none"} /></ActionForm>
-            </>
+            <DetailsForm id={item.id} labels={labels.map((l) => l.name).join(", ")} assignees={asStrings(item.assignees).join(", ")} milestone={item.milestoneNumber == null ? "" : String(item.milestoneNumber)} milestonePlaceholder={item.milestoneTitle ?? "none"} />
           ) : (
             <dl className="grid grid-cols-[100px_1fr] gap-y-1.5 text-[12.5px]"><dt className="text-ink-3">Assignees</dt><dd>{asStrings(item.assignees).join(", ") || "None"}</dd><dt className="text-ink-3">Milestone</dt><dd>{item.milestoneTitle ?? "None"}</dd></dl>
           )}
@@ -181,7 +177,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         </div>
       </Panel>
 
-      <Panel title="Waiting on someone" icon={Hourglass} id="waiting">
+      <Panel title="Waiting on someone" icon={Hourglass} id="waiting" defaultOpen={false} summary={waitingSummary}>
         <div className="flex flex-col gap-3 p-4">
           {derived.stages.length > 0 && <StageList stages={derived.stages} />}
           {manualOpen.length === 0 && <p className="text-[12.5px] text-ink-3">No manual waiting record. {isPr ? "Pull requests derive this from review requests and rules." : "Use this when an issue needs another person's decision."}</p>}

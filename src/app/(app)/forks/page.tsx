@@ -57,9 +57,8 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
 
   return (
     <>
-      <PageHeader title="Forks" subtitle="Commit divergence, upstream pull requests and upstream issues are separate questions with separate evidence." />
+      <PageHeader title="Forks" subtitle="How far each fork is from its upstream." help="Commit divergence, upstream pull requests and upstream issues are separate questions with separate evidence." />
       <ViewBar scope="forks" views={await listViews(db, viewer, "forks")} />
-      {mappings.length > 0 && <div className="mb-4"><SubscriptionsPanel db={db} viewer={viewer} mappings={mappings.map((m) => ({ id: m.id, label: m.upstream.fullName }))} /></div>}
       {unmappedForks > 0 && <div className="mb-4"><Banner title={`${unmappedForks} fork${unmappedForks === 1 ? "" : "s"} without a mapped upstream you can see`}>Upstream content is only shown when the upstream repository is also shared with you.</Banner></div>}
 
       {mappings.length === 0 ? (
@@ -110,7 +109,7 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
 
                   <section aria-labelledby={`is-${m.id}`}>
                     <h3 id={`is-${m.id}`} className="mb-1 text-[13px] font-medium">Upstream issues to triage</h3>
-                    <p className="mb-2 text-[12px] text-ink-3">Issues are discussions, not commits. Decide per fork whether each matters here. A status saves as soon as you pick it.</p>
+                    <p className="mb-2 text-[12px] text-ink-3">A status saves as soon as you pick it.</p>
                     <UpstreamIssues canEdit={caps.manageWork} rows={issues.map((i) => ({ id: i.id, number: i.issueNumber, title: i.title, url: i.htmlUrl, status: i.status, note: i.note }))} />
                   </section>
                   <UpstreamUpdate db={db} viewer={viewer} mappingId={m.id} forkBranch={m.forkBranch} forkName={m.fork.fullName} upstreamName={m.upstream.fullName} />
@@ -122,22 +121,25 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
         </div>
       )}
 
+      {(mappings.length > 0 || viewer.isAdmin) && <h2 className="mt-8 mb-3 text-[13px] font-medium text-ink-2">Set up</h2>}
+      {mappings.length > 0 && <div className="mb-4"><SubscriptionsPanel db={db} viewer={viewer} mappings={mappings.map((m) => ({ id: m.id, label: m.upstream.fullName }))} /></div>}
+
       {viewer.isAdmin && (
-        <div className="mt-6">
-          <Panel title="Watchlist" icon={Eye} id="watchlist"><WatchlistForm /></Panel>
+        <div className="mb-4">
+          <Panel title="Watchlist" icon={Eye} id="watchlist" defaultOpen={mappings.length === 0}><WatchlistForm /></Panel>
         </div>
       )}
 
       {viewer.isAdmin && forkRepos.length > 1 && (
-        <div className="mt-6">
-          <Panel title="Map a fork to its upstream" icon={GitFork} id="map">
+        <div className="mb-4">
+          <Panel title="Map a fork to its upstream" icon={GitFork} id="map" defaultOpen={false}>
             <div className="p-4">
               <ActionForm action={mapForkAction} submitLabel="Save mapping" className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <ForkMapFields forks={forkRepos.map((r) => ({ id: r.id, fullName: r.fullName, parentGithubId: r.parentGithubId?.toString() ?? null, parentFullName: r.parentFullName }))} repos={allRepos.map((r) => ({ id: r.id, githubId: r.githubId.toString(), fullName: r.fullName }))} />
                 <div><label className="label" htmlFor="mf-fb">Fork branch</label><input id="mf-fb" name="forkBranch" className="input" placeholder="default branch" /></div>
                 <div><label className="label" htmlFor="mf-ub">Upstream branch</label><input id="mf-ub" name="upstreamBranch" className="input" placeholder="default branch" /></div>
               </ActionForm>
-              <p className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-3"><RefreshCw size={12} aria-hidden /> Default branches are discovered from GitHub, not assumed to be main. Leave a branch blank to use the repository default.</p>
+              <p className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-3"><RefreshCw size={12} aria-hidden /> Leave a branch blank to use the repository default (read from GitHub).</p>
             </div>
           </Panel>
         </div>

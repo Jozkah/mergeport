@@ -40,7 +40,7 @@ export function WatchlistForm() {
           spellCheck={false}
           placeholder="owner/repository, or paste a GitHub address"
         />
-        <p className="mt-1 text-[12px] text-ink-3">One address per line. A fork on GitHub is compared with its parent. To compare any two repositories, put the fork first and its upstream second on the same line. Private repositories need your GitHub sign-in to be able to read them. Nothing is shared with teammates.</p>
+        <p className="mt-1 text-[12px] text-ink-3">One per line. Two on a line = fork, then upstream.</p>
       </div>
       <div className="flex items-center gap-3">
         <button type="button" className="btn btn-primary" disabled={pending || !text.trim()} onClick={submit}>{pending ? "Adding…" : "Add to watchlist"}</button>

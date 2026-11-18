@@ -7,7 +7,7 @@ import { repoWhere } from "@/lib/authz/viewer";
 import { formatDuration } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Banner, EmptyState, PageHeader, Panel } from "@/components/ui/primitives";
-import { FolderGit2, Plus, RefreshCw } from "@/components/ui/icons";
+import { FolderGit2, Plus } from "@/components/ui/icons";
 import { importPublicAction } from "@/app/actions";
 import { watchView } from "@/lib/local/repo-watch";
 import { watchLabel, watchTitle } from "@/lib/local/watch-format";
@@ -51,7 +51,8 @@ export default async function Repositories({ searchParams: _searchParams }: { se
       openItems: r.lastSyncedAt ? r._count.workItems : null,
       status: r.trackingStatus === "DISCONNECTED" ? "disconnected" : r.rateLimited ? "rate" : r.syncError ? "failed" : "ok",
       statusDetail: r.statusDetail ?? r.syncError ?? null,
-      synced: r.lastSyncedAt ? `synced ${formatDuration(now.getTime() - r.lastSyncedAt.getTime())} ago` : "never synced",
+      synced: r.lastSyncedAt ? formatDuration(now.getTime() - r.lastSyncedAt.getTime()) : "never synced",
+      syncedAt: r.lastSyncedAt ? `Last synced ${r.lastSyncedAt.toISOString().replace("T", " ").slice(0, 19)} UTC` : null,
       spaceId: r.spaceId,
       spaceName: sp?.name ?? null,
       canUnshare: !!sp?.canWrite,
@@ -72,10 +73,11 @@ export default async function Repositories({ searchParams: _searchParams }: { se
 
       {problems.length > 0 && (
         <div className="mb-4">
-          <Banner tone={problems.some((r) => r.trackingStatus === "DISCONNECTED") ? "error" : "warn"} title={`${problems.length} repositor${problems.length === 1 ? "y has" : "ies have"} stale data`}>
-            Their numbers are from the last successful sync, not from GitHub right now (often a short GitHub outage or rate limit that clears by itself). Use the “Needs attention” filter below to see which, and “Refresh” to try again.
+          <Banner tone={problems.some((r) => r.trackingStatus === "DISCONNECTED") ? "error" : "warn"} title={`${problems.length} repositor${problems.length === 1 ? "y has" : "ies have"} stale data.`}>
+            Filter: Needs attention.
             <details className="mt-1.5">
               <summary className="cursor-pointer text-[12px] opacity-80">Details</summary>
+              <p className="mt-1 text-[12px]">{problems.length === 1 ? "Its numbers are" : "Their numbers are"} from the last successful sync, not from GitHub right now (often a short GitHub outage or rate limit that clears by itself). Use the “Needs attention” filter below to see which, and “Refresh” to try again.</p>
               <ul className="mt-1 list-disc pl-5 text-[12px]">
                 {problems.slice(0, 12).map((r) => <li key={r.id}><strong className="font-medium">{r.fullName}</strong>: {r.trackingStatus === "DISCONNECTED" ? "disconnected" : r.rateLimited ? "GitHub rate limit reached" : "last sync failed"}{(r.statusDetail ?? r.syncError) ? ` (${r.statusDetail ?? r.syncError})` : ""}</li>)}
                 {problems.length > 12 && <li>and {problems.length - 12} more</li>}
@@ -100,7 +102,6 @@ export default async function Repositories({ searchParams: _searchParams }: { se
           <RepoList rows={rows} writable={writable.map((sp) => ({ id: sp.id, name: sp.name, everyone: sp.kind === "COMMON" }))} />
         )}
       </Panel>
-      <p className="mt-3 flex items-center gap-1.5 text-[12px] text-ink-3"><RefreshCw size={12} aria-hidden /> Stopping tracking removes it from the dashboard only. Nothing is deleted on GitHub.</p>
     </>
   );
 }

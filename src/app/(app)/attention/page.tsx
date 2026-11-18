@@ -32,6 +32,9 @@ function Row({ d, tz, now, queue }: { d: DerivedItem; tz: string; now: Date; que
   const x = d.derivation;
   const pending = x.actors.filter((a) => a.status === "PENDING" || a.status === "UNAVAILABLE" || a.status === "APPROVED_STALE" || a.status === "CHANGES_REQUESTED");
   const first = pending[0];
+  // A lone review-stage chip only repeats "Waiting on X" and the age on the right; chips stay for rule, manual or split internal/external stages.
+  const reviewStages = d.stages.filter((s) => s.source === "review");
+  const stages = reviewStages.length === 1 ? d.stages.filter((s) => s.source !== "review") : d.stages;
   const showStatus = x.primary !== QUEUE_STATUS[queue]; // the queue already says it; only a different state is news
   return (
     <li className="flex flex-col gap-1.5 px-4 py-3">
@@ -48,7 +51,7 @@ function Row({ d, tz, now, queue }: { d: DerivedItem; tz: string; now: Date; que
         {first && <span className="inline-flex items-center gap-1 text-ink-2"><Hourglass size={12} aria-hidden />{queue === "changes" ? "Changes asked by" : "Waiting on"} <Avatar login={first.actor.ref} size={14} /><span className="font-medium">{first.actor.display ?? first.actor.ref}</span>{pending.length > 1 && <span className="text-ink-3">+{pending.length - 1}</span>}</span>}
         {d.ruleConflict && <span className="text-waiting">Rule conflict</span>}
       </div>
-      {d.stages.length > 0 && <StageList stages={d.stages} compact />}
+      {stages.length > 0 && <StageList stages={stages} compact />}
       <details className="group text-[12px] text-ink-3">
         <summary className="inline-flex cursor-pointer list-none items-center gap-1 hover:text-ink-2 [&::-webkit-details-marker]:hidden"><span className="underline decoration-dotted underline-offset-2">Why</span></summary>
         <div className="mt-1.5 flex flex-col gap-1 border-l border-line pl-3">
@@ -101,7 +104,7 @@ export default async function Attention({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <PageHeader title="My attention" subtitle="Review waiting is tracked separately from open or closed state. Each item says who is expected to act, why, and since when." />
+      <PageHeader title="My attention" subtitle="Who is expected to act, and since when." />
       <ScopeNote scope={scope} />
       <ViewBar scope="attention" views={await listViews(db, viewer, "attention")} />
       <div className="mb-4"><Segmented label="Queues" items={QUEUES.map((x) => ({ href: `/attention?queue=${x.key}`, label: x.label, active: x.key === active, count: lists[x.key].length }))} /></div>

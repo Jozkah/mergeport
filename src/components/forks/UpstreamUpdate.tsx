@@ -39,16 +39,23 @@ export async function UpstreamUpdate({ db, viewer, mappingId, forkBranch, forkNa
   const watching = cfg.mode === "releases";
   const unseen = canEdit && runs.some((r) => r.state === "release-found" && !r.seenAt);
   const id = (s: string) => `${s}-${mappingId}`;
+  const modeLabel = !cfg.enabled ? "Off" : watching ? "Releases only" : "Merge";
+  const last = runs[0] ? STATE[runs[0].state] ?? STATE.failed : null;
   return (
-    <section aria-labelledby={id("au")} className="rounded-[10px] border border-line p-3 max-sm:rounded-none max-sm:border-0 max-sm:border-t max-sm:px-0 max-sm:pb-0 max-sm:pt-4 sm:p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 id={id("au")} className="flex items-center gap-1.5 text-[13px] font-medium"><GitMerge size={13} aria-hidden /> Auto-update from upstream <SimplePill tone={cfg.enabled ? "ok" : "unknown"} icon={cfg.enabled ? Check : CircleDashed}>{cfg.enabled ? "On" : "Off"}</SimplePill></h3>
-        {canEdit && cfg.enabled && <ActionForm action={runUpdateNowAction} submitLabel={watching ? "Check now" : "Run now"} submitAriaLabel={watching ? `Check now: releases of ${upstreamName}` : `Run now: update ${forkName}`} pendingLabel="Queuing…" submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="mappingId" value={mappingId} /></ActionForm>}
-      </div>
-      <div className="mt-1 flex max-w-[72ch] flex-col gap-1 text-[12.5px] text-ink-3 text-pretty">
+    <section aria-labelledby={id("au")} className="flex flex-wrap items-start gap-2 border-t border-line pt-3">
+      {/* One row while closed: the state from the saved config and the last run. The form and the history open under it. */}
+      <details className="min-w-[16rem] flex-1">
+        <summary className="flex min-h-10 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+          <h3 id={id("au")} className="flex items-center gap-1.5 font-medium"><GitMerge size={13} aria-hidden /> Auto-update from upstream</h3>
+          <span className="text-ink-3" aria-hidden>·</span>
+          <SimplePill tone={cfg.enabled ? "ok" : "unknown"} icon={cfg.enabled ? Check : CircleDashed}>{modeLabel}</SimplePill>
+          {last && runs[0] && <span className="inline-flex items-center gap-1.5 text-ink-3">Last run <SimplePill tone={last.tone} icon={last.icon}>{last.label}</SimplePill></span>}
+          <span className="inline-flex items-center gap-1 text-ink-2 underline underline-offset-2">{canEdit ? "Configure" : "Details"} <ChevronDown size={14} aria-hidden className="chevron" /></span>
+        </summary>
+      <div className="mt-2 flex max-w-[72ch] flex-col gap-1 text-[12.5px] text-ink-3 text-pretty">
         {watching ? (
           <>
-            <p>In this mode Mergeport only reads the releases of <Mono>{upstreamName}</Mono> from GitHub and tells you when a new one is published. It changes nothing: no copy of the repository, no merge, no branch, no pull request, no command.</p>
+            <p>In this mode Mergeport only reads the releases of <Mono>{upstreamName}</Mono> from GitHub and tells you when a new one is published. Nothing is changed.</p>
             {cfg.enabled && (
               <p className="tnum">
                 {cfg.releasesBaselined ? <>Watching from <Mono>{cfg.lastReleaseTag ?? "the first release"}</Mono>, the newest release when the first check ran. </> : <>Not checked yet. The first check only notes the newest release; it does not warn about older ones. </>}
@@ -57,10 +64,7 @@ export async function UpstreamUpdate({ db, viewer, mappingId, forkBranch, forkNa
             )}
           </>
         ) : (
-          <>
-            <p>When this fork falls behind <Mono>{upstreamName}</Mono>, Mergeport merges the newest upstream commit into a branch of its own, optionally checks it with a command, and then opens a pull request into <Mono>{forkBranch}</Mono>. If that commit conflicts or fails the check it tries the next older one (up to 6).</p>
-            <p>It works only in a private copy under the <Mono>updater</Mono> folder of your Mergeport home: your own folders and branches are never touched, nothing is deleted, and upstream is never pushed to.</p>
-          </>
+          <p>Merges new upstream commits in a private copy and opens a pull request. Your folders are never touched.</p>
         )}
       </div>
 
@@ -77,19 +81,25 @@ export async function UpstreamUpdate({ db, viewer, mappingId, forkBranch, forkNa
                 <div>
                   <label className="label" htmlFor={id("vc")}>Check command (optional)</label>
                   <input id={id("vc")} name="verifyCommand" className="input font-mono" defaultValue={cfg.verifyCommand} placeholder="npm test" autoComplete="off" spellCheck={false} aria-describedby={id("vc-help")} />
-                  <div id={id("vc-help")} className="mt-1 flex max-w-[72ch] flex-col gap-1 text-[12px] text-ink-3 text-pretty">
-                    <p><strong className="font-medium text-ink-2">Runs on this computer</strong>, in the private copy, after a clean merge, with no shell, a minimal environment and your time limit. It is stored only in this profile&rsquo;s database: never shared with a team, a hub or a backup.</p>
-                    <p>Without one, the pull request is marked &ldquo;not tested&rdquo;. On Windows, <Mono>npm</Mono> and <Mono>npx</Mono> work; other tools installed as .cmd files do not (use <Mono>node script.js</Mono>).</p>
-                  </div>
+                  <p id={id("vc-help")} className="mt-1 text-[12px] text-ink-3 text-pretty">Runs on this computer. Without one, the pull request is marked &ldquo;not tested&rdquo;.</p>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   <PromoteField id={id("pm")} name="promote" defaultValue={cfg.promote} forkBranch={forkBranch} />
                   <div>
                     <label className="label" htmlFor={id("to")}>Check time limit (seconds)</label>
                     <input id={id("to")} name="timeoutSec" inputMode="numeric" autoComplete="off" className="input w-32 tnum" defaultValue={cfg.timeoutSec} aria-describedby={id("to-help")} />
-                    <p id={id("to-help")} className="mt-1 text-[12px] text-ink-3 text-pretty">10 to 7200. A check that runs longer is stopped and counts as failed.</p>
+                    <p id={id("to-help")} className="mt-1 text-[12px] text-ink-3">10 to 7200.</p>
                   </div>
                 </div>
+                <details className="text-[12.5px]">
+                  <summary className="flex min-h-10 w-fit cursor-pointer list-none items-center gap-1 text-ink-2"><ChevronDown size={14} aria-hidden className="chevron" /> How it works</summary>
+                  <div className="flex max-w-[72ch] flex-col gap-1 text-[12px] text-ink-3 text-pretty">
+                    <p>When this fork falls behind <Mono>{upstreamName}</Mono>, Mergeport merges the newest upstream commit into a branch of its own, optionally checks it with a command, and then opens a pull request into <Mono>{forkBranch}</Mono>. If that commit conflicts or fails the check it tries the next older one (up to 6).</p>
+                    <p>It works only in a private copy under the <Mono>updater</Mono> folder of your Mergeport home: your own folders and branches are never touched, nothing is deleted, and upstream is never pushed to.</p>
+                    <p>The check command runs in the private copy after a clean merge, with no shell, a minimal environment and your time limit; a check that runs longer is stopped and counts as failed. It is stored only in this profile&rsquo;s database: never shared with a team, a hub or a backup.</p>
+                    <p>On Windows, <Mono>npm</Mono> and <Mono>npx</Mono> work; other tools installed as .cmd files do not (use <Mono>node script.js</Mono>).</p>
+                  </div>
+                </details>
                 <details className="text-[12.5px]">
                   <summary className="flex min-h-10 w-fit cursor-pointer list-none items-center gap-1 text-ink-2"><ChevronDown size={14} aria-hidden className="chevron" /> Sync branch name</summary>
                   <input id={id("bn")} name="branchName" className="input w-full font-mono sm:w-72" defaultValue={cfg.branchName} aria-label="Sync branch name" aria-describedby={id("bn-help")} autoComplete="off" spellCheck={false} />
@@ -109,7 +119,6 @@ export async function UpstreamUpdate({ db, viewer, mappingId, forkBranch, forkNa
         <p className="mt-2 text-[12.5px] text-ink-3">An administrator of this profile sets auto-update up, because its check command runs on this computer.</p>
       )}
 
-      {unseen && <ReleasesSeen mappingId={mappingId} />}
       <h4 className="mt-5 text-[13px] font-medium">History</h4>
       {runs.length === 0 ? (
         <p className="mt-1 text-[12.5px] text-ink-3">{cfg.enabled ? (watching ? "No new release yet. A warning appears here when the upstream publishes one." : "No run yet. One starts after the next comparison finds this fork behind.") : "Nothing has run."}</p>
@@ -178,6 +187,9 @@ export async function UpstreamUpdate({ db, viewer, mappingId, forkBranch, forkNa
           })}
         </ul>
       )}
+      </details>
+      {canEdit && cfg.enabled && <ActionForm action={runUpdateNowAction} submitLabel={watching ? "Check now" : "Run now"} submitAriaLabel={watching ? `Check now: releases of ${upstreamName}` : `Run now: update ${forkName}`} pendingLabel="Queuing…" submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="mappingId" value={mappingId} /></ActionForm>}
+      {unseen && <ReleasesSeen mappingId={mappingId} />}
     </section>
   );
 }

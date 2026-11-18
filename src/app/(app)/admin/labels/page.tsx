@@ -44,12 +44,13 @@ export default async function Labels() {
           )}
         </Panel>
 
-        <Panel title="Preview: how existing items would read" icon={Tag} id="preview">
-          {t.preview.length === 0 ? <p className="p-4 text-[13px] text-ink-3">No existing label is affected by a mapping.</p> : (
-            <ul className="divide-y divide-line">{t.preview.map((p) => <li key={`${p.spelling}${p.repositoryId}`} className="px-4 py-2.5 text-[13px]"><span className="font-mono">{p.spelling}</span> on <span className="tnum font-medium">{p.items}</span> item{p.items === 1 ? "" : "s"} would read as <span className="font-medium">{p.concept}</span>.</li>)}</ul>
-          )}
-          <p className="border-t border-line px-4 py-2.5 text-[12px] text-ink-3">This is a preview of how Mergeport reads labels. It never edits a label in a repository.</p>
-        </Panel>
+        {t.mappings.length > 0 && (
+          <Panel title="Preview: how existing items would read" icon={Tag} id="preview">
+            {t.preview.length === 0 ? <p className="p-4 text-[13px] text-ink-3">No existing label is affected by a mapping.</p> : (
+              <ul className="divide-y divide-line">{t.preview.map((p) => <li key={`${p.spelling}${p.repositoryId}`} className="px-4 py-2.5 text-[13px]"><span className="font-mono">{p.spelling}</span> on <span className="tnum font-medium">{p.items}</span> item{p.items === 1 ? "" : "s"} would read as <span className="font-medium">{p.concept}</span>.</li>)}</ul>
+            )}
+          </Panel>
+        )}
       </div>
     </>
   );

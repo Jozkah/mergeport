@@ -20,9 +20,9 @@ type Common = { db: Db; viewer: Viewer; projectId: string };
 export async function BoardsManager({ db, viewer, projectId, columns }: Common & { columns: { key: string; name: string }[] }) {
   const boards = await listBoards(db, viewer, projectId);
   return (
-    <Panel title="Boards" icon={Settings} id="boards">
+    <Panel title="Boards" icon={Settings} id="boards" defaultOpen={false} summary={boards.length === 0 ? "Default board only" : `${boards.length} named board${boards.length === 1 ? "" : "s"}`}>
       <div className="flex flex-col gap-4 p-4 text-[13px]">
-        {boards.length === 0 && <p className="text-ink-3">The default board shows every column. Add a named board to focus on part of the flow, rename columns, and set work-in-progress limits. Limits are advice: a column over its limit is flagged, nothing is blocked.</p>}
+        {boards.length === 0 && <p className="text-ink-3">Named boards focus on part of the flow. WIP limits are advice only.</p>}
         {boards.map((b) => (
           <details key={b.id} className="rounded-[10px] border border-line p-3">
             <summary className="cursor-pointer font-medium">{b.name} <span className="font-normal text-ink-3">· {(b.columns as { key: string }[]).length} columns · {b.groupBy === "none" ? "no lanes" : `lanes by ${b.groupBy}`} · {b.density}</span></summary>
@@ -54,7 +54,7 @@ export async function BoardsManager({ db, viewer, projectId, columns }: Common &
 export async function SuggestionsPanel({ db, viewer, projectId, automation }: Common & { automation: string }) {
   const s = await suggestedMoves(db, viewer, projectId);
   return (
-    <Panel title="Suggested moves" icon={Flag} id="suggestions">
+    <Panel title="Suggested moves" icon={Flag} id="suggestions" defaultOpen={false} summary={automation !== "suggest" ? "Off for this project" : s.length === 0 ? "Nothing to suggest" : `${s.length} suggested`}>
       <div className="flex flex-col gap-3 p-4 text-[13px]">
         {viewer.isAdmin && (
           <ActionForm action={automationAction} submitLabel="Save" submitClassName="btn" className="flex flex-wrap items-end gap-3" resetOnSuccess={false}>

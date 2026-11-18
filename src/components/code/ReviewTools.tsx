@@ -52,7 +52,6 @@ export function OwnersPanel({ itemId }: { itemId: string }) {
         <div><p className="label">Other reasons someone is expected to review</p><ul className="text-ink-3">{data.otherSources.slice(0, 6).map((s) => <li key={s.who}><span className="text-ink-2">{s.who}</span>: {s.why}</li>)}</ul></div>
       )}
       {data.notes.slice(data.rows.length === 0 ? 1 : 0).map((n) => <p key={n} className="text-ink-3">{n}</p>)}
-      <p className="text-[11.5px] text-ink-3">CODEOWNERS only suggests who to ask. Whether GitHub requires a code owner&rsquo;s approval depends on the branch protection rules, which Mergeport does not read.</p>
     </div>
   );
 }
