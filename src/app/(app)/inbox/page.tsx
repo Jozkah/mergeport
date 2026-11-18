@@ -28,7 +28,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
     <>
       <PageHeader
         title="Inbox"
-        subtitle="Pull requests waiting on you. Marking one done only clears it for you; it comes back if a new review request, commit or comment arrives. Nothing here is sent to GitHub or to your team."
+        subtitle="Pull requests waiting on you. Done clears it for you only."
         actions={<ReadAllButton disabled={unread === 0} />}
       />
       <div className="mb-4">
@@ -60,9 +60,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     {e.snoozeUntil && <span>Back {formatInstant(e.snoozeUntil, viewer.timezone)}</span>}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-3">
-                    {requested > 0 && <span>Requested {at(new Date(requested))}</span>}
-                    <span>Opened {at(e.item.createdAtGh)}</span>
-                    <span>Updated {at(e.item.updatedAtGh)} <span className="text-ink-3">({relativeTime(e.item.updatedAtGh, now)})</span></span>
+                    <span title={`Opened ${formatInstantDated(e.item.createdAtGh, viewer.timezone, now)}. Updated ${formatInstantDated(e.item.updatedAtGh, viewer.timezone, now)} (${relativeTime(e.item.updatedAtGh, now)}).`}>{requested > 0 ? <>Requested {at(new Date(requested))}</> : <>Updated {at(e.item.updatedAtGh)}</>}</span>
                   </div>
                 </div>
                 <InboxRowActions itemId={e.item.id} status={e.status} />

@@ -35,7 +35,7 @@ export default async function Overview() {
     overview(db, viewer, now),
     attentionFor(viewer, scopeKey(await readScope(db, viewer))),
     openedPerDay(db, viewer, 14, now),
-    recentActivity(db, viewer, 8),
+    recentActivity(db, viewer, 5),
     visibleForkMappings(db, viewer),
     db.dashboardMilestone.findMany({ where: { workspaceId: viewer.workspaceId, status: "OPEN", targetDate: { gte: new Date(todayIn(viewer.timezone, now) + "T00:00:00Z") }, OR: [{ projectId: null }, { project: projectWhere(viewer) }] }, orderBy: { targetDate: "asc" }, take: 1 }),
   ]);
@@ -78,7 +78,7 @@ export default async function Overview() {
             )}
           </Panel>
 
-          <Panel title="Opened in the last 14 days" icon={Activity} id="opened">
+          <Panel title="Opened in the last 14 days" icon={Activity} id="opened" defaultOpen={false} summary={`${days.reduce((n, d) => n + d.count, 0)} opened`}>
             <div className="p-4"><OpenedChart days={days} today={todayIn(viewer.timezone, now)} /></div>
           </Panel>
 
@@ -95,13 +95,6 @@ export default async function Overview() {
         </div>
 
         <div className="flex min-w-0 flex-col gap-5">
-          <Panel title="Open work" icon={CircleAlert} id="open">
-            <ul className="text-[13px]">
-              <li><Link href="/pull-requests" className="flex items-center justify-between px-4 py-3 hover:bg-faint">Open pull requests<span className="font-medium"><AnimatedNumber value={o.openPrs} /></span></Link></li>
-              <li className="border-t border-line"><Link href="/issues" className="flex items-center justify-between px-4 py-3 hover:bg-faint">Open issues<span className="font-medium"><AnimatedNumber value={o.openIssues} /></span></Link></li>
-            </ul>
-          </Panel>
-
           <Panel title="Daily digest" icon={Newspaper} id="digest" actions={<Link href="/digest" className="btn">Open</Link>}>
             {!digest ? <EmptyState icon={Newspaper} title="No digest yet">The first one is made on a morning Mergeport is open.</EmptyState> : (
               <Link href={`/digest?day=${digest.day}`} className="block px-4 py-3 text-[13px] transition-colors duration-[var(--duration-feedback)] hover:bg-faint">
@@ -125,9 +118,8 @@ export default async function Overview() {
                 <p className="font-medium">{ms.milestone.name}</p>
                 <p className="text-[12.5px] text-ink-3">Target {formatDateOnly(ms.milestone.targetDate)}</p>
                 <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`${ms.milestone.name} visible work`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={ms.progress.percent ?? undefined}><div className="meter-fill h-full bg-ink" style={{ "--v": `${ms.progress.percent ?? 0}%` } as React.CSSProperties} /></div>
-                <p className="tnum mt-2 text-[12.5px]">{ms.progress.percent === null ? "No visible work yet" : `${ms.progress.done} of ${ms.progress.total} done`}</p>
-                <p className="mt-1 text-[11.5px] text-ink-3">{ms.progress.label}: {ms.progress.explanation}</p>
-              </div>
+                <p className="tnum mt-2 text-[12.5px]" title={`${ms.progress.label}: ${ms.progress.explanation}`}>{ms.progress.percent === null ? "No visible work yet" : `${ms.progress.done} of ${ms.progress.total} done`}</p>
+                              </div>
             )}
           </Panel>
 
