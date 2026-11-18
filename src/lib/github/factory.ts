@@ -1,5 +1,6 @@
 import type { Db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
+import { maybePruneHttpCache } from "./cache-prune";
 import { DemoPort } from "./demo";
 import { ghFetch } from "./gh";
 import { profileRunner } from "@/lib/local/profile-runner";
@@ -14,7 +15,9 @@ export function dbCache(db: Db): CacheStore {
       return row ? { etag: row.etag, body: row.body } : null;
     },
     async set(key, etag, body) {
-      await db.publicCacheEntry.upsert({ where: { key }, create: { key, etag, body: body as object }, update: { etag, body: body as object, fetchedAt: new Date() } });
+      const bytes = Buffer.byteLength(JSON.stringify(body) ?? "");
+      await db.publicCacheEntry.upsert({ where: { key }, create: { key, etag, body: body as object, bytes }, update: { etag, body: body as object, bytes, fetchedAt: new Date() } });
+      await maybePruneHttpCache(db, bytes);
     },
   };
 }
