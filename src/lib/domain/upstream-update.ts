@@ -95,7 +95,22 @@ export function splitCommand(input: string): string[] {
 const BRANCH = /^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}$/;
 export const branchNameOk = (b: string) => BRANCH.test(b) && !b.includes("..") && !b.includes("//") && !b.endsWith("/") && !b.endsWith(".lock") && !b.endsWith(".");
 
-export type ConfigInput = { enabled: boolean; verifyCommand: string | null; promote: PromoteMode; timeoutSec: number; branchName: string };
+/**
+ * The default sync branch for a mapping, given the branches other enabled configs of the SAME fork already use: two mappings sharing one
+ * branch would each force-push over the other's pull request head. The first mapping keeps the plain default; another one gets the
+ * upstream branch as a suffix (and a number if even that is taken).
+ */
+export function defaultSyncBranch(upstreamBranch: string, taken: readonly string[]): string {
+  if (!taken.includes(DEFAULT_BRANCH)) return DEFAULT_BRANCH;
+  const slug = upstreamBranch.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/\.{2,}/g, ".").replace(/^[-.]+|[-.]+$/g, "").slice(0, 60) || "upstream";
+  const base = `${DEFAULT_BRANCH}-${slug}`.replace(/\.lock$/, "");
+  for (let n = 1; ; n++) {
+    const b = n === 1 ? base : `${base}-${n}`;
+    if (!taken.includes(b) && branchNameOk(b)) return b;
+  }
+}
+
+export type ConfigInput ={ enabled: boolean; verifyCommand: string | null; promote: PromoteMode; timeoutSec: number; branchName: string };
 
 /** Validates and normalises what the Forks page sends. Throws CommandError with a message a person can act on. */
 export function cleanConfig(raw: { enabled?: unknown; verifyCommand?: unknown; promote?: unknown; timeoutSec?: unknown; branchName?: unknown }, mapping: { forkBranch: string; upstreamBranch: string }): ConfigInput {

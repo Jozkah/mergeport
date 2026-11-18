@@ -675,6 +675,14 @@ model UpstreamUpdateConfig {
   lastReleaseAt      DateTime?
   releasesEtag       String?
   releasesCheckedAt  DateTime?
+  /// What the person approved when they saved: a mapping or repository changed since (a teammate's shared edit, a rename) stops the
+  /// updater until they save again. Null only for a row never saved through the settings (pinned on its first run).
+  pinForkGithubId     BigInt?
+  pinUpstreamGithubId BigInt?
+  pinForkFullName     String?
+  pinUpstreamFullName String?
+  pinForkBranch       String?
+  pinUpstreamBranch   String?
 
   mapping ForkMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
 }

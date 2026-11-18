@@ -6,7 +6,7 @@ import { HubError, type Backend, type EntityEvent, type HubClient } from "@/lib/
 import { assertBackendMatch, BackendMismatchError } from "@/lib/local/backend-guard";
 import type { Backend as ProfileBackend } from "@/lib/local/backends";
 import { mapLimit } from "@/lib/util";
-import { ENTITY_SCHEMA, ENTITY_TYPES, entityDef, entityPath, parseEntityPath, type Ctx, type EntityDef, type Listed } from "./entities";
+import { APPLY_INVALID, ENTITY_SCHEMA, ENTITY_TYPES, entityDef, entityPath, parseEntityPath, type Ctx, type EntityDef, type Listed } from "./entities";
 import { same, threeWayMerge, type Data } from "./merge";
 import { CoordinationStore, HeadMovedError, type Head } from "./store";
 
@@ -496,7 +496,7 @@ export class SyncEngine {
         // overwritten, moved or deleted by a file (or tombstone) arriving from here.
         const row = local.get(f.id);
         if (row?.spaceId && row.spaceId !== space.id) continue;
-        let r: { applied: boolean; data: Data | null; deferred?: boolean };
+        let r: { applied: boolean; data: Data | null; deferred?: boolean; invalid?: boolean };
         try {
           r = await this.reconcile(ctx, def, parsed, f.sha, row?.data ?? null);
         } catch (e) {
@@ -504,6 +504,7 @@ export class SyncEngine {
           continue;
         }
         if (r.deferred) deferred++;
+        if (r.invalid) skipped.push(`${f.type}/${f.id}: not applicable here`);
         if (r.applied) {
           applied++;
           if (r.data) appliedHere.push({ id: f.id, data: r.data });
@@ -530,7 +531,7 @@ export class SyncEngine {
   }
 
   /** One entity: apply remote, merge with local edits, or record a conflict. */
-  private async reconcile(ctx: Ctx, def: EntityDef, file: EntityFile, sha: string, local: Data | null): Promise<{ applied: boolean; data: Data | null; deferred?: boolean }> {
+  private async reconcile(ctx: Ctx, def: EntityDef, file: EntityFile, sha: string, local: Data | null): Promise<{ applied: boolean; data: Data | null; deferred?: boolean; invalid?: boolean }> {
     const spaceId = ctx.space.id;
     const key = { spaceId_type_entityId: { spaceId, type: def.type, entityId: file.id } };
     const se = await this.db.syncEntity.findUnique({ where: key });
@@ -567,6 +568,7 @@ export class SyncEngine {
     if (!localChanged) {
       const ok = await def.apply(this.db, ctx, file.id, remoteData, file.version);
       if (ok === false) return { applied: false, data: null, deferred: true };
+      if (ok === APPLY_INVALID) return { applied: false, data: null, invalid: true }; // never recorded: recording it would make capture push a deletion
       await record(remoteData);
       return { applied: true, data: remoteData };
     }

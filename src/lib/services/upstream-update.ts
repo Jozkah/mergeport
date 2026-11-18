@@ -1,12 +1,13 @@
 import type { UpstreamUpdateRun } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { repoWhere, requireRepo, type Viewer } from "@/lib/authz/viewer";
-import { CommandError, NEEDS_PERSON, RELEASE_ATTENTION_DAYS, cleanSettings, safeReleaseUrl, type CommitInfo, type PromoteMode, type ReleaseInfo, type UpdateMode, type UpdateState } from "@/lib/domain/upstream-update";
+import { CommandError, NEEDS_PERSON, RELEASE_ATTENTION_DAYS, cleanSettings, defaultSyncBranch, safeReleaseUrl, type CommitInfo, type PromoteMode, type ReleaseInfo, type UpdateMode, type UpdateState } from "@/lib/domain/upstream-update";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { UPDATE_JOB, updateJobKey } from "@/lib/local/upstream-updater-job";
 import { env } from "@/lib/env";
 import { enqueue } from "@/lib/jobs";
 import { audit } from "./audit";
+import { pinOf } from "./upstream-pin";
 import { maybeRequestReleaseCheck } from "./upstream-releases";
 
 /**
@@ -37,11 +38,17 @@ export type UpdateConfigView = {
 };
 export const DEFAULT_VIEW: UpdateConfigView = { enabled: false, mode: "merge", verifyCommand: "", promote: "pr", timeoutSec: 1200, branchName: "mergeport/upstream-sync", lastRunAt: null, includePrereleases: false, releasesCheckedAt: null, lastReleaseTag: null, releasesBaselined: false };
 
+/** Sync branches of the OTHER enabled merge-mode configs on the same fork repository. */
+async function branchesTaken(db: Db, forkRepoId: string, mappingId: string): Promise<string[]> {
+  const rows = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "merge", mappingId: { not: mappingId }, mapping: { forkRepoId } }, select: { branchName: true } });
+  return rows.map((r) => r.branchName);
+}
+
 /** Only an administrator sees (and so can edit) the command; anyone else gets the defaults shape without it. */
 export async function getUpdateConfig(db: Db, v: Viewer, mappingId: string): Promise<UpdateConfigView> {
-  await mappingFor(db, v, mappingId);
+  const m = await mappingFor(db, v, mappingId);
   const c = await db.upstreamUpdateConfig.findUnique({ where: { mappingId } });
-  if (!c) return DEFAULT_VIEW;
+  if (!c) return { ...DEFAULT_VIEW, branchName: defaultSyncBranch(m.upstreamBranch, await branchesTaken(db, m.forkRepoId, mappingId)) };
   return {
     enabled: c.enabled,
     mode: c.mode === "releases" ? "releases" : "merge",
@@ -61,14 +68,17 @@ export async function saveUpdateConfig(db: Db, v: Viewer, mappingId: string, raw
   const m = await mappingFor(db, v, mappingId);
   if (!v.isAdmin) throw new ForbiddenError("Only an administrator can change auto-update: its verify command runs on this computer");
   await requireRepo(db, v, m.forkRepoId, "manageWork");
+  const prev = await db.upstreamUpdateConfig.findUnique({ where: { mappingId } });
+  const taken = await branchesTaken(db, m.forkRepoId, mappingId);
+  const blank = typeof raw.branchName !== "string" || !raw.branchName.trim();
   let c;
   try {
-    c = cleanSettings(raw, m);
+    c = cleanSettings(blank ? { ...raw, branchName: prev && !taken.includes(prev.branchName) ? prev.branchName : defaultSyncBranch(m.upstreamBranch, taken) } : raw, m);
   } catch (e) {
     if (e instanceof CommandError) throw new ValidationError(e.message);
     throw e;
   }
-  const prev = await db.upstreamUpdateConfig.findUnique({ where: { mappingId } });
+  if (c.mode === "merge" && taken.includes(c.branchName)) throw new ValidationError(`Another enabled auto-update of this fork already uses the sync branch ${c.branchName}. Pick a different branch name.`);
   const incl = c.includePrereleases ?? prev?.includePrereleases ?? false;
   // `releases` mode writes none of the merge settings: what was stored (verify command, promote mode, ...) stays for when the person switches back.
   const data: Record<string, unknown> =
@@ -76,6 +86,8 @@ export async function saveUpdateConfig(db: Db, v: Viewer, mappingId: string, raw
       ? { enabled: c.enabled, mode: "merge", verifyCommand: c.verifyCommand, promote: c.promote, timeoutSec: c.timeoutSec, branchName: c.branchName }
       : { enabled: c.enabled, mode: "releases" };
   if (c.includePrereleases !== null) data.includePrereleases = c.includePrereleases;
+  // Saving is approving the mapping as shown: the run only acts while it still matches (see upstream-pin).
+  Object.assign(data, pinOf(m));
   // Starting to watch (or changing which releases count) starts from where things stand now: the first check is a baseline, not a flood.
   const watching = c.enabled && c.mode === "releases";
   const rebaseline = watching && !(prev?.enabled && prev.mode === "releases" && incl === prev.includePrereleases);

@@ -7,6 +7,7 @@ import type { GithubPort } from "@/lib/github/port";
 import { assertInside, createGitWriter, redactUrls, type GitWriter } from "@/lib/local/git-write";
 import { runVerify } from "@/lib/local/verify-run";
 import { notifyUpstream } from "@/lib/services/upstream-notify";
+import { pinBlocks } from "@/lib/services/upstream-pin";
 
 /**
  * The upstream auto-updater's pipeline for ONE mapping, ported in idea (not code) from a server-side updater: take the newest upstream
@@ -85,6 +86,7 @@ export async function runUpdate(deps: UpdaterDeps, mappingId: string, opts: { ma
   const now = deps.now ?? (() => new Date());
   const m = await db.forkMapping.findUnique({ where: { id: mappingId }, include: { fork: { include: { owner: true } }, upstream: { include: { owner: true } }, updateConfig: true } });
   if (!m || !m.updateConfig?.enabled || m.updateConfig.mode !== "merge" || m.fork.isDemo) return null; // `releases` mode never reaches git
+  if (await pinBlocks(db, { ...m, updateConfig: m.updateConfig }, now(), opts.manual ? "manual" : "auto")) return null;
   const cfg = m.updateConfig;
   const dir = updaterDir(deps.home, mappingId);
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
