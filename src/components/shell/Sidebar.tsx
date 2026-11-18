@@ -37,16 +37,7 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
     { href: "/tasks", label: "Tasks", icon: ListChecks, count: c.tasks },
     { href: "/pull-requests", label: "Pull requests", icon: GitPullRequest },
     { href: "/issues", label: "Issues", icon: CircleDot },
-    {
-      href: "/planning",
-      label: "Planning",
-      icon: Kanban,
-      children: [
-        { href: "/planning?view=board", label: "Board" },
-        { href: "/planning?view=list", label: "List" },
-        { href: "/planning?view=roadmap", label: "Roadmap" },
-      ],
-    },
+    { href: "/planning", label: "Planning", icon: Kanban }, // the views (board, list, roadmap...) are tabs on the page
     { href: "/activity", label: "Activity", icon: Activity },
   ];
   const source: Item[] = [
@@ -124,7 +115,7 @@ function NavList({ items, onNavigate }: { items: Item[]; onNavigate?: () => void
 function Group({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-1.5 px-2.5 text-[11.5px] font-medium uppercase tracking-[0.04em] text-ink-3">{label}</p>
+      <p className="mb-1 px-2.5 text-[11.5px] font-medium uppercase tracking-[0.04em] text-ink-3">{label}</p>
       {children}
     </div>
   );
@@ -134,7 +125,7 @@ function SidebarBody({ counts, isAdmin, user, onNavigate, workspace }: { counts:
   const nav = buildNav(counts, isAdmin);
   const searchId = `${useId()}-search`;
   return (
-    <div className="flex h-full min-h-0 flex-col gap-5 px-3 pb-3 pt-3">
+    <div className="flex h-full min-h-0 flex-col gap-3 px-3 pb-3 pt-3">
       <div className="flex items-center gap-2.5 px-1">
         <Logo size={32} />
         <div className="min-w-0">
@@ -147,7 +138,8 @@ function SidebarBody({ counts, isAdmin, user, onNavigate, workspace }: { counts:
         <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-[9px] text-ink-3" />
         <input id={searchId} name="q" type="search" placeholder="Search anything" className="input !pl-8" autoComplete="off" />
       </form>
-      <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-0.5">
+      {/* Rows stay 40px, so on short screens the list scrolls on its own (bottom fade says there is more) and the account link stays put. */}
+      <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-5 pr-0.5 [mask-image:linear-gradient(to_bottom,#000_calc(100%_-_20px),transparent)]">
         <Group label="Main navigation"><NavList items={nav.main} onNavigate={onNavigate} /></Group>
         <Group label="Source"><NavList items={nav.source} onNavigate={onNavigate} /></Group>
         <Group label="Collaboration"><NavList items={nav.team} onNavigate={onNavigate} /></Group>

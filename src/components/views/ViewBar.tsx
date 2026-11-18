@@ -35,7 +35,6 @@ export function ViewBar({ scope, views }: { scope: string; views: ViewRow[] }) {
 
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Saved views">
-      {views.length === 0 && <span className="text-[12.5px] text-ink-3">No saved views</span>}
       {views.map((v) => (
         <span key={v.id} className={`inline-flex items-center rounded-full border text-[12.5px] ${active?.id === v.id ? "border-ink bg-hover" : "border-line"}`}>
           <Link href={v.href} className="px-2.5 py-1" title={v.shared ? (v.mine ? "Shared with your team" : `Shared by ${v.ownerLogin}`) : undefined}>
@@ -63,7 +62,7 @@ export function ViewBar({ scope, views }: { scope: string; views: ViewRow[] }) {
           {error && <span role="alert" className="text-[12px] text-blocked">{error}</span>}
         </form>
       ) : (
-        <button type="button" className="btn btn-quiet" onClick={() => setAdding(true)} title={`Save the current filters of ${path} as a view`}>Save current view</button>
+        <button type="button" className="btn btn-quiet" onClick={() => setAdding(true)} title={`Save the current filters of ${path} as a view`}>{views.length === 0 ? "Save view" : "Save current view"}</button>
       )}
     </div>
   );
