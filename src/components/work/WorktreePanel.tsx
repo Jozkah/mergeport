@@ -9,8 +9,8 @@ import { WorktreeActions } from "@/components/work/WorktreeActions";
  * The local checkout of this work, from the branch/worktree snapshot on THIS computer: which folder, and whether it is clean, ahead or
  * behind. Facts only. Folder paths are never sent to teammates; they are shown here because it is your own computer.
  */
-export function WorktreePanel({ links, tz, repositoryId, note, defaultOpen = true }: { links: WorkLinks; tz: string; repositoryId: string; note?: string; defaultOpen?: boolean }) {
-  const summary = !links.branch ? "No branch known" : !links.mapped ? "Not mapped" : links.matches.length === 0 ? "No worktree" : `${links.matches.length} worktree${links.matches.length === 1 ? "" : "s"}`;
+export function WorktreePanel({ links, tz, repositoryId, note, defaultOpen = true, summary: summaryOverride }: { links: WorkLinks; tz: string; repositoryId: string; note?: string; defaultOpen?: boolean; summary?: string }) {
+  const summary = summaryOverride ?? (!links.branch ? "No branch known" : !links.mapped ? "Not mapped" : links.matches.length === 0 ? "No worktree" : `${links.matches.length} worktree${links.matches.length === 1 ? "" : "s"}`);
   return (
     <Panel title="On this computer" icon={GitBranch} id="local" defaultOpen={defaultOpen} summary={summary}>
       <div className="flex flex-col gap-2 p-4 text-[12.5px]">
