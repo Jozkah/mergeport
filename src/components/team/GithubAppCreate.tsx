@@ -87,7 +87,7 @@ export function GithubAppCreate() {
         </button>
         <p role="alert" className="text-[12.5px] text-blocked">{error}</p>
       </div>
-      <p className="max-w-[75ch] text-pretty text-[12px] text-ink-3">GitHub shows the App prefilled. You may change its name (it must be unique), then press &ldquo;Create GitHub App&rdquo;. Mergeport keeps only the webhook secret and discards the App&rsquo;s private key.</p>
+      <p className="max-w-[75ch] text-pretty text-[12px] text-ink-3">Rename the App if needed, then press &ldquo;Create GitHub App&rdquo;. Mergeport keeps only the webhook secret, not the private key.</p>
       {answer && <ManifestForm {...answer} formRef={form} />}
     </div>
   );
