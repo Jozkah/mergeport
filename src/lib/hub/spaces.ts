@@ -8,6 +8,7 @@ import type { Me } from "./types";
  * Returns hub space ids.
  */
 export async function syncHubSpaces(db: Db, engine: SyncEngine, me: Me, origin?: string): Promise<{ added: string[]; removed: string[] }> {
+  engine.assertBackend("HUB"); // a GitHub profile never records or opens hub spaces
   const added: string[] = [];
   const removed: string[] = [];
   const local = await db.space.findMany({ where: { backend: "HUB" } });
