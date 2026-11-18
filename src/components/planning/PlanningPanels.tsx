@@ -22,7 +22,7 @@ export async function BoardsManager({ db, viewer, projectId, columns }: Common &
   return (
     <Panel title="Boards" icon={Settings} id="boards" defaultOpen={false} summary={boards.length === 0 ? "Default board only" : `${boards.length} named board${boards.length === 1 ? "" : "s"}`}>
       <div className="flex flex-col gap-4 p-4 text-[13px]">
-        {boards.length === 0 && <p className="text-ink-3">Named boards focus on part of the flow. WIP limits are advice only.</p>}
+        {boards.length === 0 && <p className="text-ink-3">WIP limits are advice only.</p>}
         {boards.map((b) => (
           <details key={b.id} className="rounded-[10px] border border-line p-3">
             <summary className="cursor-pointer font-medium">{b.name} <span className="font-normal text-ink-3">· {(b.columns as { key: string }[]).length} columns · {b.groupBy === "none" ? "no lanes" : `lanes by ${b.groupBy}`} · {b.density}</span></summary>
@@ -82,7 +82,7 @@ export async function EpicsView({ db, viewer, projectId, cards }: Common & { car
   return (
     <div className="flex flex-col gap-5">
       <Panel title="Epics" icon={Flag} id="epics" actions={
-        <Sheet title="New epic" description="A feature that spans several tasks and issues. One level only." trigger={<button className="btn btn-primary">New epic</button>}>
+        <Sheet title="New epic" description="Spans several tasks and issues. One level only." trigger={<button className="btn btn-primary">New epic</button>}>
           <ActionForm action={createEpicAction} submitLabel="Create epic">
             <input type="hidden" name="projectId" value={projectId} />
             <div className="flex flex-col gap-3">
@@ -138,7 +138,7 @@ export async function IterationsView({ db, projectId, cards }: { db: Db; project
   return (
     <div className="flex flex-col gap-5">
       <Panel title="Iterations" icon={CalendarDays} id="iterations" actions={
-        <Sheet title="New iteration" description="A short timebox. A milestone is the delivery goal; an iteration is the cycle currently funding part of it." trigger={<button className="btn btn-primary">New iteration</button>}>
+        <Sheet title="New iteration" description="A short timebox toward a milestone." trigger={<button className="btn btn-primary">New iteration</button>}>
           <ActionForm action={createIterationAction} submitLabel="Create iteration">
             <input type="hidden" name="projectId" value={projectId} />
             <div className="flex flex-col gap-3">
@@ -148,7 +148,7 @@ export async function IterationsView({ db, projectId, cards }: { db: Db; project
           </ActionForm>
         </Sheet>
       }>
-        {iterations.length === 0 ? <EmptyState icon={CalendarDays} title="No iterations yet">Plan short cycles separately from milestones.</EmptyState> : (
+        {iterations.length === 0 ? <EmptyState icon={CalendarDays} title="No iterations yet">Plan short cycles.</EmptyState> : (
           <ul className="divide-y divide-line">
             {iterations.map((i) => {
               const mine = byIter(i.id);
@@ -268,7 +268,7 @@ export async function MapView({ db, viewer, projectId, cards }: Common & { cards
                 })}
               </svg>
             </div>
-            <p className="mt-2 text-[12px] text-ink-3">Solid arrows block. Dashed lines are related or duplicate links. A link to a card you cannot see shows only as “+N hidden” on the card you can see.</p>
+            <p className="mt-2 text-[12px] text-ink-3">Solid arrows block; dashed lines are related or duplicates. Hidden cards show as “+N hidden”.</p>
           </div>
         )}
       </Panel>
@@ -296,7 +296,7 @@ export async function InsightsView({ db, viewer, projectId }: Common) {
       <Panel title="Delivery analytics" icon={Kanban} id="insights">
         <div className="flex flex-col gap-4 p-4 text-[13px]">
           {a.recordingSince === null ? (
-            <p className="text-ink-2">Mergeport has not recorded any planning history for this project yet. From now on every card created or moved is recorded, and these numbers appear as history builds up. Nothing is estimated from today&rsquo;s state.</p>
+            <p className="text-ink-2">No planning history recorded yet. Numbers appear as cards are created or moved; nothing is estimated.</p>
           ) : (
             <p className="text-ink-3">Recording since {formatInstant(a.recordingSince, viewer.timezone)} ({a.events} event{a.events === 1 ? "" : "s"}). Numbers cover only work whose start and finish were recorded.</p>
           )}

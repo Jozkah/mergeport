@@ -92,7 +92,7 @@ export default async function Planning({ searchParams }: { searchParams: Promise
               </ActionForm>
             </Sheet>
             {viewer.isAdmin && (
-              <Sheet title="New dashboard milestone" description="Spans repositories and lives in the dashboard. Repository milestones on GitHub stay separate." trigger={<button className="btn"><Milestone size={14} aria-hidden /> New milestone</button>}>
+              <Sheet title="New dashboard milestone" description="Spans repositories. Separate from GitHub milestones." trigger={<button className="btn"><Milestone size={14} aria-hidden /> New milestone</button>}>
                 <ActionForm action={createMilestoneAction} submitLabel="Create milestone">
                   <input type="hidden" name="projectId" value={project.id} />
                   <div className="flex flex-col gap-3">

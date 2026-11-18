@@ -109,7 +109,6 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
 
                   <section aria-labelledby={`is-${m.id}`}>
                     <h3 id={`is-${m.id}`} className="mb-1 text-[13px] font-medium">Upstream issues to triage</h3>
-                    <p className="mb-2 text-[12px] text-ink-3">A status saves as soon as you pick it.</p>
                     <UpstreamIssues canEdit={caps.manageWork} rows={issues.map((i) => ({ id: i.id, number: i.issueNumber, title: i.title, url: i.htmlUrl, status: i.status, note: i.note }))} />
                   </section>
                   <UpstreamUpdate db={db} viewer={viewer} mappingId={m.id} forkBranch={m.forkBranch} forkName={m.fork.fullName} upstreamName={m.upstream.fullName} />
@@ -139,7 +138,7 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
                 <div><label className="label" htmlFor="mf-fb">Fork branch</label><input id="mf-fb" name="forkBranch" className="input" placeholder="default branch" /></div>
                 <div><label className="label" htmlFor="mf-ub">Upstream branch</label><input id="mf-ub" name="upstreamBranch" className="input" placeholder="default branch" /></div>
               </ActionForm>
-              <p className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-3"><RefreshCw size={12} aria-hidden /> Leave a branch blank to use the repository default (read from GitHub).</p>
+              <p className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-3"><RefreshCw size={12} aria-hidden /> Blank uses the repository default.</p>
             </div>
           </Panel>
         </div>
