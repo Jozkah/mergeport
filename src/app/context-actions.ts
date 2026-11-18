@@ -6,7 +6,7 @@ import { run, type ActionResult } from "@/lib/action-result";
 import { requireViewer } from "@/lib/auth/current";
 import { ValidationError } from "@/lib/errors";
 import { createContext, profileDirOf, renameContext, setActive } from "@/lib/local/contexts";
-import { RESTART_EXIT_CODE } from "@/lib/local/launcher";
+import { RESTART_EXIT_CODE } from "@/lib/local/restart-code";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 

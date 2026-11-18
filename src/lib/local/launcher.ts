@@ -10,7 +10,9 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-export const RESTART_EXIT_CODE = 75;
+import { RESTART_EXIT_CODE } from "./restart-code";
+
+export { RESTART_EXIT_CODE };
 export const STAMP_FILE = path.join(".next", "mergeport-built-for");
 const BUILD_ID = path.join(".next", "BUILD_ID");
 /** Files whose change needs a rebuild even without a commit (dependencies, database client). */
