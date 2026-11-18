@@ -1,7 +1,7 @@
-import { discussionDownloaded } from "@/lib/sync/discussion-window";
+﻿import { discussionDownloaded } from "@/lib/sync/discussion-window";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
-import { shouldApplyUpdate } from "@/lib/domain/sync";
+import { canSpend, shouldApplyUpdate } from "@/lib/domain/sync";
 import { classifyCompare, classifyUpstreamMerge } from "@/lib/domain/forks";
 import { GithubError, type GithubPort, type RemoteComment, type RemoteWorkItem } from "@/lib/github/port";
 import { mapLimit } from "@/lib/util";
@@ -291,17 +291,51 @@ export async function syncItem(db: Db, port: GithubPort, repositoryId: string, n
 
 // ---------- forks ----------
 
+/** Most GitHub requests one sync.fork run may make; merged PRs beyond it wait for the next run (newest first). */
+export const FORK_SYNC_REQUEST_CAP = 60;
+/** The loop stops while this much of the hourly budget is left, so other jobs keep some room. */
+const FORK_SYNC_RESERVE = 100;
+const CHECKED_AT = "Checked against fork commit ";
+
+const isRateLimit = (e: unknown): e is GithubError => e instanceof GithubError && e.kind === "rate-limited";
+
+/**
+ * Compares the fork with its upstream and gathers merged-PR evidence within a fixed request budget.
+ *
+ * Which merged PRs are examined (newest merge first, at most FORK_SYNC_REQUEST_CAP requests per run, the rest next run):
+ * - new ones (no stored row) and unresolved ones (UNKNOWN), always;
+ * - NOT_DETECTED ones only when the fork tip is not the commit they were last checked against (recorded in the note):
+ *   "X is not an ancestor of tip T" can only change when the fork branch moves;
+ * - never ANCESTRY_EXACT or MANUAL_ACK. An ancestor stays an ancestor while the fork only moves forward, and the upstream
+ *   tip moving cannot change the ancestry of a commit that is already merged. (A force-push that drops upstream history is
+ *   not re-detected per PR; the branch comparison still shows the fork behind.)
+ * A rate-limit answer stops the loop without touching stored evidence and is rethrown, so the job layer backs off.
+ */
 export async function syncFork(db: Db, port: GithubPort, mappingId: string, now = new Date()) {
   const m = await db.forkMapping.findUnique({ where: { id: mappingId }, include: { fork: { include: { owner: true } }, upstream: { include: { owner: true } } } });
   if (!m) return;
   const up = { owner: m.upstream.owner.login, repo: m.upstream.name, branch: m.upstreamBranch };
   const fk = { owner: m.fork.owner.login, branch: m.forkBranch };
+  let limited: GithubError | null = null;
+  let spent = 1; // the comparison below
+  // Branch tips come from the branch rows sync.repository just stored (it runs right before this job); only a branch with
+  // no stored row is listed from GitHub. A stored tip that lags only makes NOT_DETECTED rows get rechecked once more later.
+  const tipOf = async (repositoryId: string, owner: string, repo: string, branch: string) => {
+    const row = await db.branch.findUnique({ where: { repositoryId_name: { repositoryId, name: branch } }, select: { sha: true } });
+    if (row) return row.sha;
+    spent += 2; // repository + branches
+    const list = await port.listBranches(owner, repo).catch((e) => {
+      if (isRateLimit(e)) limited ??= e;
+      return [];
+    });
+    return list.find((b) => b.name === branch)?.sha ?? null;
+  };
 
   const outcome = await port.compare(up, fk);
+  if (outcome.kind === "rate-limited") limited = new GithubError("rate-limited", "GitHub rate limit reached while comparing the fork");
   const view = classifyCompare(outcome);
-  const [upBranches, forkBranches] = await Promise.all([port.listBranches(up.owner, up.repo).catch(() => []), port.listBranches(m.fork.owner.login, m.fork.name).catch(() => [])]);
-  const upTip = upBranches.find((b) => b.name === m.upstreamBranch)?.sha ?? null;
-  const forkTip = forkBranches.find((b) => b.name === m.forkBranch)?.sha ?? null;
+  const upTip = await tipOf(m.upstreamRepoId, up.owner, up.repo, m.upstreamBranch);
+  const forkTip = await tipOf(m.forkRepoId, m.fork.owner.login, m.fork.name, m.forkBranch);
   await db.forkComparison.create({
     data: {
       mappingId: m.id,
@@ -317,21 +351,67 @@ export async function syncFork(db: Db, port: GithubPort, mappingId: string, now 
   });
 
   // Upstream merged PRs: ancestry evidence only. Titles and numbers are never evidence.
-  const merged = await db.workItem.findMany({ where: { repositoryId: m.upstreamRepoId, type: "PULL_REQUEST", state: "MERGED" } });
-  for (const pr of merged) {
-    const sha = await port.getPullMergeSha(up.owner, up.repo, pr.number).catch(() => null);
-    const existing = await db.upstreamPrState.findUnique({ where: { mappingId_number: { mappingId: m.id, number: pr.number } } });
-    const ancestry = sha ? await port.isAncestor({ owner: up.owner, repo: up.repo }, sha, `${fk.owner}:${fk.branch}`) : "unknown";
+  const merged = await db.workItem.findMany({ where: { repositoryId: m.upstreamRepoId, type: "PULL_REQUEST", state: "MERGED" }, orderBy: [{ mergedAtGh: "desc" }, { number: "desc" }] });
+  const states = new Map((await db.upstreamPrState.findMany({ where: { mappingId: m.id } })).map((s) => [s.number, s]));
+  const due = merged.filter((pr) => {
+    const s = states.get(pr.number);
+    if (!s) return true;
+    if (s.ackedById) return s.evidence !== "MANUAL_ACK"; // a human decision: recorded without any request
+    if (s.evidence === "UNKNOWN") return !(forkTip && s.evidenceNote?.endsWith(CHECKED_AT + forkTip)); // checked cleanly at this tip already
+    if (s.evidence === "NOT_DETECTED") return !!forkTip && !s.evidenceNote?.endsWith(CHECKED_AT + forkTip);
+    return false;
+  });
+  const writes: Prisma.PrismaPromise<unknown>[] = [];
+  for (const pr of due) {
+    if (limited) break;
+    const existing = states.get(pr.number);
+    if (existing?.ackedById) {
+      const c = classifyUpstreamMerge({ ancestry: "unknown", patchEquivalentCommitsFound: false, titleOrNumberMatch: false, manualAck: true, mergeShaKnown: !!existing.mergeSha });
+      writes.push(db.upstreamPrState.update({ where: { id: existing.id }, data: { title: pr.title, evidence: c.evidence, evidenceNote: c.note } }));
+      continue;
+    }
+    if (!canSpend(port.lastRate(), 2, FORK_SYNC_RESERVE)) break; // budget low: the rest waits for the next run
+    const needSha = !existing?.mergeSha;
+    if (spent + (needSha ? 2 : 1) > FORK_SYNC_REQUEST_CAP) break;
+    let clean = true; // false when a request failed, so the row is retried next run
+    let sha = existing?.mergeSha ?? null;
+    let ancestry: "ancestor" | "not-ancestor" | "unknown" = "unknown";
+    try {
+      if (needSha) {
+        spent++;
+        sha = await port.getPullMergeSha(up.owner, up.repo, pr.number).catch((e) => {
+          if (isRateLimit(e)) throw e;
+          clean = false;
+          return null;
+        });
+      }
+      if (sha) {
+        spent++;
+        ancestry = await port.isAncestor({ owner: up.owner, repo: up.repo }, sha, `${fk.owner}:${fk.branch}`);
+        if (ancestry === "unknown") clean = false;
+      }
+    } catch (e) {
+      if (!isRateLimit(e)) throw e;
+      limited = e; // keep whatever this PR had before
+      break;
+    }
     const c = classifyUpstreamMerge({ ancestry, patchEquivalentCommitsFound: false, titleOrNumberMatch: false, manualAck: !!existing?.ackedById, mergeShaKnown: !!sha });
-    await db.upstreamPrState.upsert({
-      where: { mappingId_number: { mappingId: m.id, number: pr.number } },
-      create: { mappingId: m.id, number: pr.number, title: pr.title, state: "merged", htmlUrl: pr.htmlUrl, mergeSha: sha, mergedAtGh: pr.mergedAtGh, evidence: c.evidence, evidenceNote: c.note },
-      update: { title: pr.title, mergeSha: sha, mergedAtGh: pr.mergedAtGh, evidence: c.evidence, evidenceNote: c.note },
-    });
+    // A result reached without errors records the fork tip it holds for; a failed check never replaces settled evidence.
+    if (!clean && existing && existing.evidence !== "UNKNOWN") continue;
+    const note = clean && forkTip && c.evidence !== "ANCESTRY_EXACT" ? `${c.note} ${CHECKED_AT}${forkTip}` : c.note;
+    writes.push(
+      db.upstreamPrState.upsert({
+        where: { mappingId_number: { mappingId: m.id, number: pr.number } },
+        create: { mappingId: m.id, number: pr.number, title: pr.title, state: "merged", htmlUrl: pr.htmlUrl, mergeSha: sha, mergedAtGh: pr.mergedAtGh, evidence: c.evidence, evidenceNote: note },
+        update: { title: pr.title, mergeSha: sha, mergedAtGh: pr.mergedAtGh, evidence: c.evidence, evidenceNote: note },
+      }),
+    );
   }
+  await db.$transaction(writes); // one commit for the run's results (also the ones gathered before a rate limit)
   // Upstream open issues enter triage once; later decisions are never overwritten by sync.
   const issues = await db.workItem.findMany({ where: { repositoryId: m.upstreamRepoId, type: "ISSUE", state: "OPEN" } });
   for (const i of issues) {
     await db.upstreamIssueTriage.upsert({ where: { mappingId_issueNumber: { mappingId: m.id, issueNumber: i.number } }, create: { mappingId: m.id, issueNumber: i.number, title: i.title, htmlUrl: i.htmlUrl }, update: { title: i.title } });
   }
+  if (limited) throw limited; // surfaced, not swallowed: the job retries after the reset
 }
