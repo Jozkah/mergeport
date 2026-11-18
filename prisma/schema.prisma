@@ -869,6 +869,10 @@ model PublicCacheEntry {
   etag      String?
   body      Json
   fetchedAt DateTime @default(now())
+  /// Stored body size, so retention (src/lib/github/cache-prune.ts) can sum and evict without reading bodies.
+  bytes     Int      @default(0)
+
+  @@index([fetchedAt, bytes])
 }
 
 /// Last known result of a network discovery (repositories, invitations, space candidates), so pages render from local
