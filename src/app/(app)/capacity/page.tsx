@@ -45,7 +45,7 @@ export default async function Capacity() {
         )}
       </Panel>
 
-      <Panel title={viewer.isAdmin ? "Set availability" : "Set my availability"} icon={Users} id="set-availability" className="mt-5">
+      <Panel title={viewer.isAdmin ? "Set availability" : "Set my availability"} icon={Users} id="set-availability" className="mt-5" defaultOpen={false} summary="Away dates and a backup">
         <ActionForm action={availabilityAction} submitLabel="Save" className="p-4" resetOnSuccess={false}>
           <div className="grid gap-3 md:grid-cols-2">
             <div><label className="label" htmlFor="av-login">Person</label><Select id="av-login" name="login" className="select" defaultValue={mine?.login ?? options[0]?.login}>{options.map((r) => <option key={r.login} value={r.login}>{r.login}</option>)}</Select></div>

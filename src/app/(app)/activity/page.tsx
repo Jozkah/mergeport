@@ -17,7 +17,7 @@ export default async function ActivityPage() {
   const unread = notes.filter((n) => !n.readAt).length;
   return (
     <>
-      <PageHeader title="Activity" subtitle="Synchronized from GitHub for the repositories you can see. Notifications are dashboard records; nothing is emailed or posted." />
+      <PageHeader title="Activity" subtitle="Recent changes in your repositories. Notifications stay in this app; nothing is emailed or posted." />
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <Panel title="Recent activity" icon={Activity} id="act">
           {events.length === 0 ? <EmptyState icon={Activity} title="No activity yet" action={<Link href="/repositories/connect" className="btn btn-primary">Connect repositories</Link>}>Pull requests, issues and comments from your repositories show up here once they have synced.</EmptyState> : (
