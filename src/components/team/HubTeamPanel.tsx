@@ -5,9 +5,9 @@ import { Select } from "@/components/ui/Select";
 import { Sheet } from "@/components/ui/dialog";
 import { Avatar, Banner, EmptyState, Mono, PageHeader, Panel, SimplePill } from "@/components/ui/primitives";
 import { Lock, ShieldCheck, Trash2, Users } from "@/components/ui/icons";
-import { hubChangeRoleAction, hubCreateSpaceAction, hubDeleteSpaceAction, hubInviteAction, hubReinstateMemberAction, hubRemoveMemberAction, hubSignOutAction } from "@/app/hub-team-actions";
+import { hubCancelInviteAction, hubChangeRoleAction, hubCreateSpaceAction, hubDeleteSpaceAction, hubInviteAction, hubReinstateMemberAction, hubRemoveMemberAction, hubSignOutAction } from "@/app/hub-team-actions";
 import { HubSignOut } from "@/components/team/HubSignOut";
-import type { HubAdminSpace, HubLinkStatus, HubMember, HubSpaceMember } from "@/lib/hub/ports";
+import type { HubAdminSpace, HubLinkStatus, HubMember, HubPendingInvite, HubSpaceMember } from "@/lib/hub/ports";
 import type { HubOverview } from "@/lib/team/hub-service";
 
 export const REMOVE_MEMBER_WARNING = (login: string) => `@${login} loses access to the team and to every restricted space, on every computer. Only the server's owner can reinstate them, and only into the common space.`;
@@ -64,7 +64,7 @@ const ROLE_OPTIONS = (
 );
 
 /** Presentational: everything it shows was already decided by the page. Writes go through server actions, which the hub re-checks. */
-export function HubTeamPanel({ origin, status, overview, error, spaceMembers = null, removedMembers = [], instantUpdates = null }: { origin: string | null; status: HubLinkStatus; overview: HubOverview | null; error: HubTeamError | null; spaceMembers?: HubAdminSpace[] | null; removedMembers?: HubMember[]; instantUpdates?: ReactNode }) {
+export function HubTeamPanel({ origin, status, overview, error, spaceMembers = null, removedMembers = [], pendingInvites = [], instantUpdates = null }: { origin: string | null; status: HubLinkStatus; overview: HubOverview | null; error: HubTeamError | null; spaceMembers?: HubAdminSpace[] | null; removedMembers?: HubMember[]; pendingInvites?: HubPendingInvite[]; instantUpdates?: ReactNode }) {
   const removed = error?.kind === "forbidden";
   const needsSignIn = (status.needsSignIn || error?.kind === "unauthorized") && !removed;
   const o = removed ? null : overview;
@@ -134,6 +134,21 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
                         <input type="hidden" name="githubId" value={m.githubId} />
                         <span className="inline-flex h-10 items-center text-[12.5px] text-ink-3" aria-hidden>as</span>
                         <Select name="role" aria-label={`Role for @${m.login} when reinstated`} defaultValue="MEMBER" className="select !h-10 !w-32">{ROLE_OPTIONS}</Select>
+                      </ActionForm>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {o.canAdmin && pendingInvites.length > 0 && (
+              <div className="border-t border-line p-4">
+                <h3 className="mb-2 text-[13px] font-medium">Pending invites (<span className="tnum">{pendingInvites.length}</span>)</h3>
+                <ul className="max-h-72 overflow-y-auto" aria-label="Pending invites">
+                  {pendingInvites.map((i) => (
+                    <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
+                      <span className="min-w-0 max-w-full break-all">@{i.login} <span className="text-ink-3">({ROLE_LABEL[i.role]})</span></span>
+                      <ActionForm action={hubCancelInviteAction} submitLabel="Cancel" pendingLabel="Cancelling…" submitClassName="btn !h-10" submitAriaLabel={`Cancel invite for @${i.login}`}>
+                        <input type="hidden" name="inviteId" value={i.id} />
                       </ActionForm>
                     </li>
                   ))}

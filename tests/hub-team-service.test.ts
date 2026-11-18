@@ -163,6 +163,35 @@ describe("HubTeamService", () => {
   });
 });
 
+describe("HubTeamService pending invites", () => {
+  const stub = (role: "OWNER" | "ADMIN" | "MEMBER") => {
+    const calls: string[] = [];
+    const self = { githubId: "1", login: "boss", name: null, avatarUrl: null, role, status: "ACTIVE" as const };
+    const api = {
+      me: async () => ({ member: self, team: { name: "T" }, members: [self], spaces: [] }),
+      pendingInvites: async () => [{ id: "i1", login: "typo", githubId: "11", role: "MEMBER" as const, invitedBy: "boss", createdAt: "a", expiresAt: "b" }],
+      cancelInvite: async (id: string) => void calls.push(`cancel:${id}`),
+    } as unknown as import("@/lib/hub/ports").HubAdminApi;
+    return { svc: new HubTeamService(api, "1"), calls };
+  };
+
+  it("owner and admin list and cancel", async () => {
+    for (const role of ["OWNER", "ADMIN"] as const) {
+      const { svc, calls } = stub(role);
+      expect((await svc.pendingInvites()).map((i) => i.login)).toEqual(["typo"]);
+      await svc.cancelInvite("i1");
+      expect(calls).toEqual(["cancel:i1"]);
+    }
+  });
+
+  it("a member can do neither, before any request is sent", async () => {
+    const { svc, calls } = stub("MEMBER");
+    await expect(svc.pendingInvites()).rejects.toThrow(ValidationError);
+    await expect(svc.cancelInvite("i1")).rejects.toThrow(ValidationError);
+    expect(calls).toEqual([]);
+  });
+});
+
 describe("HubTeamService reinstatement", () => {
   const stub = (role: "OWNER" | "ADMIN") => {
     const calls: string[] = [];
