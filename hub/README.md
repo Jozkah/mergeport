@@ -167,6 +167,8 @@ Security notes:
 - Residual and deliberate: the response code reveals whether webhooks are configured (`404` without a secret, `401` with one). Events are relayed in the order their bodies finish arriving, and apps never write older data over newer. A captured signed delivery can be replayed after the 10 minute dedupe window; it only makes apps refresh.
 - Limits: at most 16 webhook bodies are read at once (the next answers `503` with `Retry-After: 1`); a body past 1 MiB is refused as soon as it passes the limit and the connection is cut. On the WebSocket, `watch` frames may be up to 64 KiB and every other client frame 4 KiB; more than 30 client frames in 10 s closes the socket (1008).
 - A private repository is relayed to its owner by the owner's numeric GitHub id (`repository.owner.id`); the login is compared (case-insensitively) only when the payload has no numeric owner id.
+- A private repository shared into a space is relayed to that space's readers only when the person who shared it is the repository's owner or a hub ADMIN/OWNER at delivery time (the table `repo_sharer` records every writer of a `repo` entity). A member who merely posts a `repo` entity gets nothing, and a sharer who is demoted or removed stops counting at once.
+- A body that has not finished arriving after 10 seconds is answered `408` and its slot is freed; one address can hold at most 4 bodies at once.
 - Cloudflare in front: if Bot Fight Mode or a WAF rule challenges `GitHub-Hookshot/*`, add a skip rule for `/webhooks/github`; failures show in the App's Recent deliveries.
 
 ## What the hub stores
