@@ -1,5 +1,6 @@
 import { Octokit } from "octokit";
 const MAX_TEXT_BYTES = 1_000_000;
+const EXTRAS_PAGE = 1001; // discovery's last step: public repositories of your organizations and ones you sent pull requests to
 const COMMIT_FILE_PAGES = 30; // 100 files a page; GitHub itself stops listing a commit at 3000 files
 import type { RepoMeta } from "@/lib/services/repositories";
 import type { CompareOutcome } from "@/lib/domain/forks";
@@ -169,10 +170,54 @@ export class OctokitPort implements GithubPort {
    * repositories of others only appear when the person is a collaborator.
    */
   async listAuthorizedRepositories(page: number): Promise<Discovery> {
+    if (page === EXTRAS_PAGE) return { repos: await this.listExtraRepositories(), nextPage: null, notes: [] };
     const { data, headers } = await this.get<any[]>("GET /user/repos", { affiliation: "owner,collaborator,organization_member", sort: "updated", per_page: 100, page });
     const notes: DiscoveryNote[] = [];
     if (page === 1 && headers["x-github-sso"]) notes.push({ kind: "org-approval", ownerLogin: "", message: "Some organizations require SAML SSO authorization for your gh token before their repositories can be listed. Authorize the token for those organizations on GitHub, then refresh." });
-    return { repos: data.map(OctokitPort.toRepoMeta), nextPage: OctokitPort.nextPage(headers.link), notes };
+    for (const r of data) this.listed.add(String(r.full_name).toLowerCase());
+    // After the last page of the authorized list comes one more page: public repositories GitHub does not list as yours.
+    return { repos: data.map(OctokitPort.toRepoMeta), nextPage: OctokitPort.nextPage(headers.link) ?? EXTRAS_PAGE, notes };
+  }
+
+  /** Full names already returned by `/user/repos` in this run, so the extras step does not fetch them again. */
+  private listed = new Set<string>();
+
+  /**
+   * Public repositories that `/user/repos` never returns: public repositories of organizations the person belongs to, and
+   * repositories they opened pull requests in without being a collaborator. Best effort: any failure here is skipped, never
+   * turned into a failure of the whole list.
+   */
+  private async listExtraRepositories(): Promise<RepoMeta[]> {
+    const out = new Map<string, RepoMeta>();
+    const add = (r: any) => {
+      const key = String(r.full_name).toLowerCase();
+      if (!this.listed.has(key) && !out.has(key)) out.set(key, OctokitPort.toRepoMeta(r));
+    };
+    try {
+      const { data: orgs } = await this.get<any[]>("GET /user/orgs", { per_page: 100 });
+      for (const o of orgs.slice(0, 20)) {
+        try {
+          for (let page = 1; page <= 3; page++) {
+            const { data, headers } = await this.get<any[]>("GET /orgs/{org}/repos", { org: o.login, type: "public", per_page: 100, page });
+            data.forEach(add);
+            if (!OctokitPort.nextPage(headers.link)) break;
+          }
+        } catch { /* one organization failing must not hide the others */ }
+      }
+    } catch { /* no organizations listed */ }
+    try {
+      const { data } = await this.get<{ items: any[] }>("GET /search/issues", { q: "author:@me is:pr", sort: "updated", per_page: 100 });
+      const names = new Set<string>();
+      for (const i of data.items ?? []) {
+        const name = String(i.repository_url ?? "").replace(/^.*\/repos\//, "");
+        if (name.includes("/") && !this.listed.has(name.toLowerCase()) && !out.has(name.toLowerCase())) names.add(name);
+      }
+      for (const name of [...names].slice(0, 40)) {
+        const [owner, repo] = name.split("/");
+        try { add((await this.get<any>("GET /repos/{owner}/{repo}", { owner, repo })).data); } catch { /* removed or private to others */ }
+      }
+    } catch { /* search unavailable or rate limited */ }
+    return [...out.values()];
   }
 
   async listIssuesAndPulls(owner: string, repo: string, o: { since?: Date; page: number }): Promise<Page<RemoteWorkItem>> {
