@@ -49,7 +49,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <ActionForm action={setTimezoneAction} submitLabel="Save timezone" resetOnSuccess={false}>
               <label className="label" htmlFor="tz">Timezone</label>
               <Select id="tz" name="timezone" defaultValue={user.timezone} className="select max-w-sm">{[...new Set(["UTC", user.timezone, ...zones])].map((z) => <option key={z} value={z}>{z}</option>)}</Select>
-              <p className="mt-1 text-[12px] text-ink-3">Times are stored in UTC and shown in this zone. Due dates and milestone dates are calendar dates and are not shifted.</p>
+              <p className="mt-1 text-[12px] text-ink-3">Due and milestone dates are calendar dates and are not shifted.</p>
             </ActionForm>
           </div>
         </Panel>
@@ -71,7 +71,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <ActionForm action={setPollSecondsAction} submitLabel="Save" resetOnSuccess={false} className="max-w-xs">
               <label className="label" htmlFor="poll">Active polling interval (seconds, 15 to 600)</label>
               <input id="poll" name="seconds" type="number" min={15} max={600} defaultValue={poll} className="input" />
-              <p className="mt-1 text-[12px] text-ink-3">Shorter means fresher data and more GitHub requests. Shared-state requests have their own budget, separate from source repository refreshes.</p>
+              <p className="mt-1 text-[12px] text-ink-3">Shorter means fresher data and more GitHub requests.</p>
             </ActionForm>
           </div>
         </Panel>
@@ -90,20 +90,19 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <label className="label mt-3" htmlFor="watch-max">Watch at most (repositories)</label>
               <input id="watch-max" name="max" type="number" min={WATCH_MAX_REPOS_MIN} max={WATCH_MAX_REPOS_LIMIT} defaultValue={wcfg.stored.maxRepos ?? ""} placeholder={String(wcfg.fallback.maxRepos)} className="input max-w-[8rem]" />
               <p className="mt-1 text-[12px] text-ink-3" data-testid="watch-max-hint">{hint(wcfg.stored.maxRepos, wcfg.fallback.maxRepos, wcfg.fallback.maxReposFromEnv, "MERGEPORT_WATCH_MAX_REPOS")}</p>
-              <p className="mt-1 text-[12px] text-ink-3">Repositories beyond this number keep the 15-minute refresh. The least recently synced are watched first.</p>
-              <p className="mt-1 text-[12px] text-ink-3">On by default. Turn off to use only the 15-minute cycle.</p>
-              <p className="mt-1 text-[12px] text-ink-3">Checks use conditional requests that do not use your GitHub rate limit when nothing changed. Webhook-covered repositories are never polled.</p>
+              <p className="mt-1 text-[12px] text-ink-3">Repositories beyond this number keep the 15-minute refresh.</p>
+              <p className="mt-1 text-[12px] text-ink-3">Unchanged checks cost no rate limit. Webhook-covered repositories are never polled.</p>
             </ActionForm>
             <p className="mt-3 text-[12.5px] text-ink-2" data-testid="watch-effective">
               {!watch.enabled ? "Off. Repositories still refresh every 15 minutes." : watch.repos === 0 ? "No repositories to check right now." : <>Effective: every {watch.effective} s for {watch.repos} repositor{watch.repos === 1 ? "y" : "ies"}.</>}
             </p>
-            {watch.enabled && watch.stretched && <p className="mt-1 text-[12px] text-ink-3">Stretched from {watch.configured} s because of the number of repositories: {watch.repos} repositories every {watch.effective} s is 300 requests a minute in total (two per repository and check). Lower the number of repositories to check faster.</p>}
+            {watch.enabled && watch.stretched && <p className="mt-1 text-[12px] text-ink-3">Stretched from {watch.configured} s: {watch.repos} repositories every {watch.effective} s is 300 requests a minute. Watch fewer repositories to check faster.</p>}
           </div>
         </Panel>
         {setup && (
           <Panel title="Set up automatically" icon={Wand2} id="auto">
             <div className="flex flex-col gap-3 p-4 text-[13px]">
-              <p className="text-ink-3">Looks at what you track and proposes configuration that follows from GitHub&apos;s own data: projects by owner, fork-to-upstream comparisons, waiting rules for other people&apos;s repositories, boards filled from open work, local clones mapped for Branches, and required reviewers where GitHub&apos;s review requests show a pattern. Everything stays on this computer, nothing is sent to GitHub, nothing existing is changed, and each change says what it is based on.</p>
+              <p className="text-ink-3">Proposes configuration from the GitHub data you track. Nothing is sent to GitHub or changed until you apply.</p>
               <form method="get" className="flex flex-wrap items-end gap-2"><div className="min-w-[min(240px,100%)] flex-1"><label className="label" htmlFor="clones">Folder that holds your local clones</label><input id="clones" name="clones" defaultValue={clones} className="input" /></div><button className="btn" type="submit">Look again</button></form>
               {setup.steps.length === 0 ? <p><SimplePill tone="ok">Nothing to add</SimplePill> Your projects, forks and waiting rules already cover what is tracked.</p> : (
                 <ActionForm action={autoSetupAction} submitLabel="Apply selected" pendingLabel="Applying…" resetOnSuccess={false}>
@@ -126,12 +125,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <p className="text-ink-3">Demo mode: nothing here talks to GitHub.</p>
             ) : gh.state === "ok" ? (
               <p>
-                <SimplePill tone="ok">Signed in with the GitHub CLI</SimplePill> as <Mono>@{gh.identity.login}</Mono> on <Mono>{gh.identity.host}</Mono>. Mergeport recognises you by your numeric GitHub id, not your name.
-              </p>
+                <SimplePill tone="ok">Signed in with the GitHub CLI</SimplePill> as <Mono>@{gh.identity.login}</Mono> on <Mono>{gh.identity.host}</Mono>.              </p>
             ) : (
               <p><SimplePill tone="blocked">{gh.state === "missing-gh" ? "GitHub CLI not found" : gh.state === "not-logged-in" ? "Not signed in" : "GitHub CLI error"}</SimplePill> Cached data stays readable; nothing is sent to GitHub until <Mono>gh auth login</Mono> succeeds.</p>
             )}
-            <p className="text-[12.5px] text-ink-3">Mergeport never stores your token. It asks the GitHub CLI for each request, and the credential stays in the CLI&apos;s store (your operating system&apos;s keychain where available).</p>
+            <p className="text-[12.5px] text-ink-3">Mergeport never stores your token; the GitHub CLI keeps it.</p>
             <details className="text-[12.5px] text-ink-3">
               <summary className="inline-flex min-h-10 cursor-pointer items-center rounded-[6px] text-ink-2 hover:text-ink">More about credentials</summary>
               <ul className="list-disc space-y-1 pl-5">

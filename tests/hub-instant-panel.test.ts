@@ -242,7 +242,7 @@ describe("panel: repositories and the hidden form", () => {
     expect(html).toContain("Mergeport sees which repositories the App covers from GitHub&#x27;s own events. Install the App on a repository on GitHub and it shows as Covered within seconds.");
     expect(html).toContain("https://github.com/apps/team-app/installations/new");
     expect(html).toContain("Add my tracked repositories");
-    expect(html).toContain("Try to add them through GitHub&#x27;s API");
+    expect(html).toContain("GitHub often refuses this");
   });
 
   it("the hidden form posts the manifest field to the action URL that `start` answered", async () => {

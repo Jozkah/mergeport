@@ -8,7 +8,7 @@ import { Select } from "@/components/ui/Select";
 export function ScopePicker({ value, projects, repos }: { value: string; projects: { id: string; name: string }[]; repos: { id: string; name: string }[] }) {
   const [pending, start] = useTransition();
   return (
-    <div className="flex items-center gap-1.5" title="What the lists and counts cover">
+    <div className="flex min-w-0 max-w-[6.5rem] items-center gap-1.5 sm:max-w-none [&_button]:w-full [&_button]:min-w-0" title="What the lists and counts cover">
       <label htmlFor="scope-picker" className="sr-only">Scope</label>
       <Select id="scope-picker" name="scope" className="select !h-8 !py-0 text-[12.5px]" value={value} disabled={pending} onChange={(e) => start(async () => void (await setScopeAction(e.target.value)))}>
         <option value="all">Everything</option>

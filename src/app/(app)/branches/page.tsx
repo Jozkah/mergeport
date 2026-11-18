@@ -44,7 +44,7 @@ export default async function Branches({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <PageHeader title="Branches" subtitle="Remote branches come from GitHub. Local worktrees are read from folders you choose on this computer. Each list says which it is and how old it is." />
+      <PageHeader title="Branches" subtitle="Remote branches come from GitHub; local worktrees from folders you choose." />
       <p className="mb-5 text-[12.5px] text-ink-3" title="Mergeport reads branch names, paths and counts of changed files with a fixed set of read-only git commands. It never reads file contents or diffs, never runs hooks or scripts from a repository, and never writes worktree data to a shared repository. There are no create, remove, reset or checkout controls.">Read-only. Nothing here leaves this computer.</p>
 
       <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -104,8 +104,8 @@ export default async function Branches({ searchParams }: { searchParams: Promise
                                 {t.missing && <SimplePill tone="blocked">Path missing</SimplePill>}
                                 {t.dirty ? (t.dirty.staged + t.dirty.unstaged + t.dirty.untracked + t.dirty.conflicted > 0 ? <SimplePill tone="changes">Dirty: {t.dirty.staged} staged, {t.dirty.unstaged} modified, {t.dirty.untracked} untracked{t.dirty.conflicted ? `, ${t.dirty.conflicted} conflicted` : ""}</SimplePill> : <SimplePill tone="ok">Clean</SimplePill>) : <SimplePill tone="unknown">Status not reported</SimplePill>}
                               </div>
-                              <p className="mt-1 text-ink-3">{t.head ? <>HEAD <Mono>{t.head.slice(0, 7)}</Mono></> : "No HEAD"}{t.tracking?.upstream ? <> · tracks <Mono>{t.tracking.upstream}</Mono>, ahead {t.tracking.ahead ?? "?"} / behind {t.tracking.behind ?? "?"} as of the last fetch (remote may have moved)</> : " · no upstream"}</p>
-                              {pr && <p className="mt-1 text-ink-3">Possibly PR #{pr.number}: head branch name matches (name-based, not verified).</p>}
+                              <p className="mt-1 text-ink-3">{t.head ? <>HEAD <Mono>{t.head.slice(0, 7)}</Mono></> : "No HEAD"}{t.tracking?.upstream ? <> · tracks <Mono>{t.tracking.upstream}</Mono>, ahead {t.tracking.ahead ?? "?"} / behind {t.tracking.behind ?? "?"} as of last fetch</> : " · no upstream"}</p>
+                              {pr && <p className="mt-1 text-ink-3">Possibly PR #{pr.number} (matched by branch name, not verified).</p>}
                             </li>
                           );
                         })}
@@ -120,7 +120,7 @@ export default async function Branches({ searchParams }: { searchParams: Promise
                       <input type="hidden" name="repositoryId" value={repo.id} />
                       <label className="label" htmlFor={`root-${repo.id}`}>Folder of this repository on this computer</label>
                       <input id={`root-${repo.id}`} name="path" className="input" placeholder="C:\code\my-repo" required autoComplete="off" spellCheck={false} />
-                      <p className="text-[12px] text-ink-3">The path stays on this computer. It is never stored in a coordination repository.</p>
+                      <p className="text-[12px] text-ink-3">The path stays on this computer.</p>
                     </ActionForm>
                   )}
                 </section>

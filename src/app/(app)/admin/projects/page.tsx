@@ -32,16 +32,17 @@ export default async function Projects() {
     <>
       <PageHeader
         title="Projects"
-        subtitle="A project groups repositories and people for planning. Project membership never grants repository access, and a GitHub organization is not a project."
+        subtitle="Groups repositories and people for planning. Membership never grants repository access."
+        help={<>A GitHub organization is not a project.</>}
         actions={
           <Sheet title="New project" trigger={<button className="btn btn-primary"><Plus size={14} aria-hidden /> New project</button>}>
             <ActionForm action={createProjectAction} submitLabel="Create project" closeOnSuccess>
-              <div className="flex flex-col gap-3"><div><label className="label" htmlFor="p-name">Name</label><input id="p-name" name="name" className="input" required /></div><div><label className="label" htmlFor="p-rev">Required reviewers (optional)</label><input id="p-rev" name="reviewers" className="input" placeholder="GitHubLogin, org/team-slug" /></div><div><label className="label" htmlFor="p-desc">Description</label><input id="p-desc" name="description" className="input" /></div>{canShareWithTeam && <fieldset><legend className="label">Sharing</legend><label className="flex min-h-10 items-center gap-2 text-[13px]"><input type="checkbox" name="share" value="1" />Share with everyone in the team</label><p className="max-w-[60ch] text-pretty text-[12px] text-ink-3">Everyone on the team will see its cards and tasks. Leave it off to keep the project on this computer; you can change it later under the project&apos;s Sharing section.</p></fieldset>}</div>
+              <div className="flex flex-col gap-3"><div><label className="label" htmlFor="p-name">Name</label><input id="p-name" name="name" className="input" required /></div><div><label className="label" htmlFor="p-rev">Required reviewers (optional)</label><input id="p-rev" name="reviewers" className="input" placeholder="GitHubLogin, org/team-slug" /></div><div><label className="label" htmlFor="p-desc">Description</label><input id="p-desc" name="description" className="input" /></div>{canShareWithTeam && <fieldset><legend className="label">Sharing</legend><label className="flex min-h-10 items-center gap-2 text-[13px]"><input type="checkbox" name="share" value="1" />Share with everyone in the team</label><p className="max-w-[60ch] text-pretty text-[12px] text-ink-3">Everyone on the team will see its cards and tasks. Leave off to keep it on this computer.</p></fieldset>}</div>
             </ActionForm>
           </Sheet>
         }
       />
-      {projects.length === 0 ? <Panel title="Projects" icon={Layers}><EmptyState icon={Layers} title="No projects yet">A project groups repositories you plan together, for example “Website” or “Mobile app”. Use <strong>New project</strong> at the top right to make your first one.</EmptyState></Panel> : (
+      {projects.length === 0 ? <Panel title="Projects" icon={Layers}><EmptyState icon={Layers} title="No projects yet">Use <strong>New project</strong> to group repositories you plan together.</EmptyState></Panel> : (
         <div className="fit-grid" style={{ "--fit-min": "720px" } as React.CSSProperties}>
           {projects.map((p) => (
             <Panel key={p.id} title={p.name} icon={Layers} id={`p-${p.id}`} actions={<span className="hidden text-[12px] text-ink-3 sm:inline">{p.repositories.length} repositories · {p.members.length} people{reviewerText.get(p.id) ? ` · reviewers: ${reviewerText.get(p.id)}` : ""} · {p.spaceId ? "shared" : "only on this computer"}</span>}>
@@ -59,7 +60,7 @@ export default async function Projects() {
                     {members.length === 0 ? (
                       <div className="rounded-[8px] border border-dashed border-line-strong p-3 text-[12.5px] text-ink-2">
                         <p className="font-medium">Nobody to add yet.</p>
-                        <p className="mt-1 text-ink-3">People appear here once they have joined your team. Invite them by GitHub username from the Team page (they get access to the team&apos;s private coordination repository only, never to your source repositories); after they accept and join, tick them here.</p>
+                        <p className="mt-1 text-ink-3">People appear once they join your team. Invites grant the private coordination repository only, never source repositories.</p>
                         <Link href="/team" className="btn mt-2 inline-flex">Invite people on Team</Link>
                       </div>
                     ) : (
@@ -69,7 +70,7 @@ export default async function Projects() {
                   <fieldset><legend className="label">People in this project</legend>
                     {members.length === 0 ? <p className="text-[12.5px] text-ink-3"></p> : <ul className="flex flex-col gap-1.5 text-[13px]">{members.map((m) => <li key={m.id}><label className="flex items-center gap-2"><input type="checkbox" name="member" value={m.id} defaultChecked={p.members.some((x) => x.memberId === m.id)} />@{m.user.login}</label></li>)}</ul>}
                   </fieldset>
-                  <p className="mt-2 text-[12px] text-ink-3">Members see internal tasks of the projects they are in. Repository content still needs a repository grant.</p>
+                  <p className="mt-2 text-[12px] text-ink-3">Members see internal tasks. Repository content still needs a repository grant.</p>
                 </ActionForm>
                         <p className="mt-2 text-[12px] text-ink-3">Need someone else? <Link className="underline" href="/team">Invite people on Team</Link>.</p>
                       </>
@@ -82,7 +83,7 @@ export default async function Projects() {
                   <input type="hidden" name="projectId" value={p.id} />
                   <label className="label" htmlFor={`rv-${p.id}`}>Required reviewers</label>
                   <input id={`rv-${p.id}`} name="reviewers" className="input" defaultValue={reviewerText.get(p.id) ?? ""} placeholder="GitHubLogin, org/team-slug (empty = none)" />
-                  <p className="mt-1 text-[12px] text-ink-3">Every open pull request in this project then waits for these people, whoever opened it. GitHub never lets an author approve their own pull request, so for the author the requirement is shown but cannot be met by them. Edit the same rule, or add finer ones, under Review routing.</p>
+                  <p className="mt-1 text-[12px] text-ink-3">Every open pull request here waits for these people. Authors cannot approve their own, so it stays unmet for them. Finer rules: Review routing.</p>
                 </ActionForm></div>
                 </details>
                 <details className="p-4">
@@ -94,7 +95,7 @@ export default async function Projects() {
                     <option value="">Only on this computer</option>
                     {spaces.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}{sp.kind === "COMMON" ? " (everyone in the team)" : " (restricted)"}</option>)}
                   </Select>
-                  <p className="mt-1 text-[12px] text-ink-3">The project, its board and internal tasks are written to that space&apos;s private repository, so everyone who can read it sees them. Pick a restricted space for a smaller audience.</p>
+                  <p className="mt-1 text-[12px] text-ink-3">The project, board and tasks go to that space&apos;s private repository; everyone who can read it sees them.</p>
                 </ActionForm></div>
                 </details>
               </div>

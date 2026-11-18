@@ -104,8 +104,8 @@ export default async function Rules() {
           )}
         </Panel>
         <Panel title={`Waiting rules (${waiting.length})`} icon={Clock} id="waiting" actions={addWaiting}>
-          <p className="border-b border-line px-4 py-2.5 text-[12.5px] text-ink-3">Who work waits on until merged or closed, whatever its review state.</p>
-          {waiting.length === 0 ? <EmptyState icon={Clock} title="No waiting rules">For example: every open pull request in a repository whose owner merges everything waits on that owner.</EmptyState> : (
+          <p className="border-b border-line px-4 py-2.5 text-[12.5px] text-ink-3">Who work waits on until merged or closed.</p>
+          {waiting.length === 0 ? <EmptyState icon={Clock} title="No waiting rules">Example: a repository whose owner merges everything waits on that owner.</EmptyState> : (
             <ul>
               {waiting.map((r) => (
                 <li key={r.id} className={`flex flex-wrap items-start justify-between gap-3 border-b border-line p-4 last:border-b-0 ${r.enabled ? "" : "opacity-60"}`}>

@@ -22,7 +22,7 @@ export async function SubscriptionsPanel({ db, viewer, mappings }: { db: Db; vie
   return (
     <Panel title="What matters to us upstream" icon={Eye} id="subscriptions" defaultOpen={false} summary={`${subs.length} saved`}>
       <div className="flex flex-col gap-3 p-4 text-[13px]">
-        {subs.length === 0 ? <p className="text-ink-3">Save the things you care about (a label, a folder, an author, a milestone). Matching upstream items are marked with the reason they matched.</p> : (
+        {subs.length === 0 ? <p className="text-ink-3">Save labels, folders, authors or milestones to flag matching upstream items.</p> : (
           <ul className="divide-y divide-line">
             {subs.map((s) => (
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
@@ -52,7 +52,7 @@ export async function SubscriptionsPanel({ db, viewer, mappings }: { db: Db; vie
                 <div className="md:col-span-2"><label className="label" htmlFor="sb-w">Words in the title</label><input id="sb-w" name="words" className="input" placeholder="token, CVE" /></div>
               </div>
               <input type="hidden" name="op" value="create" />
-              <p className="mt-2 text-[12px] text-ink-3">Any one match is enough. Path criteria only work once an upstream pull request&rsquo;s files have been opened here; until then they are reported as not checked.</p>
+              <p className="mt-2 text-[12px] text-ink-3">Any one match counts. Path criteria apply only once a pull request&rsquo;s files have been opened here; otherwise not checked.</p>
             </ActionForm>
           </details>
         )}

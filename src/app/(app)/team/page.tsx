@@ -76,14 +76,14 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <PageHeader title="Team" subtitle="Mergeport runs on your computer. A team shares Mergeport-owned planning data through private GitHub repositories." />
+      <PageHeader title="Team" subtitle="A team shares planning data through private GitHub repositories." />
       <div className="mb-5">
         <Banner title={demo ? "Demo mode" : cfg?.mode === "TEAM" ? `Team mode: ${cfg.name}` : "Personal mode"}>
           {demo
-            ? <>Teams need your real GitHub account. Run <span className="mono">npm run local</span> to create or join one. Your configuration and cache stay on this computer.</>
+            ? <>Teams need your real GitHub account. Run <span className="mono">npm run local</span> to create or join one.</>
             : cfg?.mode === "TEAM"
-              ? `Shared data is eventually consistent: a teammate's change reaches you within about ${delay.typical} seconds while both apps are open and polling (up to ${Math.round(delay.worst / 60)} minutes when idle). If GitHub is unreachable or rate-limited, edits queue on this computer. Background sync runs only while this app runs; shared data stays in GitHub when everyone is offline.`
-              : "Your configuration and cache stay on this computer. Create a team to share planning with teammates, or join one you were invited to."}
+              ? `A teammate's change reaches you within about ${delay.typical} seconds while both apps are open (up to ${Math.round(delay.worst / 60)} minutes when idle). If GitHub is unreachable, edits queue here. Sync runs only while this app runs.`
+              : "Create a team to share planning, or join one you were invited to."}
         </Banner>
       </div>
 
@@ -119,7 +119,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                   {invitations.map((i) => (
                     <li key={i.id} className="rounded-[10px] border border-line p-3">
                       <p className="font-medium"><Mono>{i.fullName}</Mono></p>
-                      <p className="text-[12.5px] text-ink-3">Invited by @{i.inviter} with {i.permission} access. Accepting gives you access to that repository only.</p>
+                      <p className="text-[12.5px] text-ink-3">Invited by @{i.inviter} with {i.permission} access.</p>
                       <ActionForm action={acceptGithubInvitationAction} submitLabel="Accept on GitHub" submitClassName="btn mt-2"><input type="hidden" name="id" value={i.id} /></ActionForm>
                     </li>
                   ))}
@@ -136,7 +136,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                 <div><label className="label" htmlFor="j-repo">Join link or repository (owner/repo)</label><input id="j-repo" name="repo" className="input !w-72" required placeholder="owner/mergeport-team-workspace" /></div>
                 <button className="btn">Review before joining</button>
               </form>
-              <p className="text-[12px] text-ink-3">A join link only names a repository. Access comes from the GitHub invitation you accepted. You will see what the repository is, what joining downloads and publishes, and join only after you confirm.</p>
+              <p className="text-[12px] text-ink-3">A join link only names a repository; access comes from your GitHub invitation. Nothing joins until you confirm.</p>
             </div>
           </Panel>
         </div>
@@ -147,7 +147,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
         <details className="mb-5 rounded-[10px] border border-line p-3 text-[13px]">
           <summary className="cursor-pointer font-medium">Stop using this team on this computer</summary>
           <div className="mt-2 flex flex-col gap-2">
-            <p className="text-ink-3">Forgets the team and its spaces here, makes shared repositories and projects local again, and returns to personal mode so you can create or join a different team. Your boards, cards and rules stay. Nothing is changed on GitHub: the team repositories, invitations and collaborators remain until you remove them there.</p>
+            <p className="text-ink-3">Returns to personal mode and makes shared repositories and projects local again. Boards, cards and rules stay. Nothing changes on GitHub: repositories, invitations and collaborators remain until you remove them there.</p>
             <ActionForm action={leaveTeamAction} submitLabel="Stop using this team" submitClassName="btn btn-danger" resetOnSuccess={false}>
               <label className="flex items-start gap-2"><input type="checkbox" name="confirm" required className="mt-0.5" /> I understand this computer will stop syncing with this team.</label>
             </ActionForm>
@@ -155,7 +155,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
         </details>
       )}
       <Panel title={`Spaces (${spaces.length})`} icon={ShieldCheck} id="spaces">
-        {spaces.length === 0 ? <EmptyState icon={ShieldCheck} title="No spaces yet">A space is one private GitHub repository with one audience. Create a team or join one to get your first space.</EmptyState> : (
+        {spaces.length === 0 ? <EmptyState icon={ShieldCheck} title="No spaces yet">A space is one private GitHub repository. Create or join a team to get one.</EmptyState> : (
           <ul>
             {spaces.map((s) => {
               const st = states.get(s.id);
@@ -221,7 +221,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
           <Panel title="Spaces you can join" icon={Link} id="discover">
             <div className="flex flex-col gap-3 p-4 text-[13px]">
-              <p className="text-ink-3">Restricted spaces are never listed in the common repository. Mergeport lists private repositories YOUR GitHub account can already read that look like spaces of this team, and tells you what each one is. <strong className="font-medium text-ink-2">Nothing is joined automatically.</strong></p>
+              <p className="text-ink-3">Private repositories YOUR GitHub account can already read that look like spaces of this team. <strong className="font-medium text-ink-2">Nothing is joined automatically.</strong></p>
               {candView && <Freshness view={candView} listKey={KEY_CANDIDATES} timezone={viewer.timezone} refreshing={refreshing(KEY_CANDIDATES)} />}
               {candidates.length === 0 ? <p className="text-[12.5px] text-ink-3">{candView?.fetchedAt ? "No other spaces are visible to your GitHub account." : "No saved list yet."}</p> : <ul className="flex flex-col gap-2">{candidates.map((c) => <CandidateCard key={c.fullName} c={c} />)}</ul>}
               {invitations.length > 0 && <ul className="flex flex-col gap-2">{invitations.map((i) => <li key={i.id} className="rounded-[10px] border border-line p-3"><Mono>{i.fullName}</Mono> <span className="text-ink-3">invited by @{i.inviter}</span><ActionForm action={acceptGithubInvitationAction} submitLabel="Accept on GitHub" submitClassName="btn mt-2"><input type="hidden" name="id" value={i.id} /></ActionForm></li>)}</ul>}
@@ -230,7 +230,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
           {spaces.some((s) => s.canAdmin && s.kind === "COMMON") && (
             <Panel title="New restricted space" icon={Lock} id="restricted">
               <div className="p-4 text-[13px]">
-                <p className="mb-3 text-ink-3">Restricted projects need their own private repository whose collaborators are exactly the people allowed to see them. Everyone who can read a repository can read all of its files and history, so audiences are separated by repository, not by folder.</p>
+                <p className="mb-3 text-ink-3">Audiences are separated by repository, not folder: everyone who can read a repository can read all its files and history.</p>
                 <ActionForm action={createSpaceAction} submitLabel="Create private repository" pendingLabel="Creating…">
                   <label className="label" htmlFor="rs-name">Space name</label><input id="rs-name" name="name" className="input" required />
                   <label className="mt-3 flex items-start gap-2"><input type="checkbox" name="confirm" required className="mt-1" /> <span>Create a new private GitHub repository for this audience. I will invite its members separately.</span></label>
