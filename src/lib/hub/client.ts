@@ -31,11 +31,18 @@ async function send(fetchImpl: typeof fetch, url: string, init: RequestInit, tim
   }
 }
 
-function failure(res: Response): HubError {
+/** The hub's `{ error: string }` body, or undefined for anything else (an HTML page from a proxy, an empty or foreign JSON body). */
+async function hubReason(res: Response): Promise<string | undefined> {
+  if (!(res.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) return undefined;
+  const b = (await res.json().catch(() => null)) as { error?: unknown } | null;
+  return b && typeof b === "object" && typeof b.error === "string" ? b.error : undefined;
+}
+
+async function failure(res: Response): Promise<HubError> {
   const status = res.status;
   if (status === 401) return new HubError("auth", "Sign in again", { status });
-  if (status === 403) return new HubError("forbidden", "Not allowed", { status });
-  if (status === 404) return new HubError("not-found", "Not found", { status });
+  if (status === 403) return new HubError("forbidden", "Not allowed", { status, reason: await hubReason(res) });
+  if (status === 404) return new HubError("not-found", "Not found", { status, reason: await hubReason(res) });
   if (status === 429) {
     const ra = Number(res.headers.get("retry-after"));
     return new HubError("rate-limited", "Rate limited", { status, retryAfterSeconds: Number.isFinite(ra) && ra > 0 ? ra : undefined });
@@ -67,7 +74,7 @@ export class HttpHubClient implements HubClient {
       const b = (await res.json().catch(() => null)) as { reason?: string } | null;
       return b?.reason === "history" ? "history" : "gone";
     }
-    if (!res.ok) throw failure(res);
+    if (!res.ok) throw await failure(res);
     return res;
   }
 
@@ -98,7 +105,7 @@ export class HttpHubClient implements HubClient {
 export async function checkHubHealth(origin: string, supportedSchema = 1, fetchImpl: typeof fetch = (...a) => fetch(...a)): Promise<{ teamName: string | null; publicUrl: string; githubHost: string }> {
   const typed = normalizeHubOrigin(origin);
   const res = await send(fetchImpl, typed + "/health", { headers: { accept: "application/json" }, redirect: "error" }, HUB_REQUEST_TIMEOUT_MS);
-  if (!res.ok) throw failure(res);
+  if (!res.ok) throw await failure(res);
   const h = await json<{ team?: { name: string } | null; schema?: number; publicUrl?: string; githubHost?: string }>(res);
   if (typeof h.schema !== "number") throw new HubError("unknown", "Not a Mergeport hub");
   if (h.schema > supportedSchema) throw new HubError("schema", "This hub needs a newer Mergeport");
