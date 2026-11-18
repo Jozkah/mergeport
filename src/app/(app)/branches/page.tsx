@@ -129,7 +129,7 @@ export default async function Branches({ searchParams }: { searchParams: Promise
           );
         })}
         {repos.length > 0 && (
-          <Panel title={`Open pull requests (${openPrs.length})`} icon={GitBranch} id="open-prs">
+          <Panel title={`Open pull requests (${localPrRows.length})`} icon={GitBranch} id="open-prs">
             {openPrs.length === 0 ? <p className="p-4 text-[13px] text-ink-3">No open pull requests in the repositories you can see.</p> : localPrRows.length === 0 ? <p className="p-4 text-[13px] text-ink-3">No open pull request has a local folder.</p> : (
               <ul className="scroll-region !max-h-[28rem] divide-y divide-line text-[13px]">
                 {localPrRows.slice(0, 60).map(({ p, wts }) => (
