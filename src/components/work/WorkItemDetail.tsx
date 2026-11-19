@@ -137,7 +137,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         </Panel>
       )}
       {isPr && readiness && (
-        <Panel title="Ready to merge?" icon={CircleAlert} id="readiness">
+        <Panel title="Ready to merge?" icon={CircleAlert} id="readiness" defaultOpen={false} summary={`${readiness.rows.filter((r) => r.state === "ok").length} of ${readiness.rows.length} good`}>
           <ReadinessPanel
             readiness={readiness}
             status={<span className="flex flex-wrap items-center gap-2"><StatusPill status={d.primary} />{d.waiting && <span className="tnum text-[12px] text-ink-3">waiting {formatDuration(d.waiting.elapsedMs)}</span>}</span>}
@@ -230,6 +230,17 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         </div>
         {labels.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{labels.map((l) => <LabelChip key={l.name} {...l} />)}</div>}
       </header>
+
+      {isPr && readiness && item.state === "OPEN" && (
+        <div className="mb-5">
+          <Banner
+            tone={readiness.ready ? "info" : readiness.rows.some((r) => r.state === "blocked") ? "warn" : "info"}
+            title={readiness.ready ? "Ready to merge" : `Next: ${readiness.nextAction}`}
+          >
+            {readiness.ready ? "Nothing Mergeport can see is in the way. GitHub decides." : `${readiness.rows.filter((r) => r.state === "blocked").length ? `${readiness.rows.filter((r) => r.state === "blocked").map((r) => r.label.toLowerCase()).join(", ")} blocking` : "Waiting"}${readiness.nextBy.length ? ` · on ${readiness.nextBy.join(", ")}` : ""}. Details under "Ready to merge?".`}
+          </Banner>
+        </div>
+      )}
 
       {isPr ? (
         <PrTabs
