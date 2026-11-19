@@ -46,8 +46,9 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
     { href: "/forks", label: "Forks", icon: GitFork },
     { href: "/branches", label: "Branches", icon: GitBranch },
   ];
-  const team: Item[] = [
-    { href: "/team", label: "Team", icon: Users },
+  const team: Item[] = [{ href: "/team", label: "Team", icon: Users }];
+  // Used now and then: folded away until you are on one of them.
+  const more: Item[] = [
     { href: "/capacity", label: "Review capacity", icon: Route },
     { href: "/sync", label: "Sync status", icon: RefreshCw },
     { href: "/help", label: "Help", icon: CircleHelp },
@@ -59,7 +60,7 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
         { href: "/admin/labels", label: "Label taxonomy", icon: Tag },
       ]
     : [];
-  return { main, source, team, admin };
+  return { main, source, team, more, admin };
 }
 
 function NavList({ items, onNavigate }: { items: Item[]; onNavigate?: () => void }) {
@@ -122,6 +123,22 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** A folded group that opens by itself while one of its pages is showing. */
+function MoreGroup({ items, onNavigate }: { items: Item[]; onNavigate?: () => void }) {
+  const path = usePathname();
+  const here = items.some((i) => path === i.href || path.startsWith(`${i.href}/`));
+  const [open, setOpen] = useState<boolean | null>(null);
+  const shown = open ?? here;
+  return (
+    <div>
+      <button type="button" aria-expanded={shown} onClick={() => setOpen(!shown)} className="mb-1 flex w-full items-center gap-1 px-2.5 text-left text-[11.5px] font-medium uppercase tracking-[0.04em] text-ink-3 hover:text-ink">
+        More <ChevronDown size={12} aria-hidden className="chevron" data-open={shown} />
+      </button>
+      <Collapse open={shown} id="nav-more"><NavList items={items} onNavigate={onNavigate} /></Collapse>
+    </div>
+  );
+}
+
 function SidebarBody({ counts, isAdmin, user, onNavigate, workspace }: { counts: NavCounts; isAdmin: boolean; user: { login: string; name: string | null; avatarUrl: string | null }; onNavigate?: () => void; workspace: string }) {
   const nav = buildNav(counts, isAdmin);
   const searchId = `${useId()}-search`;
@@ -144,6 +161,7 @@ function SidebarBody({ counts, isAdmin, user, onNavigate, workspace }: { counts:
         <Group label="Main navigation"><NavList items={nav.main} onNavigate={onNavigate} /></Group>
         <Group label="Source"><NavList items={nav.source} onNavigate={onNavigate} /></Group>
         <Group label="Collaboration"><NavList items={nav.team} onNavigate={onNavigate} /></Group>
+        <MoreGroup items={nav.more} onNavigate={onNavigate} />
         {nav.admin.length > 0 && <Group label="Administration"><NavList items={nav.admin} onNavigate={onNavigate} /></Group>}
       </nav>
       <Link href="/settings" onClick={onNavigate} className="flex items-center gap-2.5 rounded-[10px] border border-line bg-surface p-2 shadow-hair transition-colors duration-[var(--duration-feedback)] hover:bg-subtle">
