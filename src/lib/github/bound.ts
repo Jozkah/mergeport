@@ -55,6 +55,28 @@ async function acquire(b: Binding, base: GhRunner, signal?: AbortSignal): Promis
   return { ok: true, token };
 }
 
+/**
+ * The verified token for `binding`, for callers that talk to the API directly instead of through `gh api`. It is acquired and checked
+ * exactly as for a bound runner (same cache, same refusals). `null` means the account could not be verified right now (offline).
+ */
+export async function boundToken(binding: Binding, base: () => GhRunner = getGhRunner, signal?: AbortSignal): Promise<string | null> {
+  const run = base();
+  let entry = cache.get(keyOf(binding));
+  if (!entry) {
+    entry = acquire(binding, run, signal).catch((e) => {
+      cache.delete(keyOf(binding));
+      throw e;
+    });
+    cache.set(keyOf(binding), entry);
+  }
+  const cred = await entry;
+  if (!cred.ok) {
+    cache.delete(keyOf(binding));
+    return null;
+  }
+  return cred.token;
+}
+
 /** A runner that can only ever act as `binding`. The base runner is resolved at call time so tests can substitute it. */
 export function bindRunner(binding: Binding, base: () => GhRunner = getGhRunner): GhRunner {
   return async (args: string[], opts: GhRunOpts = {}) => {

@@ -1,7 +1,6 @@
 import type { Db } from "@/lib/db";
-import { ghFetch } from "@/lib/github/gh";
 import { GitHubRest } from "@/lib/github/rest";
-import { profileRunner } from "@/lib/local/profile-runner";
+import { profileFetch } from "@/lib/local/profile-runner";
 import { COVERAGE_KEY, HUB_COVERAGE_KEY, HUB_WEBHOOKS_KEY, installUrl } from "@/lib/hub/webhook-panel";
 import { GithubError } from "@/lib/github/port";
 import { fromJson, toJson } from "@/lib/local/discovery";
@@ -37,7 +36,7 @@ export type InstallReport = {
 const isRefusal = (e: unknown) => e instanceof GithubError && (e.kind === "forbidden" || e.kind === "not-found" || e.kind === "auth");
 
 /** GitHub REST as THIS profile's own account (through its bound `gh`), the same way the sync builds it. */
-export const profileRest = (db: Db) => new GitHubRest(ghFetch(profileRunner(db)));
+export const profileRest = (db: Db) => new GitHubRest(profileFetch(db));
 
 export { installUrl };
 

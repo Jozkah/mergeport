@@ -6,8 +6,7 @@ import { startHubLive } from "@/lib/hub/live";
 import { refreshHubWatch } from "@/lib/hub/watch";
 import { loadHubSession, openVault } from "@/lib/hub/session-vault";
 import { isDemo } from "@/lib/env";
-import { ghFetch } from "@/lib/github/gh";
-import { profileRunner } from "@/lib/local/profile-runner";
+import { profileFetch } from "@/lib/local/profile-runner";
 import { GitHubRest } from "@/lib/github/rest";
 import { SyncEngine } from "@/lib/sync/engine";
 import { CoordinationStore } from "@/lib/sync/store";
@@ -88,7 +87,7 @@ export async function getEngine(): Promise<SyncEngine | null> {
 async function buildEngine(): Promise<SyncEngine | null> {
   const actor = await localActor();
   if (!actor) return null;
-  const f = ghFetch(profileRunner(db));
+  const f = profileFetch(db);
   const onChange = (e: { spaceId: string; reason: "pulled" | "pushed" | "state" }) => {
     state.version++;
     state.bus.emit("change", { version: state.version, ...e });
@@ -131,7 +130,7 @@ export async function getTeamService(): Promise<TeamService | null> {
   if (state.team) return state.team;
   const actor = await localActor();
   if (!actor) return null;
-  state.team = new TeamService(db, ghFetch(profileRunner(db)), actor, await getEngine());
+  state.team = new TeamService(db, profileFetch(db), actor, await getEngine());
   return state.team;
 }
 

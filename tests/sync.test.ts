@@ -140,6 +140,43 @@ describe("repository sync", () => {
     expect((await db.workItem.findFirstOrThrow({ where: { number: 7 } })).title).toBe("from api");
   });
 
+  it("a stored issue is fetched as an issue, without the pull request request that is bound to fail", async () => {
+    fake.items.set("acme/tool", [item(2)]);
+    await syncRepository(db, fake, repoId, { now: T(5) });
+    const calls: string[] = [];
+    const spy = new Proxy(fake, { get: (t, k, r) => (typeof (t as never)[k] === "function" ? (...a: unknown[]) => { calls.push(String(k)); return ((t as never)[k] as (...x: unknown[]) => unknown).apply(t, a); } : Reflect.get(t, k, r)) });
+    fake.items.set("acme/tool", [item(2, { updatedAt: T(9), title: "changed" })]);
+    expect(await syncItem(db, spy, repoId, 2, T(10))).toBe(true);
+    expect(calls).toContain("getIssue");
+    expect(calls).not.toContain("getPull");
+  });
+
+  it("asks GitHub for a pull request's discussion all at once, and writes nothing if one part fails", async () => {
+    fake.items.set("acme/tool", [pr(7, { title: "first" })]);
+    await syncItem(db, fake, repoId, 7, T(5));
+    const inFlight = { now: 0, max: 0 };
+    const track = <T,>(fn: () => Promise<T>) => async () => {
+      inFlight.now++;
+      inFlight.max = Math.max(inFlight.max, inFlight.now);
+      await new Promise((r) => setTimeout(r, 15));
+      try { return await fn(); } finally { inFlight.now--; }
+    };
+    const slow = new Proxy(fake, { get: (t, k, r) => (["listIssueComments", "listReviewComments", "listReviewThreads", "listReviews", "listRequestedReviewers"].includes(String(k)) ? (...a: unknown[]) => track(() => ((t as never)[k] as (...x: unknown[]) => Promise<unknown>).apply(t, a))() : Reflect.get(t, k, r)) });
+    fake.items.set("acme/tool", [pr(7, { title: "second", updatedAt: T(9) })]);
+    expect(await syncItem(db, slow, repoId, 7, T(10))).toBe(true);
+    expect(inFlight.max).toBe(5); // all five requests were in the air together
+    // a failing part leaves the stored discussion untouched
+    fake.comments.set("acme/tool#7", [{ githubId: 91n, login: "x", body: "kept", createdAt: T(2), updatedAt: T(2) }]);
+    fake.items.set("acme/tool", [pr(7, { title: "third", updatedAt: T(12) })]);
+    await syncItem(db, fake, repoId, 7, T(13));
+    expect(await db.workItemComment.count({ where: { body: "kept" } })).toBe(1);
+    const broken = new Proxy(fake, { get: (t, k, r) => (k === "listReviews" ? async () => { throw new GithubError("network", "down"); } : Reflect.get(t, k, r)) });
+    fake.comments.set("acme/tool#7", []);
+    fake.items.set("acme/tool", [pr(7, { title: "fourth", updatedAt: T(15) })]);
+    await expect(syncItem(db, broken, repoId, 7, T(16))).rejects.toBeInstanceOf(GithubError);
+    expect(await db.workItemComment.count({ where: { body: "kept" } })).toBe(1); // the deletion was not applied from a half-fetched discussion
+  });
+
   it("rate limit: marks the repo limited and stale, keeps existing data, rethrows with retry info", async () => {
     fake.items.set("acme/tool", [item(1)]);
     await syncRepository(db, fake, repoId, { now: T(10) });

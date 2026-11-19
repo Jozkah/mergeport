@@ -1,7 +1,6 @@
 import type { Db } from "@/lib/db";
 import { db as appDb } from "@/lib/db";
 import { isDemo } from "@/lib/env";
-import { ghFetch } from "@/lib/github/gh";
 import { GithubError } from "@/lib/github/port";
 import { GitHubRest } from "@/lib/github/rest";
 import { readAllCoverage, readHubWebhooksEnabled } from "@/lib/hub/github-app-install";
@@ -9,7 +8,7 @@ import { COVERAGE_KEY, HUB_COVERAGE_KEY } from "@/lib/hub/webhook-panel";
 import { pollMode } from "@/lib/local/activity";
 import { isHubBackend } from "@/lib/local/backends";
 import { fromJson } from "@/lib/local/discovery";
-import { profileRunner } from "@/lib/local/profile-runner";
+import { profileFetch } from "@/lib/local/profile-runner";
 import { readWatchConfig, readWatchSettings, type WatchConfig } from "@/lib/local/watch-settings";
 import { WATCH_MAX_REPOS, effectiveWatchSeconds, watchSummary, type WatchSummary } from "@/lib/local/watch-format";
 import { currentBackend } from "@/lib/local/workspaces";
@@ -114,7 +113,7 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
       return async () => {
         if (isDemo()) return null;
         if (!(await over.db.user.findFirst({ where: { isDemo: false }, select: { id: true } }))) return null;
-        return (rest ??= new GitHubRest(ghFetch(profileRunner(over.db))));
+        return (rest ??= new GitHubRest(profileFetch(over.db)));
       };
     })(),
     refresh: (id) => requestRepositoryRefresh(over.db, id, { full: false }),
