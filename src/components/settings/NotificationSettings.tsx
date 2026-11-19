@@ -8,8 +8,8 @@ const permission = () => (typeof Notification === "undefined" ? "unsupported" : 
 const subscribe = () => () => {};
 
 /**
- * Per-event controls, quiet hours and optional desktop pop-ups. Preferences stay on this computer. Pop-ups only appear while
- * Mergeport is open in a browser: nothing runs when it is closed, so nothing can be delivered then.
+ * Per-event controls, quiet hours and optional desktop pop-ups. Preferences stay on this computer. With a tab open the browser shows the
+ * pop-up; with none, the running app shows a Windows notification (services/toasts.ts). If Mergeport itself is not running, nothing can be delivered.
  */
 export function NotificationSettings({ initial }: { initial: Prefs }) {
   const [prefs, setPrefs] = useState<Prefs>(initial);
@@ -61,7 +61,7 @@ export function NotificationSettings({ initial }: { initial: Prefs }) {
         ) : (
           <button type="button" className="btn" onClick={() => void Notification.requestPermission().then(setAsked)}>Allow desktop notifications</button>
         )}
-        <p className="text-[12px] text-ink-3">Pop-ups only appear while Mergeport is open in a browser. When it is closed, nothing can be delivered.</p>
+        <p className="text-[12px] text-ink-3">Pop-ups also appear with no browser tab open, as long as Mergeport itself is running in the background (it can start when you sign in to Windows).</p>
       </div>
 
       <div className="flex items-center gap-3">

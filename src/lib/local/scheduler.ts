@@ -8,6 +8,8 @@ import { startRepoWatch, stopRepoWatch } from "@/lib/local/repo-watch";
 import { getEngine, notifyChange } from "@/lib/local/runtime";
 import { recoverDiscovery, shutdownDiscovery, tickDiscovery } from "@/lib/local/discovery-jobs";
 import { recoverUpdateRuns } from "@/lib/local/upstream-updater-job";
+import { showWindowsToast } from "@/lib/local/toast";
+import { dispatchToasts } from "@/lib/services/toasts";
 
 /**
  * In-process background work for the LOCAL app. It runs while this process runs, and only then: nothing here pretends a
@@ -85,6 +87,8 @@ export async function coordinate(now = Date.now()): Promise<number> {
     polled = (await engine.tick()).polled;
     if (g.__mpScheduler) g.__mpScheduler.lastTick = now;
   }
+  // Windows notifications while no tab is open (a no-op elsewhere). A failure here must never stop the sync below.
+  if (process.platform === "win32") await dispatchToasts(db, { active: mode === "active", show: showWindowsToast, baseUrl: `http://127.0.0.1:${process.env.MERGEPORT_PORT ?? 3000}` }).catch((e) => console.error("toasts failed:", e instanceof Error ? e.message : e));
   await tickDiscovery(); // retries of cached GitHub lists that are due; bounded, deduplicated, never awaited on a page
   await paceReconcile(mode, now, g.__mpScheduler?.startedAt ?? now);
   await ensureRecurring(db, { type: "digest.daily", key: "digest", intervalMs: DIGEST_EVERY_MS }); // due at once on the first tick after start: that is the catch-up

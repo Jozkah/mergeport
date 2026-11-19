@@ -22,7 +22,9 @@ import { NOT_RESTORED, Supervisor } from "../src/lib/local/supervisor";
 import { looksOffline, savedProfiles } from "../src/lib/local/saved-profiles";
 import { seedDemo } from "../src/lib/demo/seed";
 import { activeDbFile, profileDirOf, readIndex } from "../src/lib/local/contexts";
-import { buildReason, buildWithRetry, onChildExit, writeStamp } from "../src/lib/local/launcher";
+import { buildReason, buildWithRetry, currentStamp, onChildExit, writeStamp } from "../src/lib/local/launcher";
+import { removeControlFile, writeControlFile } from "../src/lib/local/fresh-link";
+import { restrictToCurrentUser } from "../src/lib/hub/session-vault";
 import { LAUNCH_TOKEN_TTL_MS } from "../src/lib/local/launch-token";
 
 const args = process.argv.slice(2);
@@ -116,9 +118,11 @@ async function main() {
   let lastBackend = startBackend; // a relaunch reopens whatever workspace was running, not necessarily the one the launcher started with
   // The supervisor owns the one app process, so a workspace switch is a restart on another database, never an in-process swap.
   const control = { url: "" };
+  // The desktop shortcut asks the running app for a fresh sign-in link with this secret (see fresh-link.ts), so it need not restart it.
+  const controlSecret = randomBytes(24).toString("base64url");
   const supervisor = new Supervisor(
     {
-      spawnChild: (spec) => spawnNext(spec, { MERGEPORT_CONTROL_URL: control.url, MERGEPORT_LAUNCHER: "1", MERGEPORT_BASE_DB: ((lastBackend = spec.backend ?? lastBackend), (lastBase = baseOf(spec.dbFile))) }),
+      spawnChild: (spec) => spawnNext(spec, { MERGEPORT_CONTROL_URL: control.url, MERGEPORT_CONTROL_SECRET: controlSecret, MERGEPORT_LAUNCHER: "1", MERGEPORT_BASE_DB: ((lastBackend = spec.backend ?? lastBackend), (lastBase = baseOf(spec.dbFile))) }),
       waitReady: (p, signal) => waitForReady(p, signal),
       resolveTarget: async ({ backend }) => {
         if (demo || signedInId === null) throw new Error("Switching workspaces is not available in this mode.");
@@ -166,6 +170,10 @@ async function main() {
     await supervisor.stop();
     throw e;
   });
+  if (!demo) {
+    writeControlFile(home, { port, secret: controlSecret, pid: process.pid, stamp: currentStamp(root) }, restrictToCurrentUser);
+    process.on("exit", () => removeControlFile(home, process.pid));
+  }
   setTimeout(() => {
     console.log(`\nMergeport is running at http://127.0.0.1:${port} (this computer only).`);
     if (demo) console.log("Demo sign-in is on the sign-in page.");
