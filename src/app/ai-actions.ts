@@ -12,7 +12,7 @@ import { assigneeCandidates, createTask } from "@/lib/services/tasks";
 import { listProjects } from "@/lib/services/queries";
 import { todayIn } from "@/lib/domain/planning";
 import { gatherFacts } from "@/lib/services/ai-facts";
-import { answerQuestion, draftTasks, listModels, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_AI_BASE_URL, type TaskDraft } from "@/lib/services/ai";
+import { answerQuestion, draftTasks, listModelInfo, rememberModel, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_AI_BASE_URL, type TaskDraft } from "@/lib/services/ai";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const vault = () => openVault(keyFileFor(resolveDbFile()));
@@ -39,9 +39,11 @@ export async function listAiModelsAction(fd: FormData): Promise<ActionResult> {
     const saved = await loadAiConfig(db, vault());
     const baseUrl = normalizeBaseUrl(str(fd, "baseUrl") || saved?.baseUrl || DEFAULT_AI_BASE_URL);
     const apiKey = str(fd, "apiKey") || saved?.apiKey || null;
-    const models = await listModels({ baseUrl, apiKey, model: null });
-    if (models.length === 0) throw new ValidationError("The endpoint listed no models.");
-    return { ok: true, message: `${models.length} model${models.length === 1 ? "" : "s"} available`, data: { models } };
+    const info = await listModelInfo({ baseUrl, apiKey, model: null });
+    if (info.length === 0) throw new ValidationError("The endpoint listed no models.");
+    const models = info.map((m) => m.id);
+    const loaded = info.filter((m) => m.loaded === true).map((m) => m.id);
+    return { ok: true, message: `${models.length} model${models.length === 1 ? "" : "s"} available`, data: { models, loaded } };
   });
 }
 
@@ -57,6 +59,7 @@ export async function draftTasksAction(fd: FormData): Promise<ActionResult> {
     const ordered = [...projects.filter((p) => p.id === wanted), ...projects.filter((p) => p.id !== wanted)];
     const people = [...new Set((await Promise.all(projects.map((p) => assigneeCandidates(db, viewer, p.id)))).flat())];
     const { drafts, model } = await draftTasks(cfg, str(fd, "text"), { projects: ordered, people, today: todayIn(viewer.timezone), me: viewer.login });
+    await rememberModel(db, model);
     return { ok: true, message: `${drafts.length} draft${drafts.length === 1 ? "" : "s"}`, data: { drafts, model } };
   });
 }
@@ -101,6 +104,7 @@ export async function askAiAction(fd: FormData): Promise<ActionResult> {
     const question = str(fd, "question");
     const facts = await gatherFacts(db, viewer, question);
     const { answer, model } = await answerQuestion(cfg, question, facts);
+    await rememberModel(db, model);
     return { ok: true, message: "Answered", data: { answer, model, sources: facts.map((x) => ({ label: x.label, href: x.href })) } };
   });
 }

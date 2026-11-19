@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { Select } from "@/components/ui/Select";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { listAiModelsAction, saveAiSettingsAction } from "@/app/ai-actions";
 
@@ -11,6 +12,8 @@ import { listAiModelsAction, saveAiSettingsAction } from "@/app/ai-actions";
 export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; hasKey: boolean; model: string | null }) {
   const form = useRef<HTMLDivElement>(null);
   const [models, setModels] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState<string[]>([]);
+  const [pref, setPref] = useState(model ?? "");
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
 
@@ -21,9 +24,19 @@ export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; h
       const r = await listAiModelsAction(fd);
       if (r.ok) {
         setModels((r.data?.models as string[]) ?? []);
-        setNote({ ok: true, text: r.message ?? "" });
+        const on = (r.data?.loaded as string[]) ?? [];
+        setLoaded(on);
+        setNote({ ok: true, text: `${r.message ?? ""}${on.length ? ` · loaded now: ${on.join(", ")}` : ""}` });
       } else setNote({ ok: false, text: r.error });
     });
+
+  // With a key saved, ask the endpoint what it offers as soon as the panel opens, so the list is ready.
+  useEffect(() => {
+    if (hasKey) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const gone = pref && models.length > 0 && !models.includes(pref);
 
   return (
     <div className="p-4">
@@ -42,13 +55,16 @@ export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; h
           </div>
           <div>
             <label className="label" htmlFor="ai-model">Preferred model (optional)</label>
-            <input id="ai-model" name="model" className="input" defaultValue={model ?? ""} list="ai-models" autoComplete="off" spellCheck={false} placeholder="Automatic" />
-            <datalist id="ai-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
+            <Select id="ai-model" name="model" className="select" value={pref} onChange={(e) => setPref(e.target.value)}>
+              <option value="">{loaded.length ? "Automatic (the loaded model)" : "Automatic"}</option>
+              {gone || (pref && models.length === 0) ? <option value={pref}>{pref}{gone ? " (not offered now)" : ""}</option> : null}
+              {models.map((m) => <option key={m} value={m}>{m}</option>)}
+            </Select>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button type="button" className="btn" onClick={load} disabled={pending}>{pending ? "Asking…" : "Load models"}</button>
               {note && <span role="status" className={`text-[12.5px] ${note.ok ? "text-ok" : "text-blocked"}`}>{note.text}</span>}
             </div>
-            <p className="mt-1 text-[12px] text-ink-3">Leave empty and Mergeport asks the endpoint which models it serves each time and uses an available one. A preferred model is used only while the endpoint still offers it.</p>
+            <p className="mt-1 text-[12px] text-ink-3">Automatic uses a model the endpoint already has loaded, so it never makes the server swap models; if the endpoint does not say which is loaded, it keeps the one that answered last. A preferred model is used whenever it is offered, even if that means a swap.</p>
           </div>
         </div>
       </ActionForm>

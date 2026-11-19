@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chat, draftTasks, extractJson, listModels, normalizeBaseUrl, parseDrafts, resolveModel, stripThinking, type DraftContext } from "@/lib/services/ai";
+import { chat, draftTasks, extractJson, listModelInfo, listModels, loadedFlag, normalizeBaseUrl, parseDrafts, resolveModel, stripThinking, type DraftContext } from "@/lib/services/ai";
 
 const ctx: DraftContext = { projects: [{ id: "p1", name: "Atlas" }, { id: "p2", name: "Billing" }], people: ["Alice", "bob"], today: "2026-11-19", me: "joel" };
 const cfg = { baseUrl: "https://ai.example.com/v1", apiKey: "k-secret", model: "qwen-x" };
@@ -105,5 +105,51 @@ describe("talking to the endpoint", () => {
     await expect(chat(cfg, [{ role: "user", content: "x" }], fakeFetch(() => ({}), 500))).rejects.toThrow(/500/);
     await expect(chat({ ...cfg, model: null }, [{ role: "user", content: "x" }])).rejects.toThrow(/No model/);
     await expect(chat(cfg, [{ role: "user", content: "x" }], fakeFetch(() => reply("  ")))).rejects.toThrow(/no text/);
+  });
+});
+
+describe("automatic mode avoids making the server swap models", () => {
+  const list = (data: Record<string, unknown>[]) => fakeFetch(() => ({ data }));
+
+  it("reads the load state however the server names it", () => {
+    expect(loadedFlag({ id: "a", loaded: true })).toBe(true);
+    expect(loadedFlag({ id: "a", status: "ready" })).toBe(true);
+    expect(loadedFlag({ id: "a", state: "Running" })).toBe(true);
+    expect(loadedFlag({ id: "a", status: { value: "loaded" } })).toBe(true);
+    expect(loadedFlag({ id: "a", status: "unloaded" })).toBe(false);
+    expect(loadedFlag({ id: "a", state: "booting" })).toBe(false);
+    expect(loadedFlag({ id: "a" })).toBeNull();
+  });
+
+  it("uses the loaded model, not the first one in the list", async () => {
+    const f = list([{ id: "a-first" }, { id: "b-loaded", status: "ready" }, { id: "c", status: "unloaded" }]);
+    expect(await resolveModel({ ...cfg, model: null }, f)).toBe("b-loaded");
+    expect((await listModelInfo(cfg, f)).map((m) => [m.id, m.loaded])).toEqual([["a-first", null], ["b-loaded", true], ["c", false]]);
+  });
+
+  it("keeps the model that answered last when the server does not say what is loaded", async () => {
+    const f = list([{ id: "a-first" }, { id: "b-last" }]);
+    expect(await resolveModel({ ...cfg, model: null, lastModel: "b-last" }, f)).toBe("b-last");
+    expect(await resolveModel({ ...cfg, model: null, lastModel: "gone" }, f)).toBe("a-first");
+  });
+
+  it("a preferred model still wins, and a booting model is not answered by trying another", async () => {
+    expect(await resolveModel({ ...cfg, model: "c" }, list([{ id: "b", status: "ready" }, { id: "c" }]))).toBe("c");
+    const used: string[] = [];
+    const f = (async (url: string, init: RequestInit) => {
+      if (String(url).endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "a" }, { id: "b" }] }));
+      used.push(JSON.parse(String(init.body)).model);
+      return new Response("{}", { status: 503 });
+    }) as unknown as typeof fetch;
+    await expect(draftTasks({ ...cfg, model: null }, "x", ctx, f)).rejects.toThrow(/503/);
+    expect(used).toEqual(["a"]);
+  });
+
+  it("understands a streamed answer and quotes an unreadable one", async () => {
+    const sse = 'data: {"choices":[{"delta":{"content":"{\\"tasks\\":[{\\"title\\""}}]}\n\ndata: {"choices":[{"delta":{"content":":\\"Streamed\\"}]}"}}]}\n\ndata: [DONE]\n';
+    const f = (async (url: string) => String(url).endsWith("/models") ? new Response(JSON.stringify({ data: [{ id: "m" }] })) : new Response(sse)) as unknown as typeof fetch;
+    expect((await draftTasks({ ...cfg, model: null }, "x", ctx, f)).drafts[0].title).toBe("Streamed");
+    const html = (async () => new Response("<html>Booting model, please wait</html>")) as unknown as typeof fetch;
+    await expect(chat(cfg, [{ role: "user", content: "x" }], html)).rejects.toThrow(/Booting model, please wait/);
   });
 });
