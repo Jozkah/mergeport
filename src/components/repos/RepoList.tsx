@@ -68,7 +68,7 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
 
   const counts = useMemo(
     () => ({
-      all: rows.length,
+      all: rows.filter((r) => !r.archived).length,
       problems: rows.filter((r) => r.status !== "ok").length,
       private: rows.filter((r) => r.visibility !== "PUBLIC").length,
       forks: rows.filter((r) => r.fork).length,
@@ -77,7 +77,7 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
     }),
     [rows],
   );
-  const match = (r: RepoRow) => (filter === "all" ? true : filter === "problems" ? r.status !== "ok" : filter === "private" ? r.visibility !== "PUBLIC" : filter === "forks" ? !!r.fork : filter === "archived" ? r.archived : !!r.spaceId);
+  const match = (r: RepoRow) => (filter === "all" ? !r.archived : filter === "problems" ? r.status !== "ok" : filter === "private" ? r.visibility !== "PUBLIC" : filter === "forks" ? !!r.fork : filter === "archived" ? r.archived : !!r.spaceId);
   const needle = q.trim().toLowerCase();
   const visible = rows.filter((r) => match(r) && (!needle || `${r.fullName} ${r.projects.join(" ")} ${r.spaceName ?? ""}`.toLowerCase().includes(needle)));
   const shown = visible.slice(0, limit);

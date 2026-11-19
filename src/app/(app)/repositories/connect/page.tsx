@@ -33,7 +33,8 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const tab: Tab = TABS.some(([k]) => k === show) ? (show as Tab) : "all";
   const view = await cached.repos();
   const tracked = new Set((await db.repository.findMany({ where: { trackingStatus: { not: "REMOVED" } }, select: { githubId: true } })).map((r) => r.githubId.toString()));
-  const all = (view.payload?.repos ?? []).slice().sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
+  // Archived repositories are read-only for everyone, so they are not offered for tracking.
+  const all = (view.payload?.repos ?? []).filter((r) => !r.archived).slice().sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
   const mine = (r: (typeof all)[number]) => r.owner.login.toLowerCase() === viewer.login.toLowerCase();
   // Unknown permissions are not "read only": only a repository GitHub reported without push rights counts as contributed.
   const canPush = (r: (typeof all)[number]) => !r.permissions || !!(r.permissions.push || r.permissions.admin || r.permissions.maintain);
