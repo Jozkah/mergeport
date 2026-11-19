@@ -22,7 +22,7 @@ export type StoredHubSession = { origin: string; token: string; githubId: bigint
 
 const ID = "session";
 
-function restrictToCurrentUser(file: string): void {
+export function restrictToCurrentUser(file: string): void {
   if (process.platform !== "win32") return;
   const user = process.env.USERNAME;
   if (!user) return;

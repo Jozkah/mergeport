@@ -830,6 +830,8 @@ model Notification {
   href        String?
   createdAt   DateTime  @default(now())
   readAt      DateTime?
+  /// When a Windows toast was shown for it (or it was skipped for one: not wanted, already shown by an open tab, too old). Null = still to decide.
+  toastedAt   DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)

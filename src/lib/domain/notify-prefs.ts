@@ -3,7 +3,7 @@ import { DEFAULT_DIGEST_SETTINGS, parseDigestSettings, type DigestSettings } fro
 /**
  * Personal notification preferences. Pure.
  * Each kind of event has two independent channels: the in-app list, and a desktop pop-up. Desktop pop-ups can only appear while
- * Mergeport is open in a browser on this computer (there is no server to send them otherwise), and quiet hours hold them back.
+ * Mergeport is running on this computer (a browser notification while a tab is open, a Windows notification when none is), and quiet hours hold them back.
  */
 export const KINDS = [
   { key: "review-requested", label: "Someone asked you to review a pull request" },
