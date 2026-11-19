@@ -17,7 +17,7 @@ const CHAT_TIMEOUT_MS = 300_000;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
 export type AiConfig = { baseUrl: string; apiKey: string | null; model: string | null; lastModel?: string | null };
-export type AiView = { baseUrl: string; hasKey: boolean; model: string | null; saved: boolean };
+export type AiView = { baseUrl: string; hasKey: boolean; model: string | null; saved: boolean; autopilot: "off" | "suggest" | "create"; lastRunAt: Date | null; lastSummary: string | null };
 export type Fetch = typeof fetch;
 
 export function normalizeBaseUrl(raw: string): string {
@@ -35,7 +35,7 @@ export function normalizeBaseUrl(raw: string): string {
 
 export async function getAiView(db: Db): Promise<AiView> {
   const row = await db.aiSettings.findUnique({ where: { id: ID } });
-  return { baseUrl: row?.baseUrl ?? DEFAULT_AI_BASE_URL, hasKey: !!row?.cipher, model: row?.model ?? null, saved: !!row };
+  return { baseUrl: row?.baseUrl ?? DEFAULT_AI_BASE_URL, hasKey: !!row?.cipher, model: row?.model ?? null, saved: !!row, autopilot: row?.autopilot === "suggest" || row?.autopilot === "create" ? row.autopilot : "off", lastRunAt: row?.lastRunAt ?? null, lastSummary: row?.lastSummary ?? null };
 }
 
 export async function loadAiConfig(db: Db, vault: Vault): Promise<AiConfig | null> {
@@ -53,16 +53,17 @@ export async function loadAiConfig(db: Db, vault: Vault): Promise<AiConfig | nul
 }
 
 /** An empty `apiKey` keeps the saved key; `clearKey` removes it. */
-export async function saveAiSettings(db: Db, vault: Vault, input: { baseUrl: string; apiKey?: string; clearKey?: boolean; model?: string }): Promise<void> {
+export async function saveAiSettings(db: Db, vault: Vault, input: { baseUrl: string; apiKey?: string; clearKey?: boolean; model?: string; autopilot?: string }): Promise<void> {
   const baseUrl = normalizeBaseUrl(input.baseUrl || DEFAULT_AI_BASE_URL);
   const model = input.model?.trim() || null;
   if (model && model.length > 200) throw new ValidationError("The model name is too long");
   const key = input.apiKey?.trim();
+  const autopilot = input.autopilot === "off" || input.autopilot === "suggest" || input.autopilot === "create" ? input.autopilot : undefined;
   const cipher = input.clearKey ? null : key ? vault.encrypt(key) : undefined;
   await db.aiSettings.upsert({
     where: { id: ID },
-    create: { id: ID, baseUrl, model, cipher: cipher ?? null },
-    update: { baseUrl, model, ...(cipher !== undefined ? { cipher } : {}) },
+    create: { id: ID, baseUrl, model, cipher: cipher ?? null, ...(autopilot ? { autopilot } : {}) },
+    update: { baseUrl, model, ...(cipher !== undefined ? { cipher } : {}), ...(autopilot ? { autopilot } : {}) },
   });
 }
 

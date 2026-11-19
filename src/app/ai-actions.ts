@@ -9,6 +9,7 @@ import { ValidationError } from "@/lib/errors";
 import { keyFileFor } from "@/lib/hub/ports-impl";
 import { openVault } from "@/lib/hub/session-vault";
 import { createTask } from "@/lib/services/tasks";
+import { acceptSuggestions, dismissSuggestions } from "@/lib/services/ai-review";
 import { listModelInfo, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_AI_BASE_URL, type TaskDraft } from "@/lib/services/ai";
 
 // Drafting tasks and answering questions are streamed from /api/ai/draft and /api/ai/ask so the page can show progress.
@@ -23,7 +24,7 @@ export async function saveAiSettingsAction(fd: FormData): Promise<ActionResult> 
   return run(async () => {
     await requireViewer();
     noDemo();
-    await saveAiSettings(db, vault(), { baseUrl: str(fd, "baseUrl"), apiKey: str(fd, "apiKey"), clearKey: fd.get("clearKey") === "on", model: str(fd, "model") });
+    await saveAiSettings(db, vault(), { baseUrl: str(fd, "baseUrl"), apiKey: str(fd, "apiKey"), clearKey: fd.get("clearKey") === "on", model: str(fd, "model"), autopilot: str(fd, "autopilot") });
     revalidatePath("/settings");
     revalidatePath("/tasks");
     return { ok: true, message: "Saved" };
@@ -43,6 +44,35 @@ export async function listAiModelsAction(fd: FormData): Promise<ActionResult> {
     const models = info.map((m) => m.id);
     const loaded = info.filter((m) => m.loaded === true).map((m) => m.id);
     return { ok: true, message: `${models.length} model${models.length === 1 ? "" : "s"} available`, data: { models, loaded } };
+  });
+}
+
+const idList = (fd: FormData): string[] => {
+  try {
+    const v = JSON.parse(str(fd, "ids"));
+    if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v as string[];
+  } catch {
+    // falls through
+  }
+  throw new ValidationError("Nothing selected.");
+};
+
+/** Turns the chosen AI suggestions into tasks. */
+export async function acceptSuggestionsAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireViewer();
+    const n = await acceptSuggestions(db, viewer, idList(fd));
+    for (const p of ["/tasks", "/planning", "/attention", "/ai"]) revalidatePath(p);
+    return { ok: true, message: `Created ${n} task${n === 1 ? "" : "s"}` };
+  });
+}
+
+export async function dismissSuggestionsAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    await requireViewer();
+    const n = await dismissSuggestions(db, idList(fd));
+    revalidatePath("/ai");
+    return { ok: true, message: `Dismissed ${n}` };
   });
 }
 

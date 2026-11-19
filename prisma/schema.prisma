@@ -1308,5 +1308,28 @@ model AiSettings {
   model     String?
   /// The model that answered last. With no preferred model it is reused (while still offered) so the server need not swap models.
   lastModel String?
+  /// "off" | "suggest" | "create". What the daily background review may do. It never touches GitHub; "create" only makes local tasks for clear cases.
+  autopilot String   @default("off")
+  lastRunAt DateTime?
+  lastRunDay String?
+  lastSummary String?
   updatedAt DateTime @updatedAt
+}
+
+/// A task the AI thinks you should have, from the daily review or "Analyze my workspace". Nothing becomes a task until it is accepted
+/// (or the autopilot level is "create" and the case is a clear one). `sourceKey` names the thing it is about, so it is not suggested twice.
+model AiSuggestion {
+  id        String    @id @default(cuid())
+  sourceKey String
+  title     String
+  reason    String
+  payload   Json
+  /// NEW | ACCEPTED | DISMISSED | AUTO
+  state     String    @default("NEW")
+  taskId    String?
+  createdAt DateTime  @default(now())
+  decidedAt DateTime?
+
+  @@index([state, createdAt])
+  @@index([sourceKey])
 }
