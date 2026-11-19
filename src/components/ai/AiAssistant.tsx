@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
-import { askAiAction } from "@/app/ai-actions";
+import { useState } from "react";
+import { Progress, useAiJob } from "@/components/ai/progress";
 import { DraftTasks } from "@/components/tasks/AiTasks";
 import { Panel } from "@/components/ui/primitives";
 import { Sparkles } from "@/components/ui/icons";
@@ -16,7 +16,8 @@ export function AiAssistant({ configured, projects, defaultProjectId }: { config
   const [mode, setMode] = useState<"ask" | "tasks">("ask");
   const [q, setQ] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [pending, start] = useTransition();
+  const job = useAiJob();
+  const pending = job.running;
 
   if (!configured) {
     return (
@@ -26,17 +27,14 @@ export function AiAssistant({ configured, projects, defaultProjectId }: { config
     );
   }
 
-  const ask = () =>
-    start(async () => {
-      const question = q.trim();
-      if (!question) return;
-      const fd = new FormData();
-      fd.set("question", question);
-      const r = await askAiAction(fd);
-      const turn: Turn = r.ok ? { q: question, a: String(r.data?.answer ?? ""), model: String(r.data?.model ?? ""), sources: (r.data?.sources as Source[]) ?? [] } : { q: question, error: r.error };
-      setTurns((t) => [turn, ...t]);
-      if (r.ok) setQ("");
-    });
+  const ask = async () => {
+    const question = q.trim();
+    if (!question || job.running) return;
+    const r = await job.run<{ answer: string; model: string; sources: Source[] }>("/api/ai/ask", { question });
+    const turn: Turn = r.ok ? { q: question, a: r.data.answer, model: r.data.model, sources: r.data.sources } : { q: question, error: r.error };
+    setTurns((t) => [turn, ...t]);
+    if (r.ok) setQ("");
+  };
 
   return (
     <div className="max-w-2xl">
@@ -60,7 +58,8 @@ export function AiAssistant({ configured, projects, defaultProjectId }: { config
               <label className="label" htmlFor="ai-q">Your question</label>
               <textarea id="ai-q" className="input min-h-20" rows={3} value={q} onChange={(e) => setQ(e.target.value)} maxLength={1000} placeholder="e.g. What is the status of PR 3 from atlas-api?" onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!pending) ask(); } }} />
               <p className="text-[12px] text-ink-3">Works best with a number and a repository or person, such as &ldquo;PR 3 from northwind/atlas-api&rdquo; or &ldquo;issue 12 by alice&rdquo;. The matching items are sent to the AI address in Settings.</p>
-              <div><button type="submit" className="btn btn-primary" disabled={pending || !q.trim()}>{pending ? "Looking…" : "Ask"}</button></div>
+              <div><button type="submit" className="btn btn-primary" disabled={pending || !q.trim()}>{pending ? "Working…" : "Ask"}</button></div>
+              <Progress steps={job.steps} running={job.running} elapsed={job.elapsed} />
             </form>
           </Panel>
           <ul className="mt-4 flex flex-col gap-3" aria-live="polite">

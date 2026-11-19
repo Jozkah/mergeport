@@ -153,3 +153,19 @@ describe("automatic mode avoids making the server swap models", () => {
     await expect(chat(cfg, [{ role: "user", content: "x" }], html)).rejects.toThrow(/Booting model, please wait/);
   });
 });
+
+describe("progress steps", () => {
+  it("says which model is used and why, then that it waits, then that it reads the answer", async () => {
+    const f = (async (url: string) => String(url).endsWith("/models")
+      ? new Response(JSON.stringify({ data: [{ id: "a" }, { id: "b", status: "ready" }] }))
+      : new Response(JSON.stringify(reply('{"tasks":[{"title":"T"}]}')))) as unknown as typeof fetch;
+    const steps: string[] = [];
+    await draftTasks({ ...cfg, model: null }, "x", ctx, f, (s) => steps.push(s));
+    expect(steps).toEqual([
+      "Asking the endpoint which models it has",
+      "Using b: it is already loaded",
+      "Waiting for b to answer. If it has to be loaded first, this can take a few minutes",
+      "Reading the answer",
+    ]);
+  });
+});
