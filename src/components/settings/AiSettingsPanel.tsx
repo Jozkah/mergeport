@@ -12,6 +12,7 @@ import { listAiModelsAction, saveAiSettingsAction } from "@/app/ai-actions";
 export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; hasKey: boolean; model: string | null }) {
   const form = useRef<HTMLDivElement>(null);
   const [models, setModels] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState<string[]>([]);
   const [pref, setPref] = useState(model ?? "");
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
@@ -23,7 +24,9 @@ export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; h
       const r = await listAiModelsAction(fd);
       if (r.ok) {
         setModels((r.data?.models as string[]) ?? []);
-        setNote({ ok: true, text: r.message ?? "" });
+        const on = (r.data?.loaded as string[]) ?? [];
+        setLoaded(on);
+        setNote({ ok: true, text: `${r.message ?? ""}${on.length ? ` · loaded now: ${on.join(", ")}` : ""}` });
       } else setNote({ ok: false, text: r.error });
     });
 
@@ -53,7 +56,7 @@ export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; h
           <div>
             <label className="label" htmlFor="ai-model">Preferred model (optional)</label>
             <Select id="ai-model" name="model" className="select" value={pref} onChange={(e) => setPref(e.target.value)}>
-              <option value="">Automatic</option>
+              <option value="">{loaded.length ? "Automatic (the loaded model)" : "Automatic"}</option>
               {gone || (pref && models.length === 0) ? <option value={pref}>{pref}{gone ? " (not offered now)" : ""}</option> : null}
               {models.map((m) => <option key={m} value={m}>{m}</option>)}
             </Select>
@@ -61,7 +64,7 @@ export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; h
               <button type="button" className="btn" onClick={load} disabled={pending}>{pending ? "Asking…" : "Load models"}</button>
               {note && <span role="status" className={`text-[12.5px] ${note.ok ? "text-ok" : "text-blocked"}`}>{note.text}</span>}
             </div>
-            <p className="mt-1 text-[12px] text-ink-3">Leave empty and Mergeport asks the endpoint which models it serves each time and uses an available one. A preferred model is used only while the endpoint still offers it.</p>
+            <p className="mt-1 text-[12px] text-ink-3">Automatic uses a model the endpoint already has loaded, so it never makes the server swap models; if the endpoint does not say which is loaded, it keeps the one that answered last. A preferred model is used whenever it is offered, even if that means a swap.</p>
           </div>
         </div>
       </ActionForm>

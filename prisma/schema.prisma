@@ -1306,5 +1306,7 @@ model AiSettings {
   baseUrl   String
   cipher    String?
   model     String?
+  /// The model that answered last. With no preferred model it is reused (while still offered) so the server need not swap models.
+  lastModel String?
   updatedAt DateTime @updatedAt
 }

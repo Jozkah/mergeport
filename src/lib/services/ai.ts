@@ -11,10 +11,12 @@ import type { Vault } from "@/lib/hub/session-vault";
 
 export const DEFAULT_AI_BASE_URL = "https://ai.kewaii.com/v1";
 const ID = "ai";
-const TIMEOUT_MS = 90_000;
+const LIST_TIMEOUT_MS = 30_000;
+// A model that is not loaded yet can take minutes to boot before it answers.
+const CHAT_TIMEOUT_MS = 300_000;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
-export type AiConfig = { baseUrl: string; apiKey: string | null; model: string | null };
+export type AiConfig = { baseUrl: string; apiKey: string | null; model: string | null; lastModel?: string | null };
 export type AiView = { baseUrl: string; hasKey: boolean; model: string | null; saved: boolean };
 export type Fetch = typeof fetch;
 
@@ -47,7 +49,7 @@ export async function loadAiConfig(db: Db, vault: Vault): Promise<AiConfig | nul
       apiKey = null; // the key file changed: ask for the key again rather than fail
     }
   }
-  return { baseUrl: row.baseUrl, apiKey, model: row.model };
+  return { baseUrl: row.baseUrl, apiKey, model: row.model, lastModel: row.lastModel };
 }
 
 /** An empty `apiKey` keeps the saved key; `clearKey` removes it. */
@@ -64,6 +66,11 @@ export async function saveAiSettings(db: Db, vault: Vault, input: { baseUrl: str
   });
 }
 
+/** Remembers which model answered, so automatic mode keeps using it instead of making the server swap. */
+export async function rememberModel(db: Db, model: string): Promise<void> {
+  await db.aiSettings.updateMany({ where: { id: ID, NOT: { lastModel: model } }, data: { lastModel: model } });
+}
+
 const headers = (cfg: AiConfig): Record<string, string> => ({ "content-type": "application/json", ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}) });
 
 /** An answer from the endpoint that was not a success; `status` lets callers tell "that model is gone" from "wrong key". */
@@ -73,27 +80,77 @@ export class AiHttpError extends ValidationError {
   }
 }
 
-async function call(url: string, init: RequestInit, f: Fetch): Promise<unknown> {
+async function call(url: string, init: RequestInit, f: Fetch, timeoutMs = LIST_TIMEOUT_MS): Promise<unknown> {
   let res: Response;
   try {
-    res = await f(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    res = await f(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
     throw new ValidationError("Could not reach the AI endpoint. Check the address and your connection.");
   }
   if (res.status === 401 || res.status === 403) throw new AiHttpError("The AI endpoint rejected the key. Save a valid key in Settings.", res.status);
   if (!res.ok) throw new AiHttpError(`The AI endpoint answered ${res.status}.`, res.status);
+  let text: string;
   try {
-    return await res.json();
+    text = await res.text();
   } catch {
-    throw new ValidationError("The AI endpoint did not answer with JSON. Is the address the /v1 base?");
+    throw new ValidationError("The connection to the AI endpoint broke while it was answering. Try again.");
   }
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Some servers stream even when asked not to: stitch the pieces back together.
+    const pieces = text.split(/\r?\n/).filter((l) => l.startsWith("data:") && !l.includes("[DONE]")).map((l) => l.slice(5).trim());
+    if (pieces.length > 0) {
+      let out = "";
+      for (const p of pieces) {
+        try {
+          const c = (JSON.parse(p) as { choices?: { delta?: { content?: unknown }; message?: { content?: unknown } }[] }).choices?.[0];
+          const part = c?.delta?.content ?? c?.message?.content;
+          if (typeof part === "string") out += part;
+        } catch {
+          // a keep-alive or comment line
+        }
+      }
+      if (out) return { choices: [{ message: { content: out } }] };
+    }
+    const seen = text.trim().replace(/\s+/g, " ").slice(0, 120);
+    throw new ValidationError(`The AI endpoint did not answer with JSON${seen ? ` (it said: ${seen})` : ""}. Is the address the /v1 base?`);
+  }
+}
+
+export type ModelInfo = { id: string; loaded: boolean | null };
+
+/** Whether a model entry says it is in memory right now. Servers name this differently; null means the entry does not say. */
+export function loadedFlag(m: Record<string, unknown>): boolean | null {
+  for (const k of ["loaded", "is_loaded", "isLoaded", "running", "active", "ready", "resident"]) if (typeof m[k] === "boolean") return m[k] as boolean;
+  for (const k of ["status", "state"]) {
+    const v = m[k];
+    const word = typeof v === "string" ? v : v && typeof v === "object" && typeof (v as { value?: unknown }).value === "string" ? (v as { value: string }).value : null;
+    if (word === null) continue;
+    if (/^(loaded|running|ready|active|up|resident|online|serving)$/i.test(word)) return true;
+    if (/^(unloaded|stopped|idle|sleeping|available|offline|down|not[_ -]?loaded)$/i.test(word)) return false;
+    // booting, loading, swapping...: on its way, not usable without waiting
+    return false;
+  }
+  return null;
+}
+
+/** The models the endpoint offers right now, with whether each says it is loaded. */
+export async function listModelInfo(cfg: AiConfig, f: Fetch = fetch): Promise<ModelInfo[]> {
+  const body = (await call(`${cfg.baseUrl}/models`, { method: "GET", headers: headers(cfg) }, f)) as { data?: Record<string, unknown>[] };
+  const byId = new Map<string, ModelInfo>();
+  for (const m of body.data ?? []) {
+    if (typeof m?.id !== "string" || !m.id) continue;
+    const loaded = loadedFlag(m);
+    const old = byId.get(m.id);
+    byId.set(m.id, { id: m.id, loaded: old?.loaded === true || loaded === true ? true : (loaded ?? old?.loaded ?? null) });
+  }
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The model names the endpoint offers right now. */
 export async function listModels(cfg: AiConfig, f: Fetch = fetch): Promise<string[]> {
-  const body = (await call(`${cfg.baseUrl}/models`, { method: "GET", headers: headers(cfg) }, f)) as { data?: { id?: unknown }[] };
-  const ids = (body.data ?? []).map((m) => m.id).filter((x): x is string => typeof x === "string" && x.length > 0);
-  return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+  return (await listModelInfo(cfg, f)).map((m) => m.id);
 }
 
 /** Drops reasoning blocks some models print before the answer. */
@@ -101,7 +158,7 @@ export const stripThinking = (s: string) => s.replace(/<think>[\s\S]*?<\/think>/
 
 export async function chat(cfg: AiConfig, messages: { role: "system" | "user"; content: string }[], f: Fetch = fetch): Promise<string> {
   if (!cfg.model) throw new ValidationError("No model is available on the AI endpoint.");
-  const body = (await call(`${cfg.baseUrl}/chat/completions`, { method: "POST", headers: headers(cfg), body: JSON.stringify({ model: cfg.model, stream: false, temperature: 0.2, messages }) }, f)) as { choices?: { message?: { content?: unknown } }[] };
+  const body = (await call(`${cfg.baseUrl}/chat/completions`, { method: "POST", headers: headers(cfg), body: JSON.stringify({ model: cfg.model, stream: false, temperature: 0.2, messages }) }, f, CHAT_TIMEOUT_MS)) as { choices?: { message?: { content?: unknown } }[] };
   const text = body.choices?.[0]?.message?.content;
   if (typeof text !== "string" || !text.trim()) throw new ValidationError("The model sent back no text. Try again or pick another model.");
   return stripThinking(text);
@@ -190,20 +247,28 @@ const SYSTEM = (ctx: DraftContext) =>
 const NOT_CHAT = /embed|whisper|tts|rerank|moderation|image|dall-e|transcri|speech/i;
 
 /**
- * Picks the model to use right now. The endpoint's own list decides: the saved name is kept while the endpoint still
- * offers it, otherwise the first chat-capable model it lists is used. If the list cannot be read, the saved name is tried as is.
+ * Picks the model to use right now, in this order: the one you prefer (while the endpoint still offers it), a model the
+ * endpoint says is already loaded, the one that answered last time, then the first chat model listed. Loaded comes before
+ * the rest because asking for a model that is not in memory makes the server unload another one and boot it, which
+ * takes minutes and interrupts whoever is using the loaded one. If the list cannot be read, the saved name is tried as is.
  */
 export async function resolveModel(cfg: AiConfig, f: Fetch = fetch, avoid: string[] = []): Promise<string> {
-  let models: string[];
+  let models: ModelInfo[];
   try {
-    models = await listModels(cfg, f);
+    models = await listModelInfo(cfg, f);
   } catch (e) {
-    if (cfg.model && !avoid.includes(cfg.model) && !(e instanceof AiHttpError && (e.httpStatus === 401 || e.httpStatus === 403))) return cfg.model;
+    const fallback = cfg.model || cfg.lastModel;
+    if (fallback && !avoid.includes(fallback) && !(e instanceof AiHttpError && (e.httpStatus === 401 || e.httpStatus === 403))) return fallback;
     throw e;
   }
-  const usable = models.filter((m) => !avoid.includes(m));
-  if (cfg.model && usable.includes(cfg.model)) return cfg.model;
-  const pick = usable.find((m) => !NOT_CHAT.test(m)) ?? usable[0];
+  const usable = models.filter((m) => !avoid.includes(m.id));
+  const ids = usable.map((m) => m.id);
+  if (cfg.model && ids.includes(cfg.model)) return cfg.model;
+  const chatty = usable.filter((m) => !NOT_CHAT.test(m.id));
+  const loaded = chatty.find((m) => m.loaded === true);
+  if (loaded) return loaded.id;
+  if (cfg.lastModel && ids.includes(cfg.lastModel) && !NOT_CHAT.test(cfg.lastModel)) return cfg.lastModel;
+  const pick = chatty[0]?.id ?? ids[0];
   if (!pick) throw new ValidationError("The AI endpoint does not offer any model right now.");
   return pick;
 }
@@ -217,8 +282,9 @@ export async function withModel<T>(cfg: AiConfig, f: Fetch, run: (model: string)
       return { value: await run(model), model };
     } catch (e) {
       tried.push(model);
-      // Only "that model is not served" (404, 400, 410, 503) moves on to another one; a wrong key or an unreadable answer is reported.
-      const gone = e instanceof AiHttpError && [400, 404, 410, 503].includes(e.httpStatus);
+      // Only "that model is not served" (400, 404, 410) moves on to another one. A 503 means a model is booting: trying another would
+      // make the server swap again. A wrong key or an unreadable answer is reported.
+      const gone = e instanceof AiHttpError && [400, 404, 410].includes(e.httpStatus);
       if (!gone || attempt >= 2) throw e;
     }
   }
