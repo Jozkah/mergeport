@@ -20,6 +20,7 @@ const LABELS: Record<string, string> = {
   planning: "Planning",
   tasks: "Tasks",
   activity: "Activity",
+  ai: "AI assistant",
   repositories: "Repositories",
   connect: "Connect repositories",
   forks: "Forks",

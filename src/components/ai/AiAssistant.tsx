@@ -1,0 +1,88 @@
+"use client";
+
+import Link from "next/link";
+import { useState, useTransition } from "react";
+import { askAiAction } from "@/app/ai-actions";
+import { DraftTasks } from "@/components/tasks/AiTasks";
+import { Panel } from "@/components/ui/primitives";
+import { Sparkles } from "@/components/ui/icons";
+
+type P = { id: string; name: string };
+type Source = { label: string; href: string | null };
+type Turn = { q: string; a: string; model: string; sources: Source[] } | { q: string; error: string };
+
+/** Two things in one place: ask about a pull request or issue, or turn notes into tasks. */
+export function AiAssistant({ configured, projects, defaultProjectId }: { configured: boolean; projects: P[]; defaultProjectId: string }) {
+  const [mode, setMode] = useState<"ask" | "tasks">("ask");
+  const [q, setQ] = useState("");
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [pending, start] = useTransition();
+
+  if (!configured) {
+    return (
+      <Panel title="Set up the AI endpoint" icon={Sparkles} id="ai-setup">
+        <p className="p-4 text-[13px] text-ink-2">Add the address and key in <Link className="underline" href="/settings#ai">Settings</Link>. The model is picked automatically.</p>
+      </Panel>
+    );
+  }
+
+  const ask = () =>
+    start(async () => {
+      const question = q.trim();
+      if (!question) return;
+      const fd = new FormData();
+      fd.set("question", question);
+      const r = await askAiAction(fd);
+      const turn: Turn = r.ok ? { q: question, a: String(r.data?.answer ?? ""), model: String(r.data?.model ?? ""), sources: (r.data?.sources as Source[]) ?? [] } : { q: question, error: r.error };
+      setTurns((t) => [turn, ...t]);
+      if (r.ok) setQ("");
+    });
+
+  return (
+    <div className="max-w-2xl">
+      <div role="tablist" aria-label="What to do" className="mb-3 flex gap-1.5">
+        {([["ask", "Ask a question"], ["tasks", "Draft tasks"]] as const).map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={mode === k} className={`btn ${mode === k ? "bg-faint font-medium text-ink" : "btn-quiet"}`} onClick={() => setMode(k)}>{label}</button>
+        ))}
+      </div>
+      {mode === "tasks" ? (
+        <Panel title="Draft tasks" icon={Sparkles} id="ai-tasks">
+          {projects.length === 0 ? (
+            <p className="p-4 text-[13px] text-ink-3">Create a project first; tasks live in a project.</p>
+          ) : (
+            <div className="p-4"><DraftTasks projects={projects} defaultProjectId={defaultProjectId} configured /></div>
+          )}
+        </Panel>
+      ) : (
+        <>
+          <Panel title="Ask" icon={Sparkles} id="ai-ask">
+            <form className="flex flex-col gap-3 p-4" onSubmit={(e) => { e.preventDefault(); if (!pending) ask(); }}>
+              <label className="label" htmlFor="ai-q">Your question</label>
+              <textarea id="ai-q" className="input min-h-20" rows={3} value={q} onChange={(e) => setQ(e.target.value)} maxLength={1000} placeholder="e.g. What is the status of PR 3 from atlas-api?" onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!pending) ask(); } }} />
+              <p className="text-[12px] text-ink-3">Works best with a number and a repository or person, such as &ldquo;PR 3 from northwind/atlas-api&rdquo; or &ldquo;issue 12 by alice&rdquo;. The matching items are sent to the AI address in Settings.</p>
+              <div><button type="submit" className="btn btn-primary" disabled={pending || !q.trim()}>{pending ? "Looking…" : "Ask"}</button></div>
+            </form>
+          </Panel>
+          <ul className="mt-4 flex flex-col gap-3" aria-live="polite">
+            {turns.map((t, i) => (
+              <li key={i} className="rounded-[12px] border border-line p-3.5 text-[13px]">
+                <p className="text-ink-3">{t.q}</p>
+                {"error" in t ? (
+                  <p role="alert" className="mt-1.5 text-blocked">{t.error}</p>
+                ) : (
+                  <>
+                    <p className="mt-1.5 whitespace-pre-wrap [overflow-wrap:anywhere]">{t.a}</p>
+                    <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-3">
+                      {t.sources.length ? <>From {t.sources.map((s) => (s.href ? <Link key={s.label} href={s.href} className="underline">{s.label}</Link> : <span key={s.label}>{s.label}</span>))}</> : "No matching items found."}
+                      {t.model && <span>· {t.model}</span>}
+                    </p>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}

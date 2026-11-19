@@ -8,6 +8,7 @@ export {
   Ban,
   Bell,
   Wand2,
+  Sparkles,
   BellRing,
   Building2,
   Calendar,

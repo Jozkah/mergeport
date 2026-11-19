@@ -15,12 +15,12 @@ const PRIORITY = ["No priority", "Low", "Medium", "High", "Urgent"];
 export function AiTasks({ projects, defaultProjectId, configured }: { projects: P[]; defaultProjectId: string; configured: boolean }) {
   return (
     <Sheet title="Draft tasks with AI" description="Write what needs doing, in any shape. You review the drafts before anything is created." trigger={<button className="btn"><Wand2 size={14} aria-hidden /> Draft with AI</button>}>
-      <Body projects={projects} defaultProjectId={defaultProjectId} configured={configured} />
+      <DraftTasks projects={projects} defaultProjectId={defaultProjectId} configured={configured} />
     </Sheet>
   );
 }
 
-function Body({ projects, defaultProjectId, configured }: { projects: P[]; defaultProjectId: string; configured: boolean }) {
+export function DraftTasks({ projects, defaultProjectId, configured }: { projects: P[]; defaultProjectId: string; configured: boolean }) {
   const router = useRouter();
   const close = useSheetClose();
   const [text, setText] = useState("");
@@ -29,6 +29,7 @@ function Body({ projects, defaultProjectId, configured }: { projects: P[]; defau
   const [model, setModel] = useState("");
   const [keep, setKeep] = useState<boolean[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? "";
 
@@ -58,6 +59,9 @@ function Body({ projects, defaultProjectId, configured }: { projects: P[]; defau
       const r = await createDraftsAction(fd);
       if (!r.ok) return setError(r.error);
       close?.();
+      setDone(r.message ?? "Created");
+      setDrafts(null);
+      setText("");
       router.refresh();
     });
 
@@ -99,6 +103,7 @@ function Body({ projects, defaultProjectId, configured }: { projects: P[]; defau
       )}
       <div><label className="label" htmlFor="ai-text">What needs doing?</label>
         <textarea id="ai-text" className="input min-h-32" rows={6} value={text} onChange={(e) => setText(e.target.value)} maxLength={8000} autoFocus placeholder="e.g. Rotate the API keys by Friday, give it to alice. Also fix the login redirect bug, high priority." /></div>
+      {done && <p role="status" className="text-[12.5px] text-ok">{done}. <a className="underline" href="/tasks">Open tasks</a></p>}
       {error && <p role="alert" className="text-[12.5px] text-blocked">{error}</p>}
       <p className="text-[12px] text-ink-3">Your text and the names of your projects and people are sent to the AI address you set in Settings.</p>
       <div><button type="button" className="btn btn-primary" onClick={draft} disabled={pending || !text.trim()}>{pending ? "Drafting…" : "Draft tasks"}</button></div>

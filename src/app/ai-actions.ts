@@ -11,7 +11,8 @@ import { openVault } from "@/lib/hub/session-vault";
 import { assigneeCandidates, createTask } from "@/lib/services/tasks";
 import { listProjects } from "@/lib/services/queries";
 import { todayIn } from "@/lib/domain/planning";
-import { draftTasks, listModels, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_AI_BASE_URL, type TaskDraft } from "@/lib/services/ai";
+import { gatherFacts } from "@/lib/services/ai-facts";
+import { answerQuestion, draftTasks, listModels, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_AI_BASE_URL, type TaskDraft } from "@/lib/services/ai";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const vault = () => openVault(keyFileFor(resolveDbFile()));
@@ -87,5 +88,19 @@ export async function createDraftsAction(fd: FormData): Promise<ActionResult> {
     }
     for (const p of ["/tasks", "/planning", "/attention"]) revalidatePath(p);
     return { ok: true, message: `Created ${made} task${made === 1 ? "" : "s"}` };
+  });
+}
+
+/** Answers a short question about pull requests and issues from what is stored here. The linked items are the evidence. */
+export async function askAiAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireViewer();
+    noDemo();
+    const cfg = await loadAiConfig(db, vault());
+    if (!cfg) throw new ValidationError("Set up the AI endpoint in Settings first.");
+    const question = str(fd, "question");
+    const facts = await gatherFacts(db, viewer, question);
+    const { answer, model } = await answerQuestion(cfg, question, facts);
+    return { ok: true, message: "Answered", data: { answer, model, sources: facts.map((x) => ({ label: x.label, href: x.href })) } };
   });
 }
