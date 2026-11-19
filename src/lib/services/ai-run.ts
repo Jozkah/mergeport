@@ -26,7 +26,7 @@ export async function runAsk(db: Db, v: Viewer, vault: Vault, input: { question:
   if (!cfg) throw new ValidationError("Set up the AI endpoint in Settings first.");
   step("Looking for the items you mention");
   const facts = await gatherFacts(db, v, input.question);
-  step(facts.length ? `Found ${facts.length} matching item${facts.length === 1 ? "" : "s"}: ${facts.map((x) => x.label).join(", ")}` : "No matching items found, the model will be told so");
+  step(facts.length ? `Found ${facts.length} matching item${facts.length === 1 ? "" : "s"}: ${facts.map((x) => x.label).join(", ")}` : "No stored item matches, so the model is asked without one");
   const { answer, model } = await answerQuestion(cfg, input.question, facts, fetch, step);
   await rememberModel(db, model);
   return { answer, model, sources: facts.map((x) => ({ label: x.label, href: x.href })) };

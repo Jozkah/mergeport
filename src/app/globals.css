@@ -704,18 +704,23 @@ select.select optgroup {
 /* Keyboard key caps in the shortcuts list. */
 .kbd { display: inline-block; min-width: 1.4em; padding: 0 0.4em; border: 1px solid var(--color-line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--color-surface); font: 500 11.5px/1.55 var(--font-mono, ui-monospace, monospace); text-align: center; }
 
-/* What the AI pointed at (GlowManager): a calm pulsing ring on the row. Still, but clearly marked, when motion is reduced. */
+/* What the AI pointed at (GlowManager): the same "look here, once" cue as a changed card (.card-landed), then a still outline and tint that stay.
+   No halo and no loop: the ring plays once, and under reduced motion the outline and tint are the whole cue. */
 .ai-glow {
-  border-radius: 10px;
-  outline: 2px solid var(--color-ink);
-  outline-offset: -2px;
+  border-radius: 8px;
+  outline: 1.5px solid var(--color-ink-2);
+  outline-offset: -1.5px;
   background-color: var(--color-hover);
-  animation: ai-glow 2.2s ease-in-out infinite;
+  --ring-color: var(--color-ink-3);
+  animation: ring-once calc(var(--duration-very-slow) + var(--duration-fast)) var(--ease-out);
 }
-@keyframes ai-glow {
-  0%, 100% { box-shadow: 0 0 0 0 transparent; }
-  50% { box-shadow: 0 0 0 4px var(--color-focus-ring), 0 0 22px 2px var(--color-focus-ring); }
-}
+.ai-glow-still { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .ai-glow { animation: none; }
 }
+
+/* A link written as a link: underlined, with the offset the rest of the app uses. Colour comes from the section hue (accent.css) where there is one. */
+.link { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Browser surfaces that belong to the palette: checkboxes and radios take the ink colour instead of the browser's blue. */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--color-ink); }

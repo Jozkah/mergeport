@@ -280,18 +280,18 @@ export async function resolveModel(cfg: AiConfig, f: Fetch = fetch, avoid: strin
   }
   const usable = models.filter((m) => !avoid.includes(m.id));
   const ids = usable.map((m) => m.id);
-  const use = (m: string, why: string) => {
+  const choose = (m: string, why: string) => {
     step(`Using ${m}: ${why}`);
     return m;
   };
-  if (cfg.model && ids.includes(cfg.model)) return use(cfg.model, "your preferred model");
+  if (cfg.model && ids.includes(cfg.model)) return choose(cfg.model, "your preferred model");
   const chatty = usable.filter((m) => !NOT_CHAT.test(m.id));
   const loaded = chatty.find((m) => m.loaded === true);
-  if (loaded) return use(loaded.id, "it is already loaded");
-  if (cfg.lastModel && ids.includes(cfg.lastModel) && !NOT_CHAT.test(cfg.lastModel)) return use(cfg.lastModel, "it answered last time");
+  if (loaded) return choose(loaded.id, "it is already loaded");
+  if (cfg.lastModel && ids.includes(cfg.lastModel) && !NOT_CHAT.test(cfg.lastModel)) return choose(cfg.lastModel, "it answered last time");
   const pick = chatty[0]?.id ?? ids[0];
   if (!pick) throw new ValidationError("The AI endpoint does not offer any model right now.");
-  return use(pick, "the first one offered (the endpoint does not say which is loaded, so it may need loading first)");
+  return choose(pick, "the first one offered (the endpoint does not say which is loaded, so it may need loading first)");
 }
 
 /** Runs `run` with whichever model the endpoint serves now; if that model is withdrawn mid-request it asks again and retries (three models at most). */
@@ -331,6 +331,16 @@ export async function draftTasks(cfg: AiConfig, text: string, ctx: DraftContext,
   return { drafts: r.value, model: r.model };
 }
 
+/**
+ * A model's answer meant to be read by a person. Models sometimes answer with JSON, a code block or nothing when asked for prose;
+ * that is refused here with a plain message rather than shown as if it were an answer.
+ */
+export function readableAnswer(raw: string): string {
+  const t = raw.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!t || /^[{\[]/.test(t)) throw new ValidationError("The model did not send back readable text. Try again, or pick another model in Settings.");
+  return t;
+}
+
 export type Fact = { label: string; href: string | null; text: string };
 
 const ANSWER_SYSTEM = [
@@ -347,5 +357,5 @@ export async function answerQuestion(cfg: AiConfig, question: string, facts: Fac
   const body = facts.length ? facts.map((x, i) => `[${i + 1}] ${x.label}\n${x.text}`).join("\n\n") : "(no matching items were found)";
   const messages = [{ role: "system" as const, content: ANSWER_SYSTEM }, { role: "user" as const, content: `Facts:\n${body}\n\nQuestion: ${q}` }];
   const r = await withModel(cfg, f, (model) => chat({ ...cfg, model }, messages, f), step);
-  return { answer: r.value, model: r.model };
+  return { answer: readableAnswer(r.value), model: r.model };
 }

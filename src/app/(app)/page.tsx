@@ -58,7 +58,6 @@ export default async function Overview() {
 
       <AiShortcuts show={await aiEnabled(db)}>
         <AiTool tool="focus" label="What should I do first?" />
-        <AiTool tool="standup" label="Write my stand-up" />
       </AiShortcuts>
 
       <GettingStarted steps={steps} />

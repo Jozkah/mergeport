@@ -52,6 +52,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     db.project.findMany({ where: projectWhere(viewer), select: { id: true, name: true }, orderBy: { name: "asc" }, take: 200 }),
     db.repository.findMany({ where: repoWhere(viewer), select: { id: true, fullName: true }, orderBy: { fullName: "asc" }, take: 300 }),
   ]);
+  // What the AI has waiting for you: suggested tasks, and requests from AI apps to approve. Shown on the sidebar row and the top-bar button.
+  const [aiSuggestions, aiRequests] = isDemo() ? [0, 0] : await Promise.all([db.aiSuggestion.count({ where: { state: "NEW" } }), pendingCount(db)]);
   const counts = {
     needsMyReview: q.needsMyReview.length,
     needsTeam: q.needsTeamReview.length,
@@ -60,6 +62,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     blocked: q.blocked.length,
     inbox: (await inbox(db, viewer, { queues: q })).unread,
     digest: await unreadDigestCount(db, viewer.userId),
+    ai: aiSuggestions + aiRequests,
     tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login.toLowerCase(), column: { key: { not: "done" } } }] } }),
   };
   const last = lastSync._max.lastSyncedAt;
@@ -106,7 +109,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
   const wsList = isDemo() ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId.toString());
   const workspaces = wsList && { ...wsList, switchable };
-  const aiQuick = isDemo() || !(await getAiView(db)).saved ? null : <AiQuick pending={(await db.aiSuggestion.count({ where: { state: "NEW" } })) + (await pendingCount(db))} />;
+  const aiQuick = isDemo() || !(await getAiView(db)).saved ? null : <AiQuick suggestions={aiSuggestions} requests={aiRequests} />;
   const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: ws.name };
   return (
     <TooltipProvider>

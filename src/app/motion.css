@@ -195,7 +195,7 @@
 .sheet[data-state="open"] { animation: sheet-in var(--duration-fast) var(--ease-smooth-out); }
 .sheet[data-state="closed"] { animation: sheet-out var(--duration-quick) var(--ease-smooth-out) forwards; }
 .drawer[data-state="open"] { animation: drawer-in var(--duration-slow) var(--ease-smooth-out); }
-.drawer[data-state="closed"] { animation: drawer-out var(--duration-medium) var(--ease-smooth-out) forwards; }
+.drawer[data-state="closed"] { animation: drawer-out var(--duration-quick) var(--ease-smooth-out) forwards; } /* closes fast: the page and focus are held until it is gone */
 /* Navigation drawer on small screens: it comes from the side it lives on, and closes quickly. */
 .drawer-left[data-state="open"] { animation: drawer-left-in var(--duration-fast) var(--ease-smooth-out); }
 .drawer-left[data-state="closed"] { animation: drawer-left-out var(--duration-quick) var(--ease-smooth-out) forwards; }
@@ -425,4 +425,28 @@ details[open] > summary > .chevron {
   .tilt-tile { transition: none; }
   .empty-in > * { animation-delay: 0ms; }
   .spot-card::after { display: none; }
+}
+
+/* ---------- AI surfaces ---------- */
+/* A row that was acted on (created, dismissed, approved) folds away instead of vanishing. --row-gap cancels the list's gap. */
+.row-leave { display: grid; grid-template-rows: 1fr; animation: row-leave var(--duration-fast) var(--ease-smooth-out) forwards; pointer-events: none; }
+.row-leave > * { min-height: 0; overflow: hidden; }
+@keyframes row-leave {
+  from { opacity: 1; grid-template-rows: 1fr; margin-bottom: 0; }
+  to { opacity: 0; grid-template-rows: 0fr; margin-bottom: calc(var(--row-gap, 12px) * -1); }
+}
+/* The spinner turning into a check is a state change: a quick cross-fade with a little scale. */
+.icon-swap { display: inline-flex; animation: icon-swap var(--duration-fast) var(--ease-in-out); }
+@keyframes icon-swap {
+  from { opacity: 0; transform: scale(var(--scale-small)); filter: blur(var(--blur-small)); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+/* The bar that says the AI is pointing at items rises in once. */
+.glow-bar { animation: rise-in-small var(--duration-fast) var(--ease-smooth-out); }
+/* Dropdown lists (Select, action menus): grow from the trigger, leave a little faster. */
+.select-pop[data-state="open"] { transform-origin: var(--radix-select-content-transform-origin, top); animation: pop-in var(--duration-fast) var(--ease-smooth-out); }
+.select-pop[data-state="closed"] { animation: pop-out var(--duration-quick) var(--ease-smooth-out) forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .row-leave { animation-name: fade-out; }
+  .icon-swap { animation-name: fade-in; }
 }
