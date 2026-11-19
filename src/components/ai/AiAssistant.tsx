@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Progress, useAiJob } from "@/components/ai/progress";
 import { DraftTasks } from "@/components/tasks/AiTasks";
+import { AiTool } from "@/components/ai/AiTool";
 import { ReviewTab, type Suggestion } from "@/components/ai/ReviewTab";
 import { Panel } from "@/components/ui/primitives";
 import { Sparkles } from "@/components/ui/icons";
@@ -14,7 +15,7 @@ type Turn = { q: string; a: string; model: string; sources: Source[] } | { q: st
 
 /** Two things in one place: ask about a pull request or issue, or turn notes into tasks. */
 export function AiAssistant({ configured, projects, defaultProjectId, suggestions, summary, lastRun, autopilot }: { configured: boolean; projects: P[]; defaultProjectId: string; suggestions: Suggestion[]; summary: string | null; lastRun: string | null; autopilot: "off" | "suggest" | "create" }) {
-  const [mode, setMode] = useState<"review" | "ask" | "tasks">(suggestions.length > 0 ? "review" : "ask");
+  const [mode, setMode] = useState<"review" | "ask" | "tasks" | "brief">(suggestions.length > 0 ? "review" : "ask");
   const [q, setQ] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const job = useAiJob();
@@ -40,12 +41,20 @@ export function AiAssistant({ configured, projects, defaultProjectId, suggestion
   return (
     <div className="max-w-2xl">
       <div role="tablist" aria-label="What to do" className="mb-3 flex gap-1.5">
-        {([["review", suggestions.length ? `Review (${suggestions.length})` : "Review"], ["ask", "Ask a question"], ["tasks", "Draft tasks"]] as const).map(([k, label]) => (
+        {([["review", suggestions.length ? `Review (${suggestions.length})` : "Review"], ["ask", "Ask a question"], ["tasks", "Draft tasks"], ["brief", "Briefings"]] as const).map(([k, label]) => (
           <button key={k} type="button" role="tab" aria-selected={mode === k} className={`btn ${mode === k ? "bg-faint font-medium text-ink" : "btn-quiet"}`} onClick={() => setMode(k)}>{label}</button>
         ))}
       </div>
       {mode === "review" ? (
         <ReviewTab initial={suggestions} summary={summary} lastRun={lastRun} autopilot={autopilot} />
+      ) : mode === "brief" ? (
+        <Panel title="Briefings" icon={Sparkles} id="ai-brief">
+          <div className="flex flex-col gap-5 p-4">
+            <AiTool tool="standup" label="Write my stand-up" hint="Yesterday, today and what is blocked, from your latest digest and what is waiting on you." />
+            <AiTool tool="digest" label="Brief me on my latest digest" hint="A short morning summary of your daily digest." />
+            <p className="text-[12px] text-ink-3">For one pull request or issue, open it and press &ldquo;Where does this stand?&rdquo;.</p>
+          </div>
+        </Panel>
       ) : mode === "tasks" ? (
         <Panel title="Draft tasks" icon={Sparkles} id="ai-tasks">
           {projects.length === 0 ? (

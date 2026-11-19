@@ -9,6 +9,9 @@ import { EmptyState, PageHeader } from "@/components/ui/primitives";
 import { ArrowLeft, ArrowRight, Newspaper } from "@/components/ui/icons";
 import { DigestActions } from "@/components/digest/DigestActions";
 import { DigestView } from "@/components/digest/DigestView";
+import { AiTool } from "@/components/ai/AiTool";
+import { getAiView } from "@/lib/services/ai";
+import { isDemo } from "@/lib/env";
 
 export const metadata = { title: "Daily digest" };
 export const dynamic = "force-dynamic";
@@ -49,6 +52,12 @@ export default async function DigestPage({ searchParams }: { searchParams: Promi
           </>
         }
       />
+      {!isDemo() && (await getAiView(db)).saved && (
+        <div className="mb-5 flex flex-wrap gap-x-4 gap-y-3">
+          <AiTool tool="digest" day={digest.day} label="Brief me" hint="A short summary of this digest, from the AI address in Settings." />
+          <AiTool tool="standup" label="Write my stand-up" />
+        </div>
+      )}
       <DigestView payload={digest.payload} />
     </>
   );
