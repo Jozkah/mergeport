@@ -9,11 +9,12 @@ import { listAiModelsAction, saveAiSettingsAction } from "@/app/ai-actions";
  * Address, key and model of an OpenAI-compatible endpoint. The model list is asked from the endpoint on request, because
  * the models behind it change over time; a name can also be typed when the endpoint does not list it.
  */
-export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; hasKey: boolean; model: string | null }) {
+export function AiSettingsPanel({ baseUrl, hasKey, model, autopilot }: { baseUrl: string; hasKey: boolean; model: string | null; autopilot: "off" | "suggest" | "create" }) {
   const form = useRef<HTMLDivElement>(null);
   const [models, setModels] = useState<string[]>([]);
   const [loaded, setLoaded] = useState<string[]>([]);
   const [pref, setPref] = useState(model ?? "");
+  const [level, setLevel] = useState<string>(autopilot);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
 
@@ -65,6 +66,15 @@ export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; h
               {note && <span role="status" className={`text-[12.5px] ${note.ok ? "text-ok" : "text-blocked"}`}>{note.text}</span>}
             </div>
             <p className="mt-1 text-[12px] text-ink-3">Automatic uses a model the endpoint already has loaded, so it never makes the server swap models; if the endpoint does not say which is loaded, it keeps the one that answered last. A preferred model is used whenever it is offered, even if that means a swap.</p>
+          </div>
+          <div>
+            <label className="label" htmlFor="ai-autopilot">Autopilot</label>
+            <Select id="ai-autopilot" name="autopilot" className="select" value={level} onChange={(e) => setLevel(e.target.value)}>
+              <option value="off">Off: nothing runs by itself</option>
+              <option value="suggest">Suggest: a review each morning leaves tasks for you to accept</option>
+              <option value="create">Create: also makes tasks for clear cases (a review waiting on you, changes requested)</option>
+            </Select>
+            <p className="mt-1 text-[12px] text-ink-3">While Mergeport is open, once a day after 7:00 it reads your review queues, blocked pull requests, tasks and failing repositories and sends their titles and status to the address above. It only ever writes local tasks and suggestions, never anything on GitHub, and never repeats a suggestion within two weeks.</p>
           </div>
         </div>
       </ActionForm>

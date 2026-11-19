@@ -16,6 +16,7 @@ import { setStatus, syncFork, syncItem, syncRepository } from "@/lib/sync/reposi
 export const SOURCE_BUDGET_KEY = "source";
 export const RECONCILE_EVERY_MS = 15 * 60_000;
 export const DIGEST_EVERY_MS = 10 * 60_000;
+export const AI_AUTOPILOT_EVERY_MS = 30 * 60_000;
 
 export async function guardSourceBudget() {
   const rl = await db.rateLimitState.findUnique({ where: { key: SOURCE_BUDGET_KEY } });
@@ -95,6 +96,11 @@ export const handlers: Record<string, Handler> = {
   "digest.daily": (async () => {
     const { runDailyDigest } = await import("@/lib/services/digest");
     if ((await runDailyDigest(db)) === "generated") (await import("@/lib/local/runtime")).notifyChange("state");
+  }) as Handler,
+  // Sends to the AI endpoint set in Settings, and only when the autopilot there is on. Writes local tasks and suggestions, never GitHub.
+  "ai.autopilot": (async () => {
+    const [{ runAutopilot }, { openVault }, { keyFileFor }, { resolveDbFile }] = await Promise.all([import("@/lib/services/ai-review"), import("@/lib/hub/session-vault"), import("@/lib/hub/ports-impl"), import("@/lib/db")]);
+    if ((await runAutopilot(db, openVault(keyFileFor(resolveDbFile())))) === "done") (await import("@/lib/local/runtime")).notifyChange("state");
   }) as Handler,
 };
 

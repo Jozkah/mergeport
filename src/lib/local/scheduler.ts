@@ -3,7 +3,7 @@ import { isDemo } from "@/lib/env";
 import { ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs";
 import { checkProfile } from "@/lib/local/identity";
 import { pollMode } from "@/lib/local/activity";
-import { DIGEST_EVERY_MS, RECONCILE_EVERY_MS, handlers } from "@/lib/local/handlers";
+import { AI_AUTOPILOT_EVERY_MS, DIGEST_EVERY_MS, RECONCILE_EVERY_MS, handlers } from "@/lib/local/handlers";
 import { startRepoWatch, stopRepoWatch } from "@/lib/local/repo-watch";
 import { getEngine, notifyChange } from "@/lib/local/runtime";
 import { recoverDiscovery, shutdownDiscovery, tickDiscovery } from "@/lib/local/discovery-jobs";
@@ -88,6 +88,7 @@ export async function coordinate(now = Date.now()): Promise<number> {
   await tickDiscovery(); // retries of cached GitHub lists that are due; bounded, deduplicated, never awaited on a page
   await paceReconcile(mode, now, g.__mpScheduler?.startedAt ?? now);
   await ensureRecurring(db, { type: "digest.daily", key: "digest", intervalMs: DIGEST_EVERY_MS }); // due at once on the first tick after start: that is the catch-up
+  await ensureRecurring(db, { type: "ai.autopilot", key: "ai-autopilot", intervalMs: AI_AUTOPILOT_EVERY_MS }); // a no-op unless the autopilot is on
   await reclaimStuck(db);
   return polled;
 }

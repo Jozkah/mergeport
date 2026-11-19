@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Progress, useAiJob } from "@/components/ai/progress";
 import { DraftTasks } from "@/components/tasks/AiTasks";
+import { ReviewTab, type Suggestion } from "@/components/ai/ReviewTab";
 import { Panel } from "@/components/ui/primitives";
 import { Sparkles } from "@/components/ui/icons";
 
@@ -12,8 +13,8 @@ type Source = { label: string; href: string | null };
 type Turn = { q: string; a: string; model: string; sources: Source[] } | { q: string; error: string };
 
 /** Two things in one place: ask about a pull request or issue, or turn notes into tasks. */
-export function AiAssistant({ configured, projects, defaultProjectId }: { configured: boolean; projects: P[]; defaultProjectId: string }) {
-  const [mode, setMode] = useState<"ask" | "tasks">("ask");
+export function AiAssistant({ configured, projects, defaultProjectId, suggestions, summary, lastRun, autopilot }: { configured: boolean; projects: P[]; defaultProjectId: string; suggestions: Suggestion[]; summary: string | null; lastRun: string | null; autopilot: "off" | "suggest" | "create" }) {
+  const [mode, setMode] = useState<"review" | "ask" | "tasks">(suggestions.length > 0 ? "review" : "ask");
   const [q, setQ] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const job = useAiJob();
@@ -39,11 +40,13 @@ export function AiAssistant({ configured, projects, defaultProjectId }: { config
   return (
     <div className="max-w-2xl">
       <div role="tablist" aria-label="What to do" className="mb-3 flex gap-1.5">
-        {([["ask", "Ask a question"], ["tasks", "Draft tasks"]] as const).map(([k, label]) => (
+        {([["review", suggestions.length ? `Review (${suggestions.length})` : "Review"], ["ask", "Ask a question"], ["tasks", "Draft tasks"]] as const).map(([k, label]) => (
           <button key={k} type="button" role="tab" aria-selected={mode === k} className={`btn ${mode === k ? "bg-faint font-medium text-ink" : "btn-quiet"}`} onClick={() => setMode(k)}>{label}</button>
         ))}
       </div>
-      {mode === "tasks" ? (
+      {mode === "review" ? (
+        <ReviewTab initial={suggestions} summary={summary} lastRun={lastRun} autopilot={autopilot} />
+      ) : mode === "tasks" ? (
         <Panel title="Draft tasks" icon={Sparkles} id="ai-tasks">
           {projects.length === 0 ? (
             <p className="p-4 text-[13px] text-ink-3">Create a project first; tasks live in a project.</p>
