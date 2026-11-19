@@ -11,6 +11,8 @@ import type { Vault } from "@/lib/hub/session-vault";
 
 export const DEFAULT_AI_BASE_URL = "https://ai.kewaii.com/v1";
 const ID = "ai";
+// An older form posted the dropdown's stand-in for "nothing chosen" as the model name; read it as nothing chosen.
+const cleanModel = (m: string | null | undefined) => (m && m !== "__empty__" ? m : null);
 const LIST_TIMEOUT_MS = 30_000;
 // A model that is not loaded yet can take minutes to boot before it answers.
 const CHAT_TIMEOUT_MS = 300_000;
@@ -35,7 +37,7 @@ export function normalizeBaseUrl(raw: string): string {
 
 export async function getAiView(db: Db): Promise<AiView> {
   const row = await db.aiSettings.findUnique({ where: { id: ID } });
-  return { baseUrl: row?.baseUrl ?? DEFAULT_AI_BASE_URL, hasKey: !!row?.cipher, model: row?.model ?? null, saved: !!row, autopilot: row?.autopilot === "suggest" || row?.autopilot === "create" ? row.autopilot : "off", lastRunAt: row?.lastRunAt ?? null, lastSummary: row?.lastSummary ?? null };
+  return { baseUrl: row?.baseUrl ?? DEFAULT_AI_BASE_URL, hasKey: !!row?.cipher, model: cleanModel(row?.model), saved: !!row, autopilot: row?.autopilot === "suggest" || row?.autopilot === "create" ? row.autopilot : "off", lastRunAt: row?.lastRunAt ?? null, lastSummary: row?.lastSummary ?? null };
 }
 
 export async function loadAiConfig(db: Db, vault: Vault): Promise<AiConfig | null> {
@@ -49,13 +51,13 @@ export async function loadAiConfig(db: Db, vault: Vault): Promise<AiConfig | nul
       apiKey = null; // the key file changed: ask for the key again rather than fail
     }
   }
-  return { baseUrl: row.baseUrl, apiKey, model: row.model, lastModel: row.lastModel };
+  return { baseUrl: row.baseUrl, apiKey, model: cleanModel(row.model), lastModel: cleanModel(row.lastModel) };
 }
 
 /** An empty `apiKey` keeps the saved key; `clearKey` removes it. */
 export async function saveAiSettings(db: Db, vault: Vault, input: { baseUrl: string; apiKey?: string; clearKey?: boolean; model?: string; autopilot?: string }): Promise<void> {
   const baseUrl = normalizeBaseUrl(input.baseUrl || DEFAULT_AI_BASE_URL);
-  const model = input.model?.trim() || null;
+  const model = cleanModel(input.model?.trim());
   if (model && model.length > 200) throw new ValidationError("The model name is too long");
   const key = input.apiKey?.trim();
   const autopilot = input.autopilot === "off" || input.autopilot === "suggest" || input.autopilot === "create" ? input.autopilot : undefined;

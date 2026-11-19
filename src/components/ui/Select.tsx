@@ -59,8 +59,10 @@ export function Select({ children, className, id, name, defaultValue, value, onC
   const current = value !== undefined ? String(value) : inner;
   const label = all.find((o) => o.value === current)?.label ?? all[0]?.label;
   return (
+    <>
+      {/* Radix would post its internal stand-in for an empty value; this posts what the person chose. */}
+      {name ? <input type="hidden" name={name} value={current} disabled={disabled} /> : null}
     <S.Root
-      name={name}
       value={enc(current)}
       required={required}
       disabled={disabled}
@@ -92,5 +94,6 @@ export function Select({ children, className, id, name, defaultValue, value, onC
         </S.Content>
       </S.Portal>
     </S.Root>
+    </>
   );
 }

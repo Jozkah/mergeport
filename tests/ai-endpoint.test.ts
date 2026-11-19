@@ -169,3 +169,21 @@ describe("progress steps", () => {
     ]);
   });
 });
+
+describe("the dropdown's stand-in for nothing chosen", () => {
+  it("is read as no preferred model", async () => {
+    const { saveAiSettings, loadAiConfig, getAiView } = await import("@/lib/services/ai");
+    const { freshSeed } = await import("./helpers");
+    const { openVault } = await import("@/lib/hub/session-vault");
+    const path = await import("node:path");
+    const os = await import("node:os");
+    const fs = await import("node:fs");
+    const { db } = await freshSeed();
+    const vault = openVault(path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ai-empty-")), "key"));
+    await saveAiSettings(db, vault, { baseUrl: "https://ai.example.com/v1", apiKey: "k", model: "__empty__" });
+    expect((await getAiView(db)).model).toBeNull();
+    expect((await loadAiConfig(db, vault))?.model).toBeNull();
+    await db.aiSettings.update({ where: { id: "ai" }, data: { model: "__empty__" } }); // a row saved by the older form
+    expect((await getAiView(db)).model).toBeNull();
+  });
+});
