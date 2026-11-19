@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { Select } from "@/components/ui/Select";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { listAiModelsAction, saveAiSettingsAction } from "@/app/ai-actions";
 
@@ -11,6 +12,7 @@ import { listAiModelsAction, saveAiSettingsAction } from "@/app/ai-actions";
 export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; hasKey: boolean; model: string | null }) {
   const form = useRef<HTMLDivElement>(null);
   const [models, setModels] = useState<string[]>([]);
+  const [pref, setPref] = useState(model ?? "");
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
 
@@ -24,6 +26,14 @@ export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; h
         setNote({ ok: true, text: r.message ?? "" });
       } else setNote({ ok: false, text: r.error });
     });
+
+  // With a key saved, ask the endpoint what it offers as soon as the panel opens, so the list is ready.
+  useEffect(() => {
+    if (hasKey) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const gone = pref && models.length > 0 && !models.includes(pref);
 
   return (
     <div className="p-4">
@@ -42,8 +52,11 @@ export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; h
           </div>
           <div>
             <label className="label" htmlFor="ai-model">Preferred model (optional)</label>
-            <input id="ai-model" name="model" className="input" defaultValue={model ?? ""} list="ai-models" autoComplete="off" spellCheck={false} placeholder="Automatic" />
-            <datalist id="ai-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
+            <Select id="ai-model" name="model" className="select" value={pref} onChange={(e) => setPref(e.target.value)}>
+              <option value="">Automatic</option>
+              {gone || (pref && models.length === 0) ? <option value={pref}>{pref}{gone ? " (not offered now)" : ""}</option> : null}
+              {models.map((m) => <option key={m} value={m}>{m}</option>)}
+            </Select>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button type="button" className="btn" onClick={load} disabled={pending}>{pending ? "Asking…" : "Load models"}</button>
               {note && <span role="status" className={`text-[12.5px] ${note.ok ? "text-ok" : "text-blocked"}`}>{note.text}</span>}
