@@ -16,6 +16,8 @@ import { planningWhere, unreadNotificationCount } from "@/lib/services/queries";
 import { formatInstant } from "@/lib/format";
 import { MobileNav, Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
+import { AiQuick } from "@/components/ai/AiQuick";
+import { getAiView } from "@/lib/services/ai";
 import { LiveRefresh } from "@/components/sync/LiveRefresh";
 import { SectionMain } from "@/components/shell/SectionMain";
 import { ContextMenuProvider } from "@/components/ui/ContextMenu";
@@ -102,6 +104,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
   const wsList = isDemo() ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId.toString());
   const workspaces = wsList && { ...wsList, switchable };
+  const aiQuick = isDemo() || !(await getAiView(db)).saved ? null : <AiQuick pending={await db.aiSuggestion.count({ where: { state: "NEW" } })} />;
   const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: ws.name };
   return (
     <TooltipProvider>
@@ -119,7 +122,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <DesktopNotifier />
           <Shortcuts />
           <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
-          <Topbar workspaces={workspaces} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
+          <Topbar aiQuick={aiQuick} workspaces={workspaces} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "mismatch" && (
           <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">

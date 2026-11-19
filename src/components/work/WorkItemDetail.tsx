@@ -21,6 +21,9 @@ import { safeReturnTo } from "@/lib/http";
 import { formatDuration, formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { checkProfile } from "@/lib/local/identity";
+import { AiTool } from "@/components/ai/AiTool";
+import { getAiView } from "@/lib/services/ai";
+import { isDemo } from "@/lib/env";
 import { Avatar, Banner, DemoBadge, EmptyState, LabelChip, Mono, Panel, SimplePill, StatusPill, Time } from "@/components/ui/primitives";
 import { ArrowLeft, Building2, CircleAlert, Eye, ExternalLink, GitCommitHorizontal, GitMerge, GitPullRequest, CircleDot, Hourglass, MessageSquare, User } from "@/components/ui/icons";
 import { commentAction, manualWaitingAction, requestReviewAction, resolveWaitingAction, submitReviewAction } from "@/app/actions";
@@ -230,6 +233,8 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         </div>
         {labels.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{labels.map((l) => <LabelChip key={l.name} {...l} />)}</div>}
       </header>
+
+      {!isDemo() && (await getAiView(db)).saved && <AiTool className="mb-5" tool="item" id={item.id} label="Where does this stand?" hint="AI summary of the discussion, what blocks it and the next step." />}
 
       {isPr && readiness && item.state === "OPEN" && (
         <div className="mb-5">

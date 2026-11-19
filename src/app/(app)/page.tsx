@@ -1,3 +1,6 @@
+import { AiShortcuts } from "@/components/ai/AiShortcuts";
+import { AiTool } from "@/components/ai/AiTool";
+import { aiEnabled } from "@/lib/services/ai";
 import { readScope, scopeKey } from "@/lib/scope";
 import Link from "next/link";
 import { requireViewer } from "@/lib/authz-page";
@@ -52,6 +55,11 @@ export default async function Overview() {
         <h1 className="text-[24px] font-medium leading-8 tracking-[-0.01em]">Hello, {user.name?.split(" ")[0] ?? user.login}</h1>
         <p className="mt-1 text-[13px] text-ink-3">What needs you, and what is waiting on someone else, across the repositories you can see.</p>
       </div>
+
+      <AiShortcuts show={await aiEnabled(db)}>
+        <AiTool tool="focus" label="What should I do first?" />
+        <AiTool tool="standup" label="Write my stand-up" />
+      </AiShortcuts>
 
       <GettingStarted steps={steps} />
 

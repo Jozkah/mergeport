@@ -13,7 +13,8 @@ import { Sparkles } from "@/components/ui/icons";
 export const metadata = { title: "AI assistant" };
 export const dynamic = "force-dynamic";
 
-export default async function AiPage() {
+export default async function AiPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const { tab } = await searchParams;
   const { viewer } = await requireViewer();
   if (isDemo()) {
     return (
@@ -32,7 +33,7 @@ export default async function AiPage() {
         subtitle="Let it review everything for you, ask about a pull request or issue, or turn notes into tasks."
         help={<>Answers use only what Mergeport has stored for repositories you can see, and link the items they come from. The assistant never changes anything by itself. Which model answers is chosen from the endpoint each time (<Link href="/settings#ai" className="underline">Settings</Link>).</>}
       />
-      <AiAssistant configured={ai.saved} projects={projects} defaultProjectId={projects[0]?.id ?? ""} suggestions={await listSuggestions(db)} summary={ai.lastSummary} lastRun={ai.lastRunAt ? formatInstant(ai.lastRunAt, viewer.timezone) : null} autopilot={ai.autopilot} />
+      <AiAssistant configured={ai.saved} projects={projects} defaultProjectId={projects[0]?.id ?? ""} suggestions={await listSuggestions(db)} summary={ai.lastSummary} lastRun={ai.lastRunAt ? formatInstant(ai.lastRunAt, viewer.timezone) : null} autopilot={ai.autopilot} initialTab={tab === "review" || tab === "ask" || tab === "tasks" || tab === "brief" ? tab : undefined} />
     </>
   );
 }
