@@ -73,7 +73,7 @@ describe("tools", () => {
     const seen: { system?: string; user?: string } = {};
     const r = await runTool(db, a, cfg, "focus", {}, { f: fake("First: review x.", seen) });
     expect(r).toMatchObject({ title: "What to do first", text: "First: review x." });
-    expect(seen.system).toMatch(/first three things/);
+    expect(seen.system).toMatch(/at most three/);
     expect(seen.user).toContain(`@${a.login}`);
   });
 
@@ -88,5 +88,70 @@ describe("tools", () => {
     const visibleToB = new Set((await listWorkItems(db, b, { state: "ALL", pageSize: 100 })).rows.map((x) => x.id));
     const hidden = (await listWorkItems(db, admin, { state: "ALL", pageSize: 100 })).rows.find((x) => !visibleToB.has(x.id))!;
     await expect(runTool(db, b, cfg, "item", { id: hidden.id }, { f: fake("x") })).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe("guiding the page", () => {
+  it("turns the AI's steps into glowing links and ignores anything it invented", async () => {
+    const { parseFocus } = await import("@/lib/services/ai-tools");
+    const { buildSnapshot } = await import("@/lib/services/ai-review");
+    const { db, a } = S;
+    const snap = await buildSnapshot(db, a);
+    const keys = [...snap.refs.keys()];
+    expect(keys.length).toBeGreaterThan(1);
+    const raw = JSON.stringify({ summary: " Start with the review. ", steps: [{ ref: keys[0].toLowerCase(), why: "Oldest." }, { ref: "R99", why: "invented" }, { ref: keys[0], why: "dup" }, { ref: keys[1], why: "Next." }, { ref: keys[2] ?? keys[1], why: "x" }, { ref: keys[3] ?? keys[0], why: "y" }] });
+    const g = parseFocus(raw, snap)!;
+    expect(g.summary).toBe("Start with the review.");
+    expect(g.steps.length).toBeLessThanOrEqual(3);
+    expect(g.steps[0]).toMatchObject({ label: snap.refs.get(keys[0])!.label, href: snap.refs.get(keys[0])!.href, why: "Oldest." });
+    expect(g.steps[0].view).toMatch(/^\/attention\?queue=(needs-me|changes|blocked)$/);
+    expect(new Set(g.steps.map((s) => s.href)).size).toBe(g.steps.length);
+    expect(parseFocus("not json at all", snap)).toBeNull();
+    expect(parseFocus(JSON.stringify({ steps: [] }), snap)).toBeNull(); // no summary: shown as plain text instead
+  });
+
+  it("focus returns steps when the model answers with JSON, and plain text when it does not", async () => {
+    const { db, a } = S;
+    const { buildSnapshot } = await import("@/lib/services/ai-review");
+    const key = [...(await buildSnapshot(db, a)).refs.keys()][0];
+    const json = await runTool(db, a, cfg, "focus", {}, { f: fake(JSON.stringify({ summary: "Do this first.", steps: [{ ref: key, why: "Waiting." }] })) });
+    expect(json.text).toBe("Do this first.");
+    expect(json.steps).toHaveLength(1);
+    const plain = await runTool(db, a, cfg, "focus", {}, { f: fake("Just do the review.") });
+    expect(plain.text).toBe("Just do the review.");
+    expect(plain.steps).toBeUndefined();
+  });
+});
+
+describe("whose work the snapshot lists", () => {
+  it("lists blocked pull requests only when they involve the person, and counts the rest as not theirs", async () => {
+    const { buildSnapshot, involvesMe } = await import("@/lib/services/ai-review");
+    const { attention } = await import("@/lib/services/queries");
+    const { db } = S;
+    let sawWatched = false;
+    for (const v of [S.admin, S.a, S.b]) {
+      const att = await attention(db, v);
+      const text = (await buildSnapshot(db, v)).text;
+      const notMine = att.blocked.filter((d) => !involvesMe(d, v.login));
+      for (const d of notMine) expect(text).not.toContain(`${d.item.repository.fullName}#${d.item.number} "`);
+      if (notMine.length) {
+        sawWatched = true;
+        expect(text).toMatch(/Not yours: \d+ other pull request/);
+      }
+      for (const d of att.blocked.filter((x) => involvesMe(x, v.login)).slice(0, 5)) expect(text).toContain(`${d.item.repository.fullName}#${d.item.number} "`);
+    }
+    expect(sawWatched).toBe(true);
+  });
+
+  it("an item counts as the person's only when they wrote it, are assigned, or were asked to review", async () => {
+    const { involvesMe } = await import("@/lib/services/ai-review");
+    const base = { authorLogin: "carol", assigneeLogins: "|dave|", reviewRequests: [{ kind: "USER", reviewerRef: "Erin", removedAt: null }, { kind: "USER", reviewerRef: "frank", removedAt: new Date() }, { kind: "EXTERNAL_ROLE", reviewerRef: "gina", removedAt: null }] };
+    const d = (over = {}) => ({ item: { ...base, ...over } }) as never;
+    expect(involvesMe(d(), "Carol")).toBe(true); // author, case-insensitive
+    expect(involvesMe(d(), "dave")).toBe(true); // assigned
+    expect(involvesMe(d(), "erin")).toBe(true); // review requested
+    expect(involvesMe(d(), "frank")).toBe(false); // the request was withdrawn
+    expect(involvesMe(d(), "gina")).toBe(false); // a role, not a person
+    expect(involvesMe(d(), "mallory")).toBe(false); // only watching
   });
 });

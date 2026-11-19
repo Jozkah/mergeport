@@ -17,6 +17,7 @@ import { formatInstant } from "@/lib/format";
 import { MobileNav, Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
 import { AiQuick } from "@/components/ai/AiQuick";
+import { GlowManager } from "@/components/ai/GlowManager";
 import { getAiView } from "@/lib/services/ai";
 import { pendingCount } from "@/lib/services/ai-approvals";
 import { LiveRefresh } from "@/components/sync/LiveRefresh";
@@ -112,6 +113,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <ToastProvider>
     <div className="mx-auto flex min-h-dvh max-w-[3200px]">
       <LiveRefresh />
+      <GlowManager />
       <ContextMenuProvider />
       <SpotlightProvider />
       <SyncAnnouncer state={sync?.state ?? null} />
