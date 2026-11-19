@@ -5,7 +5,7 @@ import { CopyField } from "@/components/forms/CopyField";
  * person, and can create, change and list tasks and read stored pull request status. It cannot reach GitHub.
  */
 export function McpPanel({ launcher }: { launcher: string }) {
-  const q = (s: string) => (/\s/.test(s) ? `"${s}"` : s);
+  const q = (s: string) => `"${s}"`; // always quoted: backslashes and spaces survive PowerShell, cmd and Git Bash
   const desktop = JSON.stringify({ mcpServers: { mergeport: { command: "node", args: [launcher] } } });
   const opencode = JSON.stringify({ mcp: { mergeport: { type: "local", command: ["node", launcher], enabled: true } } });
   return (
