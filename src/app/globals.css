@@ -673,6 +673,9 @@ select.select optgroup {
 .fit-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--fit-min, 560px)), 1fr));
+  /* Every item draws a right and bottom divider; the list overhangs by 1px and clips it, so the last column and last row show no stray line beside the panel edge. */
+  margin: 0 -1px -1px 0;
+  clip-path: inset(0 1px 1px 0);
 }
 .fit-list > li {
   border-bottom: 1px solid var(--color-line) !important;
