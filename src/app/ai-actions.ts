@@ -8,11 +8,10 @@ import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
 import { keyFileFor } from "@/lib/hub/ports-impl";
 import { openVault } from "@/lib/hub/session-vault";
-import { assigneeCandidates, createTask } from "@/lib/services/tasks";
-import { listProjects } from "@/lib/services/queries";
-import { todayIn } from "@/lib/domain/planning";
-import { gatherFacts } from "@/lib/services/ai-facts";
-import { answerQuestion, draftTasks, listModelInfo, rememberModel, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_AI_BASE_URL, type TaskDraft } from "@/lib/services/ai";
+import { createTask } from "@/lib/services/tasks";
+import { listModelInfo, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_AI_BASE_URL, type TaskDraft } from "@/lib/services/ai";
+
+// Drafting tasks and answering questions are streamed from /api/ai/draft and /api/ai/ask so the page can show progress.
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const vault = () => openVault(keyFileFor(resolveDbFile()));
@@ -47,23 +46,6 @@ export async function listAiModelsAction(fd: FormData): Promise<ActionResult> {
   });
 }
 
-/** Drafts tasks from plain text. Nothing is created here: the person reviews the drafts first. */
-export async function draftTasksAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireViewer();
-    noDemo();
-    const cfg = await loadAiConfig(db, vault());
-    if (!cfg) throw new ValidationError("Set up the AI endpoint in Settings first.");
-    const projects = (await listProjects(db, viewer)).map((p) => ({ id: p.id, name: p.name }));
-    const wanted = str(fd, "projectId");
-    const ordered = [...projects.filter((p) => p.id === wanted), ...projects.filter((p) => p.id !== wanted)];
-    const people = [...new Set((await Promise.all(projects.map((p) => assigneeCandidates(db, viewer, p.id)))).flat())];
-    const { drafts, model } = await draftTasks(cfg, str(fd, "text"), { projects: ordered, people, today: todayIn(viewer.timezone), me: viewer.login });
-    await rememberModel(db, model);
-    return { ok: true, message: `${drafts.length} draft${drafts.length === 1 ? "" : "s"}`, data: { drafts, model } };
-  });
-}
-
 /** Creates the drafts the person kept. Each goes through the same checks as a task typed by hand. */
 export async function createDraftsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
@@ -91,20 +73,5 @@ export async function createDraftsAction(fd: FormData): Promise<ActionResult> {
     }
     for (const p of ["/tasks", "/planning", "/attention"]) revalidatePath(p);
     return { ok: true, message: `Created ${made} task${made === 1 ? "" : "s"}` };
-  });
-}
-
-/** Answers a short question about pull requests and issues from what is stored here. The linked items are the evidence. */
-export async function askAiAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireViewer();
-    noDemo();
-    const cfg = await loadAiConfig(db, vault());
-    if (!cfg) throw new ValidationError("Set up the AI endpoint in Settings first.");
-    const question = str(fd, "question");
-    const facts = await gatherFacts(db, viewer, question);
-    const { answer, model } = await answerQuestion(cfg, question, facts);
-    await rememberModel(db, model);
-    return { ok: true, message: "Answered", data: { answer, model, sources: facts.map((x) => ({ label: x.label, href: x.href })) } };
   });
 }

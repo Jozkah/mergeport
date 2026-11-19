@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Sheet, useSheetClose } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/Select";
 import { Wand2 } from "@/components/ui/icons";
-import { createDraftsAction, draftTasksAction } from "@/app/ai-actions";
+import { createDraftsAction } from "@/app/ai-actions";
+import { Progress, useAiJob } from "@/components/ai/progress";
 import type { TaskDraft } from "@/lib/services/ai";
 
 type P = { id: string; name: string };
@@ -31,25 +32,22 @@ export function DraftTasks({ projects, defaultProjectId, configured }: { project
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const job = useAiJob();
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? "";
 
   if (!configured) {
     return <p className="text-[13px] text-ink-2">Add the AI address and key in <a className="underline" href="/settings#ai">Settings</a> first.</p>;
   }
 
-  const draft = () =>
-    start(async () => {
-      setError(null);
-      const fd = new FormData();
-      fd.set("text", text);
-      fd.set("projectId", projectId);
-      const r = await draftTasksAction(fd);
-      if (!r.ok) return setError(r.error);
-      const list = (r.data?.drafts as TaskDraft[]) ?? [];
-      setDrafts(list);
-      setModel(String(r.data?.model ?? ""));
-      setKeep(list.map(() => true));
-    });
+  const draft = async () => {
+    setError(null);
+    setDone(null);
+    const r = await job.run<{ drafts: TaskDraft[]; model: string }>("/api/ai/draft", { text, projectId });
+    if (!r.ok) return setError(r.error);
+    setDrafts(r.data.drafts);
+    setModel(r.data.model);
+    setKeep(r.data.drafts.map(() => true));
+  };
 
   const create = () =>
     start(async () => {
@@ -106,7 +104,8 @@ export function DraftTasks({ projects, defaultProjectId, configured }: { project
       {done && <p role="status" className="text-[12.5px] text-ok">{done}. <a className="underline" href="/tasks">Open tasks</a></p>}
       {error && <p role="alert" className="text-[12.5px] text-blocked">{error}</p>}
       <p className="text-[12px] text-ink-3">Your text and the names of your projects and people are sent to the AI address you set in Settings.</p>
-      <div><button type="button" className="btn btn-primary" onClick={draft} disabled={pending || !text.trim()}>{pending ? "Drafting…" : "Draft tasks"}</button></div>
+      <div><button type="button" className="btn btn-primary" onClick={draft} disabled={job.running || !text.trim()}>{job.running ? "Working…" : "Draft tasks"}</button></div>
+      <Progress steps={job.steps} running={job.running} elapsed={job.elapsed} />
     </div>
   );
 }
