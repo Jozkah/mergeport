@@ -7,7 +7,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useId, useState, type ComponentType, type SVGProps } from "react";
 import * as D from "@radix-ui/react-dialog";
-import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, Newspaper, PanelLeft, RefreshCw, Route, Search, Settings, Users, X } from "@/components/ui/icons";
+import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, Newspaper, PanelLeft, RefreshCw, Route, Search, Settings, Sparkles, Users, X } from "@/components/ui/icons";
 import { Collapse } from "@/components/ui/Collapse";
 import { Metric } from "@/components/ui/Metric";
 
@@ -39,6 +39,7 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
     { href: "/issues", label: "Issues", icon: CircleDot },
     { href: "/planning", label: "Planning", icon: Kanban }, // the views (board, list, roadmap...) are tabs on the page
     { href: "/activity", label: "Activity", icon: Activity },
+    { href: "/ai", label: "AI assistant", icon: Sparkles },
   ];
   const source: Item[] = [
     { href: "/repositories", label: "Repositories", icon: FolderGit2 },

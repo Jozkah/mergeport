@@ -91,14 +91,14 @@ export function ActionForm({
   return (
     <form ref={ref} onSubmit={submit} className={className} aria-busy={pending}>
       {children}
-      <div ref={row} className="mt-3 flex flex-wrap items-center gap-2" onAnimationEnd={(e) => { if (e.target === e.currentTarget) e.currentTarget.classList.remove("shake"); }}>
+      <div ref={row} className="mt-3 flex flex-wrap items-center" onAnimationEnd={(e) => { if (e.target === e.currentTarget) e.currentTarget.classList.remove("shake"); }}>
         <button type="submit" className={submitClassName} disabled={pending} data-loading={pending} aria-label={submitAriaLabel}>
           {pending ? <LoaderCircle size={14} aria-hidden className="animate-spin" /> : null}
           {pending ? pendingLabel : submitLabel}
         </button>
-        {secondary}
+        {secondary ? <span className="ml-2 inline-flex flex-wrap items-center gap-2">{secondary}</span> : null}
         {/* Two permanent regions: a region that changes role in the same render it gains text is often not announced. */}
-        <p role="status" aria-live="polite" className="min-h-5 text-[12.5px]">
+        <p role="status" aria-live="polite" className="ml-2 min-h-5 text-[12.5px] empty:ml-0">
           {pending && slow && <span className="text-ink-3">Still working. This is taking longer than usual; your input is kept.</span>}
           {/* A neutral outcome (data.neutral) is information, not a success and not a failure: plain text colour, no check. */}
           {!pending && result?.ok && result.data?.neutral === true && (
