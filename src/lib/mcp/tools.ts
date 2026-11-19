@@ -2,11 +2,16 @@ import type { Db } from "@/lib/db";
 import type { Viewer } from "@/lib/authz/viewer";
 import { runMp } from "@/lib/cli/mp";
 import { gatherFacts } from "@/lib/services/ai-facts";
+import { propose, status } from "@/lib/services/ai-approvals";
+import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 
 /**
  * What an AI app may do through Mergeport's MCP server. Everything goes through the same code as the `mp` command and the web app
  * (same limits, same history entries), as the signed-in profile's own user. Nothing here reads or changes anything on GitHub:
  * tasks are planning records on this computer, and the lookup only reads what Mergeport already stored.
+ *
+ * The propose_* tools are the one way to ask for a change on GitHub, and they only ASK: the request waits in Mergeport, with its exact
+ * text, until the person approves it there. An AI app cannot approve its own request.
  */
 export type ToolCtx = { db: Db; viewer: Viewer; now?: () => Date };
 export type ToolResult = { text: string; isError?: boolean };
@@ -47,6 +52,7 @@ const TARGET = {
 } as const;
 
 export const TOOLS: Tool[] = [
+  // (the propose_* tools are appended below)
   {
     name: "mergeport_projects",
     description: "List the Mergeport projects you can see, with their repositories and board columns. Call this first when you are unsure which project or repository a task belongs to.",
@@ -139,3 +145,47 @@ export const TOOLS: Tool[] = [
     },
   },
 ];
+
+const QUEUED = (r: { id: string; summary: string }) =>
+  JSON.stringify({ queued: true, id: r.id, summary: r.summary, note: "Nothing was sent to GitHub. The person must approve this in Mergeport (AI assistant, Approvals). Tell them it is waiting. Use mergeport_action_status to see what happened." });
+
+async function guarded(fn: () => Promise<ToolResult>): Promise<ToolResult> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof ValidationError || e instanceof ForbiddenError) return { text: JSON.stringify({ error: e.message }), isError: true };
+    if (e instanceof NotFoundError) return { text: JSON.stringify({ error: "Not found, or you cannot see it." }), isError: true };
+    throw e;
+  }
+}
+
+const ITEM = { type: "string", description: "The pull request or issue: its Mergeport id, or text with the number and repository such as \"PR 22 from owner/repo\". Must match exactly one." } as const;
+
+export const PROPOSE_TOOLS: Tool[] = [
+  {
+    name: "mergeport_propose_comment",
+    description: "Ask to post a comment on a pull request or issue on GitHub, as the person. This only queues the request: the person approves the exact text in Mergeport before anything is sent.",
+    inputSchema: { type: "object", properties: { item: ITEM, body: { type: "string", description: "The comment text, as it should be posted." } }, required: ["item", "body"], additionalProperties: false },
+    run: (a, ctx) => guarded(async () => ({ text: QUEUED(await propose(ctx.db, ctx.viewer, { kind: "comment", item: String(a.item ?? ""), body: String(a.body ?? "") })) })),
+  },
+  {
+    name: "mergeport_propose_review_request",
+    description: "Ask to request a review on a pull request from GitHub users. This only queues the request: the person approves it in Mergeport before anything is sent.",
+    inputSchema: { type: "object", properties: { item: ITEM, users: { type: "array", items: { type: "string" }, description: "GitHub usernames to ask, one to ten." } }, required: ["item", "users"], additionalProperties: false },
+    run: (a, ctx) => guarded(async () => ({ text: QUEUED(await propose(ctx.db, ctx.viewer, { kind: "request-review", item: String(a.item ?? ""), users: Array.isArray(a.users) ? a.users.map(String) : [] })) })),
+  },
+  {
+    name: "mergeport_propose_review",
+    description: "Ask to submit a review on a pull request on GitHub as the person: COMMENT, REQUEST_CHANGES or APPROVE. This only queues the request: the person reads and approves it in Mergeport before anything is sent. Never describe an approval as done until the status says so.",
+    inputSchema: { type: "object", properties: { item: ITEM, event: { type: "string", enum: ["COMMENT", "REQUEST_CHANGES", "APPROVE"], description: "The kind of review." }, body: { type: "string", description: "The review text. Required except for APPROVE." } }, required: ["item", "event"], additionalProperties: false },
+    run: (a, ctx) => guarded(async () => ({ text: QUEUED(await propose(ctx.db, ctx.viewer, { kind: "review", item: String(a.item ?? ""), event: String(a.event ?? ""), body: a.body === undefined ? "" : String(a.body) })) })),
+  },
+  {
+    name: "mergeport_action_status",
+    description: "Where a queued request stands: PENDING (waiting for the person), DONE (sent), FAILED, REJECTED or EXPIRED (nobody decided within a day).",
+    inputSchema: { type: "object", properties: { id: { type: "string", description: "The id returned when the request was queued." } }, required: ["id"], additionalProperties: false },
+    run: (a, ctx) => guarded(async () => ({ text: JSON.stringify(await status(ctx.db, String(a.id ?? ""))) })),
+  },
+];
+
+TOOLS.push(...PROPOSE_TOOLS);

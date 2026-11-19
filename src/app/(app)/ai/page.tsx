@@ -4,6 +4,7 @@ import { requireViewer } from "@/lib/authz-page";
 import { isDemo } from "@/lib/env";
 import { getAiView } from "@/lib/services/ai";
 import { listSuggestions } from "@/lib/services/ai-review";
+import { listPending } from "@/lib/services/ai-approvals";
 import { formatInstant } from "@/lib/format";
 import { listProjects } from "@/lib/services/queries";
 import { AiAssistant } from "@/components/ai/AiAssistant";
@@ -33,7 +34,7 @@ export default async function AiPage({ searchParams }: { searchParams: Promise<{
         subtitle="Let it review everything for you, ask about a pull request or issue, or turn notes into tasks."
         help={<>Answers use only what Mergeport has stored for repositories you can see, and link the items they come from. The assistant never changes anything by itself. Which model answers is chosen from the endpoint each time (<Link href="/settings#ai" className="underline">Settings</Link>).</>}
       />
-      <AiAssistant configured={ai.saved} projects={projects} defaultProjectId={projects[0]?.id ?? ""} suggestions={await listSuggestions(db)} summary={ai.lastSummary} lastRun={ai.lastRunAt ? formatInstant(ai.lastRunAt, viewer.timezone) : null} autopilot={ai.autopilot} initialTab={tab === "review" || tab === "ask" || tab === "tasks" || tab === "brief" ? tab : undefined} />
+      <AiAssistant configured={ai.saved} projects={projects} defaultProjectId={projects[0]?.id ?? ""} suggestions={await listSuggestions(db)} summary={ai.lastSummary} lastRun={ai.lastRunAt ? formatInstant(ai.lastRunAt, viewer.timezone) : null} autopilot={ai.autopilot} initialTab={tab === "review" || tab === "ask" || tab === "tasks" || tab === "brief" || tab === "approvals" ? tab : undefined} approvals={(await listPending(db)).map((p) => ({ id: p.id, summary: p.summary, detail: p.detail, href: p.href, createdAt: p.createdAt.toISOString() }))} />
     </>
   );
 }

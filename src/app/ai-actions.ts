@@ -10,6 +10,7 @@ import { keyFileFor } from "@/lib/hub/ports-impl";
 import { openVault } from "@/lib/hub/session-vault";
 import { createTask } from "@/lib/services/tasks";
 import { acceptSuggestions, dismissSuggestions } from "@/lib/services/ai-review";
+import { approve, reject } from "@/lib/services/ai-approvals";
 import { listModelInfo, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_AI_BASE_URL, type TaskDraft } from "@/lib/services/ai";
 
 // Drafting tasks and answering questions are streamed from /api/ai/draft and /api/ai/ask so the page can show progress.
@@ -103,5 +104,24 @@ export async function createDraftsAction(fd: FormData): Promise<ActionResult> {
     }
     for (const p of ["/tasks", "/planning", "/attention"]) revalidatePath(p);
     return { ok: true, message: `Created ${made} task${made === 1 ? "" : "s"}` };
+  });
+}
+
+/** The person approves a request an AI app made: it is sent to GitHub now, as them. */
+export async function approveActionAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireViewer();
+    const r = await approve(db, viewer, str(fd, "id"));
+    for (const p of ["/ai", "/pull-requests", "/issues"]) revalidatePath(p);
+    return r.ok ? { ok: true, message: r.message } : { ok: false, error: r.message };
+  });
+}
+
+export async function rejectActionAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    await requireViewer();
+    const done = await reject(db, str(fd, "id"));
+    revalidatePath("/ai");
+    return done ? { ok: true, message: "Rejected. Nothing was sent." } : { ok: false, error: "That request is no longer waiting." };
   });
 }

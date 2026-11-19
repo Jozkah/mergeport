@@ -1333,3 +1333,21 @@ model AiSuggestion {
   @@index([state, createdAt])
   @@index([sourceKey])
 }
+
+/// A change on GitHub that an AI app (through the MCP server) asked for. It is only a request: nothing is sent until the person
+/// approves it in Mergeport, which then performs it as themselves. Local, never synchronised.
+model AiPendingAction {
+  id         String    @id @default(cuid())
+  /// comment | request-review | review
+  kind       String
+  workItemId String
+  summary    String
+  payload    Json
+  /// PENDING | DONE | FAILED | REJECTED
+  state      String    @default("PENDING")
+  result     String?
+  createdAt  DateTime  @default(now())
+  decidedAt  DateTime?
+
+  @@index([state, createdAt])
+}

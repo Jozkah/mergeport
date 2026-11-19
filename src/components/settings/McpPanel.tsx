@@ -11,7 +11,7 @@ export function McpPanel({ launcher }: { launcher: string }) {
   return (
     <div className="flex max-w-2xl flex-col gap-4 p-4 text-[13px]">
       <p className="text-ink-2">
-        Any app that supports MCP can then create or update tasks (&ldquo;add a task to review paymentgateway#22, high priority, assign kewai&rdquo;), list them, and look up pull request status. It acts as you, only on this computer, and never touches GitHub.
+        Any app that supports MCP can then create or update tasks (&ldquo;add a task to review paymentgateway#22, high priority, assign kewai&rdquo;), list them, and look up pull request status. It acts as you on this computer. It cannot change anything on GitHub by itself: a comment, review request or review it proposes waits in Mergeport (AI assistant, Approvals) until you approve it.
       </p>
       <CopyField label="Claude Code (run once in a terminal)" value={`claude mcp add mergeport -- node ${q(launcher)}`} />
       <CopyField label="Claude Desktop, Cursor and similar (JSON for the app's MCP settings)" value={desktop} hint="Merge it into the existing mcpServers object if there is one, then restart the app." />
