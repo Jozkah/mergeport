@@ -1,0 +1,91 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { db, resolveDbFile } from "@/lib/db";
+import { run, type ActionResult } from "@/lib/action-result";
+import { requireViewer } from "@/lib/auth/current";
+import { isDemo } from "@/lib/env";
+import { ValidationError } from "@/lib/errors";
+import { keyFileFor } from "@/lib/hub/ports-impl";
+import { openVault } from "@/lib/hub/session-vault";
+import { assigneeCandidates, createTask } from "@/lib/services/tasks";
+import { listProjects } from "@/lib/services/queries";
+import { todayIn } from "@/lib/domain/planning";
+import { draftTasks, listModels, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_AI_BASE_URL, type TaskDraft } from "@/lib/services/ai";
+
+const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
+const vault = () => openVault(keyFileFor(resolveDbFile()));
+const noDemo = () => {
+  if (isDemo()) throw new ValidationError("The demo does not send anything to an AI endpoint.");
+};
+
+export async function saveAiSettingsAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    await requireViewer();
+    noDemo();
+    await saveAiSettings(db, vault(), { baseUrl: str(fd, "baseUrl"), apiKey: str(fd, "apiKey"), clearKey: fd.get("clearKey") === "on", model: str(fd, "model") });
+    revalidatePath("/settings");
+    revalidatePath("/tasks");
+    return { ok: true, message: "Saved" };
+  });
+}
+
+/** Asks the endpoint what it offers now, using the address and key in the form (or the saved key when the key field is empty). */
+export async function listAiModelsAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    await requireViewer();
+    noDemo();
+    const saved = await loadAiConfig(db, vault());
+    const baseUrl = normalizeBaseUrl(str(fd, "baseUrl") || saved?.baseUrl || DEFAULT_AI_BASE_URL);
+    const apiKey = str(fd, "apiKey") || saved?.apiKey || null;
+    const models = await listModels({ baseUrl, apiKey, model: null });
+    if (models.length === 0) throw new ValidationError("The endpoint listed no models.");
+    return { ok: true, message: `${models.length} model${models.length === 1 ? "" : "s"} available`, data: { models } };
+  });
+}
+
+/** Drafts tasks from plain text. Nothing is created here: the person reviews the drafts first. */
+export async function draftTasksAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireViewer();
+    noDemo();
+    const cfg = await loadAiConfig(db, vault());
+    if (!cfg?.model) throw new ValidationError("Set up the AI endpoint and choose a model in Settings first.");
+    const projects = (await listProjects(db, viewer)).map((p) => ({ id: p.id, name: p.name }));
+    const wanted = str(fd, "projectId");
+    const ordered = [...projects.filter((p) => p.id === wanted), ...projects.filter((p) => p.id !== wanted)];
+    const people = [...new Set((await Promise.all(projects.map((p) => assigneeCandidates(db, viewer, p.id)))).flat())];
+    const drafts = await draftTasks(cfg, str(fd, "text"), { projects: ordered, people, today: todayIn(viewer.timezone), me: viewer.login });
+    return { ok: true, message: `${drafts.length} draft${drafts.length === 1 ? "" : "s"}`, data: { drafts } };
+  });
+}
+
+/** Creates the drafts the person kept. Each goes through the same checks as a task typed by hand. */
+export async function createDraftsAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireViewer();
+    let drafts: TaskDraft[];
+    try {
+      drafts = JSON.parse(str(fd, "drafts"));
+      if (!Array.isArray(drafts)) throw new Error();
+    } catch {
+      throw new ValidationError("Nothing to create.");
+    }
+    if (drafts.length === 0 || drafts.length > 20) throw new ValidationError("Pick between 1 and 20 tasks.");
+    let made = 0;
+    for (const d of drafts) {
+      await createTask(db, viewer, {
+        projectId: String(d.projectId),
+        title: String(d.title ?? ""),
+        description: String(d.description ?? ""),
+        assigneeLogin: d.assignee ? String(d.assignee) : null,
+        priority: Math.max(0, Math.min(4, Number(d.priority) || 0)),
+        dueDate: d.due && /^\d{4}-\d{2}-\d{2}$/.test(String(d.due)) ? new Date(d.due + "T00:00:00Z") : null,
+        labels: Array.isArray(d.labels) ? d.labels.map(String) : [],
+      });
+      made++;
+    }
+    for (const p of ["/tasks", "/planning", "/attention"]) revalidatePath(p);
+    return { ok: true, message: `Created ${made} task${made === 1 ? "" : "s"}` };
+  });
+}

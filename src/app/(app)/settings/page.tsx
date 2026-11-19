@@ -20,6 +20,8 @@ import { Bell, Newspaper, Wand2 } from "@/components/ui/icons";
 import { BackupPanel } from "@/components/settings/BackupPanel";
 import { NotificationSettings } from "@/components/settings/NotificationSettings";
 import { getPrefs } from "@/lib/services/notification-prefs";
+import { AiSettingsPanel } from "@/components/settings/AiSettingsPanel";
+import { getAiView } from "@/lib/services/ai";
 
 export const metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
@@ -33,6 +35,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const setup = viewer.isAdmin && !isDemo() ? await planAutoSetup(db, viewer, { clonesFolder: clones }) : null;
   const prefs = await getPrefs(db, user.id);
   const { summary: watch, config: wcfg } = await watchView(db);
+  const ai = isDemo() ? null : await getAiView(db);
   const poll = (await db.teamConfig.findUnique({ where: { id: "team" } }))?.pollSeconds ?? 30;
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
@@ -66,6 +69,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </ActionForm>
           </div>
         </Panel>
+        {ai && (
+          <Panel title="AI assistant" icon={Wand2} id="ai" defaultOpen={false} summary={ai.model ? ai.model : "Not set up"}>
+            <AiSettingsPanel baseUrl={ai.baseUrl} hasKey={ai.hasKey} model={ai.model} />
+          </Panel>
+        )}
         <Panel title="Sync" icon={RefreshCw} id="polling">
           <div className="p-4">
             <ActionForm action={setPollSecondsAction} submitLabel="Save" resetOnSuccess={false} className="max-w-xs">

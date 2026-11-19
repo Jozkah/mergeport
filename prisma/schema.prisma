@@ -1297,3 +1297,14 @@ model DailyDigest {
 
   @@unique([userId, day])
 }
+
+/// The OpenAI-compatible endpoint used to draft tasks from plain text. One row per profile, never synchronised.
+/// `cipher` is the API key encrypted with the profile's vault key (see hub/session-vault.ts). `model` is whatever the endpoint
+/// currently offers; it is chosen from the endpoint's own model list and can change at any time.
+model AiSettings {
+  id        String   @id @default("ai")
+  baseUrl   String
+  cipher    String?
+  model     String?
+  updatedAt DateTime @updatedAt
+}
