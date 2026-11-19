@@ -18,6 +18,7 @@ import { MobileNav, Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
 import { AiQuick } from "@/components/ai/AiQuick";
 import { getAiView } from "@/lib/services/ai";
+import { pendingCount } from "@/lib/services/ai-approvals";
 import { LiveRefresh } from "@/components/sync/LiveRefresh";
 import { SectionMain } from "@/components/shell/SectionMain";
 import { ContextMenuProvider } from "@/components/ui/ContextMenu";
@@ -104,7 +105,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
   const wsList = isDemo() ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId.toString());
   const workspaces = wsList && { ...wsList, switchable };
-  const aiQuick = isDemo() || !(await getAiView(db)).saved ? null : <AiQuick pending={await db.aiSuggestion.count({ where: { state: "NEW" } })} />;
+  const aiQuick = isDemo() || !(await getAiView(db)).saved ? null : <AiQuick pending={(await db.aiSuggestion.count({ where: { state: "NEW" } })) + (await pendingCount(db))} />;
   const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: ws.name };
   return (
     <TooltipProvider>
