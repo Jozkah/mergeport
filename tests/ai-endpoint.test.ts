@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chat, draftTasks, extractJson, listModels, normalizeBaseUrl, parseDrafts, stripThinking, type DraftContext } from "@/lib/services/ai";
+import { chat, draftTasks, extractJson, listModels, normalizeBaseUrl, parseDrafts, resolveModel, stripThinking, type DraftContext } from "@/lib/services/ai";
 
 const ctx: DraftContext = { projects: [{ id: "p1", name: "Atlas" }, { id: "p2", name: "Billing" }], people: ["Alice", "bob"], today: "2026-11-19", me: "joel" };
 const cfg = { baseUrl: "https://ai.example.com/v1", apiKey: "k-secret", model: "qwen-x" };
@@ -58,24 +58,52 @@ describe("talking to the endpoint", () => {
     expect(seen).toEqual({ url: "https://ai.example.com/v1/models", auth: "Bearer k-secret" });
   });
 
-  it("sends the saved model name as is, non-streaming, and drafts tasks from the reply", async () => {
+  it("uses the saved model while the endpoint still offers it", async () => {
     let sent: { model?: string; stream?: boolean; messages?: { role: string; content: string }[] } = {};
-    const f = fakeFetch((_url, init) => {
+    const f = fakeFetch((url, init) => {
+      if (url.endsWith("/models")) return { data: [{ id: "whatever-v9" }, { id: "other" }] };
       sent = JSON.parse(String(init.body));
       return reply('<think>plan</think>{"tasks":[{"title":"Ship it","assignee":"bob"}]}');
     });
-    const d = await draftTasks({ ...cfg, model: "whatever-v9" }, "ship it, give to bob", ctx, f);
+    const r = await draftTasks({ ...cfg, model: "whatever-v9" }, "ship it, give to bob", ctx, f);
+    expect(r.model).toBe("whatever-v9");
     expect(sent.model).toBe("whatever-v9");
     expect(sent.stream).toBe(false);
     expect(sent.messages?.[0].content).toContain("Atlas, Billing");
     expect(sent.messages?.[1]).toEqual({ role: "user", content: "ship it, give to bob" });
-    expect(d[0]).toMatchObject({ title: "Ship it", assignee: "bob" });
+    expect(r.drafts[0]).toMatchObject({ title: "Ship it", assignee: "bob" });
+  });
+
+  it("adapts when the saved model is gone, or none is saved, and skips non-chat models", async () => {
+    const f = fakeFetch(() => ({ data: [{ id: "text-embedding-3" }, { id: "new-chat-model" }] }));
+    expect(await resolveModel({ ...cfg, model: "retired-model" }, f)).toBe("new-chat-model");
+    expect(await resolveModel({ ...cfg, model: null }, f)).toBe("new-chat-model");
+    expect(await resolveModel({ ...cfg, model: "text-embedding-3" }, f)).toBe("text-embedding-3");
+  });
+
+  it("falls back to the saved name when the list is unreadable, but not on a rejected key", async () => {
+    expect(await resolveModel(cfg, fakeFetch(() => ({}), 500))).toBe("qwen-x");
+    await expect(resolveModel(cfg, fakeFetch(() => ({}), 401))).rejects.toThrow(/rejected the key/);
+    await expect(resolveModel({ ...cfg, model: null }, fakeFetch(() => ({ data: [] })))).rejects.toThrow(/does not offer/);
+  });
+
+  it("retries with another model when the chosen one is withdrawn mid-request", async () => {
+    const used: string[] = [];
+    const f = (async (url: string, init: RequestInit) => {
+      if (String(url).endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "a" }, { id: "b" }] }));
+      const model = JSON.parse(String(init.body)).model as string;
+      used.push(model);
+      return model === "a" ? new Response("{}", { status: 404 }) : new Response(JSON.stringify(reply('{"tasks":[{"title":"Done"}]}')));
+    }) as unknown as typeof fetch;
+    const r = await draftTasks({ ...cfg, model: null }, "x", ctx, f);
+    expect(used).toEqual(["a", "b"]);
+    expect(r.model).toBe("b");
   });
 
   it("explains rejected keys, server errors and a missing model", async () => {
     await expect(listModels(cfg, fakeFetch(() => ({}), 401))).rejects.toThrow(/rejected the key/);
     await expect(chat(cfg, [{ role: "user", content: "x" }], fakeFetch(() => ({}), 500))).rejects.toThrow(/500/);
-    await expect(chat({ ...cfg, model: null }, [{ role: "user", content: "x" }])).rejects.toThrow(/Choose a model/);
+    await expect(chat({ ...cfg, model: null }, [{ role: "user", content: "x" }])).rejects.toThrow(/No model/);
     await expect(chat(cfg, [{ role: "user", content: "x" }], fakeFetch(() => reply("  ")))).rejects.toThrow(/no text/);
   });
 });

@@ -26,13 +26,14 @@ function Body({ projects, defaultProjectId, configured }: { projects: P[]; defau
   const [text, setText] = useState("");
   const [projectId, setProjectId] = useState(defaultProjectId);
   const [drafts, setDrafts] = useState<TaskDraft[] | null>(null);
+  const [model, setModel] = useState("");
   const [keep, setKeep] = useState<boolean[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? "";
 
   if (!configured) {
-    return <p className="text-[13px] text-ink-2">Add the AI address, key and a model in <a className="underline" href="/settings#ai">Settings</a> first.</p>;
+    return <p className="text-[13px] text-ink-2">Add the AI address and key in <a className="underline" href="/settings#ai">Settings</a> first.</p>;
   }
 
   const draft = () =>
@@ -45,6 +46,7 @@ function Body({ projects, defaultProjectId, configured }: { projects: P[]; defau
       if (!r.ok) return setError(r.error);
       const list = (r.data?.drafts as TaskDraft[]) ?? [];
       setDrafts(list);
+      setModel(String(r.data?.model ?? ""));
       setKeep(list.map(() => true));
     });
 
@@ -79,6 +81,7 @@ function Body({ projects, defaultProjectId, configured }: { projects: P[]; defau
             </li>
           ))}
         </ul>
+        {model && <p className="text-[12px] text-ink-3">Drafted with {model}.</p>}
         {error && <p role="alert" className="text-[12.5px] text-blocked">{error}</p>}
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className="btn btn-primary" onClick={create} disabled={pending || n === 0}>{pending ? "Creating…" : `Create ${n} task${n === 1 ? "" : "s"}`}</button>

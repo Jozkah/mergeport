@@ -57,7 +57,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
       <PageHeader
         title="Tasks"
         subtitle="Create a task, give it to someone, and talk about it. Tasks are the same cards as on the planning board and sync to everyone in the project's team."
-        actions={projects.length > 0 ? <>{ai && <AiTasks projects={projects.map((p) => ({ id: p.id, name: p.name }))} defaultProjectId={project?.id ?? projects[0].id} configured={!!ai.model} />}<TemplateButton projects={projects.map((p) => ({ id: p.id, name: p.name }))} /><NewTask projects={projects.map((p) => ({ id: p.id, name: p.name }))} peopleByProject={peopleByProject} me={viewer.login} defaultProjectId={project?.id ?? projects[0].id} /></> : undefined}
+        actions={projects.length > 0 ? <>{ai && <AiTasks projects={projects.map((p) => ({ id: p.id, name: p.name }))} defaultProjectId={project?.id ?? projects[0].id} configured={ai.saved} />}<TemplateButton projects={projects.map((p) => ({ id: p.id, name: p.name }))} /><NewTask projects={projects.map((p) => ({ id: p.id, name: p.name }))} peopleByProject={peopleByProject} me={viewer.login} defaultProjectId={project?.id ?? projects[0].id} /></> : undefined}
       />
       <ScopeNote scope={workScope} />
       <ViewBar scope="tasks" views={await listViews(db, viewer, "tasks")} />

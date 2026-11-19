@@ -50,13 +50,13 @@ export async function draftTasksAction(fd: FormData): Promise<ActionResult> {
     const { viewer } = await requireViewer();
     noDemo();
     const cfg = await loadAiConfig(db, vault());
-    if (!cfg?.model) throw new ValidationError("Set up the AI endpoint and choose a model in Settings first.");
+    if (!cfg) throw new ValidationError("Set up the AI endpoint in Settings first.");
     const projects = (await listProjects(db, viewer)).map((p) => ({ id: p.id, name: p.name }));
     const wanted = str(fd, "projectId");
     const ordered = [...projects.filter((p) => p.id === wanted), ...projects.filter((p) => p.id !== wanted)];
     const people = [...new Set((await Promise.all(projects.map((p) => assigneeCandidates(db, viewer, p.id)))).flat())];
-    const drafts = await draftTasks(cfg, str(fd, "text"), { projects: ordered, people, today: todayIn(viewer.timezone), me: viewer.login });
-    return { ok: true, message: `${drafts.length} draft${drafts.length === 1 ? "" : "s"}`, data: { drafts } };
+    const { drafts, model } = await draftTasks(cfg, str(fd, "text"), { projects: ordered, people, today: todayIn(viewer.timezone), me: viewer.login });
+    return { ok: true, message: `${drafts.length} draft${drafts.length === 1 ? "" : "s"}`, data: { drafts, model } };
   });
 }
 

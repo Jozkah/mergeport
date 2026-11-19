@@ -41,14 +41,14 @@ export function AiSettingsPanel({ baseUrl, hasKey, model }: { baseUrl: string; h
             {hasKey && <label className="-my-1 mt-1 flex min-h-8 w-fit cursor-pointer items-center gap-2 text-[12.5px]"><input type="checkbox" name="clearKey" /> Remove the saved key</label>}
           </div>
           <div>
-            <label className="label" htmlFor="ai-model">Model</label>
-            <input id="ai-model" name="model" className="input" defaultValue={model ?? ""} list="ai-models" autoComplete="off" spellCheck={false} placeholder="Load the list, or type a name" />
+            <label className="label" htmlFor="ai-model">Preferred model (optional)</label>
+            <input id="ai-model" name="model" className="input" defaultValue={model ?? ""} list="ai-models" autoComplete="off" spellCheck={false} placeholder="Automatic" />
             <datalist id="ai-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button type="button" className="btn" onClick={load} disabled={pending}>{pending ? "Asking…" : "Load models"}</button>
               {note && <span role="status" className={`text-[12.5px] ${note.ok ? "text-ok" : "text-blocked"}`}>{note.text}</span>}
             </div>
-            <p className="mt-1 text-[12px] text-ink-3">Models change over time. Come back here and pick a new one whenever the endpoint swaps it.</p>
+            <p className="mt-1 text-[12px] text-ink-3">Leave empty and Mergeport asks the endpoint which models it serves each time and uses an available one. A preferred model is used only while the endpoint still offers it.</p>
           </div>
         </div>
       </ActionForm>

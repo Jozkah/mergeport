@@ -70,7 +70,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </div>
         </Panel>
         {ai && (
-          <Panel title="AI assistant" icon={Wand2} id="ai" defaultOpen={false} summary={ai.model ? ai.model : "Not set up"}>
+          <Panel title="AI assistant" icon={Wand2} id="ai" defaultOpen={false} summary={!ai.saved ? "Not set up" : ai.model ? `Prefers ${ai.model}` : "Automatic model"}>
             <AiSettingsPanel baseUrl={ai.baseUrl} hasKey={ai.hasKey} model={ai.model} />
           </Panel>
         )}
