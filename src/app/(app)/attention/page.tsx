@@ -1,5 +1,6 @@
 import { AiShortcuts } from "@/components/ai/AiShortcuts";
 import { AiTool } from "@/components/ai/AiTool";
+import { aiEnabled } from "@/lib/services/ai";
 import Link from "next/link";
 import { readScope, scopeKey } from "@/lib/scope";
 import { ScopeNote } from "@/components/shell/ScopeNote";
@@ -107,7 +108,7 @@ export default async function Attention({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="My attention" subtitle="Who is expected to act, and since when." />
-      <AiShortcuts><AiTool tool="focus" label="Where should I start?" hint="The AI reads these queues and tells you what to do first." /></AiShortcuts>
+      <AiShortcuts show={await aiEnabled(db)}><AiTool tool="focus" label="Where should I start?" hint="The AI reads these queues and tells you what to do first." /></AiShortcuts>
       <ScopeNote scope={scope} />
       <ViewBar scope="attention" views={await listViews(db, viewer, "attention")} />
       <div className="mb-4"><Segmented label="Queues" items={QUEUES.map((x) => ({ href: `/attention?queue=${x.key}`, label: x.label, active: x.key === active, count: lists[x.key].length }))} /></div>

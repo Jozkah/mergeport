@@ -1,4 +1,5 @@
 import type { Db } from "@/lib/db";
+import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
 import type { Vault } from "@/lib/hub/session-vault";
 
@@ -38,6 +39,12 @@ export function normalizeBaseUrl(raw: string): string {
 export async function getAiView(db: Db): Promise<AiView> {
   const row = await db.aiSettings.findUnique({ where: { id: ID } });
   return { baseUrl: row?.baseUrl ?? DEFAULT_AI_BASE_URL, hasKey: !!row?.cipher, model: cleanModel(row?.model), saved: !!row, autopilot: row?.autopilot === "suggest" || row?.autopilot === "create" ? row.autopilot : "off", lastRunAt: row?.lastRunAt ?? null, lastSummary: row?.lastSummary ?? null };
+}
+
+/** Whether the AI shortcuts should show: an endpoint is saved, and this is not the demo (which sends nothing out). */
+export async function aiEnabled(db: Db): Promise<boolean> {
+  if (isDemo()) return false;
+  return !!(await db.aiSettings.findUnique({ where: { id: ID }, select: { id: true } }));
 }
 
 export async function loadAiConfig(db: Db, vault: Vault): Promise<AiConfig | null> {

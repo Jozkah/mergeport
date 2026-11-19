@@ -11,6 +11,7 @@ import { DigestActions } from "@/components/digest/DigestActions";
 import { DigestView } from "@/components/digest/DigestView";
 import { AiShortcuts } from "@/components/ai/AiShortcuts";
 import { AiTool } from "@/components/ai/AiTool";
+import { aiEnabled } from "@/lib/services/ai";
 
 export const metadata = { title: "Daily digest" };
 export const dynamic = "force-dynamic";
@@ -51,7 +52,7 @@ export default async function DigestPage({ searchParams }: { searchParams: Promi
           </>
         }
       />
-      <AiShortcuts className="mb-5">
+      <AiShortcuts show={await aiEnabled(db)} className="mb-5">
         <AiTool tool="digest" day={digest.day} label="Brief me" hint="A short summary of this digest, from the AI address in Settings." />
         <AiTool tool="standup" label="Write my stand-up" />
       </AiShortcuts>
