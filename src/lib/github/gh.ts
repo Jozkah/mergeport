@@ -87,6 +87,50 @@ export function ghFetch(run: GhRunner = runner, host = env().MERGEPORT_HOST, opt
   }) as typeof fetch;
 }
 
+/** Where the REST API of a host lives. */
+export const apiBase = (host: string) => (host === "github.com" ? "https://api.github.com" : `https://${host}/api/v3`);
+
+/**
+ * A `fetch` that talks to the API directly with a token, instead of starting `gh` for every request (about 300 ms each on Windows).
+ * Only the PATH of the request is used and the host is always the profile's own, so a token can never be sent anywhere else. The
+ * credential comes from `token()`; `onUnauthorized` is told when GitHub rejects it so the next call re-verifies from scratch.
+ * Failures look the way `ghFetch` makes them look: an identity problem is a 401 Response flagged for the UI, anything else a TypeError.
+ */
+export function directFetch(token: () => Promise<string | null>, host = env().MERGEPORT_HOST, opts: { signal?: AbortSignal; timeoutMs?: number; onUnauthorized?: () => void; fetchImpl?: typeof fetch } = {}): typeof fetch {
+  const send = opts.fetchImpl ?? fetch;
+  return (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url);
+    const method = (init.method ?? (typeof input === "object" && "method" in input ? (input as Request).method : "GET")).toUpperCase();
+    const path = url.pathname.replace(/^\//, "") + url.search;
+    if (path.startsWith("-")) throw new TypeError("Refusing a request path that looks like a command-line option");
+    let t: string | null;
+    try {
+      t = await token();
+    } catch (e) {
+      if (e instanceof IdentityError) return new Response(JSON.stringify({ message: e.message, mergeport: e.reason }), { status: 401, headers: { "content-type": "application/json", "x-mergeport-identity": e.reason } });
+      if (e instanceof GhMissingError) throw e;
+      throw new TypeError("fetch failed");
+    }
+    if (!t) throw new TypeError("fetch failed");
+    const headers = new Headers(init.headers);
+    for (const k of DROP_HEADERS) headers.delete(k);
+    headers.set("authorization", `Bearer ${t}`);
+    headers.set("user-agent", "Mergeport");
+    if (!headers.has("accept")) headers.set("accept", "application/vnd.github+json");
+    const body = init.body === undefined || init.body === null ? undefined : typeof init.body === "string" ? init.body : String(init.body);
+    if (body !== undefined) headers.set("content-type", "application/json");
+    const signals = [init.signal, opts.signal, AbortSignal.timeout(opts.timeoutMs ?? 30_000)].filter((s): s is AbortSignal => !!s);
+    let res: Response;
+    try {
+      res = await send(`${apiBase(host)}/${path}`, { method, headers, body, signal: AbortSignal.any(signals), redirect: "follow" });
+    } catch {
+      throw new TypeError("fetch failed"); // timeout, cancellation, no network: indistinguishable from offline for callers
+    }
+    if (res.status === 401) opts.onUnauthorized?.();
+    return res;
+  }) as typeof fetch;
+}
+
 /** Parses the text `gh api -i` prints: status line, headers, blank line, body. */
 export function parseHttpResponse(out: string): { status: number; headers: Headers; body: string } | null {
   const m = /^HTTP\/[\d.]+ (\d{3})[^\r\n]*\r?\n/.exec(out);

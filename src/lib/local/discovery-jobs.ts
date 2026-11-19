@@ -1,11 +1,10 @@
 import { db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
 import { currentGhStatus } from "@/lib/local/identity";
-import { ghFetch } from "@/lib/github/gh";
 import { discoverAll, portForDiscovery } from "@/lib/github/factory";
 import type { Discovery } from "@/lib/github/port";
 import { authKeysToRecheck, cancelAllDiscovery, dueKeys, isRefreshing, readCached, recoverInterrupted, refreshInBackground, type CachedView } from "@/lib/local/discovery";
-import { profileRunner } from "@/lib/local/profile-runner";
+import { profileFetch } from "@/lib/local/profile-runner";
 import { getEngine, localActor, notifyChange } from "@/lib/local/runtime";
 import { terminateAllGh } from "@/lib/github/exec";
 import { TeamService, type InvitationStatus, type SpaceCandidate } from "@/lib/team/service";
@@ -21,7 +20,7 @@ const PER_CALL_MS = 20_000;
 async function teamFor(signal: AbortSignal) {
   const actor = await localActor();
   if (!actor) throw new Error("No GitHub profile");
-  return new TeamService(db, ghFetch(profileRunner(db), undefined, { signal, timeoutMs: PER_CALL_MS }), actor, await getEngine());
+  return new TeamService(db, profileFetch(db, { signal, timeoutMs: PER_CALL_MS }), actor, await getEngine());
 }
 
 /** A team service whose every GitHub call is cancelled (and its `gh` process killed) after `ms`. For the rare call a person is waiting on. */

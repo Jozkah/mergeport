@@ -113,7 +113,17 @@ const COMMENT_FETCH_CAP = 3000; // the adapter reads at most 30 pages of 100
 
 async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: string, repositoryId: string, i: RemoteWorkItem, now: Date) {
   const wi = await db.workItem.findUniqueOrThrow({ where: { repositoryId_number: { repositoryId, number: i.number } } });
-  const [issueComments, reviewComments] = await Promise.all([port.listIssueComments(owner, repo, i.number), i.type === "PULL_REQUEST" ? port.listReviewComments(owner, repo, i.number) : Promise.resolve([])]);
+  const isPr = i.type === "PULL_REQUEST";
+  // Everything GitHub is asked here is independent of the rest, so it is asked at once (one round trip instead of four in a row), and
+  // nothing is written until all of it has arrived: a failure leaves the stored discussion as it was.
+  const [issueComments, reviewComments, threads, reviews, requested] = await Promise.all([
+    port.listIssueComments(owner, repo, i.number),
+    isPr ? port.listReviewComments(owner, repo, i.number) : Promise.resolve([]),
+    // Thread resolution lives only in GitHub's GraphQL API. If it cannot be read, the flag stays as it was (unknown stays unknown).
+    isPr ? port.listReviewThreads(owner, repo, i.number).catch(() => null) : Promise.resolve(null),
+    isPr ? port.listReviews(owner, repo, i.number) : Promise.resolve([]),
+    isPr ? port.listRequestedReviewers(owner, repo, i.number) : Promise.resolve({ users: [] as string[], teams: [] as string[] }),
+  ]);
   // Comments deleted on GitHub must disappear here too. Only a complete fetch can prove a deletion: a fetch that hit the paging
   // bound might be missing comments that still exist, so it never deletes anything.
   const reconcile = async (kind: "ISSUE_COMMENT" | "REVIEW_COMMENT", remote: { githubId: bigint }[]) => {
@@ -124,13 +134,10 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
   if (i.type === "PULL_REQUEST") await reconcile("REVIEW_COMMENT", reviewComments);
   for (const c of issueComments) await upsertComment(db, wi.id, "ISSUE_COMMENT", c);
   for (const c of reviewComments) await upsertComment(db, wi.id, "REVIEW_COMMENT", c);
-  if (i.type === "PULL_REQUEST") {
-    // Thread resolution lives only in GitHub's GraphQL API. If it cannot be read, the flag stays as it was (unknown stays unknown).
-    const threads = await port.listReviewThreads(owner, repo, i.number).catch(() => null);
+  if (isPr) {
     if (threads) for (const t of threads) await db.workItemComment.updateMany({ where: { workItemId: wi.id, kind: "REVIEW_COMMENT", threadKey: t.rootCommentId.toString() }, data: { threadResolved: t.resolved } });
   }
-  if (i.type !== "PULL_REQUEST") return;
-  const [reviews, requested] = await Promise.all([port.listReviews(owner, repo, i.number), port.listRequestedReviewers(owner, repo, i.number)]);
+  if (!isPr) return;
   for (const r of reviews) {
     const seen = await db.workItemComment.findUnique({ where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "REVIEW", githubId: r.githubId } }, select: { id: true } });
     if (!seen && r.state === "CHANGES_REQUESTED" && i.state === "OPEN") await notifyAuthorChanges(db, wi.id, r.login, i.title);
@@ -272,16 +279,26 @@ export async function syncRepository(db: Db, port: GithubPort, repositoryId: str
 export async function syncItem(db: Db, port: GithubPort, repositoryId: string, number: number, now = new Date()) {
   const repo = await db.repository.findUnique({ where: { id: repositoryId }, include: { owner: true } });
   if (!repo || repo.trackingStatus === "REMOVED") return false;
-  const pr = await port.getPull(repo.owner.login, repo.name, number).catch((e) => {
-    if (e instanceof GithubError && e.kind === "not-found") return null; // may be an issue
-    throw e;
-  });
-  const base =
-    pr ??
-    (await port.getIssue(repo.owner.login, repo.name, number).catch((e) => {
+  // An item already stored as an issue is asked for as an issue: asking for a pull request first costs a request that is bound to fail.
+  const known = await db.workItem.findUnique({ where: { repositoryId_number: { repositoryId, number } }, select: { type: true } });
+  const asPull = () =>
+    port.getPull(repo.owner.login, repo.name, number).catch((e) => {
+      if (e instanceof GithubError && e.kind === "not-found") return null; // may be an issue
+      throw e;
+    });
+  const asIssue = () =>
+    port.getIssue(repo.owner.login, repo.name, number).catch((e) => {
       if (e instanceof GithubError && e.kind === "not-found") return null;
       throw e;
-    }));
+    });
+  let pr: Awaited<ReturnType<typeof asPull>> = null;
+  let base: Awaited<ReturnType<typeof asIssue>> | NonNullable<typeof pr> | null;
+  if (known?.type === "ISSUE") {
+    base = await asIssue(); // issues and pull requests share one number space, so a stored issue cannot now be a pull request
+  } else {
+    pr = await asPull();
+    base = pr ?? (await asIssue());
+  }
   if (!base) return false;
   const checks = pr?.headSha ? await port.getChecksState(repo.owner.login, repo.name, pr.headSha) : undefined;
   const applied = await applyWorkItem(db, repo.id, base, pr ? { ...pr, checks } : undefined);
