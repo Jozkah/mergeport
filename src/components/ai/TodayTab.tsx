@@ -8,6 +8,9 @@ import { AiTool } from "@/components/ai/AiTool";
 import { Progress, useAiJob } from "@/components/ai/progress";
 import { LoaderCircle, Sparkles } from "@/components/ui/icons";
 
+/** A little longer than the row-leave animation (--duration-fast, 250 ms). */
+const FOLD_MS = 320;
+
 export type Suggestion = { id: string; title: string; reason: string; href: string };
 type Result = { summary: string; model: string; counts: { created: number; suggested: number; skipped: number }; suggestions: Suggestion[] };
 
@@ -52,7 +55,8 @@ export function TodayTab({ initial, summary, lastRun, autopilot }: { initial: Su
       fd.set("ids", JSON.stringify(ids));
       const r = await (kind === "accept" ? acceptSuggestionsAction(fd) : dismissSuggestionsAction(fd));
       if (!r.ok) return setNote({ ok: false, text: r.error });
-      setLeaving((l) => new Set([...l, ...ids])); // they fold away, then leave the list (onAnimationEnd below)
+      setLeaving((l) => new Set([...l, ...ids])); // they fold away, then leave the list
+      setTimeout(() => setList((l) => l.filter((x) => !ids.includes(x.id))), FOLD_MS);
       setNote({ ok: true, text: r.message ?? "Done", tasks: kind === "accept" });
       status.current?.focus();
       router.refresh();
@@ -85,7 +89,7 @@ export function TodayTab({ initial, summary, lastRun, autopilot }: { initial: Su
           <h3 className="px-4 pt-3 text-[13px] font-medium">Suggested tasks <span className="tnum text-ink-3">{live.length}</span></h3>
           <ul className="flex flex-col" style={{ "--row-gap": "0px" } as React.CSSProperties}>
             {list.map((s) => (
-              <li key={s.id} className={leaving.has(s.id) ? "row-leave" : undefined} onAnimationEnd={() => leaving.has(s.id) && setList((l) => l.filter((x) => x.id !== s.id))}>
+              <li key={s.id} className={leaving.has(s.id) ? "row-leave" : undefined}>
                 <div className="border-b border-line last:border-b-0">
                   <label className="flex cursor-pointer items-start gap-2.5 px-4 py-3">
                     <input type="checkbox" className="mt-1" checked={keep[s.id] ?? false} onChange={(e) => setKeep({ ...keep, [s.id]: e.target.checked })} />

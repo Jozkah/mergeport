@@ -7,6 +7,9 @@ import { approveActionAction, rejectActionAction } from "@/app/ai-actions";
 import { EmptyState } from "@/components/ui/primitives";
 import { ShieldCheck } from "@/components/ui/icons";
 
+/** A little longer than the row-leave animation (--duration-fast, 250 ms). */
+const FOLD_MS = 320;
+
 export type PendingRow = { id: string; summary: string; detail: string; href: string; createdAt: string; error?: string | null };
 
 /**
@@ -40,6 +43,7 @@ export function ApprovalsTab({ initial }: { initial: PendingRow[] }) {
         return rest;
       });
       setLeaving((l) => new Set([...l, id]));
+      setTimeout(() => setRows((l) => l.filter((x) => x.id !== id)), FOLD_MS); // after the row has folded away
       setMsg(r.message ?? "Done");
       status.current?.focus(); // the row the focus was on is folding away
       router.refresh();
@@ -54,7 +58,7 @@ export function ApprovalsTab({ initial }: { initial: PendingRow[] }) {
       ) : (
         <ul className="mt-3 flex flex-col border-t border-line" style={{ "--row-gap": "0px" } as React.CSSProperties}>
           {rows.map((r) => (
-            <li key={r.id} className={leaving.has(r.id) ? "row-leave" : undefined} onAnimationEnd={() => leaving.has(r.id) && setRows((l) => l.filter((x) => x.id !== r.id))}>
+            <li key={r.id} className={leaving.has(r.id) ? "row-leave" : undefined}>
               <div className="border-b border-line px-4 py-4 last:border-b-0">
                 <p className="text-[13px] font-medium text-pretty [overflow-wrap:anywhere]">{r.summary}</p>
                 <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-[8px] bg-faint p-3 font-sans text-[12.5px] [overflow-wrap:anywhere]">{r.detail}</pre>
