@@ -1,3 +1,5 @@
+import { AiShortcuts } from "@/components/ai/AiShortcuts";
+import { AiTool } from "@/components/ai/AiTool";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -31,6 +33,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         subtitle="Pull requests waiting on you. Done clears it for you only."
         actions={<ReadAllButton disabled={unread === 0} />}
       />
+      <AiShortcuts><AiTool tool="focus" label="What first?" /></AiShortcuts>
       <div className="mb-4">
         <Segmented label="Inbox views" items={TABS.map((t) => ({ href: `/inbox?tab=${t.key}`, label: t.label, active: t.key === tab, count: counts[t.key] }))} />
       </div>

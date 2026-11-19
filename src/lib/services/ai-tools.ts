@@ -11,11 +11,12 @@ import { derivedDetail, getWorkItemDetail } from "./queries";
  * Small AI jobs that read what Mergeport already stores and write a short text. They change nothing and send nothing to GitHub:
  *   digest   a morning briefing from a daily digest
  *   standup  yesterday, today, blocked, from the latest digest and what is waiting on you
+ *   focus    what to do first, from what is waiting on you
  *   item     where one pull request or issue stands: what it is, the discussion so far, what blocks it, the best next step
  * Titles and comments in the facts were written by other people, so every prompt says they are data, not instructions.
  */
 
-export type ToolName = "digest" | "standup" | "item";
+export type ToolName = "digest" | "standup" | "item" | "focus";
 export type ToolResult = { title: string; text: string; model: string; sources: { label: string; href: string }[] };
 
 const RULES = [
@@ -76,6 +77,7 @@ export async function itemFacts(db: Db, v: Viewer, id: string, now = new Date())
 const PROMPTS: Record<ToolName, string> = {
   digest: ["You write a short morning briefing for one developer from their daily digest.", "Say what got done, what is still open, what needs the person first, and who they are waiting on. Five to eight lines.", ...RULES].join("\n"),
   standup: ["You write a spoken-style stand-up update for one developer.", "Three short parts, each starting with its name and a colon: Yesterday, Today, Blocked. Today comes from what is waiting on the person. Say 'Blocked: nothing' when nothing is.", ...RULES].join("\n"),
+  focus: ["You tell one developer what to do first today, from a snapshot of what is waiting on them.", "Give the first three things in order, one line each with the reason, then one line on what can wait. Name items by repository and number.", ...RULES].join("\n"),
   item: ["You explain where one pull request or issue stands to a developer who has not followed it.", "Cover, in order: what it is, where the discussion stands, what is blocking it, and the single best next step for the person asking. Six to ten lines.", ...RULES].join("\n"),
 };
 
@@ -95,6 +97,10 @@ export async function runTool(db: Db, v: Viewer, cfg: AiConfig, tool: ToolName, 
       step("Checking what is waiting on you");
       facts += `\n\nWaiting on the person right now:\n${(await buildSnapshot(db, v, opts.now)).text}`;
     }
+  } else if (tool === "focus") {
+    step("Reading your review queues, pull requests and tasks");
+    facts = (await buildSnapshot(db, v, opts.now)).text;
+    title = "What to do first";
   } else if (tool === "item") {
     if (!input.id) throw new ValidationError("Open a pull request or issue first.");
     step("Reading the pull request, its status and its comments");

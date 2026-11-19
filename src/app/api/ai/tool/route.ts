@@ -10,7 +10,7 @@ import { runTool, type ToolName } from "@/lib/services/ai-tools";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TOOLS: ToolName[] = ["digest", "standup", "item"];
+const TOOLS: ToolName[] = ["digest", "standup", "item", "focus"];
 
 /** The small read-only AI jobs: briefing from the digest, stand-up, where one pull request or issue stands. */
 export async function POST(req: Request) {

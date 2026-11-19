@@ -68,6 +68,15 @@ describe("tools", () => {
     expect(seen.user).toContain(`@${a.login}`);
   });
 
+  it("focus: sends what is waiting on the person and asks for the first three things", async () => {
+    const { db, a } = S;
+    const seen: { system?: string; user?: string } = {};
+    const r = await runTool(db, a, cfg, "focus", {}, { f: fake("First: review x.", seen) });
+    expect(r).toMatchObject({ title: "What to do first", text: "First: review x." });
+    expect(seen.system).toMatch(/first three things/);
+    expect(seen.user).toContain(`@${a.login}`);
+  });
+
   it("item: needs an id, reads the thread, and cannot be pointed at something hidden", async () => {
     const { db, admin, b } = S;
     await expect(runTool(db, admin, cfg, "item", {}, { f: fake("x") })).rejects.toThrow(/Open a pull request/);

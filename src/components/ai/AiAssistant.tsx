@@ -14,8 +14,8 @@ type Source = { label: string; href: string | null };
 type Turn = { q: string; a: string; model: string; sources: Source[] } | { q: string; error: string };
 
 /** Two things in one place: ask about a pull request or issue, or turn notes into tasks. */
-export function AiAssistant({ configured, projects, defaultProjectId, suggestions, summary, lastRun, autopilot }: { configured: boolean; projects: P[]; defaultProjectId: string; suggestions: Suggestion[]; summary: string | null; lastRun: string | null; autopilot: "off" | "suggest" | "create" }) {
-  const [mode, setMode] = useState<"review" | "ask" | "tasks" | "brief">(suggestions.length > 0 ? "review" : "ask");
+export function AiAssistant({ configured, projects, defaultProjectId, suggestions, summary, lastRun, autopilot, initialTab }: { initialTab?: "review" | "ask" | "tasks" | "brief"; configured: boolean; projects: P[]; defaultProjectId: string; suggestions: Suggestion[]; summary: string | null; lastRun: string | null; autopilot: "off" | "suggest" | "create" }) {
+  const [mode, setMode] = useState<"review" | "ask" | "tasks" | "brief">(initialTab ?? (suggestions.length > 0 ? "review" : "ask"));
   const [q, setQ] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const job = useAiJob();

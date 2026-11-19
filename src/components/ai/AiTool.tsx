@@ -8,7 +8,7 @@ import { Sparkles } from "@/components/ui/icons";
 type Result = { title: string; text: string; model: string; sources: { label: string; href: string }[] };
 
 /** One small read-only AI job (briefing, stand-up, where an item stands). It reads what Mergeport already stores and writes a short text; nothing is changed. */
-export function AiTool({ tool, label, id, day, hint, className = "" }: { tool: "digest" | "standup" | "item"; label: string; id?: string; day?: string; hint?: string; className?: string }) {
+export function AiTool({ tool, label, id, day, hint, className = "" }: { tool: "digest" | "standup" | "item" | "focus"; label: string; id?: string; day?: string; hint?: string; className?: string }) {
   const job = useAiJob();
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
