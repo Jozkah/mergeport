@@ -2,8 +2,8 @@ import type { Db } from "@/lib/db";
 import type { Viewer } from "@/lib/authz/viewer";
 import { ValidationError } from "@/lib/errors";
 import { formatDuration } from "@/lib/format";
-import { chat, withModel, type AiConfig, type Fetch, type Step } from "./ai";
-import { buildSnapshot } from "./ai-review";
+import { chat, extractJson, withModel, type AiConfig, type Fetch, type Step } from "./ai";
+import { buildSnapshot, type Snapshot } from "./ai-review";
 import { getDigest, latestDigest, type DigestEntry, type DigestPayload, type DigestSection } from "./digest";
 import { derivedDetail, getWorkItemDetail } from "./queries";
 
@@ -17,7 +17,9 @@ import { derivedDetail, getWorkItemDetail } from "./queries";
  */
 
 export type ToolName = "digest" | "standup" | "item" | "focus";
-export type ToolResult = { title: string; text: string; model: string; sources: { label: string; href: string }[] };
+/** A pull request the AI points at: the page shows it glowing and links to it. `view` is the list page where it can be seen with the others. */
+export type GuideStep = { label: string; href: string; view: string; why: string };
+export type ToolResult = { title: string; text: string; model: string; sources: { label: string; href: string }[]; steps?: GuideStep[] };
 
 const RULES = [
   "Plain text only: no markdown, no headings, no bullet symbols other than a dash at the start of a line.",
@@ -77,7 +79,14 @@ export async function itemFacts(db: Db, v: Viewer, id: string, now = new Date())
 const PROMPTS: Record<ToolName, string> = {
   digest: ["You write a short morning briefing for one developer from their daily digest.", "Say what got done, what is still open, what needs the person first, and who they are waiting on. Five to eight lines.", ...RULES].join("\n"),
   standup: ["You write a spoken-style stand-up update for one developer.", "Three short parts, each starting with its name and a colon: Yesterday, Today, Blocked. Today comes from what is waiting on the person. Say 'Blocked: nothing' when nothing is.", ...RULES].join("\n"),
-  focus: ["You tell one developer what to do first today, from a snapshot of what is waiting on them.", "Give the first three things in order, one line each with the reason, then one line on what can wait. Name items by repository and number.", ...RULES].join("\n"),
+  focus: [
+    "You tell one developer what to do first today, from a snapshot of what is waiting on them. Reply with JSON only.",
+    'Shape: {"summary":string,"steps":[{"ref":string,"why":string}]}',
+    "summary: two to four plain sentences: what to do first and what can wait. Name items by repository and number.",
+    "steps: at most three, in the order to do them, each citing a ref from the snapshot (R1, C1, B1...). why: one short sentence. Never invent a ref.",
+    "Only items the snapshot lists as waiting for the person's review, changes requested on their pull request, or blocked and written by or assigned to them are their responsibility. Never call a pull request 'yours' unless it says (yours). Repositories they only watch are not their work.",
+    ...RULES.filter((r) => !r.startsWith("Plain text only")),
+  ].join("\n"),
   item: ["You explain where one pull request or issue stands to a developer who has not followed it.", "Cover, in order: what it is, where the discussion stands, what is blocking it, and the single best next step for the person asking. Six to ten lines.", ...RULES].join("\n"),
 };
 
@@ -87,6 +96,7 @@ export async function runTool(db: Db, v: Viewer, cfg: AiConfig, tool: ToolName, 
   let title: string;
   let facts: string;
   let sources: ToolResult["sources"] = [];
+  let snap: Snapshot | null = null;
   if (tool === "digest" || tool === "standup") {
     step("Reading your daily digest");
     const d = await digestFor(db, v, tool === "digest" ? input.day : undefined);
@@ -99,7 +109,8 @@ export async function runTool(db: Db, v: Viewer, cfg: AiConfig, tool: ToolName, 
     }
   } else if (tool === "focus") {
     step("Reading your review queues, pull requests and tasks");
-    facts = (await buildSnapshot(db, v, opts.now)).text;
+    snap = await buildSnapshot(db, v, opts.now);
+    facts = snap.text;
     title = "What to do first";
   } else if (tool === "item") {
     if (!input.id) throw new ValidationError("Open a pull request or issue first.");
@@ -111,5 +122,35 @@ export async function runTool(db: Db, v: Viewer, cfg: AiConfig, tool: ToolName, 
   } else throw new ValidationError("Unknown tool.");
   const messages = [{ role: "system" as const, content: PROMPTS[tool] }, { role: "user" as const, content: facts }];
   const r = await withModel(cfg, f, (model) => chat({ ...cfg, model }, messages, f), step);
-  return { title, text: r.value.trim(), model: r.model, sources };
+  const text = r.value.trim();
+  if (tool === "focus" && snap) {
+    const g = parseFocus(text, snap);
+    if (g) return { title, text: g.summary, model: r.model, sources: g.steps.map((s) => ({ label: s.label, href: s.href })), steps: g.steps };
+  }
+  return { title, text, model: r.model, sources };
+}
+
+const VIEW = { review: "/attention?queue=needs-me", changes: "/attention?queue=changes", blocked: "/attention?queue=blocked" } as const;
+
+/** The AI's answer as steps the page can act on. Only refs from the snapshot count; if the answer is not usable it is shown as plain text instead. */
+export function parseFocus(raw: string, snap: Snapshot): { summary: string; steps: GuideStep[] } | null {
+  let json: { summary?: unknown; steps?: unknown };
+  try {
+    json = extractJson(raw) as typeof json;
+  } catch {
+    return null;
+  }
+  const summary = typeof json?.summary === "string" ? json.summary.trim().slice(0, 1200) : "";
+  const steps: GuideStep[] = [];
+  const seen = new Set<string>();
+  for (const s of Array.isArray(json?.steps) ? json.steps.slice(0, 6) : []) {
+    const o = (s ?? {}) as { ref?: unknown; why?: unknown };
+    const key = typeof o.ref === "string" ? o.ref.trim().toUpperCase() : "";
+    const ref = snap.refs.get(key);
+    if (!ref || seen.has(key)) continue;
+    seen.add(key);
+    steps.push({ label: ref.label, href: ref.href, view: VIEW[ref.kind], why: typeof o.why === "string" ? o.why.trim().slice(0, 240) : "" });
+    if (steps.length === 3) break;
+  }
+  return summary ? { summary, steps } : null;
 }

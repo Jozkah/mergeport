@@ -703,3 +703,19 @@ select.select optgroup {
 
 /* Keyboard key caps in the shortcuts list. */
 .kbd { display: inline-block; min-width: 1.4em; padding: 0 0.4em; border: 1px solid var(--color-line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--color-surface); font: 500 11.5px/1.55 var(--font-mono, ui-monospace, monospace); text-align: center; }
+
+/* What the AI pointed at (GlowManager): a calm pulsing ring on the row. Still, but clearly marked, when motion is reduced. */
+.ai-glow {
+  border-radius: 10px;
+  outline: 2px solid var(--color-ink);
+  outline-offset: -2px;
+  background-color: var(--color-hover);
+  animation: ai-glow 2.2s ease-in-out infinite;
+}
+@keyframes ai-glow {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 4px var(--color-focus-ring), 0 0 22px 2px var(--color-focus-ring); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-glow { animation: none; }
+}
