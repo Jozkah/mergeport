@@ -47,9 +47,9 @@ export default async function CodePage({ params, searchParams }: { params: Promi
       <div className="mb-3 flex flex-wrap items-center gap-3 text-[14px]">
         <RefPicker repoId={repo.id} path={path} current={ref} branches={repo.branches.map((b) => b.name)} />
         <nav aria-label="Path" className="flex min-w-0 flex-wrap items-center gap-1">
-          <Link href={withRef("")} className="font-semibold text-[#0969da] hover:underline dark:text-[#4493f8]">{repo.name}</Link>
+          <Link href={withRef("")} className="link font-semibold">{repo.name}</Link>
           {crumbs.map((c, i) => (
-            <span key={i} className="flex items-center gap-1"><span className="text-ink-3">/</span>{i === crumbs.length - 1 ? <strong className="font-semibold">{c}</strong> : <Link href={withRef(crumbs.slice(0, i + 1).join("/"))} className="text-[#0969da] hover:underline dark:text-[#4493f8]">{c}</Link>}</span>
+            <span key={i} className="flex items-center gap-1"><span className="text-ink-3">/</span>{i === crumbs.length - 1 ? <strong className="font-semibold">{c}</strong> : <Link href={withRef(crumbs.slice(0, i + 1).join("/"))} className="link">{c}</Link>}</span>
           ))}
         </nav>
       </div>
