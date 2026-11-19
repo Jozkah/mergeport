@@ -5,7 +5,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Logo } from "@/components/ui/Logo";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useId, useState, type ComponentType, type SVGProps } from "react";
+import { useId, useRef, useState, type ComponentType, type SVGProps } from "react";
 import * as D from "@radix-ui/react-dialog";
 import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, Newspaper, PanelLeft, RefreshCw, Route, Search, Settings, Sparkles, Users, X } from "@/components/ui/icons";
 import { Collapse } from "@/components/ui/Collapse";
@@ -14,7 +14,7 @@ import { Metric } from "@/components/ui/Metric";
 type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 type Item = { href: string; label: string; icon: Icon; count?: number; children?: { href: string; label: string; count?: number }[] };
 
-export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number; inbox?: number; digest?: number };
+export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number; inbox?: number; digest?: number; ai?: number };
 
 function buildNav(c: NavCounts, isAdmin: boolean) {
   const main: Item[] = [
@@ -39,7 +39,7 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
     { href: "/issues", label: "Issues", icon: CircleDot },
     { href: "/planning", label: "Planning", icon: Kanban }, // the views (board, list, roadmap...) are tabs on the page
     { href: "/activity", label: "Activity", icon: Activity },
-    { href: "/ai", label: "AI assistant", icon: Sparkles },
+    { href: "/ai", label: "AI assistant", icon: Sparkles, count: c.ai },
   ];
   const source: Item[] = [
     { href: "/repositories", label: "Repositories", icon: FolderGit2 },
@@ -123,18 +123,27 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** A folded group that opens by itself while one of its pages is showing. */
+/** A folded group that opens by itself while one of its pages is showing, and again when you navigate to one of them. */
 function MoreGroup({ items, onNavigate }: { items: Item[]; onNavigate?: () => void }) {
   const path = usePathname();
   const here = items.some((i) => path === i.href || path.startsWith(`${i.href}/`));
-  const [open, setOpen] = useState<boolean | null>(null);
-  const shown = open ?? here;
+  // A choice made by hand holds for the page it was made on; arriving at one of its pages shows the group again.
+  const [chosen, setChosen] = useState<{ open: boolean; path: string } | null>(null);
+  const id = `${useId()}-more`; // the drawer renders a second copy of the navigation
+  const box = useRef<HTMLDivElement>(null);
+  const shown = chosen && chosen.path === path ? chosen.open : here;
+  const toggle = () => {
+    const next = !shown;
+    setChosen({ open: next, path });
+    // On a short window the opened list would sit below the fold: bring it into view once it has room.
+    if (next) setTimeout(() => box.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 120);
+  };
   return (
-    <div>
-      <button type="button" aria-expanded={shown} onClick={() => setOpen(!shown)} className="mb-1 flex w-full items-center gap-1 px-2.5 text-left text-[11.5px] font-medium uppercase tracking-[0.04em] text-ink-3 hover:text-ink">
+    <div ref={box}>
+      <button type="button" aria-expanded={shown} aria-controls={id} onClick={toggle} className="-my-1 mb-0 flex min-h-8 w-full items-center gap-1 px-2.5 text-left text-[11.5px] font-medium uppercase tracking-[0.04em] text-ink-3 hover:text-ink">
         More <ChevronDown size={12} aria-hidden className="chevron" data-open={shown} />
       </button>
-      <Collapse open={shown} id="nav-more"><NavList items={items} onNavigate={onNavigate} /></Collapse>
+      <Collapse open={shown} id={id}><NavList items={items} onNavigate={onNavigate} /></Collapse>
     </div>
   );
 }

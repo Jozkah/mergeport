@@ -2,7 +2,7 @@ import type { Db } from "@/lib/db";
 import type { Viewer } from "@/lib/authz/viewer";
 import { ValidationError } from "@/lib/errors";
 import { formatDuration } from "@/lib/format";
-import { chat, extractJson, withModel, type AiConfig, type Fetch, type Step } from "./ai";
+import { chat, extractJson, readableAnswer, withModel, type AiConfig, type Fetch, type Step } from "./ai";
 import { buildSnapshot, type Snapshot } from "./ai-review";
 import { getDigest, latestDigest, type DigestEntry, type DigestPayload, type DigestSection } from "./digest";
 import { derivedDetail, getWorkItemDetail } from "./queries";
@@ -127,7 +127,7 @@ export async function runTool(db: Db, v: Viewer, cfg: AiConfig, tool: ToolName, 
     const g = parseFocus(text, snap);
     if (g) return { title, text: g.summary, model: r.model, sources: g.steps.map((s) => ({ label: s.label, href: s.href })), steps: g.steps };
   }
-  return { title, text, model: r.model, sources };
+  return { title, text: readableAnswer(text), model: r.model, sources };
 }
 
 const VIEW = { review: "/attention?queue=needs-me", changes: "/attention?queue=changes", blocked: "/attention?queue=blocked" } as const;

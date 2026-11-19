@@ -182,7 +182,7 @@ export const PROPOSE_TOOLS: Tool[] = [
   },
   {
     name: "mergeport_action_status",
-    description: "Where a queued request stands: PENDING (waiting for the person), DONE (sent), FAILED, REJECTED or EXPIRED (nobody decided within a day).",
+    description: "Where a queued request stands: PENDING (waiting for the person; if a send failed, the result says why and it is still waiting), DONE (sent), REJECTED or EXPIRED (nobody decided within a day).",
     inputSchema: { type: "object", properties: { id: { type: "string", description: "The id returned when the request was queued." } }, required: ["id"], additionalProperties: false },
     run: (a, ctx) => guarded(async () => ({ text: JSON.stringify(await status(ctx.db, String(a.id ?? ""))) })),
   },

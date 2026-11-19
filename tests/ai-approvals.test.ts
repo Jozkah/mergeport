@@ -48,6 +48,20 @@ describe("requests from AI apps", () => {
     await expect(approve(db, admin, b.id, later)).rejects.toBeInstanceOf(ValidationError);
   });
 
+  it("a request that cannot be sent goes back to waiting with the reason, so it is never lost", async () => {
+    const { db, admin } = S;
+    const closed = await firstPr();
+    await db.workItem.update({ where: { id: closed.id }, data: { state: "CLOSED" } }); // GitHub refuses a review request on a closed pull request
+    const q = await propose(db, admin, { kind: "request-review", item: closed.id, users: ["alice"] });
+    const r = await approve(db, admin, q.id);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/^Not sent: /);
+    const waiting = (await listPending(db)).find((p) => p.id === q.id)!;
+    expect(waiting.error).toMatch(/^Not sent: /);
+    expect(await status(db, q.id)).toMatchObject({ state: "PENDING" });
+    expect(await reject(db, q.id)).toBe(true); // and it can still be rejected
+  });
+
   it("are checked when asked for: vague, empty or malformed requests are refused at once", async () => {
     const { db, admin } = S;
     const pr = await firstPr();

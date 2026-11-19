@@ -242,7 +242,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
             tone={readiness.ready ? "info" : readiness.rows.some((r) => r.state === "blocked") ? "warn" : "info"}
             title={readiness.ready ? "Ready to merge" : `Next: ${readiness.nextAction}`}
           >
-            {readiness.ready ? "Nothing Mergeport can see is in the way. GitHub decides." : `${readiness.rows.filter((r) => r.state === "blocked").length ? `${readiness.rows.filter((r) => r.state === "blocked").map((r) => r.label.toLowerCase()).join(", ")} blocking` : "Waiting"}${readiness.nextBy.length ? ` · on ${readiness.nextBy.join(", ")}` : ""}. Details under "Ready to merge?".`}
+            {readiness.ready ? "Nothing Mergeport can see is in the way. GitHub decides." : (readiness.rows.some((r) => r.state === "blocked") ? `Blocked by ${readiness.rows.filter((r) => r.state === "blocked").map((r) => r.label.toLowerCase()).join(", ")}` : "Waiting") + (readiness.nextBy.length ? `, on ${readiness.nextBy.join(", ")}` : "") + "."}
           </Banner>
         </div>
       )}

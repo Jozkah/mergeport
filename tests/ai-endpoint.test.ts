@@ -187,3 +187,18 @@ describe("the dropdown's stand-in for nothing chosen", () => {
     expect((await getAiView(db)).model).toBeNull();
   });
 });
+
+describe("answers meant to be read", () => {
+  it("refuses JSON, an empty answer and a bare code block, and unwraps a fenced text", async () => {
+    const { readableAnswer } = await import("@/lib/services/ai");
+    expect(readableAnswer("  Two reviews wait on you.  ")).toBe("Two reviews wait on you.");
+    expect(readableAnswer("```\nPlain text in a fence\n```")).toBe("Plain text in a fence");
+    for (const bad of ["", "   ", '{"tasks":[]}', '[1,2]', '```json\n{"a":1}\n```']) expect(() => readableAnswer(bad)).toThrow(/did not send back readable text/);
+  });
+
+  it("a question answered with JSON is reported, not shown as the answer", async () => {
+    const f = (async (url: string) => (String(url).endsWith("/models") ? new Response(JSON.stringify({ data: [{ id: "m" }] })) : new Response(JSON.stringify(reply('{"tasks":[{"title":"x"}]}'))))) as unknown as typeof fetch;
+    const { answerQuestion } = await import("@/lib/services/ai");
+    await expect(answerQuestion({ ...cfg, model: null }, "status of PR 3?", [], f)).rejects.toThrow(/readable text/);
+  });
+});

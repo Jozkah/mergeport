@@ -113,7 +113,7 @@ export async function approveActionAction(fd: FormData): Promise<ActionResult> {
     const { viewer } = await requireViewer();
     const r = await approve(db, viewer, str(fd, "id"));
     for (const p of ["/ai", "/pull-requests", "/issues"]) revalidatePath(p);
-    return r.ok ? { ok: true, message: r.message } : { ok: false, error: r.message };
+    return r.ok ? { ok: true, message: r.message } : { ok: false, error: r.message.replace(/^Not sent: /, "") };
   });
 }
 

@@ -16,7 +16,7 @@ export const REVIEW_EVENTS = ["COMMENT", "REQUEST_CHANGES", "APPROVE"] as const;
 const EXPIRES_MS = 24 * 3_600_000;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
-export type Pending = { id: string; kind: ActionKind; summary: string; detail: string; href: string; createdAt: Date };
+export type Pending = { id: string; kind: ActionKind; summary: string; detail: string; href: string; createdAt: Date; error: string | null };
 
 /** The one pull request or issue a request is about: an id, or text like "PR 22 from paymentgateway". Ambiguity is an error, never a guess. */
 export async function resolveItem(db: Db, v: Viewer, query: string) {
@@ -76,7 +76,7 @@ export async function listPending(db: Db, now = new Date()): Promise<Pending[]> 
   const rows = await db.aiPendingAction.findMany({ where: { state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } }, orderBy: { createdAt: "desc" }, take: 30 });
   const items = await db.workItem.findMany({ where: { id: { in: rows.map((r) => r.workItemId) } }, select: { id: true, type: true } });
   const type = new Map(items.map((i) => [i.id, i.type]));
-  return rows.map((r) => ({ id: r.id, kind: r.kind as ActionKind, summary: r.summary, detail: detailOf(r.kind, r.payload as Record<string, unknown>), href: `/${type.get(r.workItemId) === "ISSUE" ? "issues" : "pull-requests"}/${r.workItemId}`, createdAt: r.createdAt }));
+  return rows.map((r) => ({ id: r.id, kind: r.kind as ActionKind, summary: r.summary, detail: detailOf(r.kind, r.payload as Record<string, unknown>), href: `/${type.get(r.workItemId) === "ISSUE" ? "issues" : "pull-requests"}/${r.workItemId}`, createdAt: r.createdAt, error: r.result && r.result.startsWith("Not sent") ? r.result : null }));
 }
 
 export async function pendingCount(db: Db, now = new Date()): Promise<number> {
@@ -98,7 +98,8 @@ export async function approve(db: Db, v: Viewer, id: string, now = new Date()): 
     return { ok: true, message: `Sent: ${row.summary}` };
   } catch (e) {
     const message = e instanceof ForbiddenError || e instanceof ValidationError || e instanceof NotFoundError ? e.message : e instanceof Error ? cut(e.message, 300) : "It failed.";
-    await db.aiPendingAction.update({ where: { id }, data: { state: "FAILED", result: message } });
+    // A request that could not be sent goes back to waiting with the reason, so it can be tried again or rejected, never silently lost.
+    await db.aiPendingAction.update({ where: { id }, data: { state: "PENDING", decidedAt: null, result: `Not sent: ${message}` } });
     return { ok: false, message: `Not sent: ${message}` };
   }
 }
