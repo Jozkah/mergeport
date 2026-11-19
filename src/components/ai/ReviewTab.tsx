@@ -32,7 +32,7 @@ export function ReviewTab({ initial, summary, lastRun, autopilot }: { initial: S
     setList(r.data.suggestions);
     setKeep(Object.fromEntries(r.data.suggestions.map((s) => [s.id, true])));
     const c = r.data.counts;
-    setNote(c.suggested + c.skipped === 0 && r.data.suggestions.length === 0 ? "Nothing to suggest right now." : `${c.suggested} new suggestion${c.suggested === 1 ? "" : "s"}${c.skipped ? `, ${c.skipped} already suggested before` : ""}. Drafted with ${r.data.model}.`);
+    setNote(!r.data.model ? null : c.suggested + c.skipped === 0 ? "Nothing new to suggest right now." : `${c.suggested} new suggestion${c.suggested === 1 ? "" : "s"}${c.skipped ? `, ${c.skipped} already suggested before` : ""}. Drafted with ${r.data.model}.`);
   };
 
   const act = (kind: "accept" | "dismiss") =>
