@@ -144,14 +144,31 @@ export async function runJobsNow(): Promise<void> {
   await runJobLane(s);
 }
 
-export function startLocalScheduler(intervalMs = 5000) {
+/**
+ * Graceful stop for the standalone worker: no new ticks, wait (bounded) for the lanes to finish the job they are on, then cancel
+ * background refreshes and kill any gh process still running.
+ */
+export async function stopLocalScheduler(waitMs = 30_000): Promise<void> {
+  const s = g.__mpScheduler;
+  if (s) clearInterval(s.timer);
+  const end = Date.now() + waitMs;
+  while (s && (s.busy || s.coordBusy) && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+  shutdownDiscovery();
+  stopRepoWatch();
+  g.__mpScheduler = undefined;
+}
+
+/** `ownSignals: false` leaves SIGINT/SIGTERM to the caller (the standalone worker, which stops gracefully instead of killing gh at once). */
+export function startLocalScheduler(intervalMs = 5000, opts: { ownSignals?: boolean } = {}) {
   if (g.__mpScheduler) return;
   void recoverDiscovery().catch(() => {}); // an attempt a crash interrupted must not stay "retrying" for ever
   void recoverUpdateRuns(db).catch(() => {}); // likewise an auto-update run the last process never finished
   // Shutdown: cancel background refreshes and kill any gh process still running, so none outlives the app.
   process.once("exit", shutdownDiscovery);
-  process.once("SIGTERM", shutdownDiscovery);
-  process.once("SIGINT", shutdownDiscovery);
+  if (opts.ownSignals !== false) {
+    process.once("SIGTERM", shutdownDiscovery);
+    process.once("SIGINT", shutdownDiscovery);
+  }
   process.once("exit", stopRepoWatch);
   startRepoWatch(); // auto-sync of repositories without webhooks; idle unless a tab is open
   const state: State = { busy: false, coordBusy: false, lastTick: 0, startedAt: Date.now(), timer: undefined as unknown as ReturnType<typeof setInterval> };

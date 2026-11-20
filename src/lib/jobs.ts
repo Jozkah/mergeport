@@ -66,18 +66,21 @@ export async function ensureRecurring(db: Db, job: { type: string; key: string; 
   return db.job.update({ where: { id: existing.id }, data: { intervalMs: job.intervalMs, payload: job.payload ?? existing.payload ?? {}, ...(revive ? { status: "QUEUED", runAt: job.firstRunAt ?? new Date(), attempts: 0, lastError: null, finishedAt: null } : {}) } });
 }
 
+/**
+ * Atomic claim, safe for any number of workers on one database. One statement picks the oldest due QUEUED row and flips it to
+ * RUNNING; FOR UPDATE SKIP LOCKED makes a concurrent claimer skip rows another transaction is already claiming instead of waiting
+ * on or re-picking them, so each job goes to exactly one worker and no worker is starved by another's candidate.
+ */
 export async function claim(db: Db, now = new Date()): Promise<JobRow | null> {
-  for (let i = 0; i < 50; i++) {
-    const candidate = await db.job.findFirst({ where: { status: "QUEUED", runAt: { lte: now } }, orderBy: { runAt: "asc" } });
-    if (!candidate) return null;
-    // Atomic claim: only one caller can flip QUEUED -> RUNNING, even across processes sharing the file.
-    const won = await db.job.updateMany({ where: { id: candidate.id, status: "QUEUED" }, data: { status: "RUNNING", lockedAt: now, attempts: { increment: 1 } } });
-    if (won.count === 1) {
-      const j = await db.job.findUniqueOrThrow({ where: { id: candidate.id } });
-      return { id: j.id, type: j.type, payload: j.payload, attempts: j.attempts, maxAttempts: j.maxAttempts, intervalMs: j.intervalMs, dirty: j.dirty };
-    }
-  }
-  return null;
+  const at = now.toISOString();
+  const rows = await db.$queryRaw<JobRow[]>`
+    UPDATE "Job" SET "status" = 'RUNNING', "lockedAt" = ${at}::timestamp(3), "attempts" = "attempts" + 1
+    WHERE "id" = (
+      SELECT "id" FROM "Job" WHERE "status" = 'QUEUED' AND "runAt" <= ${at}::timestamp(3)
+      ORDER BY "runAt" ASC, "id" ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+    )
+    RETURNING "id", "type", "payload", "attempts", "maxAttempts", "intervalMs", "dirty"`;
+  return rows[0] ?? null;
 }
 
 /** Jobs whose process died stay RUNNING forever unless reclaimed. */

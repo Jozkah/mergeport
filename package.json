@@ -20,7 +20,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "migrate:from-postgres": "tsx scripts/migrate-from-postgres.ts",
     "test:live": "vitest run tests/live",
-    "hub": "node --import tsx hub/src/main.ts",
+    "worker": "node --import tsx scripts/worker.ts",
+    "hub":"node --import tsx hub/src/main.ts",
     "mp": "node --import tsx scripts/mp.ts",
     "mcp": "node --import tsx scripts/mcp.ts",
     "skill:install": "node --import tsx scripts/install-agent-skill.ts"
