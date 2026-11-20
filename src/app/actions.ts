@@ -95,11 +95,11 @@ export async function refreshRepositoryAction(fd: FormData): Promise<ActionResul
 
 // ---------- GitHub work actions ----------
 
-const ctx = async () => ({ db, v: (await requireWriter()).viewer });
+const writerCtx = async () => ({ db, v: (await requireWriter()).viewer });
 
 export async function commentAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await work.addComment(await ctx(), str(fd, "id"), String(fd.get("body") ?? ""));
+    await work.addComment(await writerCtx(), str(fd, "id"), String(fd.get("body") ?? ""));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Comment posted" };
   });
@@ -107,7 +107,7 @@ export async function commentAction(fd: FormData): Promise<ActionResult> {
 
 export async function inlineCommentAction(input: { id: string; path: string; line: number; side: "LEFT" | "RIGHT"; body: string }): Promise<ActionResult> {
   return run(async () => {
-    await work.addReviewComment(await ctx(), input.id, { path: input.path, line: input.line, side: input.side === "LEFT" ? "LEFT" : "RIGHT", body: input.body });
+    await work.addReviewComment(await writerCtx(), input.id, { path: input.path, line: input.line, side: input.side === "LEFT" ? "LEFT" : "RIGHT", body: input.body });
     revalidatePath("/pull-requests/" + input.id);
     return { ok: true, message: "Comment posted" };
   });
@@ -115,7 +115,7 @@ export async function inlineCommentAction(input: { id: string; path: string; lin
 
 export async function labelsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await work.setLabels(await ctx(), str(fd, "id"), str(fd, "labels").split(",").map((s) => s.trim()));
+    await work.setLabels(await writerCtx(), str(fd, "id"), str(fd, "labels").split(",").map((s) => s.trim()));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Labels updated" };
   });
@@ -123,7 +123,7 @@ export async function labelsAction(fd: FormData): Promise<ActionResult> {
 
 export async function assigneesAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await work.setAssignees(await ctx(), str(fd, "id"), csv(str(fd, "assignees")));
+    await work.setAssignees(await writerCtx(), str(fd, "id"), csv(str(fd, "assignees")));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Assignees updated" };
   });
@@ -132,7 +132,7 @@ export async function assigneesAction(fd: FormData): Promise<ActionResult> {
 export async function milestoneAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const n = str(fd, "number");
-    await work.setRepoMilestone(await ctx(), str(fd, "id"), n ? Number(n) : null);
+    await work.setRepoMilestone(await writerCtx(), str(fd, "id"), n ? Number(n) : null);
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Milestone updated" };
   });
@@ -140,7 +140,7 @@ export async function milestoneAction(fd: FormData): Promise<ActionResult> {
 
 export async function requestReviewAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await work.requestReview(await ctx(), str(fd, "id"), csv(str(fd, "users")), csv(str(fd, "teams")));
+    await work.requestReview(await writerCtx(), str(fd, "id"), csv(str(fd, "users")), csv(str(fd, "teams")));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Review requested on GitHub" };
   });
@@ -149,7 +149,7 @@ export async function requestReviewAction(fd: FormData): Promise<ActionResult> {
 export async function submitReviewAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const event = z.enum(["APPROVE", "COMMENT", "REQUEST_CHANGES"]).parse(str(fd, "event"));
-    await work.submitReview(await ctx(), str(fd, "id"), event, String(fd.get("body") ?? ""));
+    await work.submitReview(await writerCtx(), str(fd, "id"), event, String(fd.get("body") ?? ""));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Review submitted" };
   });
@@ -157,7 +157,7 @@ export async function submitReviewAction(fd: FormData): Promise<ActionResult> {
 
 export async function createIssueAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const c = await ctx();
+    const c = await writerCtx();
     const created = await work.createIssue(c, str(fd, "repositoryId"), { title: str(fd, "title"), body: String(fd.get("body") ?? ""), labels: csv(str(fd, "labels")) });
     revalidatePath("/issues");
     return { ok: true, message: `Issue #${created.number} created on GitHub` };
@@ -166,7 +166,7 @@ export async function createIssueAction(fd: FormData): Promise<ActionResult> {
 
 export async function mergeCheckAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const e = await work.mergeEligibility(await ctx(), str(fd, "id"));
+    const e = await work.mergeEligibility(await writerCtx(), str(fd, "id"));
     return { ok: true, data: { ...e } };
   });
 }
@@ -174,7 +174,7 @@ export async function mergeCheckAction(fd: FormData): Promise<ActionResult> {
 export async function mergeAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const method = z.enum(["merge", "squash", "rebase"]).parse(str(fd, "method"));
-    await work.mergePullRequest(await ctx(), str(fd, "id"), { method, confirmedHeadSha: str(fd, "sha"), acknowledgeWarnings: bool(fd, "ack") });
+    await work.mergePullRequest(await writerCtx(), str(fd, "id"), { method, confirmedHeadSha: str(fd, "sha"), acknowledgeWarnings: bool(fd, "ack") });
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Pull request merged" };
   });

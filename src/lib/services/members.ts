@@ -62,9 +62,9 @@ export async function changeRole(db: Db, v: Viewer, memberId: unknown, newRole: 
   await db.$transaction(async (tx) => {
     const actor = await freshActor(tx, v);
     const t = await targetOf(tx, v.workspaceId, memberId);
-    if (t.status !== "ACTIVE") throw new ConflictError("This person was removed. Reinstate them first.");
     if (t.role === "OWNER") throw new ForbiddenError("The owner's role changes only by transferring ownership.");
     if (!can(actor, "changeRoles", { targetRole: t.role, newRole })) throw new ForbiddenError("You cannot change that role");
+    if (t.status !== "ACTIVE") throw new ConflictError("This person was removed. Reinstate them first.");
     if (t.role === newRole) return;
     if (isAdminRole(t.role) && !isAdminRole(newRole)) await assertAdminRemains(tx, v.workspaceId, t.id);
     await tx.member.update({ where: { id: t.id, workspaceId: v.workspaceId }, data: { role: newRole } });
@@ -92,8 +92,8 @@ export async function reinstateMember(db: Db, v: Viewer, memberId: unknown, role
   await db.$transaction(async (tx) => {
     const actor = await freshActor(tx, v);
     const t = await targetOf(tx, v.workspaceId, memberId);
-    if (t.status !== "REVOKED") throw new ConflictError("This person is not removed.");
     if (!can(actor, "manageMembers", { targetRole: role, newRole: role })) throw new ForbiddenError("You cannot do that");
+    if (t.status !== "REVOKED") throw new ConflictError("This person is not removed.");
     await tx.member.update({ where: { id: t.id, workspaceId: v.workspaceId }, data: { status: "ACTIVE", revokedAt: null, role } });
     await audit(tx, { workspaceId: v.workspaceId, userId: v.userId }, "member.reinstated", { type: "Member", id: t.id }, { role });
   });
