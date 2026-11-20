@@ -5,7 +5,7 @@ that workspace, and every query on tenant data names the workspace.
 
 ## Model classification
 
-65 models: 1 tenant anchor, 22 ROOT, 37 CHILD, 5 GLOBAL.
+67 models: 1 tenant anchor, 22 ROOT, 37 CHILD, 7 GLOBAL.
 
 **Tenant anchor.** `Workspace` is the tenant itself.
 
@@ -32,9 +32,9 @@ PlanEvent. Through Space: SyncEntity, OutboxOp, SyncConflict, HubRestore. Person
 NotificationPref, InboxState, SeenState, ReviewDraft, ViewedFile): owned by a person, and the work item or file ids inside them are
 cuids that only exist in one workspace.
 
-**GLOBAL (5), shared on purpose.**
+**GLOBAL (7), shared on purpose.**
 
-- `User`, `Session`: a person's account and login. A user belongs to workspaces through `Member`.
+- `User`, `Session`, `Identity`, `MagicLink`: a person's account and how they sign in (see `docs/auth.md`). A user belongs to workspaces through `Member`. `Session.activeWorkspaceId` only chooses among the person's own memberships and is re-checked on every request.
 - `GithubOwner`: a public GitHub account (login, type, avatar) keyed by GitHub's immutable id. It holds nothing private and is the
   same for every tenant.
 - `PublicCacheEntry`: ETag cache of GitHub API answers, keyed by request. A 304 is only given to a caller GitHub has authorised, so
@@ -56,8 +56,8 @@ all tenants).
 `loadViewer(db, userId, workspaceId)` requires an ACTIVE membership of that workspace. With no workspace given it accepts only a
 user with exactly one membership, and returns null for several rather than guess. `resolveActiveWorkspaceId(db, user, cookie)` picks
 the workspace: the only membership; else the `mp_ws` cookie if the user is an active member of it; else the oldest membership.
-The cookie is untrusted input and only ever chooses among memberships the user already has. Nothing sets the cookie yet (no
-switcher UI in this phase).
+The cookie is untrusted input and only ever chooses among memberships the user already has. The hosted workspace switcher binds the choice to the login
+session (`Session.activeWorkspaceId`, which wins over the cookie); the cookie remains a fallback for sessions with no binding.
 
 Request paths always pass `viewer.workspaceId`: discovery lists (`readCached`), the sync engine and team service (cached per workspace in
 `getEngine(workspaceId)` / `getTeamService(workspaceId)`), the hub coverage caches, the hub login vault, watch settings and leaving a team

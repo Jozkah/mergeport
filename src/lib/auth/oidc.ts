@@ -20,7 +20,7 @@ export type OidcProvider = { name: string; label: string; issuer: string; client
 const LABELS: Record<string, string> = { google: "Google", microsoft: "Microsoft" };
 
 /** Providers configured through OIDC_<NAME>_ISSUER / _CLIENT_ID / _CLIENT_SECRET. All three must be present. */
-export function oidcProviders(envVars: NodeJS.ProcessEnv = process.env): OidcProvider[] {
+export function oidcProviders(envVars: Record<string, string | undefined> = process.env): OidcProvider[] {
   const out: OidcProvider[] = [];
   for (const key of Object.keys(envVars)) {
     const m = /^OIDC_([A-Z][A-Z0-9]*)_ISSUER$/.exec(key);
