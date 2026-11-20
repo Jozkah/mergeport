@@ -96,14 +96,14 @@ describe("backup and restore", () => {
 
   it("restores unsent edits only into a team space that exists there, and keeps them pending", async () => {
     const { db, admin } = S;
-    const space = await db.space.create({ data: { remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
+    const space = await db.space.create({ data: { workspaceId: admin.workspaceId, remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
     await db.outboxOp.create({ data: { id: "op-1", spaceId: space.id, entityType: "card", entityId: "c1", kind: "UPSERT", data: { a: 1 }, status: "FAILED" } });
     const text = await exportBackup(db, admin);
     const b = parseBackup(text);
     expect(b.source.unsentEdits).toBe(1);
     const { db: tdb, v } = await target(true);
     expect((await restoreBackup(tdb, v, b, { confirmed: true })).outbox).toEqual({ restorable: 0, skipped: 1 });
-    await tdb.space.create({ data: { remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
+    await tdb.space.create({ data: { workspaceId: v.workspaceId, remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
     expect((await restoreBackup(tdb, v, b, { confirmed: true })).outbox).toEqual({ restorable: 1, skipped: 0 });
     expect((await tdb.outboxOp.findUniqueOrThrow({ where: { id: "op-1" } })).status).toBe("PENDING");
     await tdb.$disconnect();

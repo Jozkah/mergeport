@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db, resolveDbFile } from "@/lib/db";
 import { truncateAll } from "@/lib/demo/seed";
@@ -33,17 +34,17 @@ afterEach(async () => {
   resetRuntime();
   vi.unstubAllGlobals();
   await db.space.deleteMany({ where: { backend: "HUB" } });
-  await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team" }, update: { mode: "PERSONAL", backend: "GITHUB", hubOrigin: null } });
+  await db.teamConfig.upsert({ where: { workspaceId: await wsId(db) }, create: { workspaceId: await wsId(db) }, update: { mode: "PERSONAL", backend: "GITHUB", hubOrigin: null } });
   await hubSessionPort.remove(resolveDbFile());
   process.env.DEMO_MODE = "true";
   resetEnvCache();
 });
 
-const hubSpace = () => db.space.create({ data: { remoteId: "common", teamRemoteId: "t", kind: "COMMON", name: "Workspace", repoOwner: "", repoName: "", backend: "HUB", hubSpaceId: "common", canWrite: true } });
+const hubSpace = async () => db.space.create({ data: { workspaceId: await wsId(db), remoteId: "common", teamRemoteId: "t", kind: "COMMON", name: "Workspace", repoOwner: "", repoName: "", backend: "HUB", hubSpaceId: "common", canWrite: true } });
 
 describe("runtime engine per backend", () => {
   it("a hub profile gets an engine whose pull calls the hub with the vault token", async () => {
-    await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN }, update: { mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN } });
+    await db.teamConfig.upsert({ where: { workspaceId: await wsId(db) }, create: { workspaceId: await wsId(db), mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN }, update: { mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN } });
     await hubSessionPort.save(resolveDbFile(), { origin: ORIGIN, token: TOKEN, githubId: "4242", login: "runtime-user" });
     const space = await hubSpace();
     const engine = await getEngine();
@@ -61,7 +62,7 @@ describe("runtime engine per backend", () => {
   });
 
   it("concurrent first callers share one engine, so the live link and the pages drive the same one", async () => {
-    await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN }, update: { mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN } });
+    await db.teamConfig.upsert({ where: { workspaceId: await wsId(db) }, create: { workspaceId: await wsId(db), mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN }, update: { mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN } });
     await hubSessionPort.save(resolveDbFile(), { origin: ORIGIN, token: TOKEN, githubId: "4242", login: "runtime-user" });
     const engines = await Promise.all([getEngine(), getEngine(), getEngine(), getEngine()]);
     expect(engines[0]).not.toBeNull();
@@ -70,7 +71,7 @@ describe("runtime engine per backend", () => {
   });
 
   it("a GitHub profile keeps the GitHub store and has no hub client", async () => {
-    await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "TEAM", backend: "GITHUB" }, update: { mode: "TEAM", backend: "GITHUB", hubOrigin: null } });
+    await db.teamConfig.upsert({ where: { workspaceId: await wsId(db) }, create: { workspaceId: await wsId(db), mode: "TEAM", backend: "GITHUB" }, update: { mode: "TEAM", backend: "GITHUB", hubOrigin: null } });
     const space = await hubSpace();
     const engine = await getEngine();
     expect(engine).not.toBeNull();
@@ -79,7 +80,7 @@ describe("runtime engine per backend", () => {
   });
 
   it("a hub profile without a session reports needsSignIn", async () => {
-    await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN }, update: { mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN } });
+    await db.teamConfig.upsert({ where: { workspaceId: await wsId(db) }, create: { workspaceId: await wsId(db), mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN }, update: { mode: "TEAM", backend: "HUB", hubOrigin: ORIGIN } });
     await getEngine();
     await vi.waitFor(async () => expect((await hubLinkStatus(resolveDbFile())).needsSignIn).toBe(true), { timeout: 2000 });
   });

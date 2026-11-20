@@ -178,13 +178,14 @@ describe("the dropdown's stand-in for nothing chosen", () => {
     const path = await import("node:path");
     const os = await import("node:os");
     const fs = await import("node:fs");
-    const { db } = await freshSeed();
+    const { db, admin } = await freshSeed();
+    const wsId_ = admin.workspaceId;
     const vault = openVault(path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ai-empty-")), "key"));
-    await saveAiSettings(db, vault, { baseUrl: "https://ai.example.com/v1", apiKey: "k", model: "__empty__" });
-    expect((await getAiView(db)).model).toBeNull();
-    expect((await loadAiConfig(db, vault))?.model).toBeNull();
-    await db.aiSettings.update({ where: { id: "ai" }, data: { model: "__empty__" } }); // a row saved by the older form
-    expect((await getAiView(db)).model).toBeNull();
+    await saveAiSettings(db, wsId_, vault, { baseUrl: "https://ai.example.com/v1", apiKey: "k", model: "__empty__" });
+    expect((await getAiView(db, wsId_)).model).toBeNull();
+    expect((await loadAiConfig(db, wsId_, vault))?.model).toBeNull();
+    await db.aiSettings.update({ where: { workspaceId: wsId_ }, data: { model: "__empty__" } }); // a row saved by the older form
+    expect((await getAiView(db, wsId_)).model).toBeNull();
   });
 });
 

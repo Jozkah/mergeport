@@ -171,9 +171,9 @@ describe("a project and its repositories share one audience", () => {
     const wide = await seedProject(olive, common, { repoFullName: "acme/public-site", githubId: 1111n, project: "Website" });
     const secret = await seedProject(olive, restricted, { repoFullName: "acme/payroll-vault", githubId: 31337n, project: "Payroll" });
     // a restricted repository cannot be linked to a project shared through the common space
-    await expect(assertSameAudience(olive.db, common.id, [secret.repo.id])).rejects.toBeInstanceOf(ValidationError);
-    await expect(assertSameAudience(olive.db, common.id, [wide.repo.id])).resolves.toBeUndefined();
-    await expect(assertSameAudience(olive.db, null, [secret.repo.id])).resolves.toBeUndefined(); // a local project can link anything
+    await expect(assertSameAudience(olive.db, v.workspaceId, common.id, [secret.repo.id])).rejects.toBeInstanceOf(ValidationError);
+    await expect(assertSameAudience(olive.db, v.workspaceId, common.id, [wide.repo.id])).resolves.toBeUndefined();
+    await expect(assertSameAudience(olive.db, v.workspaceId, null, [secret.repo.id])).resolves.toBeUndefined(); // a local project can link anything
     // a card from a restricted repository's issue cannot be created in the common project
     await olive.db.projectRepository.create({ data: { projectId: wide.project.id, repositoryId: secret.repo.id } });
     const item = await olive.db.workItem.create({ data: { repositoryId: secret.repo.id, githubId: 9n, number: 1, type: "ISSUE", title: "Salary of Dana", htmlUrl: "https://x/1", createdAtGh: new Date(), updatedAtGh: new Date() } });

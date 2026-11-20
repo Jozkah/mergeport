@@ -1,6 +1,10 @@
 import { createPrisma, type Db } from "@/lib/db";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
+import { firstWorkspace } from "@/lib/local/profile";
 import { seedDemo, truncateAll, type DemoIds } from "@/lib/demo/seed";
+
+/** The workspace of a test database (the profile's one), created when there is none yet. */
+export const wsId = async (db: Db) => (await firstWorkspace(db)).id;
 
 export const BASE = new Date("2026-10-28T12:00:00Z");
 

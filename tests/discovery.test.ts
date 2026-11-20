@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -160,7 +161,7 @@ describe("deduplication, shutdown and restart", () => {
 
   it("an attempt a crash left 'retrying' is marked interrupted on the next start", async () => {
     const db = fresh();
-    await db.discoveryCache.create({ data: { key: "repos", state: "RETRYING", attempts: 2, payload: toJson(["kept"]), fetchedAt: T0 } });
+    await db.discoveryCache.create({ data: { workspaceId: await wsId(db), key: "repos", state: "RETRYING", attempts: 2, payload: toJson(["kept"]), fetchedAt: T0 } });
     expect(await recoverInterrupted(db, now())).toBe(1);
     expect(await readCached(db, "repos")).toMatchObject({ state: "OFFLINE", payload: ["kept"] });
   });
@@ -206,7 +207,7 @@ describe("pending edits do not cross profiles or spaces", () => {
     const a = fresh();
     const b = fresh();
     const ws = await a.workspace.create({ data: { name: "w" } });
-    const sp = await a.space.create({ data: { remoteId: "s1", teamRemoteId: "t", kind: "COMMON", name: "S", repoOwner: "o", repoName: "r", access: "OK" } });
+    const sp = await a.space.create({ data: { workspaceId: ws.id, remoteId: "s1", teamRemoteId: "t", kind: "COMMON", name: "S", repoOwner: "o", repoName: "r", access: "OK" } });
     await a.outboxOp.create({ data: { id: "op", spaceId: sp.id, entityType: "project", entityId: "p", kind: "UPSERT", data: { n: 1 }, baseVersion: 0 } });
     expect(await a.outboxOp.count()).toBe(1);
     expect(await b.outboxOp.count()).toBe(0);

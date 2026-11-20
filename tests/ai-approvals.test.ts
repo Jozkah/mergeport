@@ -22,14 +22,14 @@ describe("requests from AI apps", () => {
     const q = await propose(db, admin, { kind: "comment", item: `PR ${pr.number} from ${pr.repository.name}`, body: "Looks good to me." });
     expect(q.summary).toBe(`Comment on ${pr.repository.fullName}#${pr.number}`);
     expect(await comments(pr.id)).toBe(before);
-    expect(await pendingCount(db)).toBe(1);
-    expect((await listPending(db))[0]).toMatchObject({ id: q.id, detail: "Looks good to me.", href: `/pull-requests/${pr.id}` });
-    expect(await status(db, q.id)).toMatchObject({ state: "PENDING" });
+    expect(await pendingCount(db, S.admin)).toBe(1);
+    expect((await listPending(db, S.admin))[0]).toMatchObject({ id: q.id, detail: "Looks good to me.", href: `/pull-requests/${pr.id}` });
+    expect(await status(db, S.admin, q.id)).toMatchObject({ state: "PENDING" });
 
     const r = await approve(db, admin, q.id);
     expect(r.ok).toBe(true);
     expect(await comments(pr.id)).toBe(before + 1);
-    expect(await status(db, q.id)).toMatchObject({ state: "DONE", result: "Sent to GitHub" });
+    expect(await status(db, S.admin, q.id)).toMatchObject({ state: "DONE", result: "Sent to GitHub" });
     await expect(approve(db, admin, q.id)).rejects.toBeInstanceOf(ValidationError); // a second click sends nothing
     expect(await comments(pr.id)).toBe(before + 1);
   });
@@ -38,13 +38,13 @@ describe("requests from AI apps", () => {
     const { db, admin } = S;
     const pr = await firstPr();
     const a = await propose(db, admin, { kind: "comment", item: pr.id, body: "x" });
-    expect(await reject(db, a.id)).toBe(true);
-    expect(await status(db, a.id)).toMatchObject({ state: "REJECTED" });
+    expect(await reject(db, S.admin, a.id)).toBe(true);
+    expect(await status(db, S.admin, a.id)).toMatchObject({ state: "REJECTED" });
     await expect(approve(db, admin, a.id)).rejects.toBeInstanceOf(ValidationError);
     const b = await propose(db, admin, { kind: "comment", item: pr.id, body: "y" });
     const later = new Date(Date.now() + 25 * 3_600_000);
-    expect(await listPending(db, later)).toHaveLength(0);
-    expect((await status(db, b.id, later)).state).toBe("EXPIRED");
+    expect(await listPending(db, S.admin, later)).toHaveLength(0);
+    expect((await status(db, S.admin, b.id, later)).state).toBe("EXPIRED");
     await expect(approve(db, admin, b.id, later)).rejects.toBeInstanceOf(ValidationError);
   });
 
@@ -56,10 +56,10 @@ describe("requests from AI apps", () => {
     const r = await approve(db, admin, q.id);
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/^Not sent: /);
-    const waiting = (await listPending(db)).find((p) => p.id === q.id)!;
+    const waiting = (await listPending(db, S.admin)).find((p) => p.id === q.id)!;
     expect(waiting.error).toMatch(/^Not sent: /);
-    expect(await status(db, q.id)).toMatchObject({ state: "PENDING" });
-    expect(await reject(db, q.id)).toBe(true); // and it can still be rejected
+    expect(await status(db, S.admin, q.id)).toMatchObject({ state: "PENDING" });
+    expect(await reject(db, S.admin, q.id)).toBe(true); // and it can still be rejected
   });
 
   it("are checked when asked for: vague, empty or malformed requests are refused at once", async () => {
@@ -70,7 +70,7 @@ describe("requests from AI apps", () => {
     await expect(propose(db, admin, { kind: "request-review", item: pr.id, users: ["not a login!"] })).rejects.toThrow(/usernames/);
     await expect(propose(db, admin, { kind: "review", item: pr.id, event: "MERGE" })).rejects.toThrow(/COMMENT, REQUEST_CHANGES or APPROVE/);
     await expect(propose(db, admin, { kind: "review", item: pr.id, event: "REQUEST_CHANGES", body: "" })).rejects.toThrow(/text of the review/);
-    expect(await pendingCount(db)).toBe(0);
+    expect(await pendingCount(db, S.admin)).toBe(0);
   });
 
   it("cannot name an item the person cannot see", async () => {

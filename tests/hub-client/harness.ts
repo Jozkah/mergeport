@@ -25,7 +25,7 @@ export async function makeHubClient(hub: FakeHub, githubId: bigint, login: strin
   const profile = await ensureLocalProfile(db, { id: githubId, login, name: login, avatarUrl: null, host: "github.com" });
   const token = hub.token(String(githubId));
   const origin = hub.origin();
-  await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "TEAM", backend: "HUB", hubOrigin: origin }, update: { mode: "TEAM", backend: "HUB", hubOrigin: origin } });
+  await db.teamConfig.upsert({ where: { workspaceId: profile.workspace.id }, create: { workspaceId: profile.workspace.id, mode: "TEAM", backend: "HUB", hubOrigin: origin }, update: { mode: "TEAM", backend: "HUB", hubOrigin: origin } });
   const client = new HttpHubClient(origin, async () => token);
   let liveHandle: ReturnType<typeof startHubLive> | null = null;
   const engine = new SyncEngine({

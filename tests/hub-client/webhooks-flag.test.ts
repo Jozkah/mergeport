@@ -1,3 +1,4 @@
+import { wsId } from "../helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearHubWebhooks, readHubWebhooksEnabled, saveHubWebhooks } from "@/lib/hub/github-app-install";
 import { HUB_WEBHOOKS_KEY } from "@/lib/hub/webhook-panel";
@@ -27,7 +28,7 @@ describe("the live link stores whether the hub's webhooks are enabled", () => {
     hub.webhooks = { enabled: true, appSlug: "team-app", lastDeliveryAt: null, lastEvent: null };
     c.startLive({ timers: new ManualTimers() });
     await vi.waitFor(async () => expect(await readHubWebhooksEnabled(c.db)).toBe(true));
-    const row = await c.db.discoveryCache.findUnique({ where: { key: HUB_WEBHOOKS_KEY } });
+    const row = await c.db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(c.db), key: HUB_WEBHOOKS_KEY } } });
     const saved = row?.payload as unknown as { enabled: boolean; at: string };
     expect(saved.enabled).toBe(true);
     expect(Number.isNaN(Date.parse(saved.at))).toBe(false);

@@ -81,7 +81,7 @@ describe("notifications while no tab is open", () => {
   let S: Awaited<ReturnType<typeof freshSeed>>;
   const shown: ToastOut[] = [];
   const base = "http://127.0.0.1:3000";
-  const run = (o: { active?: boolean; now?: Date } = {}) => dispatchToasts(S.db, { active: o.active ?? false, show: (t) => shown.push(t), baseUrl: base, now: o.now });
+  const run = (o: { active?: boolean; now?: Date } = {}) => dispatchToasts(S.db, S.admin.workspaceId, { active: o.active ?? false, show: (t) => shown.push(t), baseUrl: base, now: o.now });
   const note = (title: string, extra: { kind?: string; href?: string | null; createdAt?: Date; readAt?: Date } = {}) =>
     S.db.notification.create({ data: { workspaceId: S.admin.workspaceId, userId: S.admin.userId, kind: extra.kind ?? "review-requested", title, href: extra.href === undefined ? "/pull-requests/x" : extra.href, createdAt: extra.createdAt ?? new Date(), readAt: extra.readAt, toastedAt: null } });
 

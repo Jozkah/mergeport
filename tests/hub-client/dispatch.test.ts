@@ -1,12 +1,16 @@
+import { wsId } from "../helpers";
 import path from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createTestPrisma } from "../pg";
 import { SyncEngine } from "@/lib/sync/engine";
 
 const db = createTestPrisma(path.resolve(".data", `hub-client-dispatch-${process.pid}.db`));
 afterAll(() => db.$disconnect());
+beforeAll(async () => {
+  base = { ...base, workspaceId: await wsId(db) };
+});
 
-const base = { remoteId: "r", teamRemoteId: "t", kind: "COMMON" as const, name: "n" };
+let base = { workspaceId: "", remoteId: "r", teamRemoteId: "t", kind: "COMMON" as const, name: "n" };
 const actor = { id: 1n, login: "alice" };
 
 function engine(withHub: boolean) {

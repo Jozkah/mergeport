@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -61,7 +62,7 @@ async function makeClient(githubId: bigint, login: string, token: string) {
   const db: Db = createTestPrisma(file);
   const profile = await ensureLocalProfile(db, { id: githubId, login, name: login, avatarUrl: null, host: "github.com" });
   const origin = hub.url;
-  await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "TEAM", backend: "HUB", hubOrigin: origin }, update: { mode: "TEAM", backend: "HUB", hubOrigin: origin } });
+  await db.teamConfig.upsert({ where: { workspaceId: await wsId(db) }, create: { workspaceId: await wsId(db), mode: "TEAM", backend: "HUB", hubOrigin: origin }, update: { mode: "TEAM", backend: "HUB", hubOrigin: origin } });
   const client = new HttpHubClient(origin, async () => token);
   const sockets: NodeSocket[] = [];
   let live: ReturnType<typeof startHubLive> | null = null;

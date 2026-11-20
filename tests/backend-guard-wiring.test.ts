@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createTestPrisma } from "./pg";
@@ -26,8 +27,8 @@ function engine(profileBackend: Backend) {
 }
 
 let n = 0;
-const githubSpace = () => db.space.create({ data: { ...base, remoteId: `g${n}`, repoOwner: "acme", repoName: `guard-${n++}` } });
-const hubSpace = () => db.space.create({ data: { ...base, remoteId: `h${n}`, backend: "HUB", repoOwner: "", repoName: "", hubSpaceId: `guard-${n++}` } });
+const githubSpace = async () => db.space.create({ data: { workspaceId: await wsId(db), ...base, remoteId: `g${n}`, repoOwner: "acme", repoName: `guard-${n++}` } });
+const hubSpace = async () => db.space.create({ data: { workspaceId: await wsId(db), ...base, remoteId: `h${n}`, backend: "HUB", repoOwner: "", repoName: "", hubSpaceId: `guard-${n++}` } });
 
 describe("backend isolation guard wired into the engine", () => {
   it("a GITHUB space in a hub profile is refused before any network call", async () => {

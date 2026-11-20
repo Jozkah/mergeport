@@ -223,7 +223,7 @@ describe("stored digests", () => {
     expect(ns[0]).toMatchObject({ href: `/digest?day=${DAY}`, repositoryId: null });
     expect(ns[0].title).toContain(`Digest for ${DAY}`);
 
-    await markDigestRead(S.db, S.a.userId, DAY, NOW);
+    await markDigestRead(S.db, S.a, DAY, NOW);
     const read = await generateDigest(S.db, S.a, { now: new Date("2026-10-29T16:00:00Z"), replace: true });
     expect(read.created).toBe(false);
     expect(read.digest.generatedAt.toISOString()).toBe("2026-10-29T16:00:00.000Z");
@@ -248,16 +248,16 @@ describe("stored digests", () => {
 
   it("is personal: another person's digest is a different row", async () => {
     await generateDigest(S.db, S.a, { now: NOW });
-    expect(await getDigest(S.db, S.b.userId, DAY)).toBeNull();
-    expect(await listDigestDays(S.db, S.b.userId)).toEqual([]);
-    expect(await unreadDigestCount(S.db, S.a.userId)).toBe(1);
-    await markDigestRead(S.db, S.a.userId, DAY);
-    expect(await unreadDigestCount(S.db, S.a.userId)).toBe(0);
+    expect(await getDigest(S.db, S.b, DAY)).toBeNull();
+    expect(await listDigestDays(S.db, S.b)).toEqual([]);
+    expect(await unreadDigestCount(S.db, S.a)).toBe(1);
+    await markDigestRead(S.db, S.a, DAY);
+    expect(await unreadDigestCount(S.db, S.a)).toBe(0);
     expect((await notes())[0].readAt).not.toBeNull();
   });
 
   it("demo mode makes the first digest on demand from the demo data", async () => {
-    expect(await listDigestDays(S.db, S.a.userId)).toEqual([]);
+    expect(await listDigestDays(S.db, S.a)).toEqual([]);
     const d = await latestDigest(S.db, S.a, NOW);
     expect(d?.day).toBe(DAY);
     expect(d!.payload.counts.undone).toBeGreaterThan(0);
@@ -275,34 +275,34 @@ describe("the daily check (scheduler)", () => {
   const notes = () => S.db.notification.count({ where: { kind: "daily-digest" } });
 
   it("waits for the hour, generates once, and stays quiet for the rest of the day", async () => {
-    expect(await runDailyDigest(S.db, new Date("2026-10-29T07:59:00Z"))).toBe("not-yet");
+    expect(await runDailyDigest(S.db, S.a.workspaceId, new Date("2026-10-29T07:59:00Z"))).toBe("not-yet");
     expect(await days()).toEqual([]);
-    expect(await runDailyDigest(S.db, new Date("2026-10-29T08:00:00Z"))).toBe("generated");
-    for (const t of ["2026-10-29T08:10:00Z", "2026-10-29T12:00:00Z", "2026-10-29T23:50:00Z"]) expect(await runDailyDigest(S.db, new Date(t))).toBe("have-it");
+    expect(await runDailyDigest(S.db, S.a.workspaceId, new Date("2026-10-29T08:00:00Z"))).toBe("generated");
+    for (const t of ["2026-10-29T08:10:00Z", "2026-10-29T12:00:00Z", "2026-10-29T23:50:00Z"]) expect(await runDailyDigest(S.db, S.a.workspaceId, new Date(t))).toBe("have-it");
     expect(await days()).toEqual([{ day: DAY }]);
     expect(await notes()).toBe(1);
-    expect(await runDailyDigest(S.db, new Date("2026-10-30T09:00:00Z"))).toBe("generated"); // the next local day
+    expect(await runDailyDigest(S.db, S.a.workspaceId, new Date("2026-10-30T09:00:00Z"))).toBe("generated"); // the next local day
     expect((await days()).map((d) => d.day).sort()).toEqual([DAY, "2026-10-29"]);
   });
 
   it("catches up on the first check after the app was closed at the configured hour", async () => {
     // Closed from the evening before until 17:30: the first check of the day is already past 08:00.
-    expect(await runDailyDigest(S.db, new Date("2026-10-29T17:30:00Z"))).toBe("generated");
+    expect(await runDailyDigest(S.db, S.a.workspaceId, new Date("2026-10-29T17:30:00Z"))).toBe("generated");
     expect((await days()).map((d) => d.day)).toEqual([DAY]);
     // A configured hour of 20 has not passed at 17:30 on the next day yet.
     const p = await getPrefs(S.db, S.a.userId);
     await setPrefs(S.db, S.a.userId, { ...p, digest: { enabled: true, hour: 20 } });
-    expect(await runDailyDigest(S.db, new Date("2026-10-30T17:30:00Z"))).toBe("not-yet");
-    expect(await runDailyDigest(S.db, new Date("2026-10-30T20:00:00Z"))).toBe("generated");
+    expect(await runDailyDigest(S.db, S.a.workspaceId, new Date("2026-10-30T17:30:00Z"))).toBe("not-yet");
+    expect(await runDailyDigest(S.db, S.a.workspaceId, new Date("2026-10-30T20:00:00Z"))).toBe("generated");
   });
 
   it("does nothing when switched off, and without a profile", async () => {
     const p = await getPrefs(S.db, S.a.userId);
     await setPrefs(S.db, S.a.userId, { ...p, digest: { enabled: false, hour: 8 } });
-    expect(await runDailyDigest(S.db, new Date("2026-10-29T12:00:00Z"))).toBe("disabled");
+    expect(await runDailyDigest(S.db, S.a.workspaceId, new Date("2026-10-29T12:00:00Z"))).toBe("disabled");
     expect(await days()).toEqual([]);
     await S.db.user.updateMany({ data: { isDemo: true } });
-    expect(await runDailyDigest(S.db, new Date("2026-10-29T12:00:00Z"))).toBe("no-profile");
+    expect(await runDailyDigest(S.db, S.a.workspaceId, new Date("2026-10-29T12:00:00Z"))).toBe("no-profile");
   });
 
   it("runs as the job type digest.daily and survives running again", async () => {
@@ -368,6 +368,6 @@ describe("digest page and settings", () => {
     expect(await regenerateDigestAction("not a day")).toMatchObject({ ok: false });
     expect(await regenerateDigestAction(DAY)).toMatchObject({ ok: true });
     expect(await markDigestReadAction(DAY)).toMatchObject({ ok: true });
-    expect((await getDigest(S.db, S.a.userId, DAY))?.readAt).not.toBeNull();
+    expect((await getDigest(S.db, S.a, DAY))?.readAt).not.toBeNull();
   });
 });
