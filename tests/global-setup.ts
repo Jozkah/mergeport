@@ -41,7 +41,7 @@ export default async function setup() {
   await stopStale();
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
-  const pg = await startEmbedded({ dir, port: TEST_PG_PORT, quiet: true });
+  const pg = await startEmbedded({ dir, port: TEST_PG_PORT, quiet: true, fast: true });
   await ensureDatabase(pg, "mergeport_template");
   execFileSync(process.execPath, [path.resolve("node_modules", "prisma", "build", "index.js"), "migrate", "deploy"], {
     env: { ...process.env, DATABASE_URL: urlFor(TEST_PG_PORT, "mergeport_template") },
