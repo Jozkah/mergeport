@@ -8,10 +8,12 @@ import { SESSION_COOKIE, findSession } from "./session";
 
 /** Per-request identity. Memoized for one render only; never across requests. */
 export const getAuth = cache(async () => {
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  const s = await findSession(db, token);
+  const jar = await cookies();
+  const s = await findSession(db, jar.get(SESSION_COOKIE)?.value);
   if (!s) return null;
-  const viewer = await loadViewer(db, s.userId);
+  // The active workspace: the person's only membership, else the mp_ws cookie if it names one of theirs, else the oldest.
+  const workspaceId = await resolveActiveWorkspaceId(db, { id: s.userId }, jar.get(WORKSPACE_COOKIE)?.value);
+  const viewer = workspaceId ? await loadViewer(db, s.userId, workspaceId) : null;
   return { user: s.user, session: s, viewer };
 });
 

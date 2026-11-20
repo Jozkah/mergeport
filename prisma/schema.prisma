@@ -543,10 +543,10 @@ model PlanningItem {
   updatedAt    DateTime @updatedAt
 
   project   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  column    PlanningColumn       @relation(fields: [columnId], references: [id])
+  column    PlanningColumn       @relation(fields: [columnId], references: [id], onDelete: NoAction)
   workItem  WorkItem?            @relation(fields: [workItemId], references: [id], onDelete: SetNull)
   milestone DashboardMilestone?  @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
-  createdBy Member               @relation("PlanningCreatedBy", fields: [createdById], references: [id])
+  createdBy Member               @relation("PlanningCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
   blocks    PlanningLink[]       @relation("LinkFrom")
   blockedBy PlanningLink[]       @relation("LinkTo")
   waiting   WaitingRecord[]

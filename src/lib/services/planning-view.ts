@@ -1,6 +1,6 @@
 import { checklistProgress } from "./tasks";
 import type { Db } from "@/lib/db";
-import { repoWhere, type Viewer } from "@/lib/authz/viewer";
+import { repoWhere, requireProject, type Viewer } from "@/lib/authz/viewer";
 import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { blockerFinished } from "@/lib/domain/deps";
 import { formatDateOnly } from "@/lib/format";
@@ -39,6 +39,7 @@ export type CardView = {
 };
 
 export async function planningBoard(db: Db, v: Viewer, projectId: string, now = new Date()) {
+  await requireProject(db, v, projectId); // a project of another workspace (or one this person cannot see) is simply not found
   const columns = await db.planningColumn.findMany({ where: { projectId }, orderBy: { position: "asc" } });
   const items = await db.planningItem.findMany({
     where: await planningWhere(db, v, projectId),

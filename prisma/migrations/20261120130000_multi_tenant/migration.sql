@@ -118,3 +118,15 @@ ALTER TABLE "TeamConfig" ADD CONSTRAINT "TeamConfig_workspaceId_fkey" FOREIGN KE
 ALTER TABLE "HubSession" ADD CONSTRAINT "HubSession_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "AiSettings" ADD CONSTRAINT "AiSettings_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "Job" ADD CONSTRAINT "Job_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Deleting a workspace must cascade through projects AND members. These two keys were RESTRICT, which is checked per row and refuses
+-- while the cards (deleted by the same cascade, in another branch of it) still exist. NO ACTION + DEFERRABLE INITIALLY DEFERRED is
+-- checked at commit: it still refuses to delete a column or member that cards use, but lets the whole workspace go in one statement.
+-- (Prisma does not model deferrability, so the schema says onDelete: NoAction and sees no drift.)
+-- ---------------------------------------------------------------------------------------------------------------------
+ALTER TABLE "PlanningItem" DROP CONSTRAINT "PlanningItem_columnId_fkey";
+ALTER TABLE "PlanningItem" ADD CONSTRAINT "PlanningItem_columnId_fkey" FOREIGN KEY ("columnId") REFERENCES "PlanningColumn"("id") ON DELETE NO ACTION ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "PlanningItem" DROP CONSTRAINT "PlanningItem_createdById_fkey";
+ALTER TABLE "PlanningItem" ADD CONSTRAINT "PlanningItem_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "Member"("id") ON DELETE NO ACTION ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
