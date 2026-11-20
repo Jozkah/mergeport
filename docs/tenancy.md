@@ -5,16 +5,17 @@ that workspace, and every query on tenant data names the workspace.
 
 ## Model classification
 
-67 models: 1 tenant anchor, 22 ROOT, 37 CHILD, 7 GLOBAL.
+70 models: 1 tenant anchor, 24 ROOT, 38 CHILD, 7 GLOBAL.
 
 **Tenant anchor.** `Workspace` is the tenant itself.
 
-**ROOT (22).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
+**ROOT (24).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
 starts with it (a unique key that starts with it counts). Every query on a ROOT model must name the workspace.
 
 | Model | Notes |
 | --- | --- |
-| Member, Repository, Project | Repository is unique on (workspaceId, githubId). Project is unique on (workspaceId, slug). |
+| Member, Repository, Project | Repository is unique on (workspaceId, githubId). Project is unique on (workspaceId, slug). Member carries the role (OWNER, ADMIN, MEMBER, READER; at most one OWNER per workspace, a partial unique index); Project carries `accessSpaceId`. |
+| Invitation, AccessSpace | Email invitations (docs/auth.md) and the space ACL (docs/roles.md). One COMMON AccessSpace per workspace (partial unique index). `AccessSpaceMember` (CHILD, through AccessSpace) lists who is in a RESTRICTED one. Not the sync `Space`. |
 | ReviewRule, WaitingRule, WaitingRecord | WaitingRecord, ReviewerAvailability, LabelMap and UpstreamSubscription had the column but no foreign key; the migration adds it. |
 | DashboardMilestone, ReviewerAvailability, LabelMap, UpstreamSubscription | |
 | Notification, AuditLog, DailyDigest | DailyDigest is unique on (workspaceId, userId, day): a person in two workspaces gets one digest per workspace. |
@@ -24,7 +25,7 @@ starts with it (a unique key that starts with it counts). Every query on a ROOT 
 | GitCache, DiscoveryCache | Primary key is (workspaceId, key). The git cache holds private repository content, and discovery lists come from one person's credential, so neither may be shared across tenants. |
 | Job | `workspaceId` is nullable, see below. |
 
-**CHILD (37).** Scoped through a foreign key to a ROOT parent; no column. Through Repository: ProjectRepository, RepositoryGrant,
+**CHILD (38).** Scoped through a foreign key to a ROOT parent; no column. Through Repository: ProjectRepository, RepositoryGrant,
 WorkItem, WorkItemComment, ReviewRequest, Branch, MilestoneRepoLink, DeviceRepoMapping, WorktreeSnapshot, ForkMapping and its
 children (UpstreamUpdateConfig, UpstreamUpdateRun, ForkComparison, UpstreamPrState, UpstreamIssueTriage, BackportRecord). Through
 Project: ProjectMember, PlanningColumn, PlanningItem, TaskComment, TaskCheckItem, PlanningLink, PlanBoard, Epic, Iteration,
@@ -58,6 +59,14 @@ user with exactly one membership, and returns null for several rather than guess
 the workspace: the only membership; else the `mp_ws` cookie if the user is an active member of it; else the oldest membership.
 The cookie is untrusted input and only ever chooses among memberships the user already has. The hosted workspace switcher binds the choice to the login
 session (`Session.activeWorkspaceId`, which wins over the cookie); the cookie remains a fallback for sessions with no binding.
+
+Revoking a member (`status` REVOKED, set by removal or leaving) takes effect on the next request through that same check, and the
+removal also unbinds their sessions from the workspace and deletes their ProjectMember and AccessSpaceMember rows
+(`services/members.ts`). Another workspace of the same person is untouched.
+
+Project visibility has two layers: `projectWhere` / `planningWhere` (membership and visible repositories, as before) and the access-space
+filter `accessSpaceWhere`, applied to everyone including administrators: a project in a RESTRICTED space is invisible to anyone not
+listed in it (see docs/roles.md).
 
 Request paths always pass `viewer.workspaceId`: discovery lists (`readCached`), the sync engine and team service (cached per workspace in
 `getEngine(workspaceId)` / `getTeamService(workspaceId)`), the hub coverage caches, the hub login vault, watch settings and leaving a team

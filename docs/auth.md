@@ -114,6 +114,33 @@ Chosen over the `mp_ws` cookie because the binding lives with the login: it dies
 It is still only a *preference*: `resolveActiveWorkspaceId` re-checks an ACTIVE membership on every request, so revoking a member takes
 effect on their next request. `selectWorkspace` accepts only workspaces the person is an ACTIVE member of. `mp_ws` stays as a fallback.
 
+## Invitations (join without GitHub)
+
+An OWNER or ADMIN invites an address from Settings > Members (`/settings/members`). Roles and who may invite: `docs/roles.md`.
+
+- `Invitation`: workspace, lowercased address, role (never OWNER: a CHECK), inviter, SHA-256 of a 32-byte random token (the token is
+  only in the mail), `expiresAt` (7 days), `acceptedAt`, `revokedAt`. One pending row per (workspace, address): a partial unique index;
+  inviting an address again replaces the pending row, so the old link dies. Resend gives the same row a new token.
+- The mail (`invitationMail`, plain text, sent through the same `Mailer` as sign-in links) links to `/invite/<token>`. **A GET changes
+  nothing**: the page shows the workspace and role, and for the right person a Join button (a POST server action, so a mail scanner
+  cannot use the link up). Missing, used, revoked and expired tokens all show the same "not valid" page.
+- **The invited address is the identity proof.** Accepting needs a signed-in user whose `email` equals the invited address AND whose
+  `emailVerifiedAt` is set. Not signed in: the page offers a magic link to that address (the form's `next` is the invite URL; opening
+  the link proves the inbox) and any configured OIDC provider (the provider must send a verified email: unverified or missing claims
+  never set `User.email`). Signed in with another address, or with a GitHub-only account that has no verified email: a clear error,
+  nothing joined, and the offer to sign in with the invited address. Existing GitHub-linked users join the same way.
+- Accept is one `UPDATE "Invitation" ... WHERE acceptedAt IS NULL AND revokedAt IS NULL AND expiresAt > now RETURNING` plus the member
+  insert in one transaction: of any number of simultaneous accepts exactly one claims the row; the same person pressing twice gets
+  "already a member". Someone removed after the invitation went out is not re-admitted by it (the claim rolls back); an administrator
+  reinstates them on purpose. `landingPath` keeps an `/invite/<token>` destination through sign-in for people with no workspace yet.
+- Signing up never joins anyone, and being invited creates no account.
+- **No user-existence leak.** Inviting an address that belongs to someone in another workspace, or to nobody, gives the admin the same
+  answer and the same mail. The sign-in request keeps its uniform answer. (An admin is told "already a member" for their own workspace's
+  members: the member list shows that anyway.)
+- **Limits** (`rate-limit.ts` rows, keys `inv:`): 20 invitations per admin per hour, 100 per workspace per day, one mail per
+  (workspace, address) per minute (invite and resend share it). A failed delivery withdraws the invitation (nothing is logged but the fact).
+- Audit: `invitation.created/resent/revoked/accepted`.
+
 ## Hosted: no GitHub yet (fail-closed list)
 
 The server's `gh` login belongs to whoever installed it, not to a workspace. Until the GitHub App phase gives each workspace its own
@@ -138,11 +165,12 @@ Server actions report the message instead of "something went wrong", and the app
 | No token or email in logs | delivery failure logs a fixed message; library errors are swallowed; the console transport is refused in production and on https |
 | Timing-safe compares | `safeEqual` for state, nonce, browser value and cookie signature; token lookup is by hash |
 | Session fixation / logout | new random token per login, previous session destroyed; sign-out and sign-out-everywhere delete rows |
-| Replay / expiry | single-use atomic consume, 15 minutes |
+| Replay / expiry | single-use atomic consume, 15 minutes (invitations: 7 days, single-use, same pattern) |
+| Invitation identity | accept needs the signed-in user's VERIFIED email to equal the invited address; join is a POST, never a GET |
 | Rate limits / lockout | database rows, atomic, refused calls uncounted, per-(address, client) budget, 1 mail a minute per address |
 | Email normalization | lowercase, trim, ASCII only; plus-addressing kept distinct |
 
 ## Not done here
 
-Invitations, owner and other roles, GitHub OAuth/App sign-in (`github` identity provider is reserved) and per-workspace GitHub
+GitHub OAuth/App sign-in (`github` identity provider is reserved) and per-workspace GitHub
 credentials, SSO/SAML, a limit on how many workspaces one person may create, and email change.
