@@ -8,6 +8,7 @@ export default defineConfig({
     environment: "node",
     globalSetup: ["tests/global-setup.ts"],
     fileParallelism: false,
+    testTimeout: 20_000, // each isolated test database is a CREATE DATABASE ... TEMPLATE; Postgres is slower than a SQLite file
     env: {
       DEMO_MODE: "true",
       // Embedded Postgres started by tests/global-setup.ts (port 5434, data dir .data/pg-test).

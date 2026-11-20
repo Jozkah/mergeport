@@ -168,7 +168,7 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
 /** Notifications are dashboard records only. They carry repositoryId so reads can be filtered by current grants. */
 async function notifyReviewer(db: Db, workItemId: string, login: string, title: string) {
   const wi = await db.workItem.findUniqueOrThrow({ where: { id: workItemId }, include: { repository: true } });
-  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: login } } }, include: { user: true } });
+  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: login, mode: "insensitive" } } }, include: { user: true } });
   const member = candidates.find((m) => sameLogin(m.user.login, login));
   if (!member) return;
   await notifyUser(db, member.userId, wi, "review-requested", `Review requested: ${title}`);
@@ -185,7 +185,7 @@ async function notifyUser(db: Db, userId: string, wi: { id: string; repositoryId
 async function notifyAuthorChanges(db: Db, workItemId: string, reviewer: string | null, title: string) {
   const wi = await db.workItem.findUniqueOrThrow({ where: { id: workItemId }, include: { repository: true } });
   if (wi.state !== "OPEN" || !wi.authorLogin || (reviewer && sameLogin(reviewer, wi.authorLogin))) return;
-  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: wi.authorLogin } } }, include: { user: true } });
+  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: wi.authorLogin, mode: "insensitive" } } }, include: { user: true } });
   const member = candidates.find((m) => sameLogin(m.user.login, wi.authorLogin!));
   if (!member) return;
   await notifyUser(db, member.userId, wi, "changes-requested", `Changes requested${reviewer ? ` by ${reviewer}` : ""}: ${title}`);

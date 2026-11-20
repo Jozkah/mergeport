@@ -252,8 +252,8 @@ export async function listWorkItems(db: Db, v: Viewer, p: WorkItemListParams) {
   if (p.projectId) and.push({ repository: { projects: { some: { projectId: p.projectId } } } });
   if (p.label) and.push(await labelFilter(db, v, p.label));
   if (p.assignee) and.push({ assigneeLogins: { contains: indexNeedle(p.assignee) } });
-  if (p.author) and.push({ authorLogin: { contains: p.author } }); // SQLite LIKE: case-insensitive substring
-  if (p.q) and.push({ OR: [{ title: { contains: p.q } }, ...(Number.isInteger(Number(p.q)) ? [{ number: Number(p.q) }] : [])] });
+  if (p.author) and.push({ authorLogin: { contains: p.author, mode: "insensitive" } }); // case-insensitive substring (SQLite LIKE was; Postgres needs mode)
+  if (p.q) and.push({ OR: [{ title: { contains: p.q, mode: "insensitive" } }, ...(Number.isInteger(Number(p.q)) ? [{ number: Number(p.q) }] : [])] });
   const where: Prisma.WorkItemWhereInput = { AND: and };
 
   const pageSize = Math.min(Math.max(p.pageSize ?? 25, 1), 100);
@@ -291,14 +291,14 @@ export async function searchGlobal(db: Db, v: Viewer, q: string) {
   const term = q.trim();
   if (term.length < 2) return { repositories: [], workItems: [], planning: [] };
   const [repositories, workItems, planning] = await Promise.all([
-    db.repository.findMany({ where: { AND: [repoWhere(v), { fullName: { contains: term } }] }, take: 6, select: { id: true, fullName: true } }),
+    db.repository.findMany({ where: { AND: [repoWhere(v), { fullName: { contains: term, mode: "insensitive" } }] }, take: 6, select: { id: true, fullName: true } }),
     db.workItem.findMany({
-      where: { AND: [viaRepo(v), { OR: [{ title: { contains: term } }, ...(Number.isInteger(Number(term)) ? [{ number: Number(term) }] : [])] }] },
+      where: { AND: [viaRepo(v), { OR: [{ title: { contains: term, mode: "insensitive" } }, ...(Number.isInteger(Number(term)) ? [{ number: Number(term) }] : [])] }] },
       take: 8,
       orderBy: { updatedAtGh: "desc" },
       select: { id: true, number: true, title: true, type: true, repository: { select: { fullName: true } } },
     }),
-    db.planningItem.findMany({ where: { AND: [await planningWhere(db, v), { title: { contains: term } }] }, take: 5, select: { id: true, title: true, projectId: true } }),
+    db.planningItem.findMany({ where: { AND: [await planningWhere(db, v), { title: { contains: term, mode: "insensitive" } }] }, take: 5, select: { id: true, title: true, projectId: true } }),
   ]);
   return { repositories, workItems, planning };
 }

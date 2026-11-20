@@ -64,7 +64,7 @@ export async function listTasks(db: Db, v: Viewer, f: TaskFilter = {}) {
   else if ((f.status ?? "open") === "open") and.push({ column: { key: { not: "done" } } });
   else if (f.status === "done") and.push({ column: { key: "done" } });
   const q = f.q?.trim();
-  if (q) and.push({ OR: [{ title: { contains: q } }, { description: { contains: q } }] });
+  if (q) and.push({ OR: [{ title: { contains: q, mode: "insensitive" } }, { description: { contains: q, mode: "insensitive" } }] });
   const rows = await db.planningItem.findMany({
     where: { AND: and },
     include: { column: true, project: { select: { id: true, name: true, slug: true } }, workItem: { select: { number: true, type: true, repository: { select: { fullName: true } } } }, _count: { select: { comments: { where: { kind: "COMMENT" } } } } },

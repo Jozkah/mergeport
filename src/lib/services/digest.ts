@@ -105,7 +105,7 @@ async function doneEntries(ctx: DigestContext): Promise<DigestEntry[]> {
 
   // Reviews the person gave, once per pull request (the latest one that day).
   const reviews = await db.workItemComment.findMany({
-    where: { kind: "REVIEW", authorLogin: { contains: v.login }, createdAtGh: win, workItem: viaRepo(v) },
+    where: { kind: "REVIEW", authorLogin: { contains: v.login, mode: "insensitive" }, createdAtGh: win, workItem: viaRepo(v) },
     orderBy: { createdAtGh: "desc" },
     include: { workItem: { select: { id: true, type: true, number: true, title: true, repository: { select: { fullName: true } } } } },
   });
@@ -136,7 +136,7 @@ async function undoneEntries(ctx: DigestContext): Promise<DigestEntry[]> {
 
   // Open items assigned to the person, and the person's own open pull requests (drafts are not "waiting" yet).
   const open = await db.workItem.findMany({
-    where: { ...viaRepo(v), state: "OPEN", OR: [{ assigneeLogins: { contains: indexNeedle(v.login) } }, { type: "PULL_REQUEST", draft: false, authorLogin: { contains: v.login } }] },
+    where: { ...viaRepo(v), state: "OPEN", OR: [{ assigneeLogins: { contains: indexNeedle(v.login) } }, { type: "PULL_REQUEST", draft: false, authorLogin: { contains: v.login, mode: "insensitive" } }] },
     include: { repository: { select: { fullName: true } } },
   });
   const workIds = new Set<string>();
@@ -182,7 +182,7 @@ async function mineEntries(ctx: DigestContext, q: AttentionQueues): Promise<Dige
   for (const d of q.needsMyReview) out.push(entry(ctx, { key: `review:${d.item.id}`, title: d.item.title, repo: d.item.repository.fullName, href: workHref(d.item), reason: "Waiting for your review", since: d.derivation.waiting?.since ?? d.item.createdAtGh }));
   for (const d of q.changesRequested) out.push(entry(ctx, { key: `changes:${d.item.id}`, title: d.item.title, repo: d.item.repository.fullName, href: workHref(d.item), reason: "A reviewer asked for changes on your pull request", since: d.item.updatedAtGh }));
 
-  const mine = await db.workItem.findMany({ where: { ...viaRepo(v), state: "OPEN", type: "PULL_REQUEST", authorLogin: { contains: v.login }, OR: [{ checksState: "FAILURE" }, { mergeable: "CONFLICTING" }] }, include: { repository: { select: { fullName: true } } } });
+  const mine = await db.workItem.findMany({ where: { ...viaRepo(v), state: "OPEN", type: "PULL_REQUEST", authorLogin: { contains: v.login, mode: "insensitive" }, OR: [{ checksState: "FAILURE" }, { mergeable: "CONFLICTING" }] }, include: { repository: { select: { fullName: true } } } });
   for (const r of mine) {
     if (!sameLogin(r.authorLogin, v.login)) continue;
     if (r.checksState === "FAILURE") out.push(entry(ctx, { key: `checks:${r.id}`, title: r.title, repo: r.repository.fullName, href: workHref(r), reason: "Checks are failing on your pull request", since: r.updatedAtGh }));
@@ -212,7 +212,7 @@ async function othersEntries(ctx: DigestContext): Promise<DigestEntry[]> {
       workspaceId: v.workspaceId,
       status: "PENDING",
       OR: [
-        { workItem: { ...viaRepo(v), OR: [{ authorLogin: { contains: v.login } }, { assigneeLogins: { contains: indexNeedle(v.login) } }] } },
+        { workItem: { ...viaRepo(v), OR: [{ authorLogin: { contains: v.login, mode: "insensitive" } }, { assigneeLogins: { contains: indexNeedle(v.login) } }] } },
         { planningItem: { AND: [await planningWhere(db, v), { OR: [{ assigneeLogin: { in: [v.login, v.login.toLowerCase()] } }, { authorLogin: { in: [v.login, v.login.toLowerCase()] } }] }] } },
       ],
     },
@@ -228,7 +228,7 @@ async function othersEntries(ctx: DigestContext): Promise<DigestEntry[]> {
 
   // Review requests on the person's open pull requests that nobody answered for a while.
   const prs = await db.workItem.findMany({
-    where: { ...viaRepo(v), state: "OPEN", type: "PULL_REQUEST", draft: false, authorLogin: { contains: v.login }, reviewRequests: { some: { removedAt: null, requestedAt: { lt: staleBefore } } } },
+    where: { ...viaRepo(v), state: "OPEN", type: "PULL_REQUEST", draft: false, authorLogin: { contains: v.login, mode: "insensitive" }, reviewRequests: { some: { removedAt: null, requestedAt: { lt: staleBefore } } } },
     include: { repository: { select: { fullName: true } }, reviewRequests: true, comments: { where: { kind: "REVIEW" } } },
   });
   for (const r of prs) {
