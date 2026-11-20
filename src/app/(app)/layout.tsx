@@ -81,7 +81,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // The single state shown in the top bar is the MOST SEVERE one across spaces (what needs a person comes first).
   const SEVERITY: SyncStateName[] = ["conflict", "revoked", "signin", "schema", "rate-limited", "offline", "reconnecting", "syncing", "pending", "read-only", "synced"];
   let aggregate: SyncStateName = openConflicts ? "conflict" : quarantined ? "revoked" : offlineSpaces ? "offline" : pendingOps ? "pending" : "synced";
-  const engine = await getEngine();
+  const engine = await getEngine(viewer.workspaceId);
   if (engine && spaceCount > 0) {
     const states = await Promise.all((await db.space.findMany({ where: { workspaceId: viewer.workspaceId } })).map(async (s) => (await engine.stateFor(s)).state as SyncStateName));
     aggregate = states.sort((x, y) => SEVERITY.indexOf(x) - SEVERITY.indexOf(y))[0] ?? aggregate;

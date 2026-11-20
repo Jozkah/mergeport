@@ -13,14 +13,14 @@ const ASK_MS = 1500;
  * hub's current webhooks are enabled with that same App. Without a stored result no request is made; a hub that does not
  * answer quickly means no badge, never a slow page.
  */
-export async function instantRepoIds(db: Db): Promise<Set<string>> {
+export async function instantRepoIds(db: Db, workspaceId?: string): Promise<Set<string>> {
   try {
-    if (!(await db.discoveryCache.findFirst({ where: { workspaceId: (await firstWorkspace(db)).id, key: { in: [COVERAGE_KEY, HUB_COVERAGE_KEY] } }, select: { key: true } }))) return new Set();
+    if (!(await db.discoveryCache.findFirst({ where: { workspaceId: workspaceId ?? (await firstWorkspace(db)).id, key: { in: [COVERAGE_KEY, HUB_COVERAGE_KEY] } }, select: { key: true } }))) return new Set();
     const backend = await currentBackend();
     if (!isHubBackend(backend)) return new Set();
     const { svc } = await getHubTeamService(backend);
     const { webhooks } = await Promise.race([svc.overview(), new Promise<never>((_, no) => setTimeout(() => no(new Error("slow")), ASK_MS).unref?.())]);
-    return webhooks.enabled ? await readAllCoverage(db, webhooks.appSlug) : new Set();
+    return webhooks.enabled ? await readAllCoverage(db, webhooks.appSlug, workspaceId) : new Set();
   } catch {
     return new Set();
   }

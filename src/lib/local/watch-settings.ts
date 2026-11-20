@@ -26,8 +26,8 @@ const validEnv = (name: string, min: number, max: number): boolean => {
   return Number.isInteger(n) && n >= min && n <= max;
 };
 
-export async function readWatchConfig(db: Db): Promise<WatchConfig> {
-  const row = await db.teamConfig.findUnique({ where: { workspaceId: (await firstWorkspace(db)).id }, select: { watchSeconds: true, watchEnabled: true, watchMaxRepos: true } });
+export async function readWatchConfig(db: Db, workspaceId?: string): Promise<WatchConfig> {
+  const row = await db.teamConfig.findUnique({ where: { workspaceId: workspaceId ?? (await firstWorkspace(db)).id }, select: { watchSeconds: true, watchEnabled: true, watchMaxRepos: true } });
   const e = env();
   const fbSeconds = e.MERGEPORT_WATCH_SECONDS ?? WATCH_DEFAULT_SECONDS;
   const fbMax = e.MERGEPORT_WATCH_MAX_REPOS ?? WATCH_MAX_REPOS;
@@ -74,14 +74,14 @@ export const parseOptional = (raw: unknown, parse: (r: unknown) => number): numb
  * Writes only what is given: `undefined` leaves a column alone, `null` clears it (back to the environment or built-in default).
  * Returns the names of the columns that were written.
  */
-export async function saveWatchSettings(db: Db, o: { enabled?: boolean; seconds?: number | null; maxRepos?: number | null }): Promise<string[]> {
+export async function saveWatchSettings(db: Db, o: { enabled?: boolean; seconds?: number | null; maxRepos?: number | null }, workspaceId?: string): Promise<string[]> {
   const data: { watchEnabled?: boolean; watchSeconds?: number | null; watchMaxRepos?: number | null } = {};
   if (o.enabled !== undefined) data.watchEnabled = o.enabled;
   if (o.seconds !== undefined) data.watchSeconds = o.seconds;
   if (o.maxRepos !== undefined) data.watchMaxRepos = o.maxRepos;
   const written = Object.keys(data);
   if (written.length === 0) return written;
-  const workspaceId = (await firstWorkspace(db)).id;
-  await db.teamConfig.upsert({ where: { workspaceId }, create: { workspaceId, ...data }, update: data });
+  const ws = workspaceId ?? (await firstWorkspace(db)).id;
+  await db.teamConfig.upsert({ where: { workspaceId: ws }, create: { workspaceId: ws, ...data }, update: data });
   return written;
 }

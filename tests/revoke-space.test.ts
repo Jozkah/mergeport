@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 import { leaveTeamLocally } from "@/lib/team/leave";
@@ -52,7 +53,7 @@ describe("losing a space", () => {
     const { olive } = await team();
     await olive.db.member.update({ where: { id: olive.profile.member.id }, data: { role: "MEMBER" } });
     expect((await olive.viewer()).isAdmin).toBe(false);
-    await leaveTeamLocally(olive.db);
+    await leaveTeamLocally(olive.db, await wsId(olive.db));
     expect((await olive.viewer()).isAdmin).toBe(true);
     const again = await ensureLocalProfile(olive.db, { id: olive.actor.id, login: olive.login, name: olive.login, avatarUrl: null, host: "github.com" });
     expect(again.member.role).toBe("ADMIN");
@@ -61,7 +62,7 @@ describe("losing a space", () => {
   it("leaving a team keeps projects, cards and repositories", async () => {
     const { olive, common } = await team();
     const seed = await seedProject(olive, common);
-    await leaveTeamLocally(olive.db);
+    await leaveTeamLocally(olive.db, await wsId(olive.db));
     expect(await olive.db.repository.count({ where: { id: seed.repo.id } })).toBe(1);
     expect(await olive.db.project.count({ where: { id: seed.project.id } })).toBe(1);
     expect(await olive.db.planningItem.count({ where: { projectId: seed.project.id } })).toBe(1);

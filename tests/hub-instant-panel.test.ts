@@ -454,7 +454,7 @@ describe("the Instant badge", () => {
   it("leaving the team clears the hub-reported coverage too", async () => {
     const { leaveTeamLocally } = await import("@/lib/team/leave");
     await saveHubCoverage(h.db, ["21"]);
-    await leaveTeamLocally(h.db);
+    await leaveTeamLocally(h.db, await wsId(h.db));
     expect(await h.db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(h.db), key: "github-app-hub-coverage" } } })).toBeNull();
   });
 
@@ -468,7 +468,7 @@ describe("the Instant badge", () => {
   it("leaving the team clears the stored coverage", async () => {
     const { leaveTeamLocally } = await import("@/lib/team/leave");
     await stored();
-    await leaveTeamLocally(h.db);
+    await leaveTeamLocally(h.db, await wsId(h.db));
     expect(await h.db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(h.db), key: "github-app-coverage" } } })).toBeNull();
   });
 });

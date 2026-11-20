@@ -60,7 +60,7 @@ export async function trackSelectedAction(fd: FormData): Promise<ActionResult> {
     const ids = new Set(strs(fd, "repo"));
     if (ids.size === 0) throw new ValidationError("Select at least one repository");
     // Selected from the saved list: no live GitHub call, so this works offline and never waits on a stalled CLI.
-    const saved = await readCached<Discovery>(db, "repos");
+    const saved = await readCached<Discovery>(db, "repos", new Date(), undefined, viewer.workspaceId);
     if (!saved.payload) throw new ValidationError("The repository list has not been loaded yet. Use Check again, then select.");
     const found = saved.payload.repos.filter((r) => ids.has(r.githubId.toString()));
     if (found.length !== ids.size) throw new ValidationError("Some selected repositories are no longer available to your GitHub account");
@@ -607,19 +607,19 @@ export async function setTimezoneAction(fd: FormData): Promise<ActionResult> {
  */
 export async function setRepoWatchAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
+    const { viewer } = await requireViewer();
     const enabled = fd.get("enabled") === "on" || fd.get("enabled") === "true";
     const seconds = parseOptional(fd.get("seconds"), parseWatchSeconds);
     const maxRepos = parseOptional(fd.get("max"), parseWatchMaxRepos);
-    const cur = await readWatchConfig(db);
+    const cur = await readWatchConfig(db, viewer.workspaceId);
     await saveWatchSettings(db, {
       enabled: enabled !== cur.enabled ? enabled : undefined,
       seconds: seconds !== cur.stored.seconds ? seconds : undefined,
       maxRepos: maxRepos !== cur.stored.maxRepos ? maxRepos : undefined,
-    });
+    }, viewer.workspaceId);
     revalidatePath("/settings");
     revalidatePath("/repositories");
-    const now = await readWatchConfig(db);
+    const now = await readWatchConfig(db, viewer.workspaceId);
     return { ok: true, message: now.enabled ? `Checking up to ${now.maxRepos} repositories every ${now.seconds} seconds while Mergeport is open` : "Automatic checks are off. Repositories still refresh every 15 minutes." };
   });
 }

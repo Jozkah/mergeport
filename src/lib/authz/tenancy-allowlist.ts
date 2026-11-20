@@ -19,3 +19,26 @@ export const TENANCY_ALLOWLIST: TenancyAllow[] = [
   { file: "src/lib/sync/repository.ts", reason: "Source sync internals run for one repository id taken from a job (or a webhook already matched to it); every row they touch hangs off that repository, so it is the tenant boundary." },
   { file: "prisma/seed.ts", reason: "Seed script: refuses to run when real data exists and wipes the whole demo database." },
 ];
+
+/**
+ * Files that may call `firstWorkspace(db)`: single-profile plumbing with no workspace of its own. `firstWorkspace` FAILS CLOSED
+ * (it throws when the database holds more than one workspace), so these paths refuse to run multi-tenant instead of silently
+ * serving the oldest tenant. Request paths with a viewer must pass `viewer.workspaceId` instead and are not listed here.
+ * tests/tenancy-scope.test.ts fails on any other file and on an entry that no longer calls it.
+ */
+export const FIRST_WORKSPACE_ALLOWLIST: { file: string; reason: string }[] = [
+  { file: "src/lib/local/profile.ts", reason: "Defines it, and ensureLocalProfile bootstraps the profile's one workspace." },
+  { file: "src/lib/sync/engine.ts", reason: "Default workspace of an engine built without one (local profile); the runtime always passes it." },
+  { file: "src/lib/team/service.ts", reason: "Default workspace of a TeamService built without an engine or workspace (local profile)." },
+  { file: "src/lib/local/runtime.ts", reason: "Process singletons of the local app: default workspace when a caller names none, and the hub-link guard." },
+  { file: "src/lib/local/scheduler.ts", reason: "The in-process local scheduler dispatches desktop toasts for the profile's one workspace." },
+  { file: "src/lib/local/discovery.ts", reason: "Discovery cache of the profile; callers with a viewer pass the workspace, the retry scheduler has none." },
+  { file: "src/lib/local/discovery-jobs.ts", reason: "Space lookup for the background invitation-status refresh started by the local scheduler." },
+  { file: "src/lib/local/repo-watch.ts", reason: "The local repository watcher runs in the scheduler process for the profile's one workspace." },
+  { file: "src/lib/local/watch-settings.ts", reason: "Default workspace when the caller (the watcher) has no viewer; the settings action passes the viewer's." },
+  { file: "src/lib/hub/session-vault.ts", reason: "Hub login of the profile: ports and the live link have only a db file; callers with a viewer pass the workspace." },
+  { file: "src/lib/hub/github-app-install.ts", reason: "Coverage caches of the profile's hub link; callers with a viewer pass the workspace." },
+  { file: "src/lib/hub/instant-badges.ts", reason: "Badge lookup defaults to the profile's workspace; the repositories page passes the viewer's." },
+  { file: "src/lib/hub/ports-impl.ts", reason: "Hub profile ports work on a profile db file (connect flow) with no viewer." },
+  { file: "src/lib/hub/watch.ts", reason: "The hub watch set of the profile's single hub link." },
+];

@@ -32,6 +32,24 @@ async function recordRate(rate: { remaining: number; limit: number; resetAt: Dat
   await db.rateLimitState.upsert({ where: { key: SOURCE_BUDGET_KEY }, create: { key: SOURCE_BUDGET_KEY, ...rate }, update: { ...rate } });
 }
 
+/**
+ * Runs `fn` once per workspace, in a fixed order (id), so one failing tenant cannot starve the ones after it. Each failure is logged
+ * and the loop goes on; the job only fails (and retries) when EVERY workspace failed.
+ */
+export async function forEachWorkspace(d: typeof db, label: string, fn: (workspaceId: string) => Promise<void>): Promise<void> {
+  const all = await d.workspace.findMany({ select: { id: true }, orderBy: { id: "asc" } });
+  const errors: unknown[] = [];
+  for (const ws of all) {
+    try {
+      await fn(ws.id);
+    } catch (e) {
+      errors.push(e);
+      console.error(`${label} failed for workspace ${ws.id}:`, e instanceof Error ? e.message : e);
+    }
+  }
+  if (all.length > 0 && errors.length === all.length) throw errors[0];
+}
+
 export const handlers: Record<string, Handler> = {
   "sync.repository": (async (p: { repositoryId: string; full?: boolean }, job: JobRow) => {
     await guardSourceBudget();
@@ -87,27 +105,27 @@ export const handlers: Record<string, Handler> = {
   // A system-wide job (no workspace): it fans out over the workspaces and everything it queues belongs to exactly one of them.
   "reconcile.all": (async () => {
     const { enqueue } = await import("@/lib/jobs");
-    for (const ws of await db.workspace.findMany({ select: { id: true } })) {
-      const repos = await db.repository.findMany({ where: { workspaceId: ws.id, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
-      for (const r of repos) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}`, workspaceId: ws.id });
+    await forEachWorkspace(db, "reconcile.all", async (workspaceId) => {
+      const repos = await db.repository.findMany({ where: { workspaceId, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
+      for (const r of repos) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}`, workspaceId });
       // A fork that is NOT behind never reaches an update request, so release watches are asked for here as well (each capped to one check per ~15 minutes).
-      const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases", mapping: { fork: { workspaceId: ws.id } } }, select: { mappingId: true } });
+      const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases", mapping: { fork: { workspaceId } } }, select: { mappingId: true } });
       for (const w of watches) await maybeRequestReleaseCheck(db, w.mappingId);
-    }
+    });
   }) as Handler,
   // Local only (no GitHub, no network): makes the daily digest once per local day, and catches up after the app was closed.
   "digest.daily": (async () => {
     const { runDailyDigest } = await import("@/lib/services/digest");
-    for (const ws of await db.workspace.findMany({ select: { id: true } })) {
-      if ((await runDailyDigest(db, ws.id)) === "generated") (await import("@/lib/local/runtime")).notifyChange("state");
-    }
+    await forEachWorkspace(db, "digest.daily", async (workspaceId) => {
+      if ((await runDailyDigest(db, workspaceId)) === "generated") (await import("@/lib/local/runtime")).notifyChange("state");
+    });
   }) as Handler,
   // Sends to the AI endpoint set in Settings, and only when the autopilot there is on. Writes local tasks and suggestions, never GitHub.
   "ai.autopilot": (async () => {
     const [{ runAutopilot }, { openVault }, { keyFileFor }, { resolveDbFile }] = await Promise.all([import("@/lib/services/ai-review"), import("@/lib/hub/session-vault"), import("@/lib/hub/ports-impl"), import("@/lib/db")]);
-    for (const ws of await db.workspace.findMany({ select: { id: true } })) {
-      if ((await runAutopilot(db, ws.id, openVault(keyFileFor(resolveDbFile())))) === "done") (await import("@/lib/local/runtime")).notifyChange("state");
-    }
+    await forEachWorkspace(db, "ai.autopilot", async (workspaceId) => {
+      if ((await runAutopilot(db, workspaceId, openVault(keyFileFor(resolveDbFile())))) === "done") (await import("@/lib/local/runtime")).notifyChange("state");
+    });
   }) as Handler,
 };
 

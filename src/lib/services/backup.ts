@@ -212,6 +212,26 @@ async function pass(db: Db, v: Viewer, b: Backup, write: boolean): Promise<Resto
   // Projects this workspace owns (plus the ones this restore creates): a row of a child table may only name one of them.
   const ownProjects = new Set((await db.project.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true } })).map((p) => p.id));
   const restoredItems = new Set<string>();
+  // Parents this restore creates or finds in THIS workspace, by table: id -> the project they belong to (or "" when they have none).
+  const restored = { PlanningColumn: new Map<string, string>(), Epic: new Map<string, string>(), Iteration: new Map<string, string>(), DashboardMilestone: new Map<string, string>(), ForkMapping: new Map<string, string>() };
+  const ownedParent = async (table: keyof typeof restored, id: unknown, projectId?: unknown): Promise<boolean> => {
+    if (typeof id !== "string") return false;
+    const seen = restored[table].get(id);
+    if (seen !== undefined) return projectId === undefined || seen === projectId;
+    const w = v.workspaceId;
+    switch (table) {
+      case "PlanningColumn":
+        return (await db.planningColumn.count({ where: { id, projectId: String(projectId), project: { workspaceId: w } } })) > 0;
+      case "Epic":
+        return (await db.epic.count({ where: { id, projectId: String(projectId), project: { workspaceId: w } } })) > 0;
+      case "Iteration":
+        return (await db.iteration.count({ where: { id, projectId: String(projectId), project: { workspaceId: w } } })) > 0;
+      case "DashboardMilestone":
+        return (await db.dashboardMilestone.count({ where: { id, workspaceId: w } })) > 0;
+      case "ForkMapping":
+        return (await db.forkMapping.count({ where: { id, fork: { workspaceId: w } } })) > 0;
+    }
+  };
   const ownsItem = async (id: unknown) => typeof id === "string" && (restoredItems.has(id) || (await db.planningItem.count({ where: { id, project: { workspaceId: v.workspaceId } } })) > 0);
   for (const e of ENTRIES) {
     const rows = b.tables[e.table] ?? [];
@@ -233,6 +253,25 @@ async function pass(db: Db, v: Viewer, b: Backup, write: boolean): Promise<Resto
       }
       // A card that followed a GitHub item is re-linked by the next sync (it keeps repository id and number); the local link is not guessed here.
       if (e.table === "PlanningItem") row = { ...row, workItemId: null };
+      // Every foreign key of the row must point inside this workspace (and, for card fields, inside the card's own project).
+      const fkOk =
+        e.table === "UpstreamIssueTriage" || e.table === "BackportRecord"
+          ? await ownedParent("ForkMapping", row.mappingId)
+          : e.table === "PlanningItem"
+            ? (await ownedParent("PlanningColumn", row.columnId, row.projectId)) &&
+              (row.epicId == null || (await ownedParent("Epic", row.epicId, row.projectId))) &&
+              (row.iterationId == null || (await ownedParent("Iteration", row.iterationId, row.projectId))) &&
+              (row.milestoneId == null || (await ownedParent("DashboardMilestone", row.milestoneId)))
+            : e.table === "PlanEvent"
+              ? await ownsItem(row.itemId)
+              : e.table === "DashboardMilestone"
+                ? row.projectId == null || ownProjects.has(String(row.projectId))
+                : true;
+      if (!fkOk) {
+        t.skipped++;
+        skipped.set(`${e.table}|belongs to another workspace`, (skipped.get(`${e.table}|belongs to another workspace`) ?? 0) + 1);
+        continue;
+      }
       const itemRefs = e.table === "PlanningLink" ? [row.fromId, row.toId] : e.table === "TaskComment" || e.table === "TaskCheckItem" ? [row.itemId] : [];
       if (itemRefs.length && !(await Promise.all(itemRefs.map(ownsItem))).every(Boolean)) {
         t.skipped++;
@@ -249,6 +288,8 @@ async function pass(db: Db, v: Viewer, b: Backup, write: boolean): Promise<Resto
       }
       if (e.table === "Project") ownProjects.add(String(row.id));
       if (e.table === "PlanningItem") restoredItems.add(String(row.id));
+      if (e.table === "PlanningColumn" || e.table === "Epic" || e.table === "Iteration") restored[e.table].set(String(row.id), String(row.projectId));
+      if (e.table === "DashboardMilestone" || e.table === "ForkMapping") restored[e.table].set(String(row.id), "");
       if (!cur) {
         t.create++;
         if (write) await delegate.create({ data: row });

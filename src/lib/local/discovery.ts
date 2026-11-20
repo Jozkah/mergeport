@@ -42,8 +42,8 @@ export const toJson = <T>(v: T): Prisma.InputJsonValue => JSON.parse(JSON.string
 export const fromJson = <T>(v: unknown): T =>
   JSON.parse(JSON.stringify(v), (_k, x) => (x && typeof x === "object" && BIG in x ? BigInt((x as Record<string, string>)[BIG]) : x)) as T;
 
-export async function readCached<T>(db: Db, key: string, now = new Date(), staleAfterMs = STALE_AFTER_MS): Promise<CachedView<T>> {
-  const row = await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: (await firstWorkspace(db)).id, key } } });
+export async function readCached<T>(db: Db, key: string, now = new Date(), staleAfterMs = STALE_AFTER_MS, workspaceId?: string): Promise<CachedView<T>> {
+  const row = await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: workspaceId ?? (await firstWorkspace(db)).id, key } } });
   if (!row) return { payload: null, fetchedAt: null, state: "EMPTY", error: null, attempts: 0, nextRetryAt: null, stale: true };
   return {
     payload: row.payload === null ? null : fromJson<T>(row.payload),
@@ -89,6 +89,8 @@ export type RefreshOptions = {
   now?: () => Date;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   onChange?: () => void;
+  /** The workspace the list belongs to. Omitted: the profile's only workspace (fails closed when there are several). */
+  workspaceId?: string;
 };
 
 const abortableSleep = (ms: number, signal: AbortSignal) =>
@@ -113,7 +115,7 @@ export function refreshInBackground<T>(db: Db, key: string, load: (signal: Abort
   const write = async (data: { state: DiscoveryState; error?: string | null; attempts: number; nextRetryAt?: Date | null; payload?: Prisma.InputJsonValue; fetchedAt?: Date }) => {
     const base = { state: data.state, error: data.error ?? null, attempts: data.attempts, nextRetryAt: data.nextRetryAt ?? null };
     const withPayload = data.payload !== undefined ? { ...base, payload: data.payload, fetchedAt: data.fetchedAt ?? now() } : base;
-    const workspaceId = (await firstWorkspace(db)).id; // the lists belong to the profile's one workspace
+    const workspaceId = o.workspaceId ?? (await firstWorkspace(db)).id;
     await db.discoveryCache.upsert({ where: { workspaceId_key: { workspaceId, key } }, create: { workspaceId, key, ...withPayload }, update: withPayload });
     o.onChange?.();
   };

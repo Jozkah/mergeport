@@ -59,9 +59,24 @@ the workspace: the only membership; else the `mp_ws` cookie if the user is an ac
 The cookie is untrusted input and only ever chooses among memberships the user already has. Nothing sets the cookie yet (no
 switcher UI in this phase).
 
-Code with no signed-in viewer (the local scheduler, hub link, discovery caches, the sync engine and team service of a local profile)
-uses `firstWorkspace(db)`, the profile's one workspace. `SyncEngine` and `TeamService` accept an explicit `workspaceId`; a hosted
-worker must pass it.
+Request paths always pass `viewer.workspaceId`: discovery lists (`readCached`), the sync engine and team service (cached per workspace in
+`getEngine(workspaceId)` / `getTeamService(workspaceId)`), the hub coverage caches, the hub login vault, watch settings and leaving a team
+(`leaveTeamLocally(db, workspaceId)` requires it, and the action requires an administrator).
+
+Code with no viewer (the local scheduler, repository watcher, hub link and its ports, discovery retries) uses `firstWorkspace(db)`.
+It FAILS CLOSED: it throws when the database holds more than one workspace, so these paths refuse to run multi-tenant instead of
+silently serving the oldest tenant. Fail-closed paths today: the hub live link (it also refuses to start for any workspace but the
+only one), `hubSessionPort`, `getHubTeamService`, the background discovery refresh and retry, the repository watcher, desktop toasts,
+and an engine or team service built without a workspace. `tests/tenancy-scope.test.ts` allows `firstWorkspace(` only in the files
+listed in `FIRST_WORKSPACE_ALLOWLIST`, each with a reason. This local and hub code is scheduled for removal; a hosted deployment does
+not use it.
+
+The fan-out jobs (`reconcile.all`, `digest.daily`, `ai.autopilot`) run each workspace in id order inside its own try/catch; a failing
+workspace is logged and the next still runs, and the job fails only when every workspace failed.
+
+Backup restore checks every foreign key of a restored row: cards must name a column, epic and iteration of their own project and a
+milestone of the workspace; triage and backport rows a fork mapping of the workspace; events and links cards of the workspace.
+Anything else is skipped and listed.
 
 ## Enforcement
 

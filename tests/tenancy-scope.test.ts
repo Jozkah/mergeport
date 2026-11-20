@@ -2,8 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { TENANCY_ALLOWLIST, type TenancyAllow } from "@/lib/authz/tenancy-allowlist";
-import { rootModels, scan, type Violation } from "./tenancy-scan";
+import { FIRST_WORKSPACE_ALLOWLIST, TENANCY_ALLOWLIST, type TenancyAllow } from "@/lib/authz/tenancy-allowlist";
+import { firstWorkspaceCalls, rootModels, scan, type Violation } from "./tenancy-scan";
 
 const root = path.resolve(import.meta.dirname, "..");
 const allows = (e: TenancyAllow, v: Violation) => e.file === v.file && (!e.models || e.models.includes(v.model)) && (!e.ops || e.ops.includes(v.op));
@@ -30,6 +30,16 @@ describe("tenancy: every ROOT-model query is scoped to a workspace", () => {
         all.some((v) => allows(e, v)),
         `${e.file} ${(e.models ?? []).join(",")} ${(e.ops ?? []).join(",")} matches no unscoped call: remove the entry`,
       ).toBe(true);
+    }
+  });
+
+  it("firstWorkspace( (the profile's one workspace, fail closed) is called only from the allowlisted single-profile files", () => {
+    const calls = firstWorkspaceCalls(root);
+    const allowed = new Set(FIRST_WORKSPACE_ALLOWLIST.map((e) => e.file));
+    expect([...calls.keys()].filter((f) => !allowed.has(f)).map((f) => `${f}:${calls.get(f)!.join(",")}`)).toEqual([]);
+    for (const e of FIRST_WORKSPACE_ALLOWLIST) {
+      expect(e.reason.length, `${e.file} has a reason`).toBeGreaterThan(20);
+      expect(calls.has(e.file), `${e.file} no longer calls firstWorkspace: remove the entry`).toBe(true);
     }
   });
 

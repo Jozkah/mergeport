@@ -22,7 +22,7 @@ const val = (v: unknown) => (v === undefined || v === null ? "none" : typeof v =
 
 export default async function SyncPage() {
   const { viewer } = await requireViewer();
-  const engine = await getEngine();
+  const engine = await getEngine(viewer.workspaceId);
   const cfg = await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } });
   const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId }, orderBy: { createdAt: "asc" } });
   const conflicts = await db.syncConflict.findMany({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { createdAt: "asc" } });
@@ -46,7 +46,7 @@ export default async function SyncPage() {
   const sourceProblems = sourceRepos.filter((r) => r.trackingStatus === "DISCONNECTED" || r.rateLimited || r.syncError);
   const lastSource = sourceRepos.reduce<Date | null>((m, r) => (r.lastSyncedAt && (!m || r.lastSyncedAt > m) ? r.lastSyncedAt : m), null);
   const center = await syncCenter(db, viewer.workspaceId, poll);
-  const teamSvc = await getTeamService();
+  const teamSvc = await getTeamService(viewer.workspaceId);
   const quota = teamSvc && !isDemo() ? await Promise.race([teamSvc.rateLimit(), new Promise<null>((r) => setTimeout(() => r(null), 3000))]) : null;
   const states = engine ? await Promise.all(spaces.map(async (s) => [s, await engine.stateFor(s)] as const)) : [];
 

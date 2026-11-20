@@ -1,5 +1,4 @@
 import type { Db } from "@/lib/db";
-import { firstWorkspace } from "@/lib/local/profile";
 import { COVERAGE_KEY, HUB_COVERAGE_KEY, HUB_WEBHOOKS_KEY } from "@/lib/hub/webhook-panel";
 
 /**
@@ -8,8 +7,8 @@ import { COVERAGE_KEY, HUB_COVERAGE_KEY, HUB_WEBHOOKS_KEY } from "@/lib/hub/webh
  * they are; remove those on GitHub). Local data (cards, rules, boards) is kept; unsent edits to shared records are dropped
  * with their space. Afterwards a new team can be created or joined.
  */
-export async function leaveTeamLocally(db: Db, workspaceId?: string): Promise<{ spaces: number }> {
-  const ws = workspaceId ?? (await firstWorkspace(db)).id; // a profile has one workspace; a hosted caller names it
+export async function leaveTeamLocally(db: Db, workspaceId: string): Promise<{ spaces: number }> {
+  const ws = workspaceId;
   const spaces = await db.space.count({ where: { workspaceId: ws } });
   // The person owns their personal workspace: back in personal mode they are its administrator again, not the team's MEMBER.
   const me = (await db.member.findFirst({ where: { workspaceId: ws, user: { isDemo: false } }, orderBy: { createdAt: "asc" }, include: { user: true } }))?.user;

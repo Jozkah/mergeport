@@ -29,8 +29,11 @@ export const profileDbPath = (home: string, host: string, accountId: bigint, bac
  * this as its workspace; anything that serves a request takes the viewer's workspaceId instead.
  */
 export async function firstWorkspace(db: Db) {
-  const found = await db.workspace.findFirst({ orderBy: { createdAt: "asc" } });
-  if (found) return found;
+  const found = await db.workspace.findMany({ orderBy: { createdAt: "asc" }, take: 2 });
+  // FAIL CLOSED: with several workspaces "the first" would silently be the oldest tenant's. Code that has no workspace of its own
+  // is single-profile code; it must not run against a multi-workspace database. Pass the workspace instead.
+  if (found.length > 1) throw new Error("This code path serves one workspace per database and was reached with several. Pass the workspace explicitly.");
+  if (found.length === 1) return found[0];
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(7771001)`;
     return (await tx.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ?? (await tx.workspace.create({ data: { name: "Personal workspace" } }));

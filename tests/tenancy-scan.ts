@@ -75,6 +75,20 @@ export function listSources(root: string): string[] {
   return out;
 }
 
+/** Calls of firstWorkspace( (the fail-closed "the profile's one workspace" lookup): repository-relative file -> line numbers. */
+export function firstWorkspaceCalls(root: string): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  for (const file of listSources(root)) {
+    const rel = path.relative(root, file).split(path.sep).join("/");
+    fs.readFileSync(file, "utf8")
+      .split("\n")
+      .forEach((l, i) => {
+        if (/\bfirstWorkspace\(/.test(l) && !/function firstWorkspace\(/.test(l) && !/^\s*(\/\/|\*|\/\*)/.test(l)) out.set(rel, [...(out.get(rel) ?? []), i + 1]);
+      });
+  }
+  return out;
+}
+
 export function scan(root: string, models: string[] = rootModels(root)): Violation[] {
   const delegates = new Set(models.map(lowerFirst));
   const re = new RegExp(`\\.(${[...delegates].join("|")})\\.(${OPS.join("|")})\\s*(?:<[^>(]*>)?\\(`, "g");

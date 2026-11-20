@@ -36,7 +36,7 @@ describe("the live link stores whether the hub's webhooks are enabled", () => {
 
   it("leaving the team and Turn off clear it", async () => {
     await saveHubWebhooks(c.db, true);
-    await leaveTeamLocally(c.db);
+    await leaveTeamLocally(c.db, await wsId(c.db));
     expect(await readHubWebhooksEnabled(c.db)).toBe(false);
     await saveHubWebhooks(c.db, true);
     await clearHubWebhooks(c.db);

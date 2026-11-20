@@ -14,14 +14,14 @@ export const dynamic = "force-dynamic";
  * is what they just asked for and has a hard deadline.
  */
 export default async function Join({ searchParams }: { searchParams: Promise<{ repo?: string }> }) {
-  await requireViewer();
+  const { viewer } = await requireViewer();
   const sp = await searchParams;
   let candidate: SpaceCandidate | null = null;
   let problem: { tone: "error" | "warn"; title: string; text: string } | null = null;
   if (sp.repo) {
     try {
       TeamService.parseRepoRef(sp.repo);
-      candidate = await (await teamWithDeadline(12_000)).inspect(sp.repo);
+      candidate = await (await teamWithDeadline(12_000, viewer.workspaceId)).inspect(sp.repo);
     } catch (e) {
       if (e instanceof GithubError && e.kind === "network") problem = { tone: "warn", title: "GitHub could not be reached", text: "Nothing was joined. Check your connection and open the link again." };
       else if (e instanceof GithubError && e.kind === "auth") problem = { tone: "error", title: "GitHub sign-in needed", text: e.message };

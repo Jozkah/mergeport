@@ -42,23 +42,23 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   const demo = isDemo();
   const cfg = await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } });
   const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId }, orderBy: [{ kind: "asc" }, { createdAt: "asc" }] });
-  const team = await getTeamService();
-  const engine = await getEngine();
+  const team = await getTeamService(viewer.workspaceId);
+  const engine = await getEngine(viewer.workspaceId);
 
   let plan: TeamPlan | null = null;
   let planError: string | null = null;
   if (team && sp.name && cfg?.mode !== "TEAM") {
     // The ONLY live GitHub call while rendering, and only because the person just asked for a plan. It has a hard deadline.
     try {
-      plan = await (await teamWithDeadline(12_000)).planTeam({ name: sp.name, owner: sp.owner || undefined });
+      plan = await (await teamWithDeadline(12_000, viewer.workspaceId)).planTeam({ name: sp.name, owner: sp.owner || undefined });
     } catch (e) {
       planError = e instanceof GhErr && e.kind === "network" ? "GitHub did not answer. Check your connection and review the plan again." : e instanceof Error ? e.message : "Could not prepare the plan";
     }
   }
   // Everything below comes from the local cache: no GitHub call, no waiting. Each list says how old it is and why.
-  const invView = !demo && team ? await cached.invitations() : null;
+  const invView = !demo && team ? await cached.invitations(viewer.workspaceId) : null;
   const invitations = invView?.payload ?? [];
-  const candView = !demo && team ? await cached.candidates() : null;
+  const candView = !demo && team ? await cached.candidates(viewer.workspaceId) : null;
   const candidates = candView?.payload ?? [];
   const states = engine ? new Map(await Promise.all(spaces.map(async (s) => [s.id, await engine.stateFor(s)] as const))) : new Map();
   const delay = expectedConsistencyDelaySeconds(cfg?.pollSeconds ?? 30);
@@ -73,7 +73,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
     : null;
   const invitePlan = team && invitePlanSpace && sp.users ? (() => { try { return team.planInvite(invitePlanSpace, sp.users!.split(/[,\s]+/), sp.perm === "pull" ? "pull" : "push"); } catch { return null; } })() : null;
   const statusBySpace = new Map<string, Awaited<ReturnType<typeof cached.invitationStatus>>>();
-  if (team) for (const sp2 of spaces.filter((x) => x.canAdmin && x.access === "OK")) statusBySpace.set(sp2.id, await cached.invitationStatus(sp2.id));
+  if (team) for (const sp2 of spaces.filter((x) => x.canAdmin && x.access === "OK")) statusBySpace.set(sp2.id, await cached.invitationStatus(viewer.workspaceId, sp2.id));
 
   return (
     <>

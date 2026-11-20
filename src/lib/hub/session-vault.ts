@@ -94,14 +94,14 @@ export function openVault(keyFile: string): Vault {
   };
 }
 
-export async function saveHubSession(db: Db, vault: Vault, s: StoredHubSession): Promise<void> {
+export async function saveHubSession(db: Db, vault: Vault, s: StoredHubSession, workspaceId?: string): Promise<void> {
   const data = { origin: s.origin, cipher: vault.encrypt(s.token), githubId: s.githubId, login: s.login };
-  const workspaceId = (await firstWorkspace(db)).id; // one hub login per workspace; a profile has one workspace
-  await db.hubSession.upsert({ where: { workspaceId }, create: { workspaceId, ...data }, update: data });
+  const ws = workspaceId ?? (await firstWorkspace(db)).id; // one hub login per workspace; omitted: the profile's only workspace (fails closed when there are several)
+  await db.hubSession.upsert({ where: { workspaceId: ws }, create: { workspaceId: ws, ...data }, update: data });
 }
 
-export async function loadHubSession(db: Db, vault: Vault): Promise<StoredHubSession | null> {
-  const row = await db.hubSession.findUnique({ where: { workspaceId: (await firstWorkspace(db)).id } });
+export async function loadHubSession(db: Db, vault: Vault, workspaceId?: string): Promise<StoredHubSession | null> {
+  const row = await db.hubSession.findUnique({ where: { workspaceId: workspaceId ?? (await firstWorkspace(db)).id } });
   if (!row) return null;
   try {
     return { origin: row.origin, token: vault.decrypt(row.cipher), githubId: row.githubId, login: row.login };
@@ -110,6 +110,6 @@ export async function loadHubSession(db: Db, vault: Vault): Promise<StoredHubSes
   }
 }
 
-export async function clearHubSession(db: Db): Promise<void> {
-  await db.hubSession.deleteMany({ where: { workspaceId: (await firstWorkspace(db)).id } });
+export async function clearHubSession(db: Db, workspaceId?: string): Promise<void> {
+  await db.hubSession.deleteMany({ where: { workspaceId: workspaceId ?? (await firstWorkspace(db)).id } });
 }

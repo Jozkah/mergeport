@@ -26,7 +26,7 @@ export async function addTrackedRepositoriesAction(): Promise<ActionResult> {
     const rows = await db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: "ACTIVE", isDemo: false }, select: { githubId: true, fullName: true } });
     const tracked = rows.map((r) => ({ githubId: r.githubId.toString(), fullName: r.fullName }));
     const report = await addTrackedRepositories(profileRest(db), webhooks.appSlug, tracked);
-    if (report.state === "checked") await saveCoverage(db, { appSlug: report.appSlug, checkedAt: new Date().toISOString(), covered: report.covered });
+    if (report.state === "checked") await saveCoverage(db, { appSlug: report.appSlug, checkedAt: new Date().toISOString(), covered: report.covered }, viewer.workspaceId);
     refresh();
     if (report.state === "not-installed") return { ok: false, error: "You have not installed the App yet. Install it on GitHub first, then press this button again." };
     // GitHub refuses this credential for installations: not a failure, coverage is detected from the hub's events instead.
@@ -52,7 +52,7 @@ export async function checkInstantUpdatesAction(): Promise<ActionResult> {
     const s = webhookStatus(webhooks);
     if (webhooks.enabled) {
       // Any covered repository is success, however it became known.
-      const covered = await readAllCoverage(db, webhooks.appSlug);
+      const covered = await readAllCoverage(db, webhooks.appSlug, viewer.workspaceId);
       const rows = await db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: "ACTIVE", isDemo: false }, select: { githubId: true } });
       const n = rows.filter((r) => covered.has(r.githubId.toString())).length;
       if (n > 0) return { ok: true, message: `The App covers ${n} of your ${rows.length} tracked ${rows.length === 1 ? "repository" : "repositories"}. ${s.kind === "on" ? "Events from GitHub are arriving." : "Edit an issue on GitHub to see it arrive instantly."}` };
@@ -76,12 +76,12 @@ export async function saveWebhookSecretAction(fd: FormData): Promise<ActionResul
 
 export async function turnOffInstantUpdatesAction(): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    const { viewer } = await requireViewer();
     const { svc } = await hubService();
     await svc.clearGithubWebhook();
-    await clearCoverage(db);
-    await clearHubCoverage(db);
-    await clearHubWebhooks(db);
+    await clearCoverage(db, viewer.workspaceId);
+    await clearHubCoverage(db, viewer.workspaceId);
+    await clearHubWebhooks(db, viewer.workspaceId);
     refresh();
     return { ok: true, message: "Turned off. The server no longer accepts events from GitHub." };
   });

@@ -20,7 +20,7 @@ async function instantUpdatesPanel({ overview, origin, viewerWorkspaceId, github
   try {
     const rows = await db.repository.findMany({ where: { workspaceId: viewerWorkspaceId, trackingStatus: "ACTIVE", isDemo: false }, orderBy: { fullName: "asc" }, select: { id: true, githubId: true, fullName: true } });
     tracked = rows.map((r) => ({ id: r.id, githubId: r.githubId.toString(), fullName: r.fullName }));
-    covered = await readAllCoverage(db, overview.webhooks.appSlug);
+    covered = await readAllCoverage(db, overview.webhooks.appSlug, viewerWorkspaceId);
   } catch {
     // keep the empty lists
   }

@@ -24,9 +24,9 @@ import { env } from "@/lib/env";
  */
 
 type HubLive = ReturnType<typeof startHubLive>;
-type G = typeof globalThis & { __mp?: { bus: EventEmitter; engine?: SyncEngine; enginePromise?: Promise<SyncEngine | null>; team?: TeamService; hub?: { key: string; svc: HubTeamService }; live?: HubLive; version: number } };
+type G = typeof globalThis & { __mp?: { bus: EventEmitter; engines: Map<string, SyncEngine>; enginePromises: Map<string, Promise<SyncEngine | null>>; teams: Map<string, TeamService>; hub?: { key: string; svc: HubTeamService }; live?: HubLive; version: number } };
 const g = globalThis as G;
-const state = (g.__mp ??= { bus: new EventEmitter(), version: 0 });
+const state: NonNullable<G["__mp"]> = (g.__mp ??= { bus: new EventEmitter(), engines: new Map(), enginePromises: new Map(), teams: new Map(), version: 0 });
 state.bus.setMaxListeners(50);
 
 export const bus = state.bus;
@@ -66,25 +66,31 @@ const hubToken = async (): Promise<string | null> => (await loadHubSession(db, o
  * (`TeamConfig.backend = HUB` with an origin) gets an `HttpHubClient` and the live link, started once per process;
  * `hubLive` lets the engine's own tick leave hub spaces to the socket while it is up.
  */
-export async function getEngine(): Promise<SyncEngine | null> {
+export async function getEngine(workspaceId?: string): Promise<SyncEngine | null> {
   if (isDemo()) return null;
-  if (state.engine) return state.engine;
+  const ws = workspaceId ?? (await firstWorkspace(db)).id; // fails closed when several workspaces exist and the caller named none
+  const have = state.engines.get(ws);
+  if (have) return have;
   // Concurrent first callers (the scheduler's first tick and a page render) share one build. Two engines would each keep their own
   // "cycle in progress" set, and the live link would drive a different engine than the pages and the Sync button use.
-  const building = (state.enginePromise ??= buildEngine().then(
-    (e) => {
-      if (!e) state.enginePromise = undefined; // no signed-in account yet: ask again next time
-      return e;
-    },
-    (err) => {
-      state.enginePromise = undefined;
-      throw err;
-    },
-  ));
+  let building = state.enginePromises.get(ws);
+  if (!building) {
+    building = buildEngine(ws).then(
+      (e) => {
+        if (!e) state.enginePromises.delete(ws); // no signed-in account yet: ask again next time
+        return e;
+      },
+      (err) => {
+        state.enginePromises.delete(ws);
+        throw err;
+      },
+    );
+    state.enginePromises.set(ws, building);
+  }
   return building;
 }
 
-async function buildEngine(): Promise<SyncEngine | null> {
+async function buildEngine(workspaceId: string): Promise<SyncEngine | null> {
   const actor = await localActor();
   if (!actor) return null;
   const f = profileFetch(db);
@@ -92,14 +98,13 @@ async function buildEngine(): Promise<SyncEngine | null> {
     state.version++;
     state.bus.emit("change", { version: state.version, ...e });
   };
-  const workspaceId = (await firstWorkspace(db)).id; // the profile's one workspace
   const team = await db.teamConfig.findUnique({ where: { workspaceId } });
   const hubOrigin = team?.backend === "HUB" ? team.hubOrigin : null;
   // The launcher's MERGEPORT_BACKEND names what this profile directory is; without a launcher, TeamConfig decides.
   const launched = process.env.MERGEPORT_BACKEND;
   const profileBackend = launched === GITHUB_BACKEND || (launched && isHubBackend(launched)) ? (launched as Backend) : hubOrigin ? hubBackendId(hubOrigin) : GITHUB_BACKEND;
   if (!hubOrigin) {
-    state.engine = new SyncEngine({
+    const plain = new SyncEngine({
       workspaceId,
       db,
       actor,
@@ -107,8 +112,11 @@ async function buildEngine(): Promise<SyncEngine | null> {
       store: (s: Space) => new CoordinationStore(new GitHubRest(f), s.repoOwner, s.repoName),
       onChange,
     });
-    return state.engine;
+    state.engines.set(workspaceId, plain);
+    return plain;
   }
+  // The hub link (session, live socket, watch set) is one per process. FAIL CLOSED: it never starts when there are several workspaces.
+  if ((await firstWorkspace(db)).id !== workspaceId) throw new Error("The hub link serves the profile's only workspace.");
   const client = new HttpHubClient(hubOrigin, hubToken);
   const engine = new SyncEngine({
       workspaceId,
@@ -120,7 +128,7 @@ async function buildEngine(): Promise<SyncEngine | null> {
     hubLive: () => state.live?.live() ?? false,
     onChange,
   });
-  state.engine = engine;
+  state.engines.set(workspaceId, engine);
   if (!state.live) {
     state.live = startHubLive({ db, engine, client, origin: hubOrigin, getToken: hubToken, notify: () => notifyChange("pulled"), notifyState: () => notifyChange("state"), kickJobs: () => void import("@/lib/local/scheduler").then((m) => m.runJobsNow()).catch(() => {}) });
     registerHubLinkState(() => state.live?.link.state ?? "offline");
@@ -128,13 +136,16 @@ async function buildEngine(): Promise<SyncEngine | null> {
   return engine;
 }
 
-export async function getTeamService(): Promise<TeamService | null> {
+export async function getTeamService(workspaceId?: string): Promise<TeamService | null> {
   if (isDemo()) return null;
-  if (state.team) return state.team;
+  const ws = workspaceId ?? (await firstWorkspace(db)).id;
+  const have = state.teams.get(ws);
+  if (have) return have;
   const actor = await localActor();
   if (!actor) return null;
-  state.team = new TeamService(db, profileFetch(db), actor, await getEngine());
-  return state.team;
+  const svc = new TeamService(db, profileFetch(db), actor, await getEngine(ws), undefined, ws);
+  state.teams.set(ws, svc);
+  return svc;
 }
 
 /**
@@ -170,9 +181,9 @@ export const resetRuntime = () => {
   state.live?.stop();
   state.live = undefined;
   registerHubLinkState(null);
-  state.engine = undefined;
-  state.enginePromise = undefined;
-  state.team = undefined;
+  state.engines.clear();
+  state.enginePromises.clear();
+  state.teams.clear();
   state.hub = undefined;
 };
 

@@ -31,7 +31,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const { viewer } = await requireViewer();
   const { show } = await searchParams;
   const tab: Tab = TABS.some(([k]) => k === show) ? (show as Tab) : "all";
-  const view = await cached.repos();
+  const view = await cached.repos(viewer.workspaceId);
   const tracked = new Set((await db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: { not: "REMOVED" } }, select: { githubId: true } })).map((r) => r.githubId.toString()));
   // Archived repositories are read-only for everyone, so they are not offered for tracking.
   const all = (view.payload?.repos ?? []).filter((r) => !r.archived).slice().sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
