@@ -40,7 +40,7 @@ export function spawnNext(spec: ChildSpec, extraEnv: Record<string, string>): Ch
   };
 }
 
-/** Polls /api/local/ready every 200 ms until the app answers; gives up after 60 s or when the signal aborts. */
+/** Polls /api/local/ready every 75 ms until the app answers; gives up after 60 s or when the signal aborts. */
 export async function waitForReady(port: number, signal: AbortSignal, opts: { timeoutMs?: number; intervalMs?: number; fetch?: typeof fetch } = {}): Promise<string> {
   const deadline = Date.now() + (opts.timeoutMs ?? 60_000);
   const f = opts.fetch ?? fetch;
@@ -55,7 +55,7 @@ export async function waitForReady(port: number, signal: AbortSignal, opts: { ti
       /* not up yet */
     }
     if (Date.now() >= deadline) throw new Error("The app did not start in time");
-    await new Promise((r) => setTimeout(r, opts.intervalMs ?? 200));
+    await new Promise((r) => setTimeout(r, opts.intervalMs ?? 75));
   }
   throw new Error("Startup was cancelled");
 }

@@ -32,7 +32,7 @@ export async function pollSwitch(i: {
   sleep?: (ms: number) => Promise<void>;
 }): Promise<SwitchOutcome> {
   const timeoutMs = i.timeoutMs ?? 60_000;
-  const intervalMs = i.intervalMs ?? 400;
+  const intervalMs = i.intervalMs ?? 150;
   const sleep = i.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const deadline = Date.now() + timeoutMs;
   let previous = i.previousBootId;

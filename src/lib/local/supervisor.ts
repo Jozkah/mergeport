@@ -41,7 +41,7 @@ export class Supervisor {
   private listeners: Array<(code: number | null) => void> = [];
   private failListeners: Array<(err: Error) => void> = [];
 
-  constructor(private deps: SupervisorDeps, private opts: { port: number; demo: boolean; /** Pause between answering a switch request and killing the old child, so its response reaches the browser. Default 400. */ killDelayMs?: number }) {}
+  constructor(private deps: SupervisorDeps, private opts: { port: number; demo: boolean; /** Pause between answering a switch request and killing the old child, so its response reaches the browser. Default 150. */ killDelayMs?: number }) {}
 
   /**
    * "child-exit": a child died outside a switch (the supervisor does not respawn it).
@@ -77,7 +77,7 @@ export class Supervisor {
         announced = true;
       }
       try {
-        if (announced) await new Promise((r) => setTimeout(r, this.opts.killDelayMs ?? 400));
+        if (announced) await new Promise((r) => setTimeout(r, this.opts.killDelayMs ?? 150));
         await this.killCurrent();
         try {
           const started = await this.boot(next, true);
