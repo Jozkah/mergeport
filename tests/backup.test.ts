@@ -125,7 +125,7 @@ describe("backup and restore", () => {
   it("is atomic: a bad row leaves nothing half-restored", async () => {
     const { db, admin } = S;
     const b = parseBackup(await exportBackup(db, admin));
-    b.tables.PlanningItem = [{ ...b.tables.PlanningItem[0], id: "broken-card", columnId: "no-such-column" }, ...b.tables.PlanningItem];
+    b.tables.PlanningItem = [{ ...b.tables.PlanningItem[0], id: "broken-card", position: "not a number" }, ...b.tables.PlanningItem];
     const { db: tdb, v } = await target(true);
     await expect(restoreBackup(tdb, v, b, { confirmed: true })).rejects.toThrow();
     expect(await tdb.project.count()).toBe(0);
