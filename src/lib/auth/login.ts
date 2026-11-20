@@ -18,6 +18,9 @@ export async function startHostedSession(userId: string): Promise<void> {
 
 /** Where a freshly signed-in person goes: the page they asked for, or onboarding when they belong to no workspace yet. */
 export async function landingPath(userId: string, next?: string | null): Promise<string> {
+  const dest = safeReturnTo(next);
+  // An invitation link must survive sign-in even for someone with no workspace yet: that is exactly who is being invited.
+  if (/^\/invite\/[A-Za-z0-9_-]{20,200}$/.test(dest)) return dest;
   const n = await db.member.count({ where: { userId, status: "ACTIVE" } });
-  return n === 0 ? "/onboarding" : safeReturnTo(next);
+  return n === 0 ? "/onboarding" : dest;
 }

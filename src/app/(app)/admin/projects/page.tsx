@@ -3,6 +3,7 @@ import { RepoChecklist } from "@/components/forms/RepoChecklist";
 import { Select } from "@/components/ui/Select";
 import { db } from "@/lib/db";
 import { requireAdminViewer } from "@/lib/authz-page";
+import { projectWhere } from "@/lib/authz/viewer";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Sheet } from "@/components/ui/dialog";
 import { EmptyState, PageHeader, Panel } from "@/components/ui/primitives";
@@ -19,7 +20,7 @@ export default async function Projects() {
   const { viewer } = await requireAdminViewer();
   const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId, access: "OK", canWrite: true }, orderBy: [{ kind: "asc" }, { name: "asc" }] });
   const [projectsRaw, reposRaw, members] = await Promise.all([
-    db.project.findMany({ where: { workspaceId: viewer.workspaceId }, include: { repositories: true, members: true }, orderBy: { name: "asc" } }),
+    db.project.findMany({ where: projectWhere(viewer), include: { repositories: true, members: true }, orderBy: { name: "asc" } }),
     db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: { not: "REMOVED" } }, select: { id: true, fullName: true }, orderBy: { fullName: "asc" } }),
     db.member.findMany({ where: { workspaceId: viewer.workspaceId, status: "ACTIVE", role: { in: ["MEMBER", "READER"] } }, include: { user: true } }),
   ]);

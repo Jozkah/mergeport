@@ -16,7 +16,9 @@ import { watchView } from "@/lib/local/repo-watch";
 import { WATCH_MAX_REPOS_LIMIT, WATCH_MAX_REPOS_MIN, WATCH_MAX_SECONDS, WATCH_MIN_SECONDS } from "@/lib/local/watch-format";
 import { planAutoSetup } from "@/lib/services/auto-setup";
 import { db } from "@/lib/db";
-import { Bell, Newspaper, Wand2 } from "@/components/ui/icons";
+import { Bell, Newspaper, Users, Wand2 } from "@/components/ui/icons";
+import Link from "next/link";
+import { ROLE_LABEL } from "@/lib/authz/roles";
 import { BackupPanel } from "@/components/settings/BackupPanel";
 import { NotificationSettings } from "@/components/settings/NotificationSettings";
 import { getPrefs } from "@/lib/services/notification-prefs";
@@ -57,6 +59,14 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </ActionForm>
           </div>
         </Panel>
+        {!isDemo() && (
+          <Panel title="Workspace members" icon={Users} id="members">
+            <div className="p-4 text-[13px]">
+              <p>Your role: <strong>{ROLE_LABEL[viewer.role]}</strong>. {viewer.isAdmin ? "Invite people by email, change roles and control who sees which space." : "You can leave the workspace from the members page."}</p>
+              <Link href="/settings/members" className="btn mt-3 !h-10">Open members</Link>
+            </div>
+          </Panel>
+        )}
         <Panel title="Notifications" icon={Bell} id="notifications">
           <NotificationSettings initial={prefs} />
         </Panel>

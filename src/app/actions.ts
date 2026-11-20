@@ -11,7 +11,7 @@ import { STAGE_KEYS } from "@/lib/domain/stages";
 import { run, type ActionResult } from "@/lib/action-result";
 import { requireAdminViewer, requireViewer, requireWriter } from "@/lib/auth/current";
 import { NotFoundError, ValidationError } from "@/lib/errors";
-import { assertProjectWritable, requireAdmin, requireRepo } from "@/lib/authz/viewer";
+import { assertProjectWritable, requireAdmin, requireRepo, projectWhere } from "@/lib/authz/viewer";
 import { removeFromTracking, trackLocally, upsertRepository, type RepoMeta } from "@/lib/services/repositories";
 import * as work from "@/lib/services/work-actions";
 import { addDependency, assertSameAudience, createCard, moveCard, requestManualReview, resolveManualReview, createColumnsForProject } from "@/lib/services/planning";
@@ -295,7 +295,7 @@ export async function autoSetupAction(fd: FormData): Promise<ActionResult> {
 export async function setProjectReviewersAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireAdminViewer();
-    const p = await db.project.findFirst({ where: { id: str(fd, "projectId"), workspaceId: viewer.workspaceId } });
+    const p = await db.project.findFirst({ where: { id: str(fd, "projectId"), ...projectWhere(viewer) } });
     if (!p) throw new ValidationError("Unknown project");
     const { reviewers } = await setProjectReviewers(db, viewer.workspaceId, p.id, p.name, str(fd, "reviewers"));
     await audit(db, viewer, "project.reviewers", { type: "Project", id: p.id }, { reviewers });
@@ -309,7 +309,7 @@ export async function setProjectReposAction(fd: FormData): Promise<ActionResult>
   return run(async () => {
     const { viewer } = await requireAdminViewer();
     const projectId = str(fd, "projectId");
-    const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
+    const p = await db.project.findFirst({ where: { id: projectId, ...projectWhere(viewer) } });
     if (!p) throw new ValidationError("Unknown project");
     await assertProjectWritable(db, viewer, p.id);
     const ids = strs(fd, "repo");
@@ -327,7 +327,7 @@ export async function setProjectMembersAction(fd: FormData): Promise<ActionResul
   return run(async () => {
     const { viewer } = await requireAdminViewer();
     const projectId = str(fd, "projectId");
-    const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
+    const p = await db.project.findFirst({ where: { id: projectId, ...projectWhere(viewer) } });
     if (!p) throw new ValidationError("Unknown project");
     await assertProjectWritable(db, viewer, p.id);
     const ids = strs(fd, "member");
@@ -352,7 +352,7 @@ export async function saveRuleAction(fd: FormData): Promise<ActionResult> {
     const projectId = scope === "PROJECT" ? str(fd, "projectId") : null;
     const ownerLogin = scope === "OWNER" ? str(fd, "ownerLogin") : null;
     if (scope === "REPOSITORY" && !(await db.repository.findFirst({ where: { id: repositoryId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a repository");
-    if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a project");
+    if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, ...projectWhere(viewer) } }))) throw new ValidationError("Choose a project");
     if (scope === "OWNER" && !ownerLogin) throw new ValidationError("Enter the GitHub owner");
     if (scope === "PROJECT") await assertProjectWritable(db, viewer, projectId);
     const rule = await db.reviewRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, labels: csv(str(fd, "labels")), reviewers, semantics: str(fd, "semantics") === "ALL" ? "ALL" : "ANY", reason } });
@@ -380,7 +380,7 @@ export async function saveWaitingRuleAction(fd: FormData): Promise<ActionResult>
     const projectId = scope === "PROJECT" ? str(fd, "projectId") : null;
     const ownerLogin = scope === "OWNER" ? str(fd, "ownerLogin").replace(/^@/, "") : null;
     if (scope === "REPOSITORY" && !(await db.repository.findFirst({ where: { id: repositoryId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a repository");
-    if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a project");
+    if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, ...projectWhere(viewer) } }))) throw new ValidationError("Choose a project");
     if (scope === "OWNER" && !ownerLogin) throw new ValidationError("Enter the GitHub owner");
     const t = str(fd, "itemType");
     const rule = await db.waitingRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, itemType: t === "ISSUE" || t === "ANY" ? t : "PULL_REQUEST", labels: csv(str(fd, "labels")), authors: csv(str(fd, "authors")).map((a) => a.replace(/^@/, "")), includeDrafts: str(fd, "includeDrafts") === "on", waitingOn, reason, stage: STAGE_KEYS.includes(str(fd, "stage")) ? str(fd, "stage") : "" } });

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { run, type ActionResult } from "@/lib/action-result";
 import { requireWriter } from "@/lib/auth/current";
-import { requireAdmin } from "@/lib/authz/viewer";
+import { requireAdmin, projectWhere } from "@/lib/authz/viewer";
 import { ValidationError } from "@/lib/errors";
 import { getEngine, getTeamService } from "@/lib/local/runtime";
 import { shareRepositoryToSpace, unshareRepository } from "@/lib/services/repositories";
@@ -207,7 +207,7 @@ export async function setProjectSpaceAction(fd: FormData): Promise<ActionResult>
     const { viewer } = await requireWriter();
     const projectId = str(fd, "projectId");
     const spaceId = str(fd, "spaceId") || null;
-    const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
+    const p = await db.project.findFirst({ where: { id: projectId, ...projectWhere(viewer) } });
     if (!p) throw new ValidationError("Unknown project");
     if (spaceId) {
       const s = await db.space.findUnique({ where: { id: spaceId, workspaceId: viewer.workspaceId } });
