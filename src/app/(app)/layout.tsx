@@ -1,6 +1,8 @@
 import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
+import { activeWorkspaces } from "@/lib/auth/workspaces";
+import { isHosted } from "@/lib/public-url";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { readScope, scopeKey } from "@/lib/scope";
 import { Suspense } from "react";
@@ -107,7 +109,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const sync = candidates.sort((x, y) => SEVERITY.indexOf(x.state) - SEVERITY.indexOf(y.state))[0] ?? null;
   // Switching needs the launcher's control channel; without it (plain dev server) the label is static, and demo shows nothing.
   const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
-  const wsList = isDemo() ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId?.toString() ?? "");
+  const hosted = isHosted();
+  const mine = hosted ? await activeWorkspaces(db, user.id) : [];
+  const accountSwitcher = mine.length > 1 ? { workspaces: mine, active: viewer.workspaceId } : null;
+  const wsList = isDemo() || hosted ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId?.toString() ?? "");
   const workspaces = wsList && { ...wsList, switchable };
   const aiQuick = isDemo() || !(await getAiView(db, viewer.workspaceId)).saved ? null : <AiQuick suggestions={aiSuggestions} requests={aiRequests} />;
   const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: ws.name };
@@ -128,7 +133,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <DesktopNotifier />
           <Shortcuts />
           <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
-          <Topbar aiQuick={aiQuick} workspaces={workspaces} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
+          <Topbar aiQuick={aiQuick} workspaces={workspaces} accountSwitcher={accountSwitcher} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "mismatch" && (
           <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">

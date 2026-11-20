@@ -11,15 +11,18 @@ export const getAuth = cache(async () => {
   const jar = await cookies();
   const s = await findSession(db, jar.get(SESSION_COOKIE)?.value);
   if (!s) return null;
-  // The active workspace: the person's only membership, else the mp_ws cookie if it names one of theirs, else the oldest.
-  const workspaceId = await resolveActiveWorkspaceId(db, { id: s.userId }, jar.get(WORKSPACE_COOKIE)?.value);
+  // The active workspace: the person's only membership, else the one this session was bound to (switcher), else the mp_ws cookie
+  // (older sessions), else the oldest. Each candidate is only a choice among memberships the person still has.
+  const workspaceId = await resolveActiveWorkspaceId(db, { id: s.userId }, s.activeWorkspaceId ?? jar.get(WORKSPACE_COOKIE)?.value);
   const viewer = workspaceId ? await loadViewer(db, s.userId, workspaceId) : null;
   return { user: s.user, session: s, viewer };
 });
 
 export async function requireViewer(): Promise<{ user: NonNullable<Awaited<ReturnType<typeof getAuth>>>["user"]; viewer: Viewer; csrf: string }> {
   const a = await getAuth();
-  if (!a || !a.viewer) redirect("/sign-in");
+  if (!a) redirect("/sign-in");
+  // Signed in but in no workspace (a first email or OIDC login): create one.
+  if (!a.viewer) redirect("/onboarding");
   return { user: a.user, viewer: a.viewer, csrf: a.session.csrfToken };
 }
 

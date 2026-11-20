@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { buildCsp, newNonce } from "@/lib/csp";
+import { isPublicHost } from "@/lib/public-url";
 
 /**
  * Local-only guard, run before every request.
@@ -25,7 +26,8 @@ export function cacheControlFor(pathname: string): string {
 
 export function proxy(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
-  if (!LOOPBACK.test(host)) return new NextResponse("Forbidden host", { status: 403 });
+  // Loopback names always; a hosted deployment also answers on its own configured address (MERGEPORT_PUBLIC_URL), nothing else.
+  if (!LOOPBACK.test(host) && !isPublicHost(host)) return new NextResponse("Forbidden host", { status: 403 });
 
   const method = req.method.toUpperCase();
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {

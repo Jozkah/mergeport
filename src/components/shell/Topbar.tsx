@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Bell, ChevronRight, LayoutDashboard, LogOut } from "@/components/ui/icons";
 import { ThemeToggle } from "@/components/shell/ThemeControls";
 import { WorkspaceSwitcher } from "@/components/shell/WorkspaceSwitcher";
+import { AccountWorkspaceSwitcher } from "@/components/shell/AccountWorkspaceSwitcher";
 import { Tip } from "@/components/ui/Tooltip";
 import { Metric } from "@/components/ui/Metric";
 import { SyncBadge, type SyncStateName } from "@/components/sync/SyncBadge";
@@ -38,7 +39,7 @@ const LABELS: Record<string, string> = {
   search: "Search",
 };
 
-export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePicker, workspaces }: { aiQuick?: React.ReactNode; workspaces?: React.ComponentProps<typeof WorkspaceSwitcher> | null; scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
+export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePicker, workspaces, accountSwitcher }: { aiQuick?: React.ReactNode; accountSwitcher?: { workspaces: { id: string; name: string }[]; active: string } | null; workspaces?: React.ComponentProps<typeof WorkspaceSwitcher> | null; scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
   const path = usePathname();
   const parts = path.split("/").filter(Boolean);
   const crumbs = parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
@@ -68,6 +69,7 @@ export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePick
         </ol>
       </nav>
       {workspaces ? <div className="hidden sm:block"><WorkspaceSwitcher {...workspaces} /></div> : null}
+      {accountSwitcher ? <div className="hidden sm:block"><AccountWorkspaceSwitcher {...accountSwitcher} /></div> : null}
       {scopePicker}
       {syncNote && <span className="hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
       {sync && <SyncBadge {...sync} href="/sync" />}
@@ -81,12 +83,13 @@ export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePick
         </Link>
         )}</RingOnChange>
       </Tip>
-      <form action="/api/local/signout" method="post">
+      <form action="/auth/signout" method="post">
         <Tip label="Sign out of this browser session"><button className="btn btn-quiet btn-icon" aria-label="Sign out"><LogOut size={16} aria-hidden /></button></Tip>
       </form>
     </header>
     {/* Narrow screens have no room for a third control in the bar: the switcher gets its own row under it. */}
     {workspaces ? <div className="border-b border-line px-4 py-2 sm:hidden"><WorkspaceSwitcher {...workspaces} className="w-full" /></div> : null}
+    {accountSwitcher ? <div className="border-b border-line px-4 py-2 sm:hidden"><AccountWorkspaceSwitcher {...accountSwitcher} className="w-full" /></div> : null}
     </>
   );
 }

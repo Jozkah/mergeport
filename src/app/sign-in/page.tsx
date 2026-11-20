@@ -1,4 +1,6 @@
 import { Logo } from "@/components/ui/Logo";
+import { AccountSignIn } from "@/components/forms/AccountSignIn";
+import { isHosted } from "@/lib/public-url";
 import { env, isDemo } from "@/lib/env";
 import { currentGhStatus } from "@/lib/local/identity";
 import { loginCommand, REQUIRED_SCOPES } from "@/lib/github/gh";
@@ -21,8 +23,10 @@ const ERRORS: Record<string, string> = {
   "hub-expired": "The sign-in code expired. Connect again.",
 };
 
-export default async function SignIn({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+export default async function SignIn({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string; next?: string }> }) {
   const sp = await searchParams;
+  // A hosted deployment (MERGEPORT_PUBLIC_URL) signs people in with email or OIDC. The GitHub CLI, hub and demo sections below belong to the local app.
+  if (isHosted()) return <AccountSignIn error={sp.error} sent={sp.sent === "1"} next={sp.next} />;
   const demo = isDemo();
   const st = demo ? null : await currentGhStatus(true);
   const launched = Boolean(env().MERGEPORT_LAUNCH_TOKEN);

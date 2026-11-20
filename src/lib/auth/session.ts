@@ -1,17 +1,24 @@
 import type { Db } from "@/lib/db";
 import { randomToken, sha256 } from "@/lib/crypto";
+import { cookiesSecure } from "@/lib/public-url";
 
 export const SESSION_COOKIE = "mp_session";
 /** The app listens on this computer only and the cookie is the person's own browser, so the sign-in lasts half a year (browsers cap cookies near 400 days). It used to be 14 days, which meant signing in again every two weeks. */
 export const SESSION_TTL_MS = 180 * 24 * 3600 * 1000;
 
 /** Opaque server-side session. Only the SHA-256 of the cookie value is stored. */
-export async function createSession(db: Db, userId: string, now = new Date()) {
+export async function createSession(db: Db, userId: string, now = new Date(), activeWorkspaceId: string | null = null) {
   const token = randomToken(32);
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
-  await db.session.create({ data: { tokenHash: sha256(token), csrfToken: randomToken(16), userId, expiresAt } });
+  await db.session.create({ data: { tokenHash: sha256(token), csrfToken: randomToken(16), userId, expiresAt, activeWorkspaceId } });
   return { token, expiresAt };
 }
+
+/**
+ * Cookie attributes for hosted sign-in: HttpOnly, SameSite=Lax (the magic link and the OIDC redirect arrive as top-level
+ * navigations from another site, and Strict would hide the cookie on the very next request), Secure when the public address is https.
+ */
+export const hostedSessionCookie = (expires: Date) => ({ httpOnly: true, sameSite: "lax" as const, secure: cookiesSecure(), path: "/", expires });
 
 export async function findSession(db: Db, token: string | undefined | null, now = new Date()) {
   if (!token) return null;
