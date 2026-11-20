@@ -51,7 +51,7 @@ describe("legacy Postgres import", () => {
     const report = await importLegacy(db, models, legacy, { login: "alice-demo" });
     expect(await db.user.count()).toBe(1);
     expect(await db.member.count()).toBe(1);
-    expect((await db.member.findFirstOrThrow()).role).toBe("ADMIN"); // sole owner of the local profile
+    expect((await db.member.findFirstOrThrow()).role).toBe("OWNER"); // sole owner of the local profile
     const repos = await db.repository.findMany();
     expect(repos.length).toBe(3);
     expect(repos.some((r) => r.name === "internal-tools")).toBe(false); // alice never saw it

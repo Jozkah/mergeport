@@ -472,7 +472,7 @@ describe("privacy boundaries", () => {
 
   it("the owner is administrator because GitHub says so; a forged local role grants no GitHub authority and is undone on sync", async () => {
     const { olive, alice, common, aliceCommon } = await teamOfTwo();
-    expect((await olive.db.member.findFirstOrThrow()).role).toBe("ADMIN");
+    expect((await olive.db.member.findFirstOrThrow()).role).toBe("OWNER");
     await alice.db.member.updateMany({ data: { role: "ADMIN" } });
     // creating a restricted space under the org/owner namespace needs GitHub rights the member does not have
     await expect(alice.team.createRestrictedSpace({ name: "Sneaky", owner: "olive" })).rejects.toBeInstanceOf(GithubError);
