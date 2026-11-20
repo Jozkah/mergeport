@@ -4,7 +4,7 @@ import { leaveTeamLocally } from "@/lib/team/leave";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireViewer } from "@/lib/auth/current";
+import { requireWriter } from "@/lib/auth/current";
 import { requireAdmin } from "@/lib/authz/viewer";
 import { ValidationError } from "@/lib/errors";
 import { getEngine, getTeamService } from "@/lib/local/runtime";
@@ -30,7 +30,7 @@ async function engine(workspaceId: string) {
 /** Step 2 of team creation. Step 1 (the plan) is rendered by the page; nothing is created without this explicit confirmation. */
 export async function createTeamAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const t = await team(viewer.workspaceId);
     const plan = await t.planTeam({ name: str(fd, "name"), owner: str(fd, "owner") || undefined });
     if (plan.fullName !== str(fd, "expected")) throw new ValidationError("The proposed repository changed. Review the new plan and confirm again.");
@@ -43,7 +43,7 @@ export async function createTeamAction(fd: FormData): Promise<ActionResult> {
 
 export async function leaveTeamAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     requireAdmin(viewer);
     if (!checked(fd, "confirm")) throw new ValidationError("Confirm that this computer should stop using the team");
     const { spaces } = await leaveTeamLocally(db, viewer.workspaceId);
@@ -56,7 +56,7 @@ export async function leaveTeamAction(fd: FormData): Promise<ActionResult> {
 
 export async function createSpaceAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const t = await team(viewer.workspaceId);
     if (!checked(fd, "confirm")) throw new ValidationError("Confirm that a new private repository will be created");
     const space = await t.createRestrictedSpace({ name: str(fd, "name") });
@@ -67,7 +67,7 @@ export async function createSpaceAction(fd: FormData): Promise<ActionResult> {
 
 export async function inviteAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const t = await team(viewer.workspaceId);
     const space = await db.space.findUniqueOrThrow({ where: { id: str(fd, "spaceId"), workspaceId: viewer.workspaceId } });
     const plan = t.planInvite(space, str(fd, "usernames").split(/[,\s]+/), str(fd, "permission") === "pull" ? "pull" : "push");
@@ -82,7 +82,7 @@ export async function inviteAction(fd: FormData): Promise<ActionResult> {
 
 export async function revokeAccessAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const t = await team(viewer.workspaceId);
     const space = await db.space.findUniqueOrThrow({ where: { id: str(fd, "spaceId"), workspaceId: viewer.workspaceId } });
     await t.revokeInvitationOrAccess(space, str(fd, "username"));
@@ -93,7 +93,7 @@ export async function revokeAccessAction(fd: FormData): Promise<ActionResult> {
 
 export async function acceptGithubInvitationAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const t = await team(viewer.workspaceId);
     await t.acceptInvitation(Number(str(fd, "id")));
     revalidatePath("/team");
@@ -103,7 +103,7 @@ export async function acceptGithubInvitationAction(fd: FormData): Promise<Action
 
 export async function joinSpaceAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const t = await team(viewer.workspaceId);
     if (!checked(fd, "confirm")) throw new ValidationError("Tick the box to confirm you have reviewed what joining downloads and publishes");
     const repoId = Number(str(fd, "repoId"));
@@ -119,7 +119,7 @@ export async function joinSpaceAction(fd: FormData): Promise<ActionResult> {
 /** Asks for a background refresh of one cached discovery list. Returns at once; the page shows the cached list and its freshness. */
 export async function refreshDiscoveryAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { user, viewer } = await requireViewer();
+    const { user, viewer } = await requireWriter();
     const key = str(fd, "key");
     if (!(["repos", "invitations", "candidates"].includes(key) || /^inv-status:[A-Za-z0-9_-]{1,40}$/.test(key))) throw new ValidationError("Unknown list");
     startDiscovery(key, user.login, viewer.workspaceId);
@@ -129,7 +129,7 @@ export async function refreshDiscoveryAction(fd: FormData): Promise<ActionResult
 
 export async function refreshSyncAction(): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await (await engine(viewer.workspaceId)).refreshNow();
     revalidatePath("/", "layout");
     return { ok: true, message: "Refreshed" };
@@ -138,7 +138,7 @@ export async function refreshSyncAction(): Promise<ActionResult> {
 
 export async function resolveConflictAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const choice = str(fd, "choice") === "theirs" ? "theirs" : "mine";
     await (await engine(viewer.workspaceId)).resolveConflict(str(fd, "id"), choice);
     revalidatePath("/sync");
@@ -148,7 +148,7 @@ export async function resolveConflictAction(fd: FormData): Promise<ActionResult>
 
 export async function releaseQuarantineAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await (await engine(viewer.workspaceId)).releaseQuarantine(str(fd, "spaceId"), str(fd, "action") === "retry" ? "retry" : "discard");
     revalidatePath("/sync");
     return { ok: true, message: "Done" };
@@ -157,7 +157,7 @@ export async function releaseQuarantineAction(fd: FormData): Promise<ActionResul
 
 export async function resendRestoredAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const { queued } = await (await engine(viewer.workspaceId)).resendRestored(str(fd, "id"));
     revalidatePath("/sync");
     return { ok: true, message: queued ? `${queued} item(s) queued to send to the server again` : "Nothing to send: those items were changed since." };
@@ -166,7 +166,7 @@ export async function resendRestoredAction(fd: FormData): Promise<ActionResult> 
 
 export async function dismissRestoredAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await (await engine(viewer.workspaceId)).dismissRestored(str(fd, "id"));
     revalidatePath("/sync");
     return { ok: true, message: "Dismissed" };
@@ -175,7 +175,7 @@ export async function dismissRestoredAction(fd: FormData): Promise<ActionResult>
 
 export async function setPollSecondsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const n = Math.max(15, Math.min(600, Number(str(fd, "seconds")) || 30));
     await db.teamConfig.upsert({ where: { workspaceId: viewer.workspaceId }, create: { workspaceId: viewer.workspaceId, pollSeconds: n }, update: { pollSeconds: n } });
     revalidatePath("/sync");
@@ -185,7 +185,7 @@ export async function setPollSecondsAction(fd: FormData): Promise<ActionResult> 
 
 export async function shareRepositoryAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     if (!checked(fd, "confirm")) throw new ValidationError("Confirm who will see this repository");
     await shareRepositoryToSpace(db, viewer, str(fd, "repositoryId"), str(fd, "spaceId"));
     revalidatePath("/repositories");
@@ -195,7 +195,7 @@ export async function shareRepositoryAction(fd: FormData): Promise<ActionResult>
 
 export async function unshareRepositoryAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await unshareRepository(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/repositories");
     return { ok: true, message: "No longer shared" };
@@ -204,7 +204,7 @@ export async function unshareRepositoryAction(fd: FormData): Promise<ActionResul
 
 export async function setProjectSpaceAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const projectId = str(fd, "projectId");
     const spaceId = str(fd, "spaceId") || null;
     const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });

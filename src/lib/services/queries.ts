@@ -2,7 +2,7 @@ import { byOwnerFirst, byPersonalFirst } from "@/lib/domain/ordering";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { NotFoundError } from "@/lib/errors";
-import { projectWhere, repoWhere, viaRepo, type Viewer } from "@/lib/authz/viewer";
+import { accessSpaceWhere, projectWhere, repoWhere, viaRepo, type Viewer } from "@/lib/authz/viewer";
 import { deriveReview, type ReviewDerivation, type ReviewInput, type Reviewer } from "@/lib/domain/review";
 import { resolveRule, type RuleRow } from "@/lib/domain/rules";
 import { applyWaitingRules, matchingWaitingRules, type WaitingRuleRow } from "@/lib/domain/waiting-rules";
@@ -210,7 +210,7 @@ export async function overview(db: Db, v: Viewer, now = new Date()) {
  *  - draft items are visible to members of the project (explicit audience); admin sees all.
  */
 export async function planningWhere(_db: Db, v: Viewer, projectId?: string): Promise<Prisma.PlanningItemWhereInput> {
-  const projectFilter: Prisma.PlanningItemWhereInput = { project: { workspaceId: v.workspaceId, ...(projectId ? { id: projectId } : {}) } };
+  const projectFilter: Prisma.PlanningItemWhereInput = { project: { workspaceId: v.workspaceId, ...(projectId ? { id: projectId } : {}), AND: [accessSpaceWhere(v)] } };
   if (v.isAdmin) return projectFilter;
   return {
     AND: [
@@ -321,7 +321,8 @@ export async function listRepositories(db: Db, v: Viewer) {
 
 /** Project names are only exposed to members who belong to that project. Admin sees all. */
 function projectWhereForNames(v: Viewer): Prisma.ProjectWhereInput {
-  return v.isAdmin ? { workspaceId: v.workspaceId } : { workspaceId: v.workspaceId, members: { some: { memberId: v.memberId } } };
+  const base: Prisma.ProjectWhereInput = { workspaceId: v.workspaceId, AND: [accessSpaceWhere(v)] };
+  return v.isAdmin ? base : { ...base, members: { some: { memberId: v.memberId } } };
 }
 
 export async function listProjects(db: Db, v: Viewer) {

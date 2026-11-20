@@ -21,7 +21,7 @@ export default async function Projects() {
   const [projectsRaw, reposRaw, members] = await Promise.all([
     db.project.findMany({ where: { workspaceId: viewer.workspaceId }, include: { repositories: true, members: true }, orderBy: { name: "asc" } }),
     db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: { not: "REMOVED" } }, select: { id: true, fullName: true }, orderBy: { fullName: "asc" } }),
-    db.member.findMany({ where: { workspaceId: viewer.workspaceId, status: "ACTIVE", role: "MEMBER" }, include: { user: true } }),
+    db.member.findMany({ where: { workspaceId: viewer.workspaceId, status: "ACTIVE", role: { in: ["MEMBER", "READER"] } }, include: { user: true } }),
   ]);
   const canShareWithTeam = spaces.some((s) => s.kind === "COMMON");
   const me = viewer.login;

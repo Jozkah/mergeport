@@ -13,7 +13,7 @@ export async function leaveTeamLocally(db: Db, workspaceId: string): Promise<{ s
   // The person owns their personal workspace: back in personal mode they are its administrator again, not the team's MEMBER.
   const me = (await db.member.findFirst({ where: { workspaceId: ws, user: { isDemo: false } }, orderBy: { createdAt: "asc" }, include: { user: true } }))?.user;
   await db.$transaction([
-    ...(me ? [db.member.updateMany({ where: { workspaceId: ws, userId: me.id }, data: { role: "ADMIN", status: "ACTIVE" } })] : []),
+    ...(me ? [db.member.updateMany({ where: { workspaceId: ws, userId: me.id, role: { not: "OWNER" } }, data: { role: "ADMIN", status: "ACTIVE" } })] : []),
     db.repository.updateMany({ where: { workspaceId: ws, spaceId: { not: null } }, data: { spaceId: null } }),
     db.project.updateMany({ where: { workspaceId: ws, spaceId: { not: null } }, data: { spaceId: null } }),
     db.space.deleteMany({ where: { workspaceId: ws } }),

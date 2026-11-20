@@ -17,7 +17,10 @@ import { leaveTeamLocally } from "@/lib/team/leave";
 import { testDb } from "./helpers";
 
 const mocks = vi.hoisted(() => ({ viewer: null as null | Record<string, unknown> }));
-vi.mock("@/lib/auth/current", () => ({ requireViewer: async () => ({ user: { id: (mocks.viewer as { userId: string }).userId, githubId: 1n, login: "x", name: "X" }, viewer: mocks.viewer, csrf: "x" }) }));
+vi.mock("@/lib/auth/current", () => {
+  const requireViewer = async () => ({ user: { id: (mocks.viewer as { userId: string }).userId, githubId: 1n, login: "x", name: "X" }, viewer: mocks.viewer, csrf: "x" });
+  return { requireViewer, requireWriter: requireViewer };
+});
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ push: () => {}, refresh: () => {} }), redirect: () => {}, unstable_rethrow: () => {} }));
 

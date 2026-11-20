@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
-import { requireViewer } from "@/lib/auth/current";
+import { requireWriter } from "@/lib/auth/current";
 import { db } from "@/lib/db";
 import { ValidationError } from "@/lib/errors";
 import { addTrackedRepositories, clearCoverage, clearHubCoverage, clearHubWebhooks, profileRest, readAllCoverage, saveCoverage } from "@/lib/hub/github-app-install";
@@ -18,7 +18,7 @@ const refresh = () => {
 /** Step 2: asks GitHub (as this person) to add their tracked repositories to the team's App, one request each. */
 export async function addTrackedRepositoriesAction(): Promise<ActionResult> {
   return hubRun(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const { svc } = await hubService();
     const { webhooks } = await svc.overview();
     if (!webhooks.enabled) throw new ValidationError("Instant GitHub updates are not set up yet. The owner creates the GitHub App first.");
@@ -45,7 +45,7 @@ export async function addTrackedRepositoriesAction(): Promise<ActionResult> {
 /** Step 3: re-reads the hub's `/me` and says in words what it shows. */
 export async function checkInstantUpdatesAction(): Promise<ActionResult> {
   return hubRun(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const { svc } = await hubService();
     const { webhooks } = await svc.overview();
     refresh();
@@ -66,7 +66,7 @@ export async function checkInstantUpdatesAction(): Promise<ActionResult> {
 /** The by-hand path: the owner pastes the secret they generated here into the GitHub App they made themselves. */
 export async function saveWebhookSecretAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    await requireWriter();
     const { svc } = await hubService();
     await svc.setGithubWebhook(str(fd, "secret"), str(fd, "appSlug") || null);
     refresh();
@@ -76,7 +76,7 @@ export async function saveWebhookSecretAction(fd: FormData): Promise<ActionResul
 
 export async function turnOffInstantUpdatesAction(): Promise<ActionResult> {
   return hubRun(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const { svc } = await hubService();
     await svc.clearGithubWebhook();
     await clearCoverage(db, viewer.workspaceId);

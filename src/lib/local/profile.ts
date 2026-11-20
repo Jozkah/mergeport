@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { Db } from "@/lib/db";
+import { ensureCommonSpace } from "@/lib/services/access-spaces";
 import type { Backend } from "@/lib/local/backends";
 
 /**
@@ -46,12 +47,13 @@ export async function ensureLocalProfile(db: Db, who: LocalIdentity) {
   if (existing && existing.githubId !== who.id) throw new AccountMismatchError(existing.login, who.login);
   const workspace = await firstWorkspace(db);
   const user = await db.user.upsert({ where: { githubId: who.id }, create: { githubId: who.id, login: who.login, name: who.name, avatarUrl: who.avatarUrl }, update: { login: who.login, name: who.name, avatarUrl: who.avatarUrl } });
-  const member = await db.member.upsert({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } }, create: { workspaceId: workspace.id, userId: user.id, role: "ADMIN" }, update: { status: "ACTIVE" } });
+  const member = await db.member.upsert({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } }, create: { workspaceId: workspace.id, userId: user.id, role: "OWNER" }, update: { status: "ACTIVE" } });
+  await ensureCommonSpace(db, workspace.id);
   // createMany + skipDuplicates is INSERT ... ON CONFLICT DO NOTHING: safe when two callers race on the unique workspaceId.
   await db.teamConfig.createMany({ data: [{ workspaceId: workspace.id, mode: "PERSONAL" }], skipDuplicates: true });
   const team = await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: workspace.id } });
   // Personal mode means the person administers their own workspace. (In team mode the role comes from GitHub permissions.)
-  if (team.mode === "PERSONAL" && member.role !== "ADMIN") {
+  if (team.mode === "PERSONAL" && member.role !== "ADMIN" && member.role !== "OWNER") {
     const fixed = await db.member.update({ where: { id: member.id, workspaceId: workspace.id }, data: { role: "ADMIN" } });
     return { workspace, user, member: fixed };
   }

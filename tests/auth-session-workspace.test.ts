@@ -72,7 +72,7 @@ describe("first sign-in and onboarding", () => {
     const ws = await createWorkspaceFor(db(), userId, "  Acme   engineering ", session.id);
     expect(ws.name).toBe("Acme engineering");
     const m = await db().member.findFirstOrThrow({ where: { workspaceId: ws.id, userId } });
-    expect(m).toMatchObject({ role: "ADMIN", status: "ACTIVE" });
+    expect(m).toMatchObject({ role: "OWNER", status: "ACTIVE" });
     expect((await db().session.findUniqueOrThrow({ where: { id: session.id } })).activeWorkspaceId).toBe(ws.id);
     const a = await getAuth();
     expect(a?.viewer).toMatchObject({ workspaceId: ws.id, userId, isAdmin: true, githubId: null });

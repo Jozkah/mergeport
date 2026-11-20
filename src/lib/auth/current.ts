@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { WORKSPACE_COOKIE, resolveActiveWorkspaceId } from "@/lib/authz/active-workspace";
-import { loadViewer, type Viewer } from "@/lib/authz/viewer";
+import { loadViewer, requireWrite, type Viewer } from "@/lib/authz/viewer";
 import { SESSION_COOKIE, findSession } from "./session";
 
 /** Per-request identity. Memoized for one render only; never across requests. */
@@ -26,7 +26,18 @@ export async function requireViewer(): Promise<{ user: NonNullable<Awaited<Retur
   return { user: a.user, viewer: a.viewer, csrf: a.session.csrfToken };
 }
 
-/** Administrator = GitHub says this account administers the team's common space (or it is a personal profile). */
+/**
+ * The guard for every mutating server action: a signed-in viewer whose role may write (not READER). Throws ForbiddenError, which
+ * `run()` turns into a message. Actions that only touch the caller's own preferences use requireViewer and are listed, with a reason,
+ * in tests/mutation-guard.test.ts.
+ */
+export async function requireWriter() {
+  const a = await requireViewer();
+  requireWrite(a.viewer);
+  return a;
+}
+
+/** Administrator = OWNER or ADMIN of the active workspace. Non-administrators get the same 404 as a missing page. */
 export async function requireAdminViewer() {
   const a = await requireViewer();
   if (!a.viewer.isAdmin) notFound(); // non-admins get the same 404 as a missing page

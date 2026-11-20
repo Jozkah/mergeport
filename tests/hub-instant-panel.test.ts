@@ -28,7 +28,10 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/team", useRouter: () =>
 vi.mock("@/lib/db", async (orig) => ({ ...(await orig<typeof import("@/lib/db")>()), get db() { return h.db; } }));
 vi.mock("@/lib/local/runtime", () => ({ getTeamService: async () => null, getEngine: async () => null, getHubTeamService: h.getHubTeamService, syncSoon: () => {} }));
 vi.mock("@/lib/local/workspaces", () => ({ currentBackend: async () => hubBackendId("https://hub.example.com") }));
-vi.mock("@/lib/auth/current", () => ({ requireViewer: async () => ({ user: { githubId: 2n, login: "adm" }, viewer: { login: "adm", timezone: "UTC", isAdmin: true, workspaceId: (globalThis as { __ws?: string }).__ws }, csrf: "x" }) }));
+vi.mock("@/lib/auth/current", () => {
+  const requireViewer = async () => ({ user: { githubId: 2n, login: "adm" }, viewer: { login: "adm", timezone: "UTC", isAdmin: true, workspaceId: (globalThis as { __ws?: string }).__ws }, csrf: "x" });
+  return { requireViewer, requireWriter: requireViewer };
+});
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/lib/hub/ports-impl", async (orig) => ({ ...(await orig<typeof import("@/lib/hub/ports-impl")>()), hubLinkStatus: async () => h.link as HubLinkStatus }));
 vi.mock("@/lib/hub/github-app-install", async (orig) => ({ ...(await orig<typeof import("@/lib/hub/github-app-install")>()), profileRest: () => h.rest }));

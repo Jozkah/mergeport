@@ -148,7 +148,7 @@ export async function importLegacy(db: Db, models: Map<string, ModelInfo>, rows:
       if (orphan) { dropped++; continue; }
 
       // Local-first adjustments.
-      if (model === "Member") data.role = "ADMIN"; // sole owner of this local profile; team authority comes from GitHub spaces
+      if (model === "Member") data.role = "OWNER"; // sole owner of this local profile; team authority comes from GitHub spaces
       if (model === "Repository" || model === "Project") data.spaceId = null; // nothing becomes shared by migrating
       if (model === "WorkItem") {
         data.labelNames = indexList(((data.labels as { name: string }[] | null) ?? []).map((l) => l.name));

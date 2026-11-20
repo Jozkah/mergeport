@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireViewer } from "@/lib/auth/current";
+import { requireViewer, requireWriter } from "@/lib/auth/current";
 import { db } from "@/lib/db";
 import { applyQuick, previewQuick, type QuickPreview, type Target } from "@/lib/services/quick-actions";
 
@@ -19,7 +19,7 @@ export async function previewQuickAction(type: string, id: string, text: string)
 
 export async function applyQuickAction(type: string, id: string, text: string): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const r = await applyQuick({ db, v: viewer }, target(type, id), text);
     revalidatePath("/", "layout");
     return { ok: true, message: r.writesTo === "github" ? `Applied to GitHub (${r.applied} change${r.applied === 1 ? "" : "s"})` : `Applied (${r.applied} change${r.applied === 1 ? "" : "s"})` };

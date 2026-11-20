@@ -9,7 +9,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { STAGE_KEYS } from "@/lib/domain/stages";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireAdminViewer, requireViewer } from "@/lib/auth/current";
+import { requireAdminViewer, requireViewer, requireWriter } from "@/lib/auth/current";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { assertProjectWritable, requireAdmin, requireRepo } from "@/lib/authz/viewer";
 import { removeFromTracking, trackLocally, upsertRepository, type RepoMeta } from "@/lib/services/repositories";
@@ -38,7 +38,7 @@ const urlRe = /^(?:https?:\/\/github\.com\/)?([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._
 /** Public import via the official public REST API, with no credential at all. Nothing is shared with teammates. */
 export async function importPublicAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const m = urlRe.exec(str(fd, "repo"));
     if (!m) throw new ValidationError("Enter a GitHub URL or owner/repo");
     const meta = await publicPort(db).getRepository(m[1], m[2]).catch((e) => {
@@ -56,7 +56,7 @@ export async function importPublicAction(fd: FormData): Promise<ActionResult> {
 /** Tracks repositories the person's own GitHub access can list. Tracking is local; it neither grants GitHub access nor publishes anything. */
 export async function trackSelectedAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const ids = new Set(strs(fd, "repo"));
     if (ids.size === 0) throw new ValidationError("Select at least one repository");
     // Selected from the saved list: no live GitHub call, so this works offline and never waits on a stalled CLI.
@@ -74,7 +74,7 @@ export async function trackSelectedAction(fd: FormData): Promise<ActionResult> {
 
 export async function untrackRepositoryAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await removeFromTracking(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/repositories");
     return { ok: true, message: "Repository removed from tracking. Nothing was deleted on GitHub." };
@@ -83,7 +83,7 @@ export async function untrackRepositoryAction(fd: FormData): Promise<ActionResul
 
 export async function refreshRepositoryAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const repo = await requireRepo(db, viewer, str(fd, "repositoryId"));
     // A person asking for a refresh gets a complete one: every page is listed again (unchanged items cost no detail requests), so a
     // repository whose earlier sync was cut short is repaired instead of only receiving what changed since.
@@ -95,7 +95,7 @@ export async function refreshRepositoryAction(fd: FormData): Promise<ActionResul
 
 // ---------- GitHub work actions ----------
 
-const ctx = async () => ({ db, v: (await requireViewer()).viewer });
+const ctx = async () => ({ db, v: (await requireWriter()).viewer });
 
 export async function commentAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
@@ -184,7 +184,7 @@ export async function mergeAction(fd: FormData): Promise<ActionResult> {
 
 export async function createCardAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const due = str(fd, "due");
     await createCard(db, viewer, {
       projectId: str(fd, "projectId"),
@@ -203,7 +203,7 @@ export async function createCardAction(fd: FormData): Promise<ActionResult> {
 /** Called from the board (drag or keyboard). Conflicts are reported so the client can roll back and reload. */
 export async function moveCardAction(input: { itemId: string; toColumnKey: string; beforePosition: number | null; afterPosition: number | null; expectedVersion: number }): Promise<ActionResult & { version?: number }> {
   const r = await run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const res = await moveCard(db, viewer, input);
     return { ok: true, data: { version: res.version } };
   });
@@ -213,7 +213,7 @@ export async function moveCardAction(input: { itemId: string; toColumnKey: strin
 
 export async function addDependencyAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await addDependency(db, viewer, str(fd, "blockerId"), str(fd, "blockedId"));
     revalidatePath("/planning");
     return { ok: true, message: "Dependency added" };
@@ -238,7 +238,7 @@ export async function createMilestoneAction(fd: FormData): Promise<ActionResult>
 
 export async function manualWaitingAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await requestManualReview(db, viewer, {
       workItemId: str(fd, "workItemId") || undefined,
       planningItemId: str(fd, "planningItemId") || undefined,
@@ -254,7 +254,7 @@ export async function manualWaitingAction(fd: FormData): Promise<ActionResult> {
 
 export async function resolveWaitingAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await resolveManualReview(db, viewer, str(fd, "id"), z.enum(["SATISFIED", "CANCELLED"]).parse(str(fd, "outcome")), str(fd, "note"));
     revalidatePath("/attention");
     return { ok: true, message: "Decision recorded" };
@@ -464,7 +464,7 @@ export async function watchlistAction(input: { text: string }): Promise<ActionRe
 
 export async function refreshForkAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const m = await db.forkMapping.findFirst({ where: { id: str(fd, "mappingId") } });
     if (!m) throw new NotFoundError();
     await requireRepo(db, viewer, m.forkRepoId);
@@ -476,7 +476,7 @@ export async function refreshForkAction(fd: FormData): Promise<ActionResult> {
 
 export async function triageAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const row = await db.upstreamIssueTriage.findFirst({ where: { id: str(fd, "id") }, include: { mapping: true } });
     if (!row) throw new NotFoundError();
     await requireRepo(db, viewer, row.mapping.forkRepoId, "manageWork");
@@ -494,7 +494,7 @@ const TRIAGE = ["UNTRIAGED", "WATCHING", "RELEVANT", "ADDRESSED", "IGNORED"] as 
 /** Sets the status (and optionally the note) of many upstream issues at once. Every mapping touched must be one the person may manage. */
 export async function triageManyAction(input: { ids: string[]; status: (typeof TRIAGE)[number]; note?: string | null }): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const status = z.enum(TRIAGE).parse(input.status);
     const ids = [...new Set((input.ids ?? []).map(String))].slice(0, 500);
     if (ids.length === 0) throw new ValidationError("Pick at least one issue");
@@ -515,7 +515,7 @@ export async function triageManyAction(input: { ids: string[]; status: (typeof T
 /** Acknowledges many merged upstream pull requests at once: a decision by a person, not proof. */
 export async function ackManyAction(input: { ids: string[] }): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const ids = [...new Set((input.ids ?? []).map(String))].slice(0, 500);
     if (ids.length === 0) throw new ValidationError("Pick at least one pull request");
     const rows = await db.upstreamPrState.findMany({ where: { id: { in: ids } }, include: { mapping: true } });
@@ -533,7 +533,7 @@ export async function ackManyAction(input: { ids: string[] }): Promise<ActionRes
 
 export async function ackEvidenceAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const row = await db.upstreamPrState.findFirst({ where: { id: str(fd, "id") }, include: { mapping: true } });
     if (!row) throw new NotFoundError();
     await requireRepo(db, viewer, row.mapping.forkRepoId, "manageWork");
@@ -547,7 +547,7 @@ export async function ackEvidenceAction(fd: FormData): Promise<ActionResult> {
 
 export async function syncForkBranchAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const r = await work.syncForkBranch({ db, v: viewer }, str(fd, "mappingId"), { forkTip: str(fd, "forkTip"), upstreamTip: str(fd, "upstreamTip") });
     revalidatePath("/forks");
     return { ok: r.result !== "conflict", ...(r.result === "conflict" ? { error: r.message } : { message: `${r.message || "Fork updated"} Only the fork on GitHub changed; no local worktree was touched.` }) } as ActionResult;
@@ -558,7 +558,7 @@ export async function syncForkBranchAction(fd: FormData): Promise<ActionResult> 
 
 export async function mapRootAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await mapLocalRoot(db, viewer, str(fd, "repositoryId"), str(fd, "path"));
     await scanWorktrees(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/branches");
@@ -568,7 +568,7 @@ export async function mapRootAction(fd: FormData): Promise<ActionResult> {
 
 export async function scanRootAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const snap = await scanWorktrees(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/branches");
     return { ok: true, message: `Scanned ${snap.worktrees.length} worktree(s)` };
@@ -577,7 +577,7 @@ export async function scanRootAction(fd: FormData): Promise<ActionResult> {
 
 export async function unmapRootAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await unmapLocalRoot(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/branches");
     return { ok: true, message: "Folder forgotten" };
@@ -607,7 +607,7 @@ export async function setTimezoneAction(fd: FormData): Promise<ActionResult> {
  */
 export async function setRepoWatchAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const enabled = fd.get("enabled") === "on" || fd.get("enabled") === "true";
     const seconds = parseOptional(fd.get("seconds"), parseWatchSeconds);
     const maxRepos = parseOptional(fd.get("max"), parseWatchMaxRepos);

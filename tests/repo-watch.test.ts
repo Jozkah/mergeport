@@ -21,12 +21,13 @@ const h = vi.hoisted(() => ({ viewer: null as unknown, user: null as unknown }))
 vi.mock("next/navigation", () => ({ usePathname: () => "/settings", useRouter: () => ({ push: () => {}, refresh: () => {} }), redirect: () => {}, unstable_rethrow: () => {} }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }));
-vi.mock("@/lib/auth/current", () => ({
-  requireViewer: async () => {
+vi.mock("@/lib/auth/current", () => {
+  const requireViewer = async () => {
     if (!h.viewer) throw new Error("Not signed in");
     return { viewer: h.viewer, user: h.user };
-  },
-}));
+  };
+  return { requireViewer, requireWriter: requireViewer };
+});
 vi.mock("@/lib/authz-page", () => ({ requireViewer: async () => ({ viewer: h.viewer, user: h.user }) }));
 vi.mock("@/lib/local/identity", () => ({ currentGhStatus: async () => ({ state: "missing-gh" }), checkProfile: async () => ({ kind: "no-profile" }) }));
 

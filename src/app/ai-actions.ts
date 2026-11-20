@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db, resolveDbFile } from "@/lib/db";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireViewer } from "@/lib/auth/current";
+import { requireViewer, requireWriter } from "@/lib/auth/current";
 import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
 import { keyFileFor } from "@/lib/hub/ports-impl";
@@ -23,7 +23,7 @@ const noDemo = () => {
 
 export async function saveAiSettingsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     noDemo();
     await saveAiSettings(db, viewer.workspaceId, vault(), { baseUrl: str(fd, "baseUrl"), apiKey: str(fd, "apiKey"), clearKey: fd.get("clearKey") === "on", model: str(fd, "model"), autopilot: str(fd, "autopilot") });
     revalidatePath("/settings");
@@ -61,7 +61,7 @@ const idList = (fd: FormData): string[] => {
 /** Turns the chosen AI suggestions into tasks. */
 export async function acceptSuggestionsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const n = await acceptSuggestions(db, viewer, idList(fd));
     for (const p of ["/tasks", "/planning", "/attention", "/ai"]) revalidatePath(p);
     return { ok: true, message: `Created ${n} task${n === 1 ? "" : "s"}` };
@@ -70,7 +70,7 @@ export async function acceptSuggestionsAction(fd: FormData): Promise<ActionResul
 
 export async function dismissSuggestionsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const n = await dismissSuggestions(db, viewer, idList(fd));
     revalidatePath("/ai");
     return { ok: true, message: `Dismissed ${n}` };
@@ -80,7 +80,7 @@ export async function dismissSuggestionsAction(fd: FormData): Promise<ActionResu
 /** Creates the drafts the person kept. Each goes through the same checks as a task typed by hand. */
 export async function createDraftsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     let drafts: TaskDraft[];
     try {
       drafts = JSON.parse(str(fd, "drafts"));
@@ -110,7 +110,7 @@ export async function createDraftsAction(fd: FormData): Promise<ActionResult> {
 /** The person approves a request an AI app made: it is sent to GitHub now, as them. */
 export async function approveActionAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const r = await approve(db, viewer, str(fd, "id"));
     for (const p of ["/ai", "/pull-requests", "/issues"]) revalidatePath(p);
     return r.ok ? { ok: true, message: r.message } : { ok: false, error: r.message.replace(/^Not sent: /, "") };
@@ -119,7 +119,7 @@ export async function approveActionAction(fd: FormData): Promise<ActionResult> {
 
 export async function rejectActionAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const done = await reject(db, viewer, str(fd, "id"));
     revalidatePath("/ai");
     return done ? { ok: true, message: "Rejected. Nothing was sent." } : { ok: false, error: "That request is no longer waiting." };

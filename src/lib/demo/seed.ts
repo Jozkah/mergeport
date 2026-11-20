@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
+import { ensureCommonSpace } from "@/lib/services/access-spaces";
 import { createColumnsForProject } from "@/lib/services/planning";
 import { indexList } from "@/lib/domain/text-index";
 
@@ -25,6 +26,7 @@ export async function seedDemo(db: Db, base = new Date()) {
   const at = (offsetMs: number) => new Date(base.getTime() + offsetMs);
 
   const ws = await db.workspace.create({ data: { name: "Demo workspace (synthetic data)" } });
+  await ensureCommonSpace(db, ws.id);
 
   const mkUser = (githubId: number, login: string, name: string) => db.user.create({ data: { githubId: BigInt(githubId), login, name, isDemo: true, avatarUrl: null } });
   const [uAdmin, uA, uB, uExt] = await Promise.all([
@@ -33,8 +35,8 @@ export async function seedDemo(db: Db, base = new Date()) {
     mkUser(1003, "bram-demo", "Bram Demo"),
     mkUser(1004, "maintainer-demo", "Mina Maintainer"), // NOT a dashboard member
   ]);
-  const mkMember = (userId: string, role: "ADMIN" | "MEMBER") => db.member.create({ data: { workspaceId: ws.id, userId, role } });
-  const mAdmin = await mkMember(uAdmin.id, "ADMIN");
+  const mkMember = (userId: string, role: "OWNER" | "MEMBER") => db.member.create({ data: { workspaceId: ws.id, userId, role } });
+  const mAdmin = await mkMember(uAdmin.id, "OWNER");
   const mA = await mkMember(uA.id, "MEMBER");
   const mB = await mkMember(uB.id, "MEMBER");
 

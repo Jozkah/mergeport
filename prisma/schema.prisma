@@ -11,9 +11,12 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Exactly one OWNER per workspace (partial unique index Member_one_owner). READER is read-only. See docs/roles.md.
 enum MemberRole {
+  OWNER
   ADMIN
   MEMBER
+  READER
 }
 
 enum MemberStatus {
@@ -155,6 +158,8 @@ model Workspace {
   labelMaps     LabelMap[]
   upstreamSubscriptions UpstreamSubscription[]
   spaces        Space[]
+  invitations   Invitation[]
+  accessSpaces  AccessSpace[]
   teamConfig    TeamConfig?
   hubSession    HubSession?
   aiSettings    AiSettings?
@@ -251,6 +256,8 @@ model Member {
   projects        ProjectMember[]
   planningCreated PlanningItem[]      @relation("PlanningCreatedBy")
   ownedMilestones DashboardMilestone[]
+  invitationsSent Invitation[]
+  accessSpaces    AccessSpaceMember[]
 
   @@unique([workspaceId, userId])
 }
@@ -319,11 +326,14 @@ model Project {
   slug        String
   description String?
   spaceId     String? // null = local only
+  /// The access-control space this project lives in (who may see and write it). Null = the workspace's COMMON space.
+  accessSpaceId String?
   /// off | suggest. Suggestions never move anything by themselves and never write to GitHub.
   automation  String   @default("off")
   createdAt   DateTime @default(now())
 
   workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  accessSpace  AccessSpace?        @relation(fields: [accessSpaceId], references: [id], onDelete: SetNull)
   boards       PlanBoard[]
   epics        Epic[]
   iterations   Iteration[]
@@ -337,6 +347,55 @@ model Project {
   waitingRules WaitingRule[]
 
   @@unique([workspaceId, slug])
+  @@index([accessSpaceId])
+}
+
+/// Who sees and writes a group of projects. Separate from Space (the GitHub/hub sync space, scheduled for removal).
+/// COMMON: every active member reads it; one per workspace (partial unique index). RESTRICTED: only AccessSpaceMember rows.
+model AccessSpace {
+  id          String    @id @default(cuid())
+  workspaceId String
+  kind        SpaceKind
+  name        String
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members   AccessSpaceMember[]
+  projects  Project[]
+
+  @@index([workspaceId])
+}
+
+model AccessSpaceMember {
+  spaceId  String
+  memberId String
+  canWrite Boolean @default(false)
+
+  space  AccessSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  member Member      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([spaceId, memberId])
+  @@index([memberId])
+}
+
+/// An email invitation to join a workspace. The token is only stored as its SHA-256. At most one pending (not accepted, not revoked)
+/// row per (workspaceId, emailLowercased): partial unique index Invitation_pending_key. The role is never OWNER (CHECK constraint).
+model Invitation {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  emailLowercased   String
+  role              MemberRole
+  invitedByMemberId String?
+  tokenHash         String    @unique
+  expiresAt         DateTime
+  acceptedAt        DateTime?
+  revokedAt         DateTime?
+  createdAt         DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy Member?   @relation(fields: [invitedByMemberId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
 }
 
 model ProjectRepository {

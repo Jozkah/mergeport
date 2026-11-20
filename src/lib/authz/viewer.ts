@@ -1,6 +1,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { ForbiddenError, NotFoundError } from "@/lib/errors";
+import { can, isAdminRole, type Role, type Subject } from "./roles";
 
 /**
  * The authenticated, authorized caller. Loaded from the database on every request:
@@ -16,8 +17,16 @@ export type Viewer = {
   /** Null for people who signed in with email or OIDC and have not linked a GitHub account. */
   githubId: bigint | null;
   timezone: string;
+  /** The workspace role (docs/roles.md). Read the policy through can(); do not compare strings in new code. */
+  role: Role;
+  /** OWNER or ADMIN. Kept for the many existing checks; derived from `role`. */
   isAdmin: boolean;
 };
+
+/** The policy subject of a viewer. A hand-built viewer without `role` (older tests, local tools) counts as ADMIN when isAdmin, else MEMBER. */
+export function subjectOf(v: Partial<Pick<Viewer, "role" | "isAdmin">>): Subject {
+  return { role: v.role ?? (v.isAdmin ? "ADMIN" : "MEMBER") };
+}
 
 export type Capability = "view" | "manageWork" | "review";
 
@@ -43,7 +52,8 @@ export async function loadViewer(db: Db, userId: string, workspaceId?: string | 
     login: m.user.login,
     githubId: m.user.githubId,
     timezone: m.user.timezone,
-    isAdmin: m.role === "ADMIN",
+    role: m.role,
+    isAdmin: isAdminRole(m.role),
   };
 }
 
@@ -63,7 +73,12 @@ export async function visibleRepoIds(db: Db, v: Viewer): Promise<string[]> {
 }
 
 export function requireAdmin(v: Viewer): void {
-  if (!v.isAdmin) throw new ForbiddenError("Administrator only");
+  if (!can(subjectOf(v), "manageSpaces")) throw new ForbiddenError("Administrator only");
+}
+
+/** Blocks READER (and, with `spaceCanWrite: false`, a member whose access to the space is read-only). The guard every mutating action passes through. */
+export function requireWrite(v: Partial<Pick<Viewer, "role" | "isAdmin">>, spaceCanWrite?: boolean): void {
+  if (!can(subjectOf(v), "write", { spaceCanWrite })) throw new ForbiddenError(spaceCanWrite === false ? "You have read-only access to this space" : "Your role is read-only in this workspace");
 }
 
 /**
@@ -73,7 +88,9 @@ export function requireAdmin(v: Viewer): void {
 export async function requireRepo(db: Db, v: Viewer, repositoryId: string, cap: Capability = "view") {
   const repo = await db.repository.findFirst({ where: { id: repositoryId, ...repoWhere(v) }, include: { owner: true } });
   if (!repo) throw new NotFoundError();
-  if (v.isAdmin || cap === "view") return repo;
+  if (cap === "view") return repo;
+  requireWrite(v);
+  if (v.isAdmin) return repo;
   const g = await db.repositoryGrant.findFirst({
     where: { memberId: v.memberId, repositoryId, revokedAt: null },
   });
@@ -91,14 +108,23 @@ export async function requireWorkItem(db: Db, v: Viewer, workItemId: string, cap
 }
 
 export async function capabilitiesFor(db: Db, v: Viewer, repositoryId: string): Promise<Record<Capability, boolean>> {
+  if (!can(subjectOf(v), "write")) return { view: true, manageWork: false, review: false };
   if (v.isAdmin) return { view: true, manageWork: true, review: true };
   const g = await db.repositoryGrant.findFirst({ where: { memberId: v.memberId, repositoryId, revokedAt: null } });
   return { view: Boolean(g), manageWork: Boolean(g?.canManageWork), review: Boolean(g?.canReview) };
 }
 
-/** Projects visible to this viewer: members need membership AND at least one visible repo; admin sees all. */
+/**
+ * Access-space filter: a project is visible when it sits in the COMMON space (or in none) or in a RESTRICTED space the viewer is a
+ * member of. Not even an admin sees into a restricted space they are not in (they can add themselves from the Spaces panel).
+ */
+export function accessSpaceWhere(v: Pick<Viewer, "memberId">): Prisma.ProjectWhereInput {
+  return { OR: [{ accessSpaceId: null }, { accessSpace: { kind: "COMMON" } }, { accessSpace: { members: { some: { memberId: v.memberId ?? "" } } } }] };
+}
+
+/** Projects visible to this viewer: members need membership AND at least one visible repo; admin sees all. A restricted space hides its projects from everyone outside it. */
 export function projectWhere(v: Viewer): Prisma.ProjectWhereInput {
-  const base: Prisma.ProjectWhereInput = { workspaceId: v.workspaceId };
+  const base: Prisma.ProjectWhereInput = { workspaceId: v.workspaceId, AND: [accessSpaceWhere(v)] };
   if (v.isAdmin) return base;
   return {
     ...base,
@@ -118,9 +144,12 @@ export async function requireProject(db: Db, v: Viewer, projectId: string) {
  * make them: the edit would stay on this computer, never reach the team, and later show up as a merge nobody can resolve.
  * Local-only projects (no space) are always writable.
  */
-export async function assertProjectWritable(db: Db, v: Pick<Viewer, "workspaceId">, projectId: string | null | undefined): Promise<void> {
+export async function assertProjectWritable(db: Db, v: Pick<Viewer, "workspaceId"> & Partial<Pick<Viewer, "memberId" | "role" | "isAdmin">>, projectId: string | null | undefined): Promise<void> {
   if (!projectId) return;
-  const p = await db.project.findUnique({ where: { id: projectId, workspaceId: v.workspaceId }, select: { spaceId: true } });
+  // A caller that passes only a workspace (background code) has no person to check; everyone else is held to their role and their space ACL.
+  if (v.role !== undefined || v.isAdmin !== undefined) requireWrite(v);
+  const p = await db.project.findUnique({ where: { id: projectId, workspaceId: v.workspaceId }, select: { spaceId: true, accessSpace: { select: { kind: true, members: { where: { memberId: v.memberId ?? "" }, select: { canWrite: true } } } } } });
+  if (p?.accessSpace?.kind === "RESTRICTED" && v.memberId) requireWrite(v, p.accessSpace.members[0]?.canWrite === true);
   if (!p?.spaceId) return;
   const space = await db.space.findUnique({ where: { id: p.spaceId, workspaceId: v.workspaceId }, select: { canWrite: true } });
   if (space && !space.canWrite) throw new ForbiddenError("This project is shared read-only with you");
