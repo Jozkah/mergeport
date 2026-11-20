@@ -15,8 +15,14 @@ type Actor = Pick<Viewer, "workspaceId" | "memberId" | "userId">;
 
 export type MemberRow = { id: string; userId: string; login: string; name: string | null; email: string | null; role: Role; status: "ACTIVE" | "REVOKED"; createdAt: Date; revokedAt: Date | null; isSelf: boolean };
 
-/** The acting member, freshly read: still ACTIVE, with the role they have NOW. */
+/**
+ * The acting member, freshly read: still ACTIVE, with the role they have NOW. Every member-administration transaction starts here, and
+ * the first statement locks the workspace's member rows (FOR UPDATE), so these transactions run one after another per workspace:
+ * under READ COMMITTED a concurrent transfer and removal/demotion could otherwise each act on a stale read and leave no OWNER.
+ * Rows read after the lock are the committed ones.
+ */
 async function freshActor(tx: Tx, v: Actor) {
+  await tx.$queryRaw`SELECT "id" FROM "Member" WHERE "workspaceId" = ${v.workspaceId} FOR UPDATE`;
   const m = await tx.member.findFirst({ where: { id: v.memberId, workspaceId: v.workspaceId, status: "ACTIVE" } });
   if (!m) throw new ForbiddenError("You are no longer a member of this workspace");
   return m;
@@ -34,6 +40,11 @@ async function assertAdminRemains(tx: Tx, workspaceId: string, exceptMemberId: s
   if (n < 1) throw new ConflictError("A workspace needs at least one administrator.");
 }
 
+/** A person who can no longer invite (removed, left, or demoted below ADMIN) leaves no live invitations behind. */
+async function revokePendingInvitations(tx: Tx, workspaceId: string, memberId: string, now: Date) {
+  await tx.invitation.updateMany({ where: { workspaceId, invitedByMemberId: memberId, acceptedAt: null, revokedAt: null }, data: { revokedAt: now } });
+}
+
 /**
  * Ends a membership: REVOKED (not deleted, so authorship and the audit trail keep pointing at someone), their project, space and
  * repository grants dropped, and every login of theirs that was bound to this workspace unbound. loadViewer and
@@ -41,6 +52,7 @@ async function assertAdminRemains(tx: Tx, workspaceId: string, exceptMemberId: s
  */
 async function endMembership(tx: Tx, workspaceId: string, member: { id: string; userId: string }, now: Date) {
   await tx.member.update({ where: { id: member.id, workspaceId }, data: { status: "REVOKED", revokedAt: now } });
+  await revokePendingInvitations(tx, workspaceId, member.id, now);
   await tx.projectMember.deleteMany({ where: { memberId: member.id } });
   await tx.accessSpaceMember.deleteMany({ where: { memberId: member.id } });
   await tx.repositoryGrant.updateMany({ where: { memberId: member.id, revokedAt: null }, data: { revokedAt: now } });
@@ -68,6 +80,7 @@ export async function changeRole(db: Db, v: Viewer, memberId: unknown, newRole: 
     if (t.role === newRole) return;
     if (isAdminRole(t.role) && !isAdminRole(newRole)) await assertAdminRemains(tx, v.workspaceId, t.id);
     await tx.member.update({ where: { id: t.id, workspaceId: v.workspaceId }, data: { role: newRole } });
+    if (!isAdminRole(newRole)) await revokePendingInvitations(tx, v.workspaceId, t.id, new Date());
     await audit(tx, { workspaceId: v.workspaceId, userId: v.userId }, "member.role", { type: "Member", id: t.id }, { from: t.role, to: newRole });
   });
 }

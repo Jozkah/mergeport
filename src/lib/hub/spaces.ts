@@ -41,7 +41,8 @@ export async function syncHubSpaces(db: Db, engine: SyncEngine, me: Me, origin?:
 
   // In a hub profile the local role is the hub's own: hub spaces never carry an admin bit, so it cannot come from a space.
   const hubAdmin = me.member.role === "OWNER" || me.member.role === "ADMIN";
-  await db.member.updateMany({ where: { workspaceId, status: "ACTIVE" }, data: { role: hubAdmin ? "ADMIN" : "MEMBER" } });
+  // A READER is never promoted by this; an OWNER row only exists in a database that was a hosted workspace or migrated, and here authority comes from the hub.
+  await db.member.updateMany({ where: { workspaceId, status: "ACTIVE", role: { in: ["OWNER", "ADMIN", "MEMBER"] } }, data: { role: hubAdmin ? "ADMIN" : "MEMBER" } });
 
   if (commonId) {
     await db.teamConfig.upsert({

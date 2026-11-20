@@ -23,7 +23,7 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
         <div className="panel-body p-5">
           <h1 className="text-[20px] font-medium">Create your workspace</h1>
           <p className="mt-2 text-[13px] text-ink-3">A workspace holds your team&apos;s projects and repositories. You will be its administrator.</p>
-          {sp.error && <div className="mt-4"><Banner tone="error" title="Could not create it">Give the workspace a name of up to 80 characters.</Banner></div>}
+          {sp.error && <div className="mt-4"><Banner tone="error" title="Could not create it">{sp.error === "limit" ? "You have created several workspaces today. Try again tomorrow." : "Give the workspace a name of up to 80 characters."}</Banner></div>}
           <form action={createWorkspaceAction} className="mt-4 flex flex-col gap-3">
             <label className="flex flex-col gap-1.5 text-[13px]">
               <span className="font-medium text-ink-2">Workspace name</span>

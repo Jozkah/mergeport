@@ -1121,7 +1121,7 @@ export class SyncEngine {
     if (team.backend === "HUB") return;
     const common = team.commonSpaceId ? await this.db.space.findUnique({ where: { id: team.commonSpaceId, workspaceId } }) : null;
     const admin = !!common && common.access === "OK" && common.canAdmin;
-    await this.db.member.updateMany({ where: { workspaceId, status: "ACTIVE", role: { in: ["ADMIN", "MEMBER"] } }, data: { role: admin ? "ADMIN" : "MEMBER" } });
+    await this.db.member.updateMany({ where: { workspaceId, status: "ACTIVE", role: { in: ["OWNER", "ADMIN", "MEMBER"] } }, data: { role: admin ? "ADMIN" : "MEMBER" } });
   }
 
   // ---------- state for the interface ----------

@@ -51,7 +51,7 @@ describe("legacy Postgres import", () => {
     const report = await importLegacy(db, models, legacy, { login: "alice-demo" });
     expect(await db.user.count()).toBe(1);
     expect(await db.member.count()).toBe(1);
-    expect((await db.member.findFirstOrThrow()).role).toBe("OWNER"); // sole owner of the local profile
+    expect((await db.member.findFirstOrThrow()).role).toBe("ADMIN"); // sole owner of the local profile
     const repos = await db.repository.findMany();
     expect(repos.length).toBe(3);
     expect(repos.some((r) => r.name === "internal-tools")).toBe(false); // alice never saw it
@@ -73,6 +73,21 @@ describe("legacy Postgres import", () => {
       for (const n of names) expect(w.labelNames).toContain(`|${n}|`);
     }
     await db.$disconnect();
+  });
+
+  it("a legacy administrator keeps the full view whether the old row says ADMIN or OWNER (the roles migration added OWNER)", async () => {
+    const adminUser = legacy.User.find((u) => u.login === "owner-demo")!;
+    const counts: number[] = [];
+    for (const role of ["ADMIN", "OWNER"]) {
+      const rows: LegacyRows = { ...legacy, Member: legacy.Member.map((m) => (m.userId === adminUser.id ? { ...m, role } : m)) };
+      const db = fresh();
+      await importLegacy(db, models, rows, { login: "owner-demo" });
+      counts.push(await db.workItem.count({ where: { NOT: { labels: { equals: [] } } } }));
+      expect((await db.member.findFirstOrThrow()).role).toBe("ADMIN");
+      await db.$disconnect();
+    }
+    expect(counts[0]).toBeGreaterThan(0);
+    expect(counts[1]).toBe(counts[0]);
   });
 
   it("does not carry rows that hang off content the person could not see, nor other people's audit trail", async () => {

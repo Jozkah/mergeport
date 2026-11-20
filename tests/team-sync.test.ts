@@ -472,13 +472,25 @@ describe("privacy boundaries", () => {
 
   it("the owner is administrator because GitHub says so; a forged local role grants no GitHub authority and is undone on sync", async () => {
     const { olive, alice, common, aliceCommon } = await teamOfTwo();
-    expect((await olive.db.member.findFirstOrThrow()).role).toBe("OWNER");
+    expect((await olive.db.member.findFirstOrThrow()).role).toBe("ADMIN");
     await alice.db.member.updateMany({ data: { role: "ADMIN" } });
     // creating a restricted space under the org/owner namespace needs GitHub rights the member does not have
     await expect(alice.team.createRestrictedSpace({ name: "Sneaky", owner: "olive" })).rejects.toBeInstanceOf(GithubError);
     await alice.engine.syncSpace(aliceCommon);
     expect((await alice.db.member.findFirstOrThrow()).role).toBe("MEMBER");
+    // a row that holds OWNER (a profile that was a hosted workspace, or migrated by the roles migration) gets no authority from it either
+    await alice.db.member.updateMany({ data: { role: "OWNER" } });
+    await alice.engine.refreshRole();
+    const after = await alice.db.member.findFirstOrThrow();
+    expect(after.role).toBe("MEMBER");
     void common;
+  });
+
+  it("a READER is not promoted by the legacy role sync", async () => {
+    const { alice, aliceCommon } = await teamOfTwo();
+    await alice.db.member.updateMany({ data: { role: "READER" } });
+    await alice.engine.syncSpace(aliceCommon);
+    expect((await alice.db.member.findFirstOrThrow()).role).toBe("READER");
   });
 
   it("no token, path or local file ever reaches a coordination repository", async () => {

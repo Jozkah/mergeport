@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { db, resolveDbFile } from "@/lib/db";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireViewer, requireWriter } from "@/lib/auth/current";
+import { requireWriter } from "@/lib/auth/current";
+import { requireAdmin } from "@/lib/authz/viewer";
 import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
 import { keyFileFor } from "@/lib/hub/ports-impl";
@@ -24,6 +25,7 @@ const noDemo = () => {
 export async function saveAiSettingsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireWriter();
+    requireAdmin(viewer); // the endpoint and its key belong to the workspace: administrators only
     noDemo();
     await saveAiSettings(db, viewer.workspaceId, vault(), { baseUrl: str(fd, "baseUrl"), apiKey: str(fd, "apiKey"), clearKey: fd.get("clearKey") === "on", model: str(fd, "model"), autopilot: str(fd, "autopilot") });
     revalidatePath("/settings");
@@ -32,14 +34,18 @@ export async function saveAiSettingsAction(fd: FormData): Promise<ActionResult> 
   });
 }
 
-/** Asks the endpoint what it offers now, using the address and key in the form (or the saved key when the key field is empty). */
+/**
+ * Asks the endpoint what it offers now, using the address and key in the form. The saved key is used ONLY when the address in the
+ * form is the saved address: otherwise any member could point this at their own host and receive the workspace's key.
+ */
 export async function listAiModelsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     noDemo();
     const saved = await loadAiConfig(db, viewer.workspaceId, vault());
     const baseUrl = normalizeBaseUrl(str(fd, "baseUrl") || saved?.baseUrl || DEFAULT_AI_BASE_URL);
-    const apiKey = str(fd, "apiKey") || saved?.apiKey || null;
+    const sameEndpoint = !!saved && normalizeBaseUrl(saved.baseUrl) === baseUrl;
+    const apiKey = str(fd, "apiKey") || (sameEndpoint ? saved.apiKey : null) || null;
     const info = await listModelInfo({ baseUrl, apiKey, model: null });
     if (info.length === 0) throw new ValidationError("The endpoint listed no models.");
     const models = info.map((m) => m.id);

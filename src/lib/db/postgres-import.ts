@@ -103,7 +103,7 @@ export async function importLegacy(db: Db, models: Map<string, ModelInfo>, rows:
   const myMember = (rows.Member ?? []).find((m) => m.userId === user.id);
   const keep = new Map<string, Set<unknown>>();
   // A legacy non-administrator only ever saw repositories and projects they were granted / belonged to; keep exactly those.
-  const legacyAdmin = myMember?.role === "ADMIN";
+  const legacyAdmin = myMember?.role === "ADMIN" || myMember?.role === "OWNER";
   const visibleRepos = new Set((rows.RepositoryGrant ?? []).filter((g) => g.memberId === myMember?.id && !g.revokedAt).map((g) => g.repositoryId));
   const myProjects = new Set((rows.ProjectMember ?? []).filter((m) => m.memberId === myMember?.id).map((m) => m.projectId));
 
@@ -148,7 +148,7 @@ export async function importLegacy(db: Db, models: Map<string, ModelInfo>, rows:
       if (orphan) { dropped++; continue; }
 
       // Local-first adjustments.
-      if (model === "Member") data.role = "OWNER"; // sole owner of this local profile; team authority comes from GitHub spaces
+      if (model === "Member") data.role = "ADMIN"; // sole owner of this local profile; team authority comes from GitHub spaces
       if (model === "Repository" || model === "Project") data.spaceId = null; // nothing becomes shared by migrating
       if (model === "WorkItem") {
         data.labelNames = indexList(((data.labels as { name: string }[] | null) ?? []).map((l) => l.name));

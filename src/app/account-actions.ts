@@ -8,7 +8,7 @@ import { getAuth } from "@/lib/auth/current";
 import { selectWorkspace } from "@/lib/authz/active-workspace";
 import { createWorkspaceFor } from "@/lib/auth/workspaces";
 import { db } from "@/lib/db";
-import { ValidationError } from "@/lib/errors";
+import { ConflictError, ValidationError } from "@/lib/errors";
 
 /**
  * Form actions for hosted accounts. Next checks that a Server Action's Origin matches the host that served the page, which is the
@@ -23,6 +23,7 @@ export async function createWorkspaceAction(formData: FormData): Promise<void> {
     await createWorkspaceFor(db, a.user.id, formData.get("name"), a.session.id);
   } catch (e) {
     if (e instanceof ValidationError) redirect("/onboarding?error=name");
+    if (e instanceof ConflictError) redirect("/onboarding?error=limit");
     throw e;
   }
   revalidatePath("/", "layout");

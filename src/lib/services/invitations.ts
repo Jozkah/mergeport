@@ -17,7 +17,12 @@ import { audit } from "./audit";
  */
 export const INVITE_TTL_MS = 7 * 24 * 3600 * 1000;
 const HOUR = 3600 * 1000;
-export const INVITE_LIMITS = { perAdminPerHour: 20, perWorkspacePerDay: 100, gapMs: 60_000 } as const;
+/**
+ * perAdminPerHour / perWorkspacePerDay: per inviter and per workspace. perUserPerHour: per PERSON across all their memberships and
+ * workspaces (a new workspace is a new budget otherwise). perRecipientPerDay: invitations to one address from ALL workspaces, so
+ * nobody's inbox can be flooded by making workspaces. gapMs: one mail per (workspace, address) per minute.
+ */
+export const INVITE_LIMITS = { perAdminPerHour: 20, perUserPerHour: 30, perWorkspacePerDay: 100, perRecipientPerDay: 3, gapMs: 60_000 } as const;
 
 type Tx = Prisma.TransactionClient;
 type Sender = { mailer: Mailer; origin: string; now?: Date };
@@ -25,10 +30,12 @@ type Sender = { mailer: Mailer; origin: string; now?: Date };
 const linkFor = (origin: string, token: string) => `${origin}/invite/${token}`;
 
 /** Per-admin and per-workspace budgets and a spacing per address, so one admin cannot turn the invite form into a mail cannon. */
-async function spend(db: Db, v: Pick<Viewer, "memberId" | "workspaceId">, email: string, now: Date) {
+async function spend(db: Db, v: Pick<Viewer, "memberId" | "workspaceId" | "userId">, email: string, now: Date) {
+  if (!(await claimGap(db, `inv:gap:${sha256(`${v.workspaceId}|${email}`)}`, INVITE_LIMITS.gapMs, now))) throw new ConflictError("An invitation to that address was just sent. Wait a minute before sending another.");
+  if (!(await take(db, `inv:to:${sha256(email)}`, INVITE_LIMITS.perRecipientPerDay, 24 * HOUR, now))) throw new ConflictError("That address has received several invitations today. Try again tomorrow.");
+  if (!(await take(db, `inv:user:${v.userId}`, INVITE_LIMITS.perUserPerHour, HOUR, now))) throw new ConflictError("You have sent a lot of invitations. Try again in an hour.");
   if (!(await take(db, `inv:admin:${v.memberId}`, INVITE_LIMITS.perAdminPerHour, HOUR, now))) throw new ConflictError("You have sent a lot of invitations. Try again in an hour.");
   if (!(await take(db, `inv:ws:${v.workspaceId}`, INVITE_LIMITS.perWorkspacePerDay, 24 * HOUR, now))) throw new ConflictError("This workspace has sent many invitations today. Try again tomorrow.");
-  if (!(await claimGap(db, `inv:gap:${sha256(`${v.workspaceId}|${email}`)}`, INVITE_LIMITS.gapMs, now))) throw new ConflictError("An invitation to that address was just sent. Wait a minute before sending another.");
 }
 
 async function actorOf(db: Db | Tx, v: Pick<Viewer, "memberId" | "workspaceId">) {
@@ -130,6 +137,15 @@ export async function listInvitations(db: Db, v: Viewer, now = new Date()): Prom
   return rows.map((r) => ({ id: r.id, email: r.emailLowercased, role: r.role as Role, invitedBy: r.invitedBy?.user.login ?? null, createdAt: r.createdAt, expiresAt: r.expiresAt, expired: r.expiresAt <= now }));
 }
 
+/** The person who sent an invitation must still be an ACTIVE member who may invite that role; otherwise their invitations are dead. */
+async function inviterStillAllowed(db: Db | Tx, workspaceId: string, inviterId: string | null, role: string, lock = false): Promise<boolean> {
+  if (!inviterId) return false;
+  const rows = lock
+    ? await (db as Tx).$queryRaw<{ role: string; status: string }[]>`SELECT "role"::text AS "role", "status"::text AS "status" FROM "Member" WHERE "id" = ${inviterId} AND "workspaceId" = ${workspaceId} FOR SHARE`
+    : (await db.member.findMany({ where: { id: inviterId, workspaceId }, select: { role: true, status: true } })).map((m) => ({ role: m.role as string, status: m.status as string }));
+  return rows.length === 1 && can({ role: rows[0].role, status: rows[0].status }, "manageMembers", { newRole: role });
+}
+
 export type InvitePreview = { workspaceName: string; role: Role; email: string };
 
 /**
@@ -138,8 +154,9 @@ export type InvitePreview = { workspaceName: string; role: Role; email: string }
  */
 export async function previewInvitation(db: Db, token: unknown, now = new Date()): Promise<InvitePreview | null> {
   if (typeof token !== "string" || token.length < 20 || token.length > 200) return null;
-  const row = await db.invitation.findUnique({ where: { tokenHash: sha256(token) }, select: { workspaceId: true, role: true, emailLowercased: true, acceptedAt: true, revokedAt: true, expiresAt: true, workspace: { select: { name: true } } } });
+  const row = await db.invitation.findUnique({ where: { tokenHash: sha256(token) }, select: { workspaceId: true, role: true, emailLowercased: true, invitedByMemberId: true, acceptedAt: true, revokedAt: true, expiresAt: true, workspace: { select: { name: true } } } });
   if (!row || row.acceptedAt || row.revokedAt || row.expiresAt <= now) return null;
+  if (!(await inviterStillAllowed(db, row.workspaceId, row.invitedByMemberId, row.role))) return null;
   return { workspaceName: row.workspace.name, role: row.role as Role, email: row.emailLowercased };
 }
 
@@ -166,12 +183,13 @@ export async function acceptInvitation(db: Db, token: unknown, user: { id: strin
   if (!user.email || !user.emailVerifiedAt || user.email !== row.emailLowercased) return { ok: false, reason: "wrong-email" };
   try {
     return await db.$transaction(async (tx): Promise<AcceptResult> => {
-      const claimed = await tx.$queryRaw<{ id: string; workspaceId: string; role: string }[]>`
+      const claimed = await tx.$queryRaw<{ id: string; workspaceId: string; invitedByMemberId: string | null; role: string }[]>`
         UPDATE "Invitation" SET "acceptedAt" = ${now}
         WHERE "tokenHash" = ${hash} AND "acceptedAt" IS NULL AND "revokedAt" IS NULL AND "expiresAt" > ${now}
-        RETURNING "id", "workspaceId", "role"::text AS "role"`;
+        RETURNING "id", "workspaceId", "invitedByMemberId", "role"::text AS "role"`;
       if (claimed.length !== 1) throw new Rollback();
-      const { id, workspaceId, role } = claimed[0];
+      const { id, workspaceId, role, invitedByMemberId } = claimed[0];
+      if (!(await inviterStillAllowed(tx, workspaceId, invitedByMemberId, role, true))) throw new Rollback(); // the inviter was removed or demoted since: the invitation died with their access
       const existing = await tx.member.findUnique({ where: { workspaceId_userId: { workspaceId, userId: user.id } }, select: { id: true, status: true } });
       if (existing?.status === "REVOKED") throw new Rollback(); // removed after the invitation went out: an administrator reinstates them on purpose
       if (!existing) await tx.member.create({ data: { workspaceId, userId: user.id, role: role as Role, status: "ACTIVE" } });
