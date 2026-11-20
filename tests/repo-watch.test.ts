@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -479,7 +480,7 @@ describe("setRepoWatchAction", () => {
       expect(r.ok).toBe(false);
       expect(JSON.stringify(r)).toContain("Enter a whole number of repositories from 1 to 200.");
     }
-    expect(await db.teamConfig.findUnique({ where: { id: "team" } })).toMatchObject({ watchSeconds: null });
+    expect(await db.teamConfig.findUnique({ where: { workspaceId: await wsId(db) } })).toMatchObject({ watchSeconds: null });
     expect(() => parseWatchSeconds("0")).toThrow(ValidationError);
   });
 
@@ -534,7 +535,7 @@ describe("settings semantics: blank clears, only changes are written", () => {
     for (const [k, v] of Object.entries(o)) fd.set(k, v);
     return fd;
   };
-  const row = () => db.teamConfig.findUniqueOrThrow({ where: { id: "team" } });
+  const row = async () => db.teamConfig.findUniqueOrThrow({ where: { workspaceId: await wsId(db) } });
 
   it("a blank field clears the saved value (NULL) so the environment or default applies again", async () => {
     const { setRepoWatchAction } = await import("@/app/actions");

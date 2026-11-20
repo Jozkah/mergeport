@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 import { GithubError } from "@/lib/github/port";
@@ -65,7 +66,7 @@ describe("create team and invitations", () => {
     const manifest = JSON.parse(server.files("olive", repo.name)["mergeport.json"]);
     expect(manifest).toMatchObject({ schema: 1, kind: "mergeport-space", spaceKind: "COMMON", teamName: "Atlas Crew" });
     expect(space.canAdmin).toBe(true);
-    expect((await olive.db.teamConfig.findUniqueOrThrow({ where: { id: "team" } })).mode).toBe("TEAM");
+    expect((await olive.db.teamConfig.findUniqueOrThrow({ where: { workspaceId: await wsId(olive.db) } })).mode).toBe("TEAM");
   });
 
   it("a name collision gets a suffix and never touches the unrelated repository", async () => {

@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -115,8 +116,8 @@ describe("completeConnect", () => {
     expect(await hubSessionPort.read(db)).toEqual({ origin, token: "session-token-secret", githubId: "42" });
     const prisma = createTestPrisma(db);
     try {
-      expect(await prisma.teamConfig.findUnique({ where: { id: "team" } })).toMatchObject({ mode: "TEAM", backend: "HUB", hubOrigin: origin, name: "Fake Team" });
-      expect(await prisma.hubSession.findUnique({ where: { id: "session" } })).toMatchObject({ origin, githubId: 42n, login: "octocat" });
+      expect(await prisma.teamConfig.findUnique({ where: { workspaceId: await wsId(prisma) } })).toMatchObject({ mode: "TEAM", backend: "HUB", hubOrigin: origin, name: "Fake Team" });
+      expect(await prisma.hubSession.findUnique({ where: { workspaceId: await wsId(prisma) } })).toMatchObject({ origin, githubId: 42n, login: "octocat" });
     } finally {
       await prisma.$disconnect();
     }

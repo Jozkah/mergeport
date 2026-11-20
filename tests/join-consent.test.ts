@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 import { GitHubRest } from "@/lib/github/rest";
@@ -30,7 +31,7 @@ async function team() {
   await olive.team.invite(common, olive.team.planInvite(common, ["alice"]), { confirmed: true });
   await alice.team.acceptInvitation((await alice.team.myInvitations())[0].id);
   await alice.team.join(plan.fullName, { confirmed: true });
-  const teamRow = await olive.db.teamConfig.findUniqueOrThrow({ where: { id: "team" } });
+  const teamRow = await olive.db.teamConfig.findUniqueOrThrow({ where: { workspaceId: await wsId(olive.db) } });
   return { olive, alice, plan, common, teamId: teamRow.teamRemoteId! };
 }
 
