@@ -2,7 +2,8 @@ import type { Db } from "@/lib/db";
 import { randomToken, sha256 } from "@/lib/crypto";
 
 export const SESSION_COOKIE = "mp_session";
-export const SESSION_TTL_MS = 14 * 24 * 3600 * 1000;
+/** The app listens on this computer only and the cookie is the person's own browser, so the sign-in lasts half a year (browsers cap cookies near 400 days). It used to be 14 days, which meant signing in again every two weeks. */
+export const SESSION_TTL_MS = 180 * 24 * 3600 * 1000;
 
 /** Opaque server-side session. Only the SHA-256 of the cookie value is stored. */
 export async function createSession(db: Db, userId: string, now = new Date()) {
