@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { HubAuth, completeConnect, safeVerificationUri } from "@/lib/hub/connect";
 import { hubLinkStatus, hubSessionPort } from "@/lib/hub/ports-impl";
 import { hubBackendId } from "@/lib/local/backends";
@@ -112,7 +112,7 @@ describe("completeConnect", () => {
     expect(fs.readFileSync(path.join(h, "hubs.json"), "utf8")).not.toContain("session-token-secret");
     for (const f of fs.readdirSync(path.dirname(db))) expect(fs.readFileSync(path.join(path.dirname(db), f))).not.toContain("session-token-secret");
     expect(await hubSessionPort.read(db)).toEqual({ origin, token: "session-token-secret", githubId: "42" });
-    const prisma = createPrisma(db);
+    const prisma = createTestPrisma(db);
     try {
       expect(await prisma.teamConfig.findUnique({ where: { id: "team" } })).toMatchObject({ mode: "TEAM", backend: "HUB", hubOrigin: origin, name: "Fake Team" });
       expect(await prisma.hubSession.findUnique({ where: { id: "session" } })).toMatchObject({ origin, githubId: 42n, login: "octocat" });

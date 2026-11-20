@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { resetEnvCache } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
 import { GitHubRest } from "@/lib/github/rest";
@@ -69,7 +70,7 @@ beforeEach(() => {
   process.env.MERGEPORT_HOME = home;
   resetEnvCache();
   vi.clearAllMocks();
-  h.db = createPrisma(path.join(home, "t.db"));
+  h.db = createTestPrisma(path.join(home, "t.db"));
   (globalThis as { __ws?: string }).__ws = undefined;
 });
 afterEach(async () => {

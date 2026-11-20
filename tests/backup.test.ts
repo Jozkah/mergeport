@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
 import { ensureLocalProfile } from "@/lib/local/profile";
 import { BACKUP_VERSION, exportBackup, parseBackup, previewRestore, restoreBackup } from "@/lib/services/backup";
@@ -17,7 +18,7 @@ let n = 0;
 async function target(withRepos: boolean): Promise<{ db: Db; v: Viewer }> {
   const file = path.resolve(".data", `restore-${process.pid}-${n++}.db`);
   files.push(file);
-  const db = createPrisma(file);
+  const db = createTestPrisma(file);
   const p = await ensureLocalProfile(db, { id: 9001n, login: "restorer", name: "Restorer", avatarUrl: null, host: "github.com" });
   if (withRepos) {
     for (const r of await S.db.repository.findMany({ where: { isDemo: false }, include: { owner: true } })) {

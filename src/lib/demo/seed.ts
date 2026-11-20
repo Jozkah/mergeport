@@ -15,11 +15,10 @@ const H = 3600_000;
 const D = 24 * H;
 
 export async function truncateAll(db: Db) {
-  const all = await db.$queryRawUnsafe<{ name: string }[]>("SELECT name FROM sqlite_master WHERE type = 'table'");
-  const rows = all.filter((r) => !r.name.startsWith("sqlite_") && !r.name.startsWith("_")); // keep migration bookkeeping
-  await db.$executeRawUnsafe("PRAGMA foreign_keys = OFF");
-  for (const r of rows) await db.$executeRawUnsafe(`DELETE FROM "${r.name}"`);
-  await db.$executeRawUnsafe("PRAGMA foreign_keys = ON");
+  const all = await db.$queryRawUnsafe<{ tablename: string }[]>("SELECT tablename FROM pg_tables WHERE schemaname = current_schema()");
+  const rows = all.filter((r) => !r.tablename.startsWith("_")); // keep migration bookkeeping (_prisma_migrations)
+  if (!rows.length) return;
+  await db.$executeRawUnsafe(`TRUNCATE TABLE ${rows.map((r) => `"${r.tablename}"`).join(", ")} CASCADE`);
 }
 
 export async function seedDemo(db: Db, base = new Date()) {

@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Space } from "@/generated/prisma/client";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "../pg";
 import { HttpHubClient } from "@/lib/hub/client";
 import type { SocketLike, Timers } from "@/lib/hub/link";
 import { startHubLive } from "@/lib/hub/live";
@@ -19,7 +20,7 @@ let counter = 0;
 export async function makeHubClient(hub: FakeHub, githubId: bigint, login: string, opts: { events?: { spaceId: string; reason: string }[] } = {}) {
   const file = path.resolve(".data", `hubclient-${login}-${process.pid}-${counter++}.db`);
   for (const sfx of ["", "-wal", "-shm"]) fs.rmSync(file + sfx, { force: true });
-  const db: Db = createPrisma(file);
+  const db: Db = createTestPrisma(file);
   const actor = { id: githubId, login };
   const profile = await ensureLocalProfile(db, { id: githubId, login, name: login, avatarUrl: null, host: "github.com" });
   const token = hub.token(String(githubId));

@@ -6,7 +6,7 @@ export const BASE = new Date("2026-10-28T12:00:00Z");
 
 let _db: Db | null = null;
 export function testDb(): Db {
-  return (_db ??= createPrisma(process.env.MERGEPORT_DB));
+  return (_db ??= createPrisma());
 }
 
 export async function freshSeed(): Promise<{ db: Db; ids: DemoIds; admin: Viewer; a: Viewer; b: Viewer }> {

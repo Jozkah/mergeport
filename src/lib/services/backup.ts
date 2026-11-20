@@ -89,8 +89,8 @@ export const latestMigration = () => {
 };
 
 async function columns(db: Db, table: string): Promise<string[]> {
-  const rows = await db.$queryRawUnsafe<{ name: string }[]>(`PRAGMA table_info("${table}")`);
-  return rows.map((r) => r.name);
+  const rows = await db.$queryRaw<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ${table} ORDER BY ordinal_position`;
+  return rows.map((r) => r.column_name);
 }
 
 export async function exportBackup(db: Db, v: Viewer, now = new Date()): Promise<string> {

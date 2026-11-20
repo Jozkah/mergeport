@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { assertBackendMatch } from "@/lib/local/backend-guard";
 import { waitForReady } from "@/lib/local/child-process";
 import { pollSwitch, validateSwitchTarget, type Ready } from "@/lib/local/switch-poll";
@@ -69,8 +69,8 @@ async function setup() {
   const ghFile = path.join(dir, "github.db");
   const hubFile = path.join(dir, "hub.db");
   const files: Record<string, string> = { github: ghFile, [HUB]: hubFile };
-  const gh = createPrisma(ghFile);
-  const hub = createPrisma(hubFile);
+  const gh = createTestPrisma(ghFile);
+  const hub = createTestPrisma(hubFile);
   await gh.workspace.create({ data: { name: "GitHub project" } });
   await hub.workspace.create({ data: { name: "Hub project" } });
   await gh.$disconnect();
@@ -100,7 +100,7 @@ const whoami = async (port: number, cookie: string) => {
 };
 const ready = async (port: number) => (await (await fetch(`http://127.0.0.1:${port}/api/local/ready`)).json()) as Ready;
 async function names(file: string) {
-  const db = createPrisma(file, { migrate: false });
+  const db = createTestPrisma(file, { migrate: false });
   try {
     return (await db.workspace.findMany()).map((w) => w.name);
   } finally {

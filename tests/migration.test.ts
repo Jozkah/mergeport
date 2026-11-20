@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { importLegacy, loadSchema, parseSchema, type LegacyRows } from "@/lib/db/postgres-import";
 import { freshSeed, leaks } from "./helpers";
 
@@ -16,7 +17,7 @@ const files: string[] = [];
 const fresh = () => {
   const f = path.resolve(".data", `client-migration-${process.pid}-${files.length}.db`);
   files.push(f);
-  return createPrisma(f);
+  return createTestPrisma(f);
 };
 
 beforeAll(async () => {

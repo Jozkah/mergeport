@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { ValidationError } from "@/lib/errors";
 import { HubForbidden, HubRequestError, HubUnauthorized } from "@/lib/hub/ports";
 import { httpHubAdmin, hubSessionPort } from "@/lib/hub/ports-impl";
@@ -153,7 +153,7 @@ describe("HubTeamService", () => {
     await expect(svc.signOut(db)).resolves.toEqual({ switchTo: "github" });
     expect(await hubSessionPort.read(db)).toBeNull();
     // The row itself is gone (not merely undecryptable): nothing of the token remains in the database.
-    const prisma = createPrisma(db, { migrate: false });
+    const prisma = createTestPrisma(db, { migrate: false });
     try {
       expect(await prisma.hubSession.count()).toBe(0);
     } finally {

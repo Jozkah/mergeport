@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { GhTimeoutError, IdentityError, defaultGhRunner, liveGhProcesses, terminateAllGh } from "@/lib/github/exec";
 import { GithubError } from "@/lib/github/port";
 import { OctokitPort, createOctokit } from "@/lib/github/octokit";
@@ -13,7 +14,7 @@ const dbs: Db[] = [];
 const fresh = () => {
   const f = path.resolve(".data", `client-discovery-${process.pid}-${files.length}.db`);
   files.push(f);
-  const db = createPrisma(f);
+  const db = createTestPrisma(f);
   dbs.push(db);
   return db;
 };

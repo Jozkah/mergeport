@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import type { Viewer } from "@/lib/authz/viewer";
 import { isBusy, withBusyRetry } from "@/lib/cli/busy";
 import { parseDue } from "@/lib/cli/dates";
@@ -342,7 +342,7 @@ describe("profile lookup", () => {
       const dir = path.join(home, "profiles", "github.com-4242");
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, "mergeport.db");
-      const db = createPrisma(file);
+      const db = createTestPrisma(file);
       await ensureLocalProfile(db, { id: 4242n, login: "Zoe", name: null, avatarUrl: null, host: "github.com" });
       writeActive(home, { host: "github.com", accountId: "4242", backend: "github" });
       const loc = locateProfile({ MERGEPORT_HOME: home });

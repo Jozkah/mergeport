@@ -10,7 +10,9 @@ export default defineConfig({
     fileParallelism: false,
     env: {
       DEMO_MODE: "true",
-      MERGEPORT_DB: path.resolve(import.meta.dirname, ".data", "test.db"),
+      // Embedded Postgres started by tests/global-setup.ts (port 5434, data dir .data/pg-test).
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5434/mergeport_test",
+      MERGEPORT_DB: path.resolve(import.meta.dirname, ".data", "test.db"), // anchor path for the vault key file only
     },
   },
 });

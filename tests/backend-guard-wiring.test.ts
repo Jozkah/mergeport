@@ -1,13 +1,13 @@
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { syncHubSpaces } from "@/lib/hub/spaces";
 import { BackendMismatchError } from "@/lib/local/backend-guard";
 import { hubBackendId, type Backend } from "@/lib/local/backends";
 import { SyncEngine } from "@/lib/sync/engine";
 import { TeamService } from "@/lib/team/service";
 
-const db = createPrisma(path.resolve(".data", `backend-guard-wiring-${process.pid}.db`));
+const db = createTestPrisma(path.resolve(".data", `backend-guard-wiring-${process.pid}.db`));
 afterAll(() => db.$disconnect());
 
 const base = { remoteId: "r", teamRemoteId: "t", kind: "COMMON" as const, name: "n" };

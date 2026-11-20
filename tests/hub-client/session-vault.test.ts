@@ -4,11 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "../pg";
 import { clearHubSession, loadHubSession, openVault, saveHubSession } from "@/lib/hub/session-vault";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-vault-"));
-const db = createPrisma(path.resolve(".data", `hub-client-vault-${process.pid}.db`));
+const db = createTestPrisma(path.resolve(".data", `hub-client-vault-${process.pid}.db`));
 afterAll(async () => {
   await db.$disconnect();
   fs.rmSync(dir, { recursive: true, force: true });

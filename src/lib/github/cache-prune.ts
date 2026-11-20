@@ -16,7 +16,7 @@ export async function pruneHttpCache(db: Db, now = new Date()): Promise<{ aged: 
   const total = (await db.publicCacheEntry.aggregate({ _sum: { bytes: true } }))._sum.bytes ?? 0;
   if (total <= CACHE_MAX_BYTES) return { aged, evicted: 0 };
   // Newest first, running byte total: everything past the low-water mark is the oldest tail.
-  const evicted = await db.$executeRaw`DELETE FROM "PublicCacheEntry" WHERE "key" IN (SELECT "key" FROM (SELECT "key", SUM("bytes") OVER (ORDER BY "fetchedAt" DESC, "key") AS run FROM "PublicCacheEntry") WHERE run > ${CACHE_LOW_WATER_BYTES})`;
+  const evicted = await db.$executeRaw`DELETE FROM "PublicCacheEntry" WHERE "key" IN (SELECT "key" FROM (SELECT "key", SUM("bytes") OVER (ORDER BY "fetchedAt" DESC, "key") AS run FROM "PublicCacheEntry") AS t WHERE run > ${CACHE_LOW_WATER_BYTES})`;
   return { aged, evicted };
 }
 

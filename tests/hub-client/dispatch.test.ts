@@ -1,9 +1,9 @@
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "../pg";
 import { SyncEngine } from "@/lib/sync/engine";
 
-const db = createPrisma(path.resolve(".data", `hub-client-dispatch-${process.pid}.db`));
+const db = createTestPrisma(path.resolve(".data", `hub-client-dispatch-${process.pid}.db`));
 afterAll(() => db.$disconnect());
 
 const base = { remoteId: "r", teamRemoteId: "t", kind: "COMMON" as const, name: "n" };

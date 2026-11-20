@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Space } from "@/generated/prisma/client";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { HttpHubClient } from "@/lib/hub/client";
 import type { SocketLike } from "@/lib/hub/link";
 import { startHubLive } from "@/lib/hub/live";
@@ -57,7 +58,7 @@ const open: { close(): Promise<void> }[] = [];
 async function makeClient(githubId: bigint, login: string, token: string) {
   const file = path.resolve(".data", `client-e2e-${login}-${process.pid}-${counter++}.db`);
   for (const sfx of ["", "-wal", "-shm"]) fs.rmSync(file + sfx, { force: true });
-  const db: Db = createPrisma(file);
+  const db: Db = createTestPrisma(file);
   const profile = await ensureLocalProfile(db, { id: githubId, login, name: login, avatarUrl: null, host: "github.com" });
   const origin = hub.url;
   await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "TEAM", backend: "HUB", hubOrigin: origin }, update: { mode: "TEAM", backend: "HUB", hubOrigin: origin } });

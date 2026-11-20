@@ -42,21 +42,12 @@ async function main() {
   }
   const target = arg("--to") ?? profileDbPath(mergeportHome(process.env.MERGEPORT_HOME), process.env.MERGEPORT_HOST ?? "github.com", BigInt(u.githubId as string | number | bigint));
   if (args.includes("--dry-run")) {
-    // A throwaway database so nothing is written to your profile.
-    const tmp = path.join(path.dirname(target), `.dry-run-${process.pid}.db`);
-    fs.mkdirSync(path.dirname(tmp), { recursive: true });
-    const db = createPrisma(tmp);
-    try {
-      console.log(JSON.stringify(await importLegacy(db, models, rows, { login }), null, 2));
-    } finally {
-      await db.$disconnect();
-      for (const s of ["", "-wal", "-shm"]) fs.rmSync(tmp + s, { force: true });
-    }
-    console.log("Dry run: nothing was written to", target);
-    return;
+    // It used a throwaway SQLite file; on Postgres a dry run would write to DATABASE_URL. Superseded in phase P3.
+    console.error("--dry-run is unavailable now that Mergeport runs on Postgres.");
+    process.exit(1);
   }
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  const db = createPrisma(target);
+  const db = createPrisma();
   try {
     console.log(JSON.stringify(await importLegacy(db, models, rows, { login }), null, 2));
   } finally {
