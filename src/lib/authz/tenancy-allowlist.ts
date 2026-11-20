@@ -10,6 +10,8 @@ export type TenancyAllow = { file: string; models?: string[]; ops?: string[]; re
 
 export const TENANCY_ALLOWLIST: TenancyAllow[] = [
   { file: "src/lib/authz/viewer.ts", models: ["member"], reason: "Identity resolution: the user's OWN active memberships (filtered by userId), used to pick the single workspace when the caller names none." },
+  { file: "src/lib/auth/login.ts", models: ["member"], reason: "After sign-in: does this person (filtered by userId) belong to any workspace? Decides between the app and /onboarding." },
+  { file: "src/lib/auth/workspaces.ts", models: ["member"], reason: "The workspace switcher lists the person's OWN active memberships (filtered by userId), across workspaces by design." },
   { file: "src/lib/jobs.ts", reason: "The job queue itself: claim, retry, recurrence and dedupe work on job ids / dedupe keys across all tenants by design (one worker serves every workspace). jobWorkspace() looks up the tenant of a payload's repository or mapping id so the job row can carry it." },
   { file: "src/lib/local/scheduler.ts", models: ["job"], reason: "The system-wide `reconcile` scheduler job (workspaceId null by design; it fans out per workspace in its handler)." },
   { file: "src/lib/local/discovery.ts", models: ["discoveryCache"], ops: ["updateMany"], reason: "Crash recovery: an attempt interrupted by a restart is reset in every workspace, because the process that ran it served all of them." },
