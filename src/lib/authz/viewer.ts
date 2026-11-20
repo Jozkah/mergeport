@@ -20,11 +20,20 @@ export type Viewer = {
 
 export type Capability = "view" | "manageWork" | "review";
 
-export async function loadViewer(db: Db, userId: string): Promise<Viewer | null> {
-  const m = await db.member.findFirst({
-    where: { userId, status: "ACTIVE" },
-    include: { user: true },
-  });
+/**
+ * Loads the caller for ONE workspace. `workspaceId` is the active workspace (see resolveActiveWorkspaceId); the user must be an
+ * ACTIVE member of it, otherwise null. Without it the only accepted shortcut is a user with exactly one active membership:
+ * several memberships and no choice is ambiguous and yields null rather than a guess.
+ */
+export async function loadViewer(db: Db, userId: string, workspaceId?: string | null): Promise<Viewer | null> {
+  const where = { userId, status: "ACTIVE" as const };
+  let m;
+  if (workspaceId) {
+    m = await db.member.findFirst({ where: { ...where, workspaceId }, include: { user: true } });
+  } else {
+    const all = await db.member.findMany({ where, include: { user: true }, take: 2, orderBy: { createdAt: "asc" } });
+    m = all.length === 1 ? all[0] : null;
+  }
   if (!m) return null;
   return {
     userId,
@@ -108,17 +117,17 @@ export async function requireProject(db: Db, v: Viewer, projectId: string) {
  * make them: the edit would stay on this computer, never reach the team, and later show up as a merge nobody can resolve.
  * Local-only projects (no space) are always writable.
  */
-export async function assertProjectWritable(db: Db, projectId: string | null | undefined): Promise<void> {
+export async function assertProjectWritable(db: Db, v: Pick<Viewer, "workspaceId">, projectId: string | null | undefined): Promise<void> {
   if (!projectId) return;
-  const p = await db.project.findUnique({ where: { id: projectId }, select: { spaceId: true } });
+  const p = await db.project.findUnique({ where: { id: projectId, workspaceId: v.workspaceId }, select: { spaceId: true } });
   if (!p?.spaceId) return;
-  const space = await db.space.findUnique({ where: { id: p.spaceId }, select: { canWrite: true } });
+  const space = await db.space.findUnique({ where: { id: p.spaceId, workspaceId: v.workspaceId }, select: { canWrite: true } });
   if (space && !space.canWrite) throw new ForbiddenError("This project is shared read-only with you");
 }
 
 /** requireProject plus the write check: visible first (hidden stays NotFound), then writable. */
 export async function requireProjectWrite(db: Db, v: Viewer, projectId: string) {
   const p = await requireProject(db, v, projectId);
-  await assertProjectWritable(db, p.id);
+  await assertProjectWritable(db, v, p.id);
   return p;
 }

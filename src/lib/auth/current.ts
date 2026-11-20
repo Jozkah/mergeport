@@ -2,6 +2,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
+import { WORKSPACE_COOKIE, resolveActiveWorkspaceId } from "@/lib/authz/active-workspace";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
 import { SESSION_COOKIE, findSession } from "./session";
 
