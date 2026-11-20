@@ -11,7 +11,7 @@ import net from "node:net";
  *    `lookup`: a second DNS answer (rebinding) can never change where the socket goes. If any answer is forbidden the call fails;
  *  - forbidden: loopback, private, link-local (cloud metadata 169.254.169.254), CGNAT, multicast, reserved and documentation
  *    ranges, for IPv4, IPv6 and IPv4 inside IPv6 (mapped, NAT64, 6to4, compatible);
- *  - no redirects: any 3xx is an error (nothing to re-validate, no credentials to strip). No cookies are ever sent or kept;
+ *  - no redirects: any 3xx except 304 Not Modified is an error (nothing to re-validate, no credentials to strip). No cookies are ever sent or kept;
  *  - connect timeout 5 s, total 10 s, response capped at 2 MB, the answer must be application/json.
  */
 export type SafeFetchErrorCode = "bad-url" | "scheme" | "blocked-address" | "dns" | "redirect" | "timeout" | "too-large" | "content-type" | "network" | "bad-header";
@@ -197,7 +197,7 @@ export async function safeFetchJson(rawUrl: string, init: SafeFetchInit = {}, de
       (res) => {
         clearTimeout(connect);
         const status = res.statusCode ?? 0;
-        if (status >= 300 && status < 400) {
+        if (status >= 300 && status < 400 && status !== 304) {
           res.destroy();
           return done(() => reject(new SafeFetchError("redirect", "The other instance answered with a redirect, which federation does not follow.")));
         }

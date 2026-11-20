@@ -5,11 +5,11 @@ that workspace, and every query on tenant data names the workspace.
 
 ## Model classification
 
-70 models: 1 tenant anchor, 24 ROOT, 38 CHILD, 7 GLOBAL.
+75 models: 1 tenant anchor, 29 ROOT, 38 CHILD, 7 GLOBAL.
 
 **Tenant anchor.** `Workspace` is the tenant itself.
 
-**ROOT (24).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
+**ROOT (29).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
 starts with it (a unique key that starts with it counts). Every query on a ROOT model must name the workspace.
 
 | Model | Notes |
@@ -22,6 +22,7 @@ starts with it (a unique key that starts with it counts). Every query on a ROOT 
 | Space | Unique on (workspaceId, backend, repoOwner, repoName, hubSpaceId): two workspaces may join the same coordination repository. |
 | TeamConfig, HubSession, AiSettings | Were fixed-id singletons (`team`, `session`, `ai`). Now one row per workspace: `workspaceId` is unique, the id is a cuid. |
 | AiSuggestion, AiPendingAction | |
+| FederationPolicy, FederationLink, FederationGrant, FederationCache, FederationEvent | Linking instances (docs/federation.md). Policy is unique on `workspaceId`. A link and its cache are the linking person's only: every query names workspace, person and link. A grant is found by the sha256 of its code or token (the secret names the tenant; allowlisted `findUnique` lookups, like the callback's lookup of a pending link by its state and the signed-in person) and everything after that uses `grant.workspaceId`. The cache is never read by search, digests, AI or backup (a test greps for it). |
 | GitCache, DiscoveryCache | Primary key is (workspaceId, key). The git cache holds private repository content, and discovery lists come from one person's credential, so neither may be shared across tenants. |
 | Job | `workspaceId` is nullable, see below. |
 
