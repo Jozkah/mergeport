@@ -1,6 +1,8 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { SESSION_COOKIE, destroyAllSessions } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
 import { getAuth } from "@/lib/auth/current";
 import { selectWorkspace } from "@/lib/authz/active-workspace";
@@ -25,6 +27,15 @@ export async function createWorkspaceAction(formData: FormData): Promise<void> {
   }
   revalidatePath("/", "layout");
   redirect("/");
+}
+
+/** Ends every login of this person, on every device, including this one. */
+export async function signOutEverywhereAction(): Promise<void> {
+  const a = await getAuth();
+  if (!a) redirect("/sign-in");
+  await destroyAllSessions(db, a.user.id);
+  (await cookies()).delete(SESSION_COOKIE);
+  redirect("/sign-in");
 }
 
 /** The workspace switcher. The id is untrusted: selectWorkspace accepts it only for a workspace the person is an ACTIVE member of. */

@@ -1,3 +1,4 @@
+import { assertGithubAvailable } from "@/lib/github/hosted";
 import type { Db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { portForWrite } from "@/lib/github/factory";
@@ -62,6 +63,7 @@ const g = globalThis as G;
 
 /** The credential helper line: the GitHub CLI's own, so Mergeport never touches a token. */
 export function credentialHelper(): string {
+  assertGithubAvailable();
   const exe = ghExecutable();
   if (!exe) return "!gh auth git-credential";
   const q = (s: string) => `'${s.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`;
@@ -70,6 +72,7 @@ export function credentialHelper(): string {
 
 /** The CLI would answer a git credential request as its SELECTED account. If that is not this profile's account, nothing is sent. */
 export async function assertActiveAccount(db: Db, host: string): Promise<void> {
+  assertGithubAvailable();
   const user = await db.user.findFirst({ where: { isDemo: false, githubId: { not: null } }, orderBy: { createdAt: "asc" } });
   if (!user?.githubId) throw new IdentityError("not-signed-in", "This profile has no GitHub account yet. Sign in first.");
   const r = await getGhRunner()(["api", "--hostname", host, "user", "--jq", ".id"], { timeoutMs: 15_000 });

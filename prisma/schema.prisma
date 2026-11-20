@@ -229,8 +229,11 @@ model MagicLink {
   expiresAt       DateTime
   consumedAt      DateTime?
   ipHash          String?
+  /// SHA-256 of the random value kept in the requesting browser's cookie. The link only works in that browser (login CSRF, mail scanners).
+  browserHash     String?
 
   @@index([emailLowercased, createdAt])
+  @@index([expiresAt])
 }
 
 model Member {

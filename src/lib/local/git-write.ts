@@ -1,3 +1,4 @@
+import { assertGithubAvailable } from "@/lib/github/hosted";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -131,7 +132,10 @@ export function createGitWriter(o: GitWriterOptions): GitWriter {
     checkArgs(args, o);
     await assertInside(o.root, cwd);
     const remote = REMOTE_OPS.has(args[0]);
-    if (remote) await o.beforeRemote?.();
+    if (remote) {
+      assertGithubAvailable(); // hosted: remote git would use the server's own gh credential
+      await o.beforeRemote?.();
+    }
     const global = ["-c", "core.autocrlf=false", "-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never", "-c", "commit.gpgsign=false", ...(remote ? ["-c", "credential.helper=", ...(o.credentialHelper ? ["-c", `credential.helper=${o.credentialHelper}`] : [])] : [])];
     o.log?.(redactUrls(`$ git ${args.join(" ")}`));
     const timeoutMs = opts.timeoutMs ?? (remote ? NETWORK_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);

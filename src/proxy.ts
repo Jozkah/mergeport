@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { buildCsp, newNonce } from "@/lib/csp";
-import { isPublicHost } from "@/lib/public-url";
+import { isHosted, isPublicHost } from "@/lib/public-url";
 
 /**
  * Local-only guard, run before every request.
@@ -26,8 +26,15 @@ export function cacheControlFor(pathname: string): string {
 
 export function proxy(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
-  // Loopback names always; a hosted deployment also answers on its own configured address (MERGEPORT_PUBLIC_URL), nothing else.
-  if (!LOOPBACK.test(host) && !isPublicHost(host)) return new NextResponse("Forbidden host", { status: 403 });
+  // Local app: loopback names only. Hosted (MERGEPORT_PUBLIC_URL): ONLY the public host. A reverse proxy can forward a client's own
+  // "Host: 127.0.0.1" header, so loopback names are no proof of a local caller there; only the launcher's readiness probe keeps them.
+  if (isHosted()) {
+    const probe = req.nextUrl.pathname === "/api/local/ready" && LOOPBACK.test(host);
+    if (!isPublicHost(host) && !probe) return new NextResponse("Forbidden host", { status: 403 });
+    // The local app's routes do not exist here, except sign-out and the launcher's own readiness probe (loopback only, checked above).
+    const p = req.nextUrl.pathname;
+    if (p.startsWith("/api/local/") && p !== "/api/local/signout" && !(p === "/api/local/ready" && probe)) return new NextResponse("Not found", { status: 404 });
+  } else if (!LOOPBACK.test(host)) return new NextResponse("Forbidden host", { status: 403 });
 
   const method = req.method.toUpperCase();
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {

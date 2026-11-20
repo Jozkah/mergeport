@@ -2,6 +2,7 @@ import type { Db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { bindRunner, boundToken, forgetCredential, type Binding } from "@/lib/github/bound";
 import { IdentityError, type GhRunner } from "@/lib/github/exec";
+import { assertGithubAvailable } from "@/lib/github/hosted";
 import { directFetch, getGhRunner, defaultGhRunner, ghFetch } from "@/lib/github/gh";
 
 /**
@@ -12,6 +13,7 @@ import { directFetch, getGhRunner, defaultGhRunner, ghFetch } from "@/lib/github
 const bound = new WeakMap<Db, Map<string, GhRunner>>();
 
 async function bindingOf(db: Db): Promise<Binding> {
+  assertGithubAvailable(); // hosted: the server's gh login is nobody's workspace credential
   const user = await db.user.findFirst({ where: { isDemo: false, githubId: { not: null } }, orderBy: { createdAt: "asc" } });
   if (!user) throw new IdentityError("not-signed-in", "This profile has no GitHub account yet. Sign in first.");
   return { id: user.githubId as bigint, login: user.login, host: env().MERGEPORT_HOST };
@@ -19,6 +21,7 @@ async function bindingOf(db: Db): Promise<Binding> {
 
 export function profileRunner(db: Db): GhRunner {
   return async (args, opts) => {
+    assertGithubAvailable();
     const b = await bindingOf(db);
     const key = `${b.host}#${b.id}#${b.login}`;
     let perDb = bound.get(db);

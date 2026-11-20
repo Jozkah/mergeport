@@ -2,6 +2,7 @@ import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
 import { activeWorkspaces } from "@/lib/auth/workspaces";
+import { GITHUB_NOT_CONNECTED } from "@/lib/github/hosted";
 import { isHosted } from "@/lib/public-url";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { readScope, scopeKey } from "@/lib/scope";
@@ -133,8 +134,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <DesktopNotifier />
           <Shortcuts />
           <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
-          <Topbar aiQuick={aiQuick} workspaces={workspaces} accountSwitcher={accountSwitcher} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
+          <Topbar aiQuick={aiQuick} workspaces={workspaces} accountSwitcher={hosted ? accountSwitcher : undefined} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
+        {profile.kind === "hosted" && (
+          <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2" role="note">
+            {GITHUB_NOT_CONNECTED} Repository sync and GitHub actions are off until then; your workspace data is still here.
+          </div>
+        )}
         {profile.kind === "mismatch" && (
           <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">
             The GitHub CLI has @{profile.ghLogin} selected. This profile keeps acting only as @{profile.profileLogin}, using that account&apos;s own sign-in; if it is not signed in, nothing is sent and you will be asked to reconnect. <Link className="underline" href="/account-changed">Details</Link>

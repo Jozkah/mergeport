@@ -26,6 +26,11 @@ export function isPublicHost(host: string | null | undefined): boolean {
   return Boolean(p && host && host === p.host);
 }
 
+/** Routes that belong to the local app (gh sign-in, launcher links, demo, hub connect) do not exist on a hosted deployment. */
+export function refuseWhenHosted(): Response | null {
+  return isHosted() ? new Response("Not found", { status: 404 }) : null;
+}
+
 /** The origin links and redirects should use for a request: the public one when hosted, otherwise the host the browser used. */
 export function originFor(req: Request): string {
   const p = publicOrigin();

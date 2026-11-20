@@ -3,7 +3,8 @@ import { canSpend } from "@/lib/domain/sync";
 import { portForSync } from "@/lib/github/factory";
 import { GithubError } from "@/lib/github/port";
 import type { Handler, JobRow } from "@/lib/jobs";
-import { maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
+import { UPDATE_JOB, maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
+import { isHosted } from "@/lib/public-url";
 import { RELEASES_JOB, maybeRequestReleaseCheck, runReleaseCheck } from "@/lib/services/upstream-releases";
 import { setStatus, syncFork, syncItem, syncRepository } from "@/lib/sync/repository";
 
@@ -50,7 +51,7 @@ export async function forEachWorkspace(d: typeof db, label: string, fn: (workspa
   if (all.length > 0 && errors.length === all.length) throw errors[0];
 }
 
-export const handlers: Record<string, Handler> = {
+const rawHandlers: Record<string, Handler> = {
   "sync.repository": (async (p: { repositoryId: string; full?: boolean }, job: JobRow) => {
     await guardSourceBudget();
     const port = await portForSync(db, p.repositoryId);
@@ -128,5 +129,14 @@ export const handlers: Record<string, Handler> = {
     });
   }) as Handler,
 };
+
+/**
+ * Jobs that reach GitHub with the server's own credential. A hosted deployment has none per workspace yet, so these finish at once
+ * as no-ops (the job is DONE, not failed and retried) until the GitHub App phase. digest.daily and ai.autopilot never touch GitHub and
+ * keep running.
+ */
+const GITHUB_BOUND_JOBS = new Set(["sync.repository", "sync.item", "sync.fork", UPDATE_JOB, RELEASES_JOB, "reconcile.all"]);
+const skipWhenHosted = (h: Handler): Handler => ((...a: Parameters<Handler>) => (isHosted() ? Promise.resolve() : h(...a))) as Handler;
+export const handlers: Record<string, Handler> = Object.fromEntries(Object.entries(rawHandlers).map(([k, h]) => [k, GITHUB_BOUND_JOBS.has(k) ? skipWhenHosted(h) : h]));
 
 export { setStatus };

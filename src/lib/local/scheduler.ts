@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
+import { isHosted } from "@/lib/public-url";
 import { ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs";
 import { checkProfile } from "@/lib/local/identity";
 import { firstWorkspace } from "@/lib/local/profile";
@@ -77,6 +78,13 @@ export async function paceReconcile(mode: "active" | "idle", now: number, starte
 /** Coordination lane: quick work only. It never waits on the job queue. */
 export async function coordinate(now = Date.now()): Promise<number> {
   if (isDemo()) return 0;
+  if (isHosted()) {
+    // No GitHub connection per workspace yet: no profile check, no coordination tick, no discovery, no reconcile. Local-only recurring jobs still run.
+    await ensureRecurring(db, { type: "digest.daily", key: "digest", intervalMs: DIGEST_EVERY_MS });
+    await ensureRecurring(db, { type: "ai.autopilot", key: "ai-autopilot", intervalMs: AI_AUTOPILOT_EVERY_MS });
+    await reclaimStuck(db);
+    return 0;
+  }
   const profile = await checkProfile();
   // Every call is bound to this profile's own account (bound.ts), so another account being selected in gh does not stop sync and
   // cannot be used by it. With no profile there is nothing to sync.

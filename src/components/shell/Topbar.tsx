@@ -7,6 +7,7 @@ import { Bell, ChevronRight, LayoutDashboard, LogOut } from "@/components/ui/ico
 import { ThemeToggle } from "@/components/shell/ThemeControls";
 import { WorkspaceSwitcher } from "@/components/shell/WorkspaceSwitcher";
 import { AccountWorkspaceSwitcher } from "@/components/shell/AccountWorkspaceSwitcher";
+import { signOutEverywhereAction } from "@/app/account-actions";
 import { Tip } from "@/components/ui/Tooltip";
 import { Metric } from "@/components/ui/Metric";
 import { SyncBadge, type SyncStateName } from "@/components/sync/SyncBadge";
@@ -83,6 +84,11 @@ export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePick
         </Link>
         )}</RingOnChange>
       </Tip>
+      {accountSwitcher !== undefined && (
+        <form action={signOutEverywhereAction}>
+          <Tip label="Sign out on every device"><button className="btn btn-quiet !h-8 text-[12px]" aria-label="Sign out everywhere">All devices</button></Tip>
+        </form>
+      )}
       <form action="/auth/signout" method="post">
         <Tip label="Sign out of this browser session"><button className="btn btn-quiet btn-icon" aria-label="Sign out"><LogOut size={16} aria-hidden /></button></Tip>
       </form>

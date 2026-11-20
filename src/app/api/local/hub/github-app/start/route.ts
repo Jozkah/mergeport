@@ -1,3 +1,4 @@
+import { refuseWhenHosted } from "@/lib/public-url";
 import { NextResponse } from "next/server";
 import { getAuth } from "@/lib/auth/current";
 import { env } from "@/lib/env";
@@ -17,6 +18,8 @@ const refuse = (error: string, status: number) => NextResponse.json({ ok: false,
  * Nothing is sent to GitHub from here; the browser does that with the returned form.
  */
 export async function POST(req: Request) {
+  const hostedRefusal = refuseWhenHosted();
+  if (hostedRefusal) return hostedRefusal;
   const refused = guardConnect(req);
   if (refused) return refused;
   if (!(await getAuth())?.viewer) return refuse("Sign in again.", 401);

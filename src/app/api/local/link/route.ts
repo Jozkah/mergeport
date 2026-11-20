@@ -1,3 +1,4 @@
+import { refuseWhenHosted } from "@/lib/public-url";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { CONTROL_HEADER, controlSecretOk, mintFreshLink } from "@/lib/local/fresh-link";
@@ -11,6 +12,8 @@ export const dynamic = "force-dynamic";
  * and a header with a secret cannot be sent by a web page. Requests that carry an Origin (a browser) are refused outright.
  */
 export async function GET(req: Request) {
+  const hostedRefusal = refuseWhenHosted();
+  if (hostedRefusal) return hostedRefusal;
   if (req.headers.get("origin")) return new NextResponse("Not for browsers", { status: 403 });
   if (!controlSecretOk(req.headers.get(CONTROL_HEADER), process.env.MERGEPORT_CONTROL_SECRET)) return new NextResponse("Forbidden", { status: 403 });
   const token = mintFreshLink();

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestPrisma } from "./pg";
-import { ORIGIN, RecordingMailer, locationOf, pathOf, request, state } from "./auth-mocks";
+import { NONCE, ORIGIN, RecordingMailer, locationOf, pathOf, request, state } from "./auth-mocks";
 import { setMailerForTests } from "@/lib/auth/mailer";
 import { consumeMagicLink, requestMagicLink } from "@/lib/auth/magic-link";
 import { OIDC_COOKIE, beginOidc, completeOidc, findProvider, oidcProviders, openFlow, sealFlow, setOidcProtocolForTests, type OidcProtocol, type OidcTokenClaims } from "@/lib/auth/oidc";
@@ -179,8 +179,8 @@ describe("callback checks", () => {
 describe("linking rules", () => {
   async function emailUser(email: string) {
     const mailer = new RecordingMailer();
-    await requestMagicLink(db(), { email, origin: ORIGIN, mailer, now: T0 });
-    const r = await consumeMagicLink(db(), mailer.token(), T0);
+    await requestMagicLink(db(), { email, origin: ORIGIN, mailer, browserNonce: NONCE, now: T0 });
+    const r = await consumeMagicLink(db(), mailer.token(), NONCE, T0);
     if (!r.ok) throw new Error("link");
     return r.userId;
   }

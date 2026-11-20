@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { publicOrigin } from "@/lib/public-url";
 
 export type MailMessage = { to: string; subject: string; text: string };
 
@@ -17,7 +18,7 @@ export class MailNotConfiguredError extends Error {
 /** Development only: prints the message (and so the sign-in link) to the server console instead of sending it. */
 export class ConsoleMailer implements Mailer {
   constructor(private readonly log: (line: string) => void = (l) => console.log(l)) {
-    if (process.env.NODE_ENV === "production") throw new MailNotConfiguredError("the console mail transport is never used in production");
+    if (process.env.NODE_ENV === "production" || publicOrigin()?.protocol === "https:") throw new MailNotConfiguredError("the console mail transport is never used in production or on an https deployment");
   }
   async send(msg: MailMessage): Promise<void> {
     this.log(`[dev mail] to ${msg.to}\n${msg.subject}\n${msg.text}`);
@@ -53,6 +54,9 @@ export function getMailer(): Mailer {
     return new SmtpMailer(url, from);
   }
   if (process.env.NODE_ENV === "production") throw new MailNotConfiguredError("SMTP_URL is not set");
+  // A hosted deployment on https is a real service whatever NODE_ENV says: no links in the server log. The console transport remains for
+  // local development and for a hosted trial on plain http (for example MERGEPORT_PUBLIC_URL=http://127.0.0.1:3000).
+  if (publicOrigin()?.protocol === "https:") throw new MailNotConfiguredError("SMTP_URL is not set (the console transport is not used for an https deployment)");
   return new ConsoleMailer();
 }
 

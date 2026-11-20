@@ -1,3 +1,4 @@
+import { isHosted } from "@/lib/public-url";
 import { EventEmitter } from "node:events";
 import type { Space } from "@/generated/prisma/client";
 import { db, resolveDbFile } from "@/lib/db";
@@ -54,6 +55,7 @@ export function notifyChange(reason: "pulled" | "pushed" | "state" = "state") {
 const throttle: { timer?: ReturnType<typeof setTimeout>; pending: boolean } = { pending: false };
 
 export async function localActor() {
+  if (isHosted()) return null; // the server's gh login is not any workspace's credential
   const user = await db.user.findFirst({ where: { isDemo: false, githubId: { not: null } }, orderBy: { createdAt: "asc" } });
   return user && user.githubId !== null ? { id: user.githubId, login: user.login } : null;
 }

@@ -2,6 +2,7 @@ import type { Db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
 import { maybePruneHttpCache } from "./cache-prune";
 import { DemoPort } from "./demo";
+import { assertGithubAvailable } from "./hosted";
 import { profileFetch } from "@/lib/local/profile-runner";
 import { OctokitPort, createOctokit, type CacheStore } from "./octokit";
 import type { Discovery, GithubPort } from "./port";
@@ -26,6 +27,7 @@ export function dbCache(db: Db): CacheStore {
  * discovery. `signal` cancels every call made through the returned port.
  */
 export function ghPort(db: Db, o: { signal?: AbortSignal; timeoutMs?: number } = {}): GithubPort {
+  assertGithubAvailable(); // hosted: no workspace has a GitHub connection yet
   return new OctokitPort(createOctokit(undefined, profileFetch(db, o)), { cache: dbCache(db) });
 }
 

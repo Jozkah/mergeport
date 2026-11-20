@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
+import { isHosted } from "@/lib/public-url";
 import { ghStatus, type GhStatus } from "@/lib/github/gh";
+import { assertGithubAvailable } from "@/lib/github/hosted";
 
 /**
  * Who `gh` has selected right now, compared with the account this profile belongs to. This is INFORMATION for the person
@@ -15,6 +17,7 @@ const g = globalThis as typeof globalThis & { __mpIdentity?: Cache; __mpIdentity
 const TTL_MS = 60_000;
 
 export async function currentGhStatus(force = false, o: { swr?: boolean; timeoutMs?: number } = {}): Promise<GhStatus> {
+  assertGithubAvailable();
   const c = g.__mpIdentity;
   if (!force && c) {
     if (Date.now() - c.at < TTL_MS) return c.status;
@@ -39,11 +42,12 @@ function refresh(timeoutMs?: number): Promise<GhStatus> {
   return g.__mpIdentityInflight;
 }
 
-export type ProfileCheck = { kind: "demo" } | { kind: "ok"; login: string } | { kind: "no-profile"; gh: GhStatus } | { kind: "mismatch"; profileLogin: string; ghLogin: string } | { kind: "gh-unavailable"; gh: GhStatus; profileLogin: string };
+export type ProfileCheck = { kind: "demo" } | { kind: "hosted" } | { kind: "ok"; login: string } | { kind: "no-profile"; gh: GhStatus } | { kind: "mismatch"; profileLogin: string; ghLogin: string } | { kind: "gh-unavailable"; gh: GhStatus; profileLogin: string };
 
 export async function checkProfile(): Promise<ProfileCheck> {
   if (isDemo()) return { kind: "demo" };
-  const profile = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
+  if (isHosted()) return { kind: "hosted" }; // never spawn gh or show the server's login on a hosted render
+  const profile = await db.user.findFirst({ where: { isDemo: false, githubId: { not: null } }, orderBy: { createdAt: "asc" } });
   const gh = await currentGhStatus(false, { swr: true, timeoutMs: 5_000 });
   if (!profile) return { kind: "no-profile", gh };
   if (gh.state === "ok") return gh.identity.id === profile.githubId ? { kind: "ok", login: profile.login } : { kind: "mismatch", profileLogin: profile.login, ghLogin: gh.identity.login };

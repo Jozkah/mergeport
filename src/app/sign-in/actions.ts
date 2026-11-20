@@ -2,6 +2,8 @@
 
 import { spawn } from "node:child_process";
 import { env } from "@/lib/env";
+import { GITHUB_NOT_CONNECTED } from "@/lib/github/hosted";
+import { isHosted } from "@/lib/public-url";
 import { ghExecutable, killTree, resetGhResolution } from "@/lib/github/exec";
 import { REQUIRED_SCOPES } from "@/lib/github/gh";
 import { currentGhStatus } from "@/lib/local/identity";
@@ -13,6 +15,7 @@ export type LoginStart = { ok: true; output: string } | { ok: false; error: stri
  * code gh prints. The token goes to gh's credential store, never through this app.
  */
 export async function startGhLoginAction(): Promise<LoginStart> {
+  if (isHosted()) return { ok: false, error: GITHUB_NOT_CONNECTED };
   const host = env().MERGEPORT_HOST;
   resetGhResolution(); // the person may just have installed gh
   const exe = ghExecutable();

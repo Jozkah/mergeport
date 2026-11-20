@@ -52,3 +52,8 @@ export const pathOf = (res: Response) => {
   const l = locationOf(res);
   return l.startsWith(ORIGIN) ? l.slice(ORIGIN.length) : l;
 };
+
+/** The random value the requesting browser keeps in its mp_ml cookie. */
+export const NONCE = "browser-nonce-0123456789abcdef";
+/** Puts the requesting browser's cookie in the jar, as it would be after asking for a link. */
+export const withBrowser = (nonce = NONCE) => void state.jar.set("mp_ml", { value: nonce, options: {} });

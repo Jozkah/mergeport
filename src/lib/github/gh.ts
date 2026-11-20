@@ -1,3 +1,4 @@
+import { GithubNotConnectedError } from "./hosted";
 import { env } from "@/lib/env";
 import { GhAbortedError, GhMissingError, GhTimeoutError, IdentityError, defaultGhRunner, type GhResult, type GhRunner } from "./exec";
 
@@ -75,7 +76,7 @@ export function ghFetch(run: GhRunner = runner, host = env().MERGEPORT_HOST, opt
     try {
       r = await run(args, { input: body, signal: init.signal ?? opts.signal, timeoutMs: opts.timeoutMs });
     } catch (e) {
-      if (e instanceof GhMissingError) throw e;
+      if (e instanceof GhMissingError || e instanceof GithubNotConnectedError) throw e; // a hosted deployment has no GitHub credential: say so, do not call it offline
       // The profile's own account cannot be used right now. Say so as an authorization problem and block the request:
       // it is never retried as another account, and it is never reported as "offline".
       if (e instanceof IdentityError) return new Response(JSON.stringify({ message: e.message, mergeport: e.reason }), { status: 401, headers: { "content-type": "application/json", "x-mergeport-identity": e.reason } });
@@ -108,7 +109,7 @@ export function directFetch(token: () => Promise<string | null>, host = env().ME
       t = await token();
     } catch (e) {
       if (e instanceof IdentityError) return new Response(JSON.stringify({ message: e.message, mergeport: e.reason }), { status: 401, headers: { "content-type": "application/json", "x-mergeport-identity": e.reason } });
-      if (e instanceof GhMissingError) throw e;
+      if (e instanceof GhMissingError || e instanceof GithubNotConnectedError) throw e; // a hosted deployment has no GitHub credential: say so, do not call it offline
       throw new TypeError("fetch failed");
     }
     if (!t) throw new TypeError("fetch failed");
