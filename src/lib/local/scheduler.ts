@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
 import { ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs";
 import { checkProfile } from "@/lib/local/identity";
+import { firstWorkspace } from "@/lib/local/profile";
 import { pollMode } from "@/lib/local/activity";
 import { AI_AUTOPILOT_EVERY_MS, DIGEST_EVERY_MS, RECONCILE_EVERY_MS, handlers } from "@/lib/local/handlers";
 import { startRepoWatch, stopRepoWatch } from "@/lib/local/repo-watch";
@@ -88,7 +89,7 @@ export async function coordinate(now = Date.now()): Promise<number> {
     if (g.__mpScheduler) g.__mpScheduler.lastTick = now;
   }
   // Windows notifications while no tab is open (a no-op elsewhere). A failure here must never stop the sync below.
-  if (process.platform === "win32") await dispatchToasts(db, { active: mode === "active", show: showWindowsToast, baseUrl: `http://127.0.0.1:${process.env.MERGEPORT_PORT ?? 3000}` }).catch((e) => console.error("toasts failed:", e instanceof Error ? e.message : e));
+  if (process.platform === "win32") await dispatchToasts(db, (await firstWorkspace(db)).id, { active: mode === "active", show: showWindowsToast, baseUrl: `http://127.0.0.1:${process.env.MERGEPORT_PORT ?? 3000}` }).catch((e) => console.error("toasts failed:", e instanceof Error ? e.message : e));
   await tickDiscovery(); // retries of cached GitHub lists that are due; bounded, deduplicated, never awaited on a page
   await paceReconcile(mode, now, g.__mpScheduler?.startedAt ?? now);
   await ensureRecurring(db, { type: "digest.daily", key: "digest", intervalMs: DIGEST_EVERY_MS }); // due at once on the first tick after start: that is the catch-up

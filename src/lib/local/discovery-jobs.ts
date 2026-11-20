@@ -1,3 +1,4 @@
+import { firstWorkspace } from "@/lib/local/profile";
 import { db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
 import { currentGhStatus } from "@/lib/local/identity";
@@ -45,7 +46,7 @@ export function startDiscovery(key: string, demoLogin?: string): void {
   } else if (key.startsWith("inv-status:")) {
     const spaceId = key.slice("inv-status:".length);
     void refreshInBackground<InvitationStatus[]>(db, key, async (signal) => {
-      const space = await db.space.findUnique({ where: { id: spaceId } });
+      const space = await db.space.findUnique({ where: { id: spaceId, workspaceId: (await firstWorkspace(db)).id } });
       if (!space) return [];
       return (await teamFor(signal)).invitationStatuses(space);
     }, opts);

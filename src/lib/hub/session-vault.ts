@@ -16,11 +16,11 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Db } from "@/lib/db";
+import { firstWorkspace } from "@/lib/local/profile";
 
 export type Vault = { encrypt(plain: string): string; decrypt(cipher: string): string };
 export type StoredHubSession = { origin: string; token: string; githubId: bigint; login: string };
 
-const ID = "session";
 
 export function restrictToCurrentUser(file: string): void {
   if (process.platform !== "win32") return;
@@ -96,11 +96,12 @@ export function openVault(keyFile: string): Vault {
 
 export async function saveHubSession(db: Db, vault: Vault, s: StoredHubSession): Promise<void> {
   const data = { origin: s.origin, cipher: vault.encrypt(s.token), githubId: s.githubId, login: s.login };
-  await db.hubSession.upsert({ where: { id: ID }, create: { id: ID, ...data }, update: data });
+  const workspaceId = (await firstWorkspace(db)).id; // one hub login per workspace; a profile has one workspace
+  await db.hubSession.upsert({ where: { workspaceId }, create: { workspaceId, ...data }, update: data });
 }
 
 export async function loadHubSession(db: Db, vault: Vault): Promise<StoredHubSession | null> {
-  const row = await db.hubSession.findUnique({ where: { id: ID } });
+  const row = await db.hubSession.findUnique({ where: { workspaceId: (await firstWorkspace(db)).id } });
   if (!row) return null;
   try {
     return { origin: row.origin, token: vault.decrypt(row.cipher), githubId: row.githubId, login: row.login };
@@ -110,5 +111,5 @@ export async function loadHubSession(db: Db, vault: Vault): Promise<StoredHubSes
 }
 
 export async function clearHubSession(db: Db): Promise<void> {
-  await db.hubSession.deleteMany({ where: { id: ID } });
+  await db.hubSession.deleteMany({ where: { workspaceId: (await firstWorkspace(db)).id } });
 }

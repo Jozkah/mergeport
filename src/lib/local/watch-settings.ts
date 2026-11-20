@@ -1,3 +1,4 @@
+import { firstWorkspace } from "@/lib/local/profile";
 import type { Db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
@@ -26,7 +27,7 @@ const validEnv = (name: string, min: number, max: number): boolean => {
 };
 
 export async function readWatchConfig(db: Db): Promise<WatchConfig> {
-  const row = await db.teamConfig.findUnique({ where: { id: "team" }, select: { watchSeconds: true, watchEnabled: true, watchMaxRepos: true } });
+  const row = await db.teamConfig.findUnique({ where: { workspaceId: (await firstWorkspace(db)).id }, select: { watchSeconds: true, watchEnabled: true, watchMaxRepos: true } });
   const e = env();
   const fbSeconds = e.MERGEPORT_WATCH_SECONDS ?? WATCH_DEFAULT_SECONDS;
   const fbMax = e.MERGEPORT_WATCH_MAX_REPOS ?? WATCH_MAX_REPOS;
@@ -80,6 +81,7 @@ export async function saveWatchSettings(db: Db, o: { enabled?: boolean; seconds?
   if (o.maxRepos !== undefined) data.watchMaxRepos = o.maxRepos;
   const written = Object.keys(data);
   if (written.length === 0) return written;
-  await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", ...data }, update: data });
+  const workspaceId = (await firstWorkspace(db)).id;
+  await db.teamConfig.upsert({ where: { workspaceId }, create: { workspaceId, ...data }, update: data });
   return written;
 }

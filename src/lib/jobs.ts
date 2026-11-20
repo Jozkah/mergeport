@@ -16,21 +16,35 @@ import { GithubError } from "@/lib/github/port";
  *  - Jobs left RUNNING by a crashed process are reclaimed.
  */
 
-export type JobRow = { id: string; type: string; payload: unknown; attempts: number; maxAttempts: number; intervalMs: number | null; dirty: boolean };
+export type JobRow = { id: string; workspaceId: string | null; type: string; payload: unknown; attempts: number; maxAttempts: number; intervalMs: number | null; dirty: boolean };
 
-export type EnqueueInput = { type: string; payload: Prisma.InputJsonValue; dedupeKey?: string; runAt?: Date; maxAttempts?: number; intervalMs?: number };
+export type EnqueueInput = { type: string; payload: Prisma.InputJsonValue; dedupeKey?: string; runAt?: Date; maxAttempts?: number; intervalMs?: number; /** The tenant the job works for. Omitted: taken from the repository / fork mapping the payload names. */ workspaceId?: string | null };
+
+/**
+ * Every job except the three system-wide schedulers (reconcile.all, digest.daily, ai.autopilot: each fans out over all workspaces
+ * and enqueues per-workspace work) belongs to exactly one workspace. The caller may say which; otherwise it is the workspace of the
+ * repository or fork mapping the payload points at. A payload that names neither yields null (a system job).
+ */
+export async function jobWorkspace(db: Db, job: Pick<EnqueueInput, "payload" | "workspaceId">): Promise<string | null> {
+  if (job.workspaceId !== undefined) return job.workspaceId;
+  const p = (job.payload ?? {}) as { repositoryId?: unknown; mappingId?: unknown };
+  if (typeof p.repositoryId === "string") return (await db.repository.findUnique({ where: { id: p.repositoryId }, select: { workspaceId: true } }))?.workspaceId ?? null;
+  if (typeof p.mappingId === "string") return (await db.forkMapping.findUnique({ where: { id: p.mappingId }, select: { fork: { select: { workspaceId: true } } } }))?.fork.workspaceId ?? null;
+  return null;
+}
 
 export async function enqueue(db: Db, job: EnqueueInput) {
   const runAt = job.runAt ?? new Date();
   const maxAttempts = job.maxAttempts ?? 5;
-  if (!job.dedupeKey) return db.job.create({ data: { type: job.type, payload: job.payload, runAt, maxAttempts, intervalMs: job.intervalMs } });
+  const workspaceId = await jobWorkspace(db, job);
+  if (!job.dedupeKey) return db.job.create({ data: { workspaceId, type: job.type, payload: job.payload, runAt, maxAttempts, intervalMs: job.intervalMs } });
   // The row can change state between the read and the write (a running job finishing, a queued one being claimed), so each write
   // names the state it was decided from, and a lost race simply decides again from the new state.
   for (let attempt = 0; attempt < 5; attempt++) {
     const existing = await db.job.findUnique({ where: { dedupeKey: job.dedupeKey } });
     if (!existing) {
       try {
-        return await db.job.create({ data: { type: job.type, payload: job.payload, dedupeKey: job.dedupeKey, runAt, maxAttempts, intervalMs: job.intervalMs } });
+        return await db.job.create({ data: { workspaceId, type: job.type, payload: job.payload, dedupeKey: job.dedupeKey, runAt, maxAttempts, intervalMs: job.intervalMs } });
       } catch {
         continue; // another caller created it first
       }
@@ -51,11 +65,11 @@ export async function enqueue(db: Db, job: EnqueueInput) {
 }
 
 /** Idempotent: call on every start. Never resets a pending run time or duplicates the job. */
-export async function ensureRecurring(db: Db, job: { type: string; key: string; intervalMs: number; payload?: Prisma.InputJsonValue; firstRunAt?: Date }) {
+export async function ensureRecurring(db: Db, job: { type: string; key: string; intervalMs: number; payload?: Prisma.InputJsonValue; firstRunAt?: Date; workspaceId?: string | null }) {
   let existing = await db.job.findUnique({ where: { dedupeKey: job.key } });
   if (!existing) {
     try {
-      return await db.job.create({ data: { type: job.type, dedupeKey: job.key, payload: job.payload ?? {}, intervalMs: job.intervalMs, runAt: job.firstRunAt ?? new Date(), maxAttempts: 3 } });
+      return await db.job.create({ data: { workspaceId: job.workspaceId ?? null, type: job.type, dedupeKey: job.key, payload: job.payload ?? {}, intervalMs: job.intervalMs, runAt: job.firstRunAt ?? new Date(), maxAttempts: 3 } });
     } catch (e) {
       // Lost a race with another caller creating the same dedupeKey: fall through and update that row.
       if ((e as { code?: string }).code !== "P2002") throw e;
@@ -79,7 +93,7 @@ export async function claim(db: Db, now = new Date()): Promise<JobRow | null> {
       SELECT "id" FROM "Job" WHERE "status" = 'QUEUED' AND "runAt" <= ${at}::timestamp(3)
       ORDER BY "runAt" ASC, "id" ASC LIMIT 1 FOR UPDATE SKIP LOCKED
     )
-    RETURNING "id", "type", "payload", "attempts", "maxAttempts", "intervalMs", "dirty"`;
+    RETURNING "id", "workspaceId", "type", "payload", "attempts", "maxAttempts", "intervalMs", "dirty"`;
   return rows[0] ?? null;
 }
 

@@ -1,4 +1,5 @@
-import path from "node:path";
+
+import { firstWorkspace } from "@/lib/local/profile";import path from "node:path";
 import { db as sharedDb, resolveDbFile, type Db } from "@/lib/db";
 import { AccountMismatchError } from "@/lib/local/profile";
 import { HubForbidden, HubRequestError, HubUnauthorized, type HubAdminApi, type HubAdminSpace, type HubLinkStatus, type HubMember, type HubPendingInvite, type HubSessionPort, type HubWebhooks } from "@/lib/hub/ports";
@@ -32,7 +33,8 @@ export const hubSessionPort: HubSessionPort = {
   async markProfile(dbFile, p) {
     await withDb(dbFile, async (db) => {
       const data = { mode: "TEAM" as const, backend: "HUB" as const, hubOrigin: p.origin, name: p.teamName };
-      await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", ...data }, update: data });
+      const workspaceId = (await firstWorkspace(db)).id;
+      await db.teamConfig.upsert({ where: { workspaceId }, create: { workspaceId, ...data }, update: data });
     });
   },
   async read(dbFile) {

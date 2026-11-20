@@ -1,11 +1,12 @@
 import type { Db } from "@/lib/db";
+import { firstWorkspace } from "@/lib/local/profile";
 
 /**
  * The set of GitHub repositories this profile wants instant updates for: every ACTIVE tracked repository, as decimal
  * ids. The hub keeps it per connection; `refreshHubWatch()` is how the services say "the tracked set changed".
  */
 export async function trackedGithubIds(db: Db): Promise<string[]> {
-  const rows = await db.repository.findMany({ where: { trackingStatus: "ACTIVE", isDemo: false }, select: { githubId: true } });
+  const rows = await db.repository.findMany({ where: { workspaceId: (await firstWorkspace(db)).id, trackingStatus: "ACTIVE", isDemo: false }, select: { githubId: true } });
   return [...new Set(rows.map((r) => r.githubId.toString()))].sort();
 }
 

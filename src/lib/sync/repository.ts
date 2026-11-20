@@ -152,7 +152,7 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
   // closed PR, so history must not turn into "waiting on" rows or fresh notifications.
   const isOpen = i.state === "OPEN";
   const active = isOpen ? [...requested.users.map((u) => ({ kind: "USER" as const, ref: u })), ...requested.teams.map((t) => ({ kind: "TEAM" as const, ref: t }))] : [];
-  if (!isOpen) await db.notification.deleteMany({ where: { kind: "review-requested", readAt: null, href: `/pull-requests/${wi.id}` } });
+  if (!isOpen) await db.notification.deleteMany({ where: { kind: "review-requested", readAt: null, repositoryId, href: `/pull-requests/${wi.id}` } });
   const open = await db.reviewRequest.findMany({ where: { workItemId: wi.id, removedAt: null } });
   for (const o of open) {
     if (!active.some((a) => a.kind === o.kind && a.ref.toLowerCase() === o.reviewerRef.toLowerCase())) await db.reviewRequest.update({ where: { id: o.id }, data: { removedAt: now } });
@@ -256,11 +256,11 @@ export async function syncRepository(db: Db, port: GithubPort, repositoryId: str
 
     // Review requests left on pull requests that are no longer open (older syncs recorded them) stop counting as pending.
     await db.reviewRequest.updateMany({ where: { removedAt: null, workItem: { repositoryId: repo.id, state: { not: "OPEN" } } }, data: { removedAt: now } });
-    const staleNotes = await db.notification.findMany({ where: { kind: "review-requested", readAt: null, repositoryId: repo.id }, select: { id: true, href: true } });
+    const staleNotes = await db.notification.findMany({ where: { workspaceId: repo.workspaceId, kind: "review-requested", readAt: null, repositoryId: repo.id }, select: { id: true, href: true } });
     if (staleNotes.length) {
       const ids = staleNotes.map((n) => n.href?.replace("/pull-requests/", "") ?? "");
       const open = new Set((await db.workItem.findMany({ where: { id: { in: ids }, state: "OPEN" }, select: { id: true } })).map((w) => w.id));
-      await db.notification.deleteMany({ where: { id: { in: staleNotes.filter((n, k) => !open.has(ids[k])).map((n) => n.id) } } });
+      await db.notification.deleteMany({ where: { workspaceId: repo.workspaceId, id: { in: staleNotes.filter((n, k) => !open.has(ids[k])).map((n) => n.id) } } });
     }
     await setStatus(db, repo.id, { lastSyncedAt: now, syncError: null, rateLimited: false, trackingStatus: "ACTIVE", statusDetail: null });
     return result;

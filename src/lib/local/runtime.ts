@@ -14,7 +14,7 @@ import { TeamService } from "@/lib/team/service";
 import { HubTeamService } from "@/lib/team/hub-service";
 import { httpHubAdmin, hubSessionPort, keyFileFor, registerHubLinkState } from "@/lib/hub/ports-impl";
 import { GITHUB_BACKEND, hubBackendId, isHubBackend, type Backend } from "@/lib/local/backends";
-import { mergeportHome } from "@/lib/local/profile";
+import { firstWorkspace, mergeportHome } from "@/lib/local/profile";
 import { readHubs } from "@/lib/local/registry";
 import { env } from "@/lib/env";
 
@@ -92,13 +92,15 @@ async function buildEngine(): Promise<SyncEngine | null> {
     state.version++;
     state.bus.emit("change", { version: state.version, ...e });
   };
-  const team = await db.teamConfig.findUnique({ where: { id: "team" } });
+  const workspaceId = (await firstWorkspace(db)).id; // the profile's one workspace
+  const team = await db.teamConfig.findUnique({ where: { workspaceId } });
   const hubOrigin = team?.backend === "HUB" ? team.hubOrigin : null;
   // The launcher's MERGEPORT_BACKEND names what this profile directory is; without a launcher, TeamConfig decides.
   const launched = process.env.MERGEPORT_BACKEND;
   const profileBackend = launched === GITHUB_BACKEND || (launched && isHubBackend(launched)) ? (launched as Backend) : hubOrigin ? hubBackendId(hubOrigin) : GITHUB_BACKEND;
   if (!hubOrigin) {
     state.engine = new SyncEngine({
+      workspaceId,
       db,
       actor,
       profileBackend,
@@ -109,6 +111,7 @@ async function buildEngine(): Promise<SyncEngine | null> {
   }
   const client = new HttpHubClient(hubOrigin, hubToken);
   const engine = new SyncEngine({
+      workspaceId,
     db,
     actor,
     store: (s: Space) => new CoordinationStore(new GitHubRest(f), s.repoOwner, s.repoName),
@@ -141,7 +144,7 @@ export async function getTeamService(): Promise<TeamService | null> {
  */
 export async function getHubTeamService(backend: string): Promise<{ svc: HubTeamService; dbFile: string; origin: string | null }> {
   const dbFile = resolveDbFile();
-  const team = await db.teamConfig.findUnique({ where: { id: "team" } });
+  const team = await db.teamConfig.findUnique({ where: { workspaceId: (await firstWorkspace(db)).id } });
   const entry = readHubs(mergeportHome(env().MERGEPORT_HOME)).find((h) => {
     try {
       return hubBackendId(h.origin) === backend;
@@ -185,7 +188,7 @@ export function syncSoon(delayMs = 1200) {
     try {
       const engine = await getEngine();
       if (!engine) return;
-      for (const space of await db.space.findMany({ where: { access: "OK" } })) await engine.syncSpace(space).catch(() => {});
+      for (const space of await db.space.findMany({ where: { workspaceId: (await firstWorkspace(db)).id, access: "OK" } })) await engine.syncSpace(space).catch(() => {});
     } catch {
       // the regular poll will retry
     }

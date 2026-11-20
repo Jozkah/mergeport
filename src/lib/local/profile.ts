@@ -23,8 +23,12 @@ export const profileDirName = (host: string, accountId: bigint, backend: Backend
 };
 export const profileDbPath = (home: string, host: string, accountId: bigint, backend: Backend = "github") => path.join(home, "profiles", profileDirName(host, accountId, backend), "mergeport.db");
 
-/** The one workspace, created once even when callers race: a transaction-scoped advisory lock serialises the find-or-create. */
-async function firstWorkspace(db: Db) {
+/**
+ * The one workspace of a LOCAL profile, created once even when callers race: a transaction-scoped advisory lock serialises the
+ * find-or-create. Single-profile plumbing (hub link, discovery caches, the in-process scheduler) has no signed-in viewer and uses
+ * this as its workspace; anything that serves a request takes the viewer's workspaceId instead.
+ */
+export async function firstWorkspace(db: Db) {
   const found = await db.workspace.findFirst({ orderBy: { createdAt: "asc" } });
   if (found) return found;
   return db.$transaction(async (tx) => {
@@ -40,12 +44,12 @@ export async function ensureLocalProfile(db: Db, who: LocalIdentity) {
   const workspace = await firstWorkspace(db);
   const user = await db.user.upsert({ where: { githubId: who.id }, create: { githubId: who.id, login: who.login, name: who.name, avatarUrl: who.avatarUrl }, update: { login: who.login, name: who.name, avatarUrl: who.avatarUrl } });
   const member = await db.member.upsert({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } }, create: { workspaceId: workspace.id, userId: user.id, role: "ADMIN" }, update: { status: "ACTIVE" } });
-  // createMany + skipDuplicates is INSERT ... ON CONFLICT DO NOTHING: safe when two callers race on the fixed id.
-  await db.teamConfig.createMany({ data: [{ id: "team", mode: "PERSONAL" }], skipDuplicates: true });
-  const team = await db.teamConfig.findUniqueOrThrow({ where: { id: "team" } });
+  // createMany + skipDuplicates is INSERT ... ON CONFLICT DO NOTHING: safe when two callers race on the unique workspaceId.
+  await db.teamConfig.createMany({ data: [{ workspaceId: workspace.id, mode: "PERSONAL" }], skipDuplicates: true });
+  const team = await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: workspace.id } });
   // Personal mode means the person administers their own workspace. (In team mode the role comes from GitHub permissions.)
   if (team.mode === "PERSONAL" && member.role !== "ADMIN") {
-    const fixed = await db.member.update({ where: { id: member.id }, data: { role: "ADMIN" } });
+    const fixed = await db.member.update({ where: { id: member.id, workspaceId: workspace.id }, data: { role: "ADMIN" } });
     return { workspace, user, member: fixed };
   }
   return { workspace, user, member };

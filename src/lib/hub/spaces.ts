@@ -11,7 +11,8 @@ export async function syncHubSpaces(db: Db, engine: SyncEngine, me: Me, origin?:
   engine.assertBackend("HUB"); // a GitHub profile never records or opens hub spaces
   const added: string[] = [];
   const removed: string[] = [];
-  const local = await db.space.findMany({ where: { backend: "HUB" } });
+  const workspaceId = await engine.workspaceId();
+  const local = await db.space.findMany({ where: { workspaceId, backend: "HUB" } });
   const byHubId = new Map(local.map((s) => [s.hubSpaceId, s]));
   let commonId: string | null = null;
 
@@ -19,14 +20,14 @@ export async function syncHubSpaces(db: Db, engine: SyncEngine, me: Me, origin?:
     const existing = byHubId.get(hs.id);
     const fields = { kind: hs.kind, name: hs.name, canWrite: hs.canWrite, canAdmin: false, teamRemoteId: me.team.id };
     if (!existing) {
-      const created = await db.space.create({ data: { ...fields, backend: "HUB", remoteId: hs.id, hubSpaceId: hs.id, repoOwner: "", repoName: "", access: "OK" } });
+      const created = await db.space.create({ data: { workspaceId, ...fields, backend: "HUB", remoteId: hs.id, hubSpaceId: hs.id, repoOwner: "", repoName: "", access: "OK" } });
       added.push(hs.id);
       if (hs.kind === "COMMON") commonId = created.id;
       continue;
     }
     // Access that came back after a revocation starts from a clean position: the purge dropped everything this cursor referred to.
     const reopened = existing.access === "REVOKED";
-    await db.space.update({ where: { id: existing.id }, data: { ...fields, access: "OK", ...(reopened ? { hubCursor: 0n, hubCursorOp: "", hubEpoch: "", lastError: null, nextPollAt: null } : {}) } });
+    await db.space.update({ where: { id: existing.id, workspaceId }, data: { ...fields, access: "OK", ...(reopened ? { hubCursor: 0n, hubCursorOp: "", hubEpoch: "", lastError: null, nextPollAt: null } : {}) } });
     if (reopened) added.push(hs.id);
     if (hs.kind === "COMMON") commonId = existing.id;
   }
@@ -40,12 +41,12 @@ export async function syncHubSpaces(db: Db, engine: SyncEngine, me: Me, origin?:
 
   // In a hub profile the local role is the hub's own: hub spaces never carry an admin bit, so it cannot come from a space.
   const hubAdmin = me.member.role === "OWNER" || me.member.role === "ADMIN";
-  await db.member.updateMany({ where: { status: "ACTIVE" }, data: { role: hubAdmin ? "ADMIN" : "MEMBER" } });
+  await db.member.updateMany({ where: { workspaceId, status: "ACTIVE" }, data: { role: hubAdmin ? "ADMIN" : "MEMBER" } });
 
   if (commonId) {
     await db.teamConfig.upsert({
-      where: { id: "team" },
-      create: { id: "team", mode: "TEAM", backend: "HUB", teamRemoteId: me.team.id, name: me.team.name, commonSpaceId: commonId, ...(origin ? { hubOrigin: origin } : {}) },
+      where: { workspaceId },
+      create: { workspaceId, mode: "TEAM", backend: "HUB", teamRemoteId: me.team.id, name: me.team.name, commonSpaceId: commonId, ...(origin ? { hubOrigin: origin } : {}) },
       update: { backend: "HUB", commonSpaceId: commonId, teamRemoteId: me.team.id, ...(origin ? { hubOrigin: origin } : {}) },
     });
   }

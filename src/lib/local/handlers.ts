@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { canSpend } from "@/lib/domain/sync";
 import { portForSync } from "@/lib/github/factory";
 import { GithubError } from "@/lib/github/port";
-import type { Handler } from "@/lib/jobs";
+import type { Handler, JobRow } from "@/lib/jobs";
 import { maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
 import { RELEASES_JOB, maybeRequestReleaseCheck, runReleaseCheck } from "@/lib/services/upstream-releases";
 import { setStatus, syncFork, syncItem, syncRepository } from "@/lib/sync/repository";
@@ -33,7 +33,7 @@ async function recordRate(rate: { remaining: number; limit: number; resetAt: Dat
 }
 
 export const handlers: Record<string, Handler> = {
-  "sync.repository": (async (p: { repositoryId: string; full?: boolean }) => {
+  "sync.repository": (async (p: { repositoryId: string; full?: boolean }, job: JobRow) => {
     await guardSourceBudget();
     const port = await portForSync(db, p.repositoryId);
     if (!port) return;
@@ -46,7 +46,7 @@ export const handlers: Record<string, Handler> = {
     (await import("@/lib/local/runtime")).notifyChange("pulled");
     const maps = await db.forkMapping.findMany({ where: { OR: [{ forkRepoId: p.repositoryId }, { upstreamRepoId: p.repositoryId }] }, select: { id: true } });
     const { enqueue } = await import("@/lib/jobs");
-    for (const m of maps) await enqueue(db, { type: "sync.fork", payload: { mappingId: m.id }, dedupeKey: `fork:${m.id}` });
+    for (const m of maps) await enqueue(db, { type: "sync.fork", payload: { mappingId: m.id }, dedupeKey: `fork:${m.id}`, workspaceId: job.workspaceId });
   }) as Handler,
   "sync.item": (async (p: { repositoryId: string; number: number }) => {
     await guardSourceBudget();
@@ -84,23 +84,30 @@ export const handlers: Record<string, Handler> = {
     }
   }) as Handler,
   // Recurrence is owned by the runner (ensureRecurring), never by this handler.
+  // A system-wide job (no workspace): it fans out over the workspaces and everything it queues belongs to exactly one of them.
   "reconcile.all": (async () => {
     const { enqueue } = await import("@/lib/jobs");
-    const repos = await db.repository.findMany({ where: { trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
-    for (const r of repos) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}` });
-    // A fork that is NOT behind never reaches an update request, so release watches are asked for here as well (each capped to one check per ~15 minutes).
-    const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases" }, select: { mappingId: true } });
-    for (const w of watches) await maybeRequestReleaseCheck(db, w.mappingId);
+    for (const ws of await db.workspace.findMany({ select: { id: true } })) {
+      const repos = await db.repository.findMany({ where: { workspaceId: ws.id, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
+      for (const r of repos) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}`, workspaceId: ws.id });
+      // A fork that is NOT behind never reaches an update request, so release watches are asked for here as well (each capped to one check per ~15 minutes).
+      const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases", mapping: { fork: { workspaceId: ws.id } } }, select: { mappingId: true } });
+      for (const w of watches) await maybeRequestReleaseCheck(db, w.mappingId);
+    }
   }) as Handler,
   // Local only (no GitHub, no network): makes the daily digest once per local day, and catches up after the app was closed.
   "digest.daily": (async () => {
     const { runDailyDigest } = await import("@/lib/services/digest");
-    if ((await runDailyDigest(db)) === "generated") (await import("@/lib/local/runtime")).notifyChange("state");
+    for (const ws of await db.workspace.findMany({ select: { id: true } })) {
+      if ((await runDailyDigest(db, ws.id)) === "generated") (await import("@/lib/local/runtime")).notifyChange("state");
+    }
   }) as Handler,
   // Sends to the AI endpoint set in Settings, and only when the autopilot there is on. Writes local tasks and suggestions, never GitHub.
   "ai.autopilot": (async () => {
     const [{ runAutopilot }, { openVault }, { keyFileFor }, { resolveDbFile }] = await Promise.all([import("@/lib/services/ai-review"), import("@/lib/hub/session-vault"), import("@/lib/hub/ports-impl"), import("@/lib/db")]);
-    if ((await runAutopilot(db, openVault(keyFileFor(resolveDbFile())))) === "done") (await import("@/lib/local/runtime")).notifyChange("state");
+    for (const ws of await db.workspace.findMany({ select: { id: true } })) {
+      if ((await runAutopilot(db, ws.id, openVault(keyFileFor(resolveDbFile())))) === "done") (await import("@/lib/local/runtime")).notifyChange("state");
+    }
   }) as Handler,
 };
 
