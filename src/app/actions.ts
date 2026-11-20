@@ -453,7 +453,7 @@ export async function mapForkAction(fd: FormData): Promise<ActionResult> {
 export async function watchlistAction(input: { text: string }): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireAdminViewer();
-    const port = await portForDiscovery(db, { id: viewer.githubId.toString(), login: viewer.login });
+    const port = await portForDiscovery(db, { id: (viewer.githubId ?? 0n).toString(), login: viewer.login });
     const results = await applyWatchlist(db, viewer, port, String(input.text ?? ""));
     revalidatePath("/forks");
     revalidatePath("/repositories");

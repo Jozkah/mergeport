@@ -141,6 +141,7 @@ model Workspace {
   name      String
   createdAt DateTime @default(now())
 
+  sessions      Session[] @relation("SessionActiveWorkspace")
   members       Member[]
   projects      Project[]
   repositories  Repository[]
@@ -167,14 +168,19 @@ model Workspace {
 
 model User {
   id        String   @id @default(cuid())
-  githubId  BigInt   @unique
+  githubId  BigInt?  @unique // null for people who signed in with email or OIDC and have not linked GitHub
   login     String
   name      String?
   avatarUrl String?
   timezone  String   @default("UTC")
   isDemo    Boolean  @default(false)
   createdAt DateTime @default(now())
+  /// Always stored lowercased. Null for legacy GitHub users. Unique when present (Postgres allows many NULLs).
+  email           String?   @unique
+  /// Set when the person proved they own `email` (magic link opened, or an OIDC provider asserted email_verified).
+  emailVerifiedAt DateTime?
 
+  identities    Identity[]
   members       Member[]
   sessions      Session[]
   devices       Device[]
@@ -189,10 +195,42 @@ model Session {
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
+  /// The workspace this login works in. Checked against an ACTIVE membership on every request; null means "pick the default".
+  activeWorkspaceId String?
+
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeWorkspace Workspace? @relation("SessionActiveWorkspace", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([activeWorkspaceId])
+}
+
+/// How a person proves who they are. provider: 'email' | 'github' | 'oidc:<name>'; subject: the lowercased email, GitHub id or OIDC `sub`.
+model Identity {
+  id        String   @id @default(cuid())
+  userId    String
+  provider  String
+  subject   String
+  email     String?
+  createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([provider, subject])
   @@index([userId])
+}
+
+/// One emailed sign-in link. Only the SHA-256 of the token is stored. Single use (consumedAt), 15 minutes.
+model MagicLink {
+  id              String    @id @default(cuid())
+  emailLowercased String
+  tokenHash       String    @unique
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  ipHash          String?
+
+  @@index([emailLowercased, createdAt])
 }
 
 model Member {

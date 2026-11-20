@@ -70,8 +70,8 @@ export function credentialHelper(): string {
 
 /** The CLI would answer a git credential request as its SELECTED account. If that is not this profile's account, nothing is sent. */
 export async function assertActiveAccount(db: Db, host: string): Promise<void> {
-  const user = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
-  if (!user) throw new IdentityError("not-signed-in", "This profile has no GitHub account yet. Sign in first.");
+  const user = await db.user.findFirst({ where: { isDemo: false, githubId: { not: null } }, orderBy: { createdAt: "asc" } });
+  if (!user?.githubId) throw new IdentityError("not-signed-in", "This profile has no GitHub account yet. Sign in first.");
   const r = await getGhRunner()(["api", "--hostname", host, "user", "--jq", ".id"], { timeoutMs: 15_000 });
   if (r.code !== 0) throw new IdentityError("not-signed-in", `The GitHub CLI is not signed in on ${host}. Run: gh auth login --hostname ${host}`);
   if (r.stdout.trim() !== user.githubId.toString()) throw new IdentityError("mismatch", `The GitHub CLI has a different account selected than this profile (${user.login}). Nothing was sent. Run gh auth switch, then run the update again.`);

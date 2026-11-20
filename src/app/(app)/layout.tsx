@@ -107,7 +107,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const sync = candidates.sort((x, y) => SEVERITY.indexOf(x.state) - SEVERITY.indexOf(y.state))[0] ?? null;
   // Switching needs the launcher's control channel; without it (plain dev server) the label is static, and demo shows nothing.
   const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
-  const wsList = isDemo() ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId.toString());
+  const wsList = isDemo() ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId?.toString() ?? "");
   const workspaces = wsList && { ...wsList, switchable };
   const aiQuick = isDemo() || !(await getAiView(db, viewer.workspaceId)).saved ? null : <AiQuick suggestions={aiSuggestions} requests={aiRequests} />;
   const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: ws.name };

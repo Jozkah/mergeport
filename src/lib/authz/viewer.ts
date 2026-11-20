@@ -13,7 +13,8 @@ export type Viewer = {
   memberId: string;
   workspaceId: string;
   login: string;
-  githubId: bigint;
+  /** Null for people who signed in with email or OIDC and have not linked a GitHub account. */
+  githubId: bigint | null;
   timezone: string;
   isAdmin: boolean;
 };

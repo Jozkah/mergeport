@@ -54,8 +54,8 @@ export function notifyChange(reason: "pulled" | "pushed" | "state" = "state") {
 const throttle: { timer?: ReturnType<typeof setTimeout>; pending: boolean } = { pending: false };
 
 export async function localActor() {
-  const user = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
-  return user ? { id: user.githubId, login: user.login } : null;
+  const user = await db.user.findFirst({ where: { isDemo: false, githubId: { not: null } }, orderBy: { createdAt: "asc" } });
+  return user && user.githubId !== null ? { id: user.githubId, login: user.login } : null;
 }
 
 /** The hub session token of this profile, decrypted per call so a sign-out or a new sign-in is picked up at once. */

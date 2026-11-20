@@ -12,9 +12,9 @@ import { directFetch, getGhRunner, defaultGhRunner, ghFetch } from "@/lib/github
 const bound = new WeakMap<Db, Map<string, GhRunner>>();
 
 async function bindingOf(db: Db): Promise<Binding> {
-  const user = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
+  const user = await db.user.findFirst({ where: { isDemo: false, githubId: { not: null } }, orderBy: { createdAt: "asc" } });
   if (!user) throw new IdentityError("not-signed-in", "This profile has no GitHub account yet. Sign in first.");
-  return { id: user.githubId, login: user.login, host: env().MERGEPORT_HOST };
+  return { id: user.githubId as bigint, login: user.login, host: env().MERGEPORT_HOST };
 }
 
 export function profileRunner(db: Db): GhRunner {
