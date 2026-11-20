@@ -30,8 +30,13 @@ export function assertHostedConfig(): void {
 
 /** The client address as the trusted proxy chain reports it, or null when it cannot be determined (not trusted, header missing or too short). */
 export function clientIp(req: Request): string | null {
+  return clientIpFromHeaders(req.headers);
+}
+
+/** Same, from a bare header set (server actions read `headers()`). */
+export function clientIpFromHeaders(h: { get(name: string): string | null }): string | null {
   if (process.env.MERGEPORT_TRUST_PROXY !== "true") return null;
-  const entries = (req.headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const entries = (h.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const i = entries.length - trustedProxyHops();
   return i >= 0 ? entries[i] : null;
 }

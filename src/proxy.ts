@@ -11,6 +11,7 @@ import { isHosted, isPublicHost } from "@/lib/public-url";
  *  - state-changing requests whose Origin / Sec-Fetch-Site is not this same origin (blocks cross-site forms and fetches).
  * Pages additionally require the session cookie that only the launcher-opened browser receives.
  */
+const FEDERATION_S2S = new Set(["/api/federation/v1/token", "/api/federation/v1/revoke"]);
 const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
 
 /**
@@ -37,7 +38,10 @@ export function proxy(req: NextRequest) {
   } else if (!LOOPBACK.test(host)) return new NextResponse("Forbidden host", { status: 403 });
 
   const method = req.method.toUpperCase();
-  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+  // Federation's server-to-server POSTs (another instance, no browser, no cookies) carry no Origin and no Sec-Fetch-Site. They are
+  // authorised by a PKCE code or a bearer token, never by a cookie, so the cross-site rule has nothing to protect there.
+  const serverToServer = isHosted() && FEDERATION_S2S.has(req.nextUrl.pathname);
+  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !serverToServer) {
     const origin = req.headers.get("origin");
     const site = req.headers.get("sec-fetch-site");
     let ok = false;
@@ -60,6 +64,7 @@ export function proxy(req: NextRequest) {
   requestHeaders.set("Content-Security-Policy", csp);
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   res.headers.set("Content-Security-Policy", csp);
+  res.headers.set("X-Frame-Options", "DENY"); // same rule as CSP frame-ancestors 'none' for browsers that only know the old header: the approval page must not be framed
   res.headers.set("Cache-Control", cacheControlFor(req.nextUrl.pathname));
   return res;
 }

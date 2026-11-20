@@ -169,6 +169,11 @@ model Workspace {
   gitCache      GitCache[]
   discoveryCache DiscoveryCache[]
   jobs          Job[]
+  federationPolicy FederationPolicy?
+  federationLinks  FederationLink[]
+  federationGrants FederationGrant[]
+  federationCache  FederationCache[]
+  federationEvents FederationEvent[]
 }
 
 model User {
@@ -191,6 +196,8 @@ model User {
   devices       Device[]
   savedFilters  SavedFilter[]
   notifications Notification[]
+  federationLinks  FederationLink[]
+  federationGrants FederationGrant[]
 }
 
 model Session {
@@ -1514,4 +1521,118 @@ model AiPendingAction {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, state, createdAt])
+}
+
+// ---------- Federation (docs/federation.md) ----------
+// Every instance is both a consumer (a user links another instance and views its data read-only) and a provider (it owns data and
+// issues revocable read-only grants). Nothing here stores a secret in clear: provider tokens and codes are sha256 hashes, consumer
+// tokens are AES-256-GCM under MERGEPORT_ENCRYPTION_KEY.
+
+/// Per-workspace linking policy, always inside the operator ceiling (MERGEPORT_FEDERATION). No row = everything off.
+model FederationPolicy {
+  id              String   @id @default(cuid())
+  workspaceId     String   @unique
+  /// off | allowlist | any
+  outboundMode    String   @default("off")
+  inboundMode     String   @default("off")
+  /// Normalised origins used by the outbound and inbound "allowlist" modes.
+  allowlist       String[] @default([])
+  /// ADMIN (owner and admins) or MEMBER (members too). READER never links.
+  whoCanLink      String   @default("ADMIN")
+  maxLinksPerUser Int      @default(5)
+  /// Distinct peer instances a workspace may be linked to (0 = none, 1 = a single linked instance).
+  maxPeers        Int      @default(5)
+  updatedAt       DateTime @updatedAt
+  updatedByUserId String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+/// Consumer side: one user's link from this workspace to a peer instance. Visible only to `userId`.
+model FederationLink {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  userId            String
+  peerOrigin        String
+  /// AES-256-GCM of the peer's access token. Null while PENDING and after unlinking.
+  tokenEnc          String?
+  /// PENDING (waiting for the callback) | ACTIVE | REVOKED (unlinked here, revoked by the peer, or refused)
+  status            String    @default("PENDING")
+  /// sha256 of the OAuth state of a PENDING link (one use), and the encrypted PKCE verifier. Both cleared at the callback.
+  stateHash         String?   @unique
+  verifierEnc       String?
+  pendingExpiresAt  DateTime?
+  peerWorkspaceName String?
+  peerRole          String?
+  lastError         String?
+  createdAt         DateTime  @default(now())
+  lastUsedAt        DateTime?
+  revokedAt         DateTime?
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cache     FederationCache[]
+
+  @@index([workspaceId, userId])
+}
+
+/// Provider side: what a user approved for one client instance. Starts as an authorization code, becomes a token on exchange.
+model FederationGrant {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  userId            String
+  clientOrigin      String
+  scope             String    @default("read")
+  codeHash          String?   @unique
+  codeExpiresAt     DateTime?
+  codeUsedAt        DateTime?
+  codeChallenge     String?
+  redirectUri       String?
+  /// sha256 of the opaque access token. Null until the code is exchanged.
+  tokenHash         String?   @unique
+  expiresAt         DateTime?
+  absoluteExpiresAt DateTime?
+  createdAt         DateTime  @default(now())
+  lastUsedAt        DateTime?
+  revokedAt         DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId])
+  @@index([workspaceId, clientOrigin])
+}
+
+/// Consumer side: the last answer from a peer for one request key, for one link only (read it only through the link's user).
+model FederationCache {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  linkId      String
+  key         String
+  etag        String?
+  bodyJson    Json
+  fetchedAt   DateTime
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  link      FederationLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, linkId, key])
+}
+
+/// Audit trail of federation decisions. Never holds a token, a code or a verifier.
+model FederationEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  kind        String
+  peerOrigin  String?
+  linkId      String?
+  grantId     String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
 }

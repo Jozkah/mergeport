@@ -36,6 +36,7 @@ import { checkProfile } from "@/lib/local/identity";
 import { getEngine } from "@/lib/local/runtime";
 import { deriveSourceStatus } from "@/lib/sync/source-status";
 import { env, isDemo } from "@/lib/env";
+import { federationState } from "@/lib/federation/config";
 import { mergeportHome } from "@/lib/local/profile";
 import { listWorkspaces } from "@/lib/local/workspaces";
 import Link from "next/link";
@@ -66,6 +67,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     inbox: (await inbox(db, viewer, { queues: q })).unread,
     digest: await unreadDigestCount(db, viewer),
     ai: aiSuggestions + aiRequests,
+    linked: federationState().kind === "enabled",
     tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login.toLowerCase(), column: { key: { not: "done" } } }] } }),
   };
   const last = lastSync._max.lastSyncedAt;

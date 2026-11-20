@@ -16,7 +16,8 @@ import { watchView } from "@/lib/local/repo-watch";
 import { WATCH_MAX_REPOS_LIMIT, WATCH_MAX_REPOS_MIN, WATCH_MAX_SECONDS, WATCH_MIN_SECONDS } from "@/lib/local/watch-format";
 import { planAutoSetup } from "@/lib/services/auto-setup";
 import { db } from "@/lib/db";
-import { Bell, Newspaper, Users, Wand2 } from "@/components/ui/icons";
+import { Bell, Globe, Newspaper, Users, Wand2 } from "@/components/ui/icons";
+import { federationState } from "@/lib/federation/config";
 import Link from "next/link";
 import { ROLE_LABEL } from "@/lib/authz/roles";
 import { BackupPanel } from "@/components/settings/BackupPanel";
@@ -64,6 +65,14 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <div className="p-4 text-[13px]">
               <p>Your role: <strong>{ROLE_LABEL[viewer.role]}</strong>. {viewer.isAdmin ? "Invite people by email, change roles and control who sees which space." : "You can leave the workspace from the members page."}</p>
               <Link href="/settings/members" className="btn mt-3 !h-10">Open members</Link>
+            </div>
+          </Panel>
+        )}
+        {viewer.isAdmin && federationState().kind !== "absent" && (
+          <Panel title="Linked instances" icon={Globe} id="linked-instances">
+            <div className="p-4 text-[13px]">
+              <p>Decide whether people here may link other Mergeport instances (read-only), which instances may link to this workspace, and revoke what is linked.</p>
+              <Link href="/settings/linked" className="btn mt-3 !h-10">Open linked instances</Link>
             </div>
           </Panel>
         )}

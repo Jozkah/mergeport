@@ -19,6 +19,8 @@ export const TENANCY_ALLOWLIST: TenancyAllow[] = [
   { file: "src/lib/github/factory.ts", models: ["repository"], reason: "portForSync loads a repository by an id taken from a job payload or from a caller that already scoped it (requireRepo / job.workspaceId); it only decides demo vs real credential." },
   { file: "src/lib/hub/gh-events.ts", reason: "Webhook ingest: an event names a GitHub repository id, and is applied to every tracked repository with that GitHub id; the review-request notification cleanup is keyed by a work item id." },
   { file: "src/lib/sync/repository.ts", reason: "Source sync internals run for one repository id taken from a job (or a webhook already matched to it); every row they touch hangs off that repository, so it is the tenant boundary." },
+  { file: "src/lib/federation/provider.ts", models: ["federationGrant"], ops: ["findUnique"], reason: "A grant is looked up by the sha256 of its one-time code or bearer token: the secret names the tenant, so there is no workspace to filter on yet. Everything after the lookup is scoped by grant.workspaceId." },
+  { file: "src/lib/federation/consumer.ts", models: ["federationLink"], ops: ["findFirst"], reason: "The OAuth callback finds the pending link by the sha256 of its one-use state AND the signed-in userId; the link then supplies the workspace for every later query." },
   { file: "prisma/seed.ts", reason: "Seed script: refuses to run when real data exists and wipes the whole demo database." },
 ];
 

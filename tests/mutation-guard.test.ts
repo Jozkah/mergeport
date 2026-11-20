@@ -48,6 +48,10 @@ const ALLOW: Allow[] = [
   { file: "src/app/palette-actions.ts", fn: "previewQuickAction", reason: "Preview only: computes what applyQuickAction would do and writes nothing." },
   { file: "src/app/scope-actions.ts", fn: "setScopeAction", reason: "Remembers the caller's working scope in a cookie." },
   { file: "src/app/upstream-update-actions.ts", fn: "markReleasesSeenAction", reason: "The caller's own seen marker." },
+  { file: "src/app/federation-actions.ts", fn: "unlinkAction", reason: "Your own link (any role, even after a downgrade to READER); unlink() lets only an administrator end someone else's." },
+  { file: "src/app/federation-actions.ts", fn: "approveFederationAction", reason: "The person's own consent to share what they themselves can see, read-only; any role may. Session CSRF token and policy are re-checked in the action and service." },
+  { file: "src/app/federation-actions.ts", fn: "denyFederationAction", reason: "Declining a link request; changes nothing but the redirect. Session CSRF token checked." },
+  { file: "src/app/federation-actions.ts", fn: "revokeGrantAction", reason: "Your own grant (any role) or, for an administrator, any grant of the workspace; revokeGrant() decides and answers NotFound otherwise." },
 ];
 
 const root = path.resolve(__dirname, "..");
@@ -132,6 +136,8 @@ const ROUTE_ALLOW: { file: string; reason: string }[] = [
   { file: "src/app/api/backup/restore/route.ts", reason: "restoreBackup refuses non-administrators (an administrator always writes), and applies the space ACL." },
   { file: "src/app/api/sync/visibility/route.ts", reason: "Local app: reports whether the tab is visible to the scheduler; authorized by the launch token, changes no workspace data." },
   { file: "src/app/auth/magic/request/route.ts", reason: "Sign-in: asks for a link before any session exists." },
+  { file: "src/app/api/federation/v1/token/route.ts", reason: "Server to server: a one-time PKCE code is the credential; there is no session or viewer. 404 unless federation is on." },
+  { file: "src/app/api/federation/v1/revoke/route.ts", reason: "Server to server: the bearer token being revoked is the credential; it only ever ends that token." },
 ];
 const ROUTE_ALLOW_PREFIX = [{ prefix: "src/app/api/local/", reason: "Local app routes: loopback only, 404 when hosted, no workspace viewer." }];
 

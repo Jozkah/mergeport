@@ -7,14 +7,14 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useId, useRef, useState, type ComponentType, type SVGProps } from "react";
 import * as D from "@radix-ui/react-dialog";
-import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, Newspaper, PanelLeft, RefreshCw, Route, Search, Settings, Sparkles, Users, X } from "@/components/ui/icons";
+import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, Globe, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, Newspaper, PanelLeft, RefreshCw, Route, Search, Settings, Sparkles, Users, X } from "@/components/ui/icons";
 import { Collapse } from "@/components/ui/Collapse";
 import { Metric } from "@/components/ui/Metric";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 type Item = { href: string; label: string; icon: Icon; count?: number; children?: { href: string; label: string; count?: number }[] };
 
-export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number; inbox?: number; digest?: number; ai?: number };
+export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number; inbox?: number; digest?: number; ai?: number; /** Federation is switched on for this server: show Linked instances. */ linked?: boolean };
 
 function buildNav(c: NavCounts, isAdmin: boolean) {
   const main: Item[] = [
@@ -46,7 +46,7 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
     { href: "/forks", label: "Forks", icon: GitFork },
     { href: "/branches", label: "Branches", icon: GitBranch },
   ];
-  const team: Item[] = [{ href: "/team", label: "Team", icon: Users }];
+  const team: Item[] = [{ href: "/team", label: "Team", icon: Users }, ...(c.linked ? [{ href: "/linked", label: "Linked instances", icon: Globe }] : [])];
   // Used now and then: folded away until you are on one of them.
   const more: Item[] = [
     { href: "/capacity", label: "Review capacity", icon: Route },
