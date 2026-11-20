@@ -214,10 +214,13 @@ describe("two clients against the real hub", () => {
     expect(removed.status).toBe(204);
     expect(await sock.closed).toBe(4403);
     await vi.waitFor(async () => expect((await alice.space("common")).access).toBe("REVOKED"), { timeout: 3000 });
-    expect(alice.live!.link.state).toBe("removed");
-    expect((await alice.db.outboxOp.findMany()).map((o) => o.status)).toEqual(["QUARANTINED"]);
-    expect(await alice.db.project.count()).toBe(0);
-    expect(await alice.db.planningItem.count()).toBe(0);
+    // access flips first; the quarantine and removing her copies follow: wait for the end state, not the first step
+    await vi.waitFor(async () => {
+      expect(alice.live!.link.state).toBe("removed");
+      expect((await alice.db.outboxOp.findMany()).map((o) => o.status)).toEqual(["QUARANTINED"]);
+      expect(await alice.db.project.count()).toBe(0);
+      expect(await alice.db.planningItem.count()).toBe(0);
+    }, { timeout: 3000 });
     // the hub revoked her sessions on removal (admin-routes.ts), so the old token is simply unknown: 401
     await expect(alice.client.me()).rejects.toMatchObject({ kind: "auth" });
     expect(await title(olive, "c1")).toBe("One");
