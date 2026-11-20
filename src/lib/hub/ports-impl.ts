@@ -1,5 +1,6 @@
 import path from "node:path";
-import { createPrisma, resolveDbFile, type Db } from "@/lib/db";
+import { db as sharedDb, resolveDbFile, type Db } from "@/lib/db";
+import { AccountMismatchError } from "@/lib/local/profile";
 import { HubForbidden, HubRequestError, HubUnauthorized, type HubAdminApi, type HubAdminSpace, type HubLinkStatus, type HubMember, type HubPendingInvite, type HubSessionPort, type HubWebhooks } from "@/lib/hub/ports";
 import { clearHubSession, loadHubSession, openVault, saveHubSession } from "@/lib/hub/session-vault";
 import type { HubLinkState } from "@/lib/hub/link";
@@ -12,20 +13,21 @@ import type { HubLinkState } from "@/lib/hub/link";
 
 export const keyFileFor = (dbFile: string) => path.join(path.dirname(dbFile), "key");
 
-async function withDb<T>(dbFile: string, f: (db: Db) => Promise<T>): Promise<T> {
-  const db = createPrisma();
-  try {
-    return await f(db);
-  } finally {
-    await db.$disconnect();
-  }
+// Single tenant: every call uses the one shared client (one pool for the process), whatever profile path it is given.
+async function withDb<T>(_dbFile: string, f: (db: Db) => Promise<T>): Promise<T> {
+  return f(sharedDb);
 }
 
 export const hubSessionPort: HubSessionPort = {
   async save(dbFile, s) {
     if (!/^\d+$/.test(s.githubId)) throw new Error("hub session needs a numeric GitHub id");
     const vault = openVault(keyFileFor(dbFile));
-    await withDb(dbFile, (db) => saveHubSession(db, vault, { origin: s.origin, token: s.token, githubId: BigInt(s.githubId), login: s.login }));
+    await withDb(dbFile, async (db) => {
+      // Refuse to store a session for one account in a database that belongs to another.
+      const owner = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
+      if (owner && owner.githubId !== BigInt(s.githubId)) throw new AccountMismatchError(owner.login, s.login);
+      return saveHubSession(db, vault, { origin: s.origin, token: s.token, githubId: BigInt(s.githubId), login: s.login });
+    });
   },
   async markProfile(dbFile, p) {
     await withDb(dbFile, async (db) => {

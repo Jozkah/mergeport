@@ -1,8 +1,8 @@
 import { ValidationError } from "@/lib/errors";
-import { createPrisma } from "@/lib/db";
+import { db } from "@/lib/db";
 import type { GhStatus } from "@/lib/github/gh";
 import { hubBackendId, normalizeHubOrigin, type Backend } from "@/lib/local/backends";
-import { ensureLocalProfile, profileDbPath } from "@/lib/local/profile";
+import { AccountMismatchError, ensureLocalProfile, profileDbPath } from "@/lib/local/profile";
 import { upsertHub } from "@/lib/local/registry";
 import type { HubSessionPort } from "@/lib/hub/ports";
 
@@ -132,11 +132,12 @@ export async function completeConnect(i: ConnectInput): Promise<{ ok: true; back
   const backend = hubBackendId(origin);
   const id = i.gh.identity;
   const dbFile = profileDbPath(i.home, i.host, id.id, backend);
-  const prisma = createPrisma();
+  // Single tenant: there is one database. If it already belongs to another GitHub account, refuse before anything is written.
   try {
-    await ensureLocalProfile(prisma, id);
-  } finally {
-    await prisma.$disconnect();
+    await ensureLocalProfile(db, id);
+  } catch (e) {
+    if (e instanceof AccountMismatchError) return { ok: false, error: "mismatch" };
+    throw e;
   }
   await i.ports.session.save(dbFile, { origin, token: i.session, githubId: i.member.githubId, login: i.member.login });
   await i.ports.session.markProfile(dbFile, { backend, origin, teamName: i.teamName });

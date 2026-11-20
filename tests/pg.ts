@@ -1,9 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { afterAll } from "vitest";
 import { createPrisma, type Db } from "@/lib/db";
 
 const BASE = process.env.DATABASE_URL!.replace(/\/[^/]*$/, "");
+const opened = new Set<Db>();
+
+// Every client made here is closed when its test file ends, so pools never pile up across a file's many isolated databases.
+afterAll(async () => {
+  await Promise.allSettled([...opened].map((c) => c.$disconnect()));
+  opened.clear();
+});
 
 /**
  * A fresh, fully migrated database for one test (a copy of the template made by tests/global-setup.ts). `label` (what used
@@ -16,5 +24,7 @@ export function createTestPrisma(label: string, _opts?: unknown): Db {
     encoding: "utf8",
   });
   if (r.status !== 0) throw new Error(`could not create test database ${name}: ${r.stderr}`);
-  return createPrisma(`${BASE}/${name}`);
+  const client = createPrisma(`${BASE}/${name}`, { max: 3 });
+  opened.add(client);
+  return client;
 }

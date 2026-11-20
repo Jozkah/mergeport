@@ -1,8 +1,8 @@
 /**
- * The command line shares the profile's SQLite file with the running app. The driver already waits up to 10 s for a lock; this adds a
- * few spaced retries on top of that for the rare case where the app holds the write lock for longer (a big sync commit).
+ * The command line shares the database with the running app. Retries cover Postgres serialization failure / deadlock (40001, 40P01, P2034)
+ * and dropped or refused connections (a restarting server), plus the old SQLite busy codes (harmless on Postgres).
  */
-const BUSY = /SQLITE_BUSY|SQLITE_LOCKED|database is locked|database table is locked|P1008|Socket timeout/i;
+const BUSY = /SQLITE_BUSY|SQLITE_LOCKED|database is locked|database table is locked|P1008|Socket timeout|\b40001\b|\b40P01\b|deadlock detected|could not serialize|ECONNRESET|ECONNREFUSED|Connection terminated|connection timeout|P1001|P1017|P2034/i;
 
 export const isBusy = (e: unknown): boolean => BUSY.test(e instanceof Error ? `${e.message} ${String((e as { code?: unknown }).code ?? "")}` : String(e));
 

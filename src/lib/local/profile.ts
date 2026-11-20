@@ -23,14 +23,26 @@ export const profileDirName = (host: string, accountId: bigint, backend: Backend
 };
 export const profileDbPath = (home: string, host: string, accountId: bigint, backend: Backend = "github") => path.join(home, "profiles", profileDirName(host, accountId, backend), "mergeport.db");
 
+/** The one workspace, created once even when callers race: a transaction-scoped advisory lock serialises the find-or-create. */
+async function firstWorkspace(db: Db) {
+  const found = await db.workspace.findFirst({ orderBy: { createdAt: "asc" } });
+  if (found) return found;
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(7771001)`;
+    return (await tx.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ?? (await tx.workspace.create({ data: { name: "Personal workspace" } }));
+  });
+}
+
 /** Creates the single local workspace, user and member for this profile, or verifies the stored one matches. */
 export async function ensureLocalProfile(db: Db, who: LocalIdentity) {
   const existing = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
   if (existing && existing.githubId !== who.id) throw new AccountMismatchError(existing.login, who.login);
-  const workspace = (await db.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ?? (await db.workspace.create({ data: { name: "Personal workspace" } }));
+  const workspace = await firstWorkspace(db);
   const user = await db.user.upsert({ where: { githubId: who.id }, create: { githubId: who.id, login: who.login, name: who.name, avatarUrl: who.avatarUrl }, update: { login: who.login, name: who.name, avatarUrl: who.avatarUrl } });
   const member = await db.member.upsert({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } }, create: { workspaceId: workspace.id, userId: user.id, role: "ADMIN" }, update: { status: "ACTIVE" } });
-  const team = await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "PERSONAL" }, update: {} });
+  // createMany + skipDuplicates is INSERT ... ON CONFLICT DO NOTHING: safe when two callers race on the fixed id.
+  await db.teamConfig.createMany({ data: [{ id: "team", mode: "PERSONAL" }], skipDuplicates: true });
+  const team = await db.teamConfig.findUniqueOrThrow({ where: { id: "team" } });
   // Personal mode means the person administers their own workspace. (In team mode the role comes from GitHub permissions.)
   if (team.mode === "PERSONAL" && member.role !== "ADMIN") {
     const fixed = await db.member.update({ where: { id: member.id }, data: { role: "ADMIN" } });

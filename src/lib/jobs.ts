@@ -52,8 +52,16 @@ export async function enqueue(db: Db, job: EnqueueInput) {
 
 /** Idempotent: call on every start. Never resets a pending run time or duplicates the job. */
 export async function ensureRecurring(db: Db, job: { type: string; key: string; intervalMs: number; payload?: Prisma.InputJsonValue; firstRunAt?: Date }) {
-  const existing = await db.job.findUnique({ where: { dedupeKey: job.key } });
-  if (!existing) return db.job.create({ data: { type: job.type, dedupeKey: job.key, payload: job.payload ?? {}, intervalMs: job.intervalMs, runAt: job.firstRunAt ?? new Date(), maxAttempts: 3 } });
+  let existing = await db.job.findUnique({ where: { dedupeKey: job.key } });
+  if (!existing) {
+    try {
+      return await db.job.create({ data: { type: job.type, dedupeKey: job.key, payload: job.payload ?? {}, intervalMs: job.intervalMs, runAt: job.firstRunAt ?? new Date(), maxAttempts: 3 } });
+    } catch (e) {
+      // Lost a race with another caller creating the same dedupeKey: fall through and update that row.
+      if ((e as { code?: string }).code !== "P2002") throw e;
+      existing = await db.job.findUniqueOrThrow({ where: { dedupeKey: job.key } });
+    }
+  }
   const revive = existing.status === "FAILED" || existing.status === "DONE";
   return db.job.update({ where: { id: existing.id }, data: { intervalMs: job.intervalMs, payload: job.payload ?? existing.payload ?? {}, ...(revive ? { status: "QUEUED", runAt: job.firstRunAt ?? new Date(), attempts: 0, lastError: null, finishedAt: null } : {}) } });
 }

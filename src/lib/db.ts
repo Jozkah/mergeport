@@ -23,9 +23,19 @@ export function databaseUrl(): string {
 }
 
 /** Opens a Prisma client on a Postgres database. Schema changes are applied by `prisma migrate deploy`, never here. */
-export function createPrisma(url: string = databaseUrl()): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString: url, max: 10 }) });
+export function createPrisma(url: string = databaseUrl(), opts: { max?: number } = {}): PrismaClient {
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString: url, max: opts.max ?? 10, connectionTimeoutMillis: 10_000, idleTimeoutMillis: 30_000 }) });
 }
 
-export const db: PrismaClient = globalThis.__prisma ?? (globalThis.__prisma = createPrisma());
+/**
+ * The process-wide client, created on first use (not at import: the build and scripts import this module without a database).
+ * One client per process, cached on globalThis so hot reload does not open a second pool.
+ */
+export const db: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_t, prop) {
+    const client = (globalThis.__prisma ??= createPrisma());
+    const v = Reflect.get(client, prop, client);
+    return typeof v === "function" ? v.bind(client) : v;
+  },
+});
 export type Db = PrismaClient;

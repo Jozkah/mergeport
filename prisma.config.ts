@@ -5,5 +5,6 @@ import { defineConfig } from "prisma/config";
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: { path: "prisma/migrations", seed: "tsx prisma/seed.ts" },
-  datasource: { url: process.env.DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:5433/mergeport" },
+  // No fallback URL: migrate commands need DATABASE_URL (they fail with Prisma's own message when it is missing); `prisma generate` does not.
+  ...(process.env.DATABASE_URL ? { datasource: { url: process.env.DATABASE_URL } } : {}),
 });
