@@ -79,7 +79,7 @@ export function TodayTab({ initial, summary, lastRun, autopilot }: { initial: Su
         {(job.running || job.steps.length > 0) && <Progress steps={job.steps} running={job.running} elapsed={job.elapsed} />}
         <p ref={status} tabIndex={-1} role="status" className={`text-[12.5px] outline-none text-pretty ${note ? (note.ok ? "text-ink-2" : "text-blocked") : "sr-only"}`}>
           {note?.text}
-          {note?.tasks && <> <Link href="/tasks" className="link">Open Tasks</Link></>}
+          {note?.tasks && <> <Link href="/tasks?scope=all" className="link">Open Tasks</Link></>}
           {note && !note.ok && <> <button type="button" className="underline" onClick={analyze}>Try again</button></>}
         </p>
       </section>

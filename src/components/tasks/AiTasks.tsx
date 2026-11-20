@@ -102,7 +102,7 @@ export function DraftTasks({ projects, defaultProjectId, configured }: { project
       )}
       <div><label className="label" htmlFor="ai-text">What needs doing?</label>
         <textarea id="ai-text" className="input min-h-32" rows={6} value={text} onChange={(e) => setText(e.target.value)} maxLength={8000} placeholder="e.g. Rotate the API keys by Friday, give it to alice. Also fix the login redirect bug, high priority." /></div>
-      {done && <p role="status" className="result-in text-[12.5px] text-ok">{done}. <Link className="link" href="/tasks">Open Tasks</Link></p>}
+      {done && <p role="status" className="result-in text-[12.5px] text-ok">{done}. <Link className="link" href="/tasks?scope=all">Open Tasks</Link></p>}
       {error && <p role="alert" className="text-[12.5px] text-blocked">{error}</p>}
       <p className="text-[12px] text-ink-3">Your text and the names of your projects and people are sent to the AI address you set in Settings.</p>
       <div><button type="button" className="btn btn-primary" onClick={() => !job.running && draft()} aria-disabled={job.running} aria-busy={job.running} disabled={!text.trim()}>{job.running ? "Working…" : "Draft tasks"}</button></div>
