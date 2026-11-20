@@ -22,9 +22,9 @@ export default async function DigestPage({ searchParams }: { searchParams: Promi
   const { viewer } = await requireViewer();
   const sp = await searchParams;
   await latestDigest(db, viewer); // in demo mode (no scheduler) this makes the first digest
-  const days = await listDigestDays(db, viewer.userId);
+  const days = await listDigestDays(db, viewer);
   const day = isDay(sp.day) && days.some((d) => d.day === sp.day) ? sp.day : days[0]?.day;
-  const digest = day ? await getDigest(db, viewer.userId, day) : null;
+  const digest = day ? await getDigest(db, viewer, day) : null;
   if (!digest) {
     const { digest: s } = await getPrefs(db, viewer.userId);
     return (
@@ -52,7 +52,7 @@ export default async function DigestPage({ searchParams }: { searchParams: Promi
           </>
         }
       />
-      <AiShortcuts show={await aiEnabled(db)} className="mb-5">
+      <AiShortcuts show={await aiEnabled(db, viewer.workspaceId)} className="mb-5">
         <AiTool tool="digest" day={digest.day} label="Brief me" hint="A short summary of this digest, from the AI address in Settings." />
         <AiTool tool="standup" label="Write my stand-up" />
       </AiShortcuts>

@@ -47,7 +47,7 @@ export async function createCard(
     const wi = await requireWorkItem(db, v, input.workItemId, "manageWork");
     const inProject = await db.projectRepository.findFirst({ where: { projectId: project.id, repositoryId: wi.repositoryId } });
     if (!inProject) throw new ValidationError("That repository is not part of this project");
-    await assertSameAudience(db, project.spaceId, [wi.repositoryId]);
+    await assertSameAudience(db, v.workspaceId, project.spaceId, [wi.repositoryId]);
     title = wi.title;
   } else if (!v.isAdmin) {
     const m = await db.projectMember.findFirst({ where: { projectId: project.id, memberId: v.memberId } });
@@ -89,15 +89,15 @@ export async function createCard(
  * repository, so every repository it links must belong to the SAME audience. Otherwise a narrower space's data would be
  * published to a wider one.
  */
-export async function assertSameAudience(db: Db, projectSpaceId: string | null, repositoryIds: string[]) {
+export async function assertSameAudience(db: Db, workspaceId: string, projectSpaceId: string | null, repositoryIds: string[]) {
   if (!projectSpaceId || repositoryIds.length === 0) return;
-  const mismatched = await db.repository.count({ where: { id: { in: repositoryIds }, OR: [{ spaceId: null }, { spaceId: { not: projectSpaceId } }] } });
+  const mismatched = await db.repository.count({ where: { workspaceId, id: { in: repositoryIds }, OR: [{ spaceId: null }, { spaceId: { not: projectSpaceId } }] } });
   if (mismatched) throw new ValidationError("A project shared through a space can only link repositories shared through that same space. Share the repository to the space first, so nobody sees more than their space allows.");
 }
 
 export async function moveCard(db: Db, v: Viewer, input: { itemId: string; toColumnKey: string; beforePosition?: number | null; afterPosition?: number | null; expectedVersion: number }) {
   const item = await requireItem(db, v, input.itemId);
-  await assertProjectWritable(db, item.projectId);
+  await assertProjectWritable(db, v, item.projectId);
   await requireManage(db, v, item);
   const column = await db.planningColumn.findFirst({ where: { projectId: item.projectId, key: input.toColumnKey } });
   if (!column) throw new ValidationError("Unknown column");
@@ -124,11 +124,11 @@ export async function moveCard(db: Db, v: Viewer, input: { itemId: string; toCol
 export async function addDependency(db: Db, v: Viewer, blockerId: string, blockedId: string, kind: string = "blocks") {
   if (!isLinkKind(kind)) throw new ValidationError("Unknown link type");
   const [a, b] = await Promise.all([requireItem(db, v, blockerId), requireItem(db, v, blockedId)]);
-  await assertProjectWritable(db, b.projectId);
+  await assertProjectWritable(db, v, b.projectId);
   await requireManage(db, v, b);
   if (a.id === b.id) throw new ValidationError("A card cannot be linked to itself");
   if (a.projectId !== b.projectId) {
-    const [pa, pb] = await Promise.all([db.project.findUniqueOrThrow({ where: { id: a.projectId } }), db.project.findUniqueOrThrow({ where: { id: b.projectId } })]);
+    const [pa, pb] = await Promise.all([db.project.findUniqueOrThrow({ where: { id: a.projectId, workspaceId: v.workspaceId } }), db.project.findUniqueOrThrow({ where: { id: b.projectId, workspaceId: v.workspaceId } })]);
     if ((pa.spaceId ?? null) !== (pb.spaceId ?? null)) throw new ValidationError("These projects are shared with different audiences, so their cards cannot be linked");
   }
   if (kind === "blocks") {
@@ -143,7 +143,7 @@ export async function addDependency(db: Db, v: Viewer, blockerId: string, blocke
 
 export async function removeDependency(db: Db, v: Viewer, fromId: string, toId: string) {
   const [a, b] = await Promise.all([requireItem(db, v, fromId), requireItem(db, v, toId)]);
-  await assertProjectWritable(db, b.projectId);
+  await assertProjectWritable(db, v, b.projectId);
   await requireManage(db, v, b);
   await db.planningLink.deleteMany({ where: { fromId: a.id, toId: b.id } });
   await audit(db, v, "planning.unlink", { type: "PlanningItem", id: b.id }, { from: a.id });
@@ -212,7 +212,7 @@ export async function resolveManualReview(db: Db, v: Viewer, recordId: string, o
   else if (rec.planningItemId) await requireItem(db, v, rec.planningItemId);
   const isNamed = rec.reviewerKind === "USER" && rec.reviewerRef.toLowerCase() === v.login.toLowerCase();
   if (!v.isAdmin && !isNamed) throw new ForbiddenError("Only the requested reviewer or an administrator can decide this");
-  await db.waitingRecord.update({ where: { id: rec.id }, data: { status: outcome, clearedAt: new Date(), clearedById: v.userId, clearReason: note } });
+  await db.waitingRecord.update({ where: { id: rec.id, workspaceId: v.workspaceId }, data: { status: outcome, clearedAt: new Date(), clearedById: v.userId, clearReason: note } });
   await audit(db, v, "waiting.resolve", { type: "WaitingRecord", id: rec.id }, { outcome });
 }
 

@@ -228,7 +228,7 @@ export async function createMilestoneAction(fd: FormData): Promise<ActionResult>
     const start = str(fd, "start");
     const target = str(fd, "target");
     const project = str(fd, "projectId");
-    await assertProjectWritable(db, project || null);
+    await assertProjectWritable(db, viewer, project || null);
     await db.dashboardMilestone.create({ data: { workspaceId: viewer.workspaceId, projectId: project || null, name, description: str(fd, "description") || null, ownerId: viewer.memberId, startDate: start ? new Date(start + "T00:00:00Z") : null, targetDate: target ? new Date(target + "T00:00:00Z") : null } });
     await audit(db, viewer, "milestone.create");
     revalidatePath("/planning");
@@ -269,7 +269,7 @@ export async function createProjectAction(fd: FormData): Promise<ActionResult> {
     const name = str(fd, "name");
     if (!name) throw new ValidationError("Name the project");
     // Resolved before anything is created, so a share that cannot happen never leaves a half-made project behind.
-    const spaceId = str(fd, "share") ? await commonSpaceIdForSharing(db) : null;
+    const spaceId = str(fd, "share") ? await commonSpaceIdForSharing(db, viewer.workspaceId) : null;
     const p = await db.project.create({ data: { workspaceId: viewer.workspaceId, name, slug: slugify(name), description: str(fd, "description") || null, spaceId } });
     await createColumnsForProject(db, p.id);
     if (str(fd, "reviewers")) await setProjectReviewers(db, viewer.workspaceId, p.id, p.name, str(fd, "reviewers"));
@@ -311,11 +311,11 @@ export async function setProjectReposAction(fd: FormData): Promise<ActionResult>
     const projectId = str(fd, "projectId");
     const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
     if (!p) throw new ValidationError("Unknown project");
-    await assertProjectWritable(db, p.id);
+    await assertProjectWritable(db, viewer, p.id);
     const ids = strs(fd, "repo");
     const repos = await db.repository.findMany({ where: { id: { in: ids }, workspaceId: viewer.workspaceId } });
     if (repos.length !== ids.length) throw new ValidationError("Unknown repository");
-    await assertSameAudience(db, p.spaceId, ids);
+    await assertSameAudience(db, viewer.workspaceId, p.spaceId, ids);
     await db.$transaction([db.projectRepository.deleteMany({ where: { projectId } }), db.projectRepository.createMany({ data: ids.map((repositoryId) => ({ projectId, repositoryId })) })]);
     await audit(db, viewer, "project.repos", { type: "Project", id: projectId }, { repositoryIds: ids });
     revalidatePath("/admin/projects");
@@ -329,7 +329,7 @@ export async function setProjectMembersAction(fd: FormData): Promise<ActionResul
     const projectId = str(fd, "projectId");
     const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
     if (!p) throw new ValidationError("Unknown project");
-    await assertProjectWritable(db, p.id);
+    await assertProjectWritable(db, viewer, p.id);
     const ids = strs(fd, "member");
     const members = await db.member.findMany({ where: { id: { in: ids }, workspaceId: viewer.workspaceId, status: "ACTIVE" } });
     if (members.length !== ids.length) throw new ValidationError("Unknown member");
@@ -354,7 +354,7 @@ export async function saveRuleAction(fd: FormData): Promise<ActionResult> {
     if (scope === "REPOSITORY" && !(await db.repository.findFirst({ where: { id: repositoryId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a repository");
     if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a project");
     if (scope === "OWNER" && !ownerLogin) throw new ValidationError("Enter the GitHub owner");
-    if (scope === "PROJECT") await assertProjectWritable(db, projectId);
+    if (scope === "PROJECT") await assertProjectWritable(db, viewer, projectId);
     const rule = await db.reviewRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, labels: csv(str(fd, "labels")), reviewers, semantics: str(fd, "semantics") === "ALL" ? "ALL" : "ANY", reason } });
     await audit(db, viewer, "rule.create", { type: "ReviewRule", id: rule.id });
     revalidatePath("/admin/rules");
@@ -397,7 +397,7 @@ export async function toggleWaitingRuleAction(fd: FormData): Promise<ActionResul
     const { viewer } = await requireAdminViewer();
     const r = await db.waitingRule.findFirst({ where: { id: str(fd, "id"), workspaceId: viewer.workspaceId } });
     if (!r) throw new ValidationError("Unknown rule");
-    await db.waitingRule.update({ where: { id: r.id }, data: { enabled: !r.enabled } });
+    await db.waitingRule.update({ where: { id: r.id, workspaceId: viewer.workspaceId }, data: { enabled: !r.enabled } });
     revalidatePath("/admin/rules");
     revalidatePath("/attention");
     revalidatePath("/");
@@ -410,7 +410,7 @@ export async function deleteWaitingRuleAction(fd: FormData): Promise<ActionResul
     const { viewer } = await requireAdminViewer();
     const r = await db.waitingRule.findFirst({ where: { id: str(fd, "id"), workspaceId: viewer.workspaceId } });
     if (!r) throw new ValidationError("Unknown rule");
-    await db.waitingRule.delete({ where: { id: r.id } });
+    await db.waitingRule.delete({ where: { id: r.id, workspaceId: viewer.workspaceId } });
     await audit(db, viewer, "waitingRule.delete", { type: "WaitingRule", id: r.id });
     revalidatePath("/admin/rules");
     revalidatePath("/attention");
@@ -648,8 +648,8 @@ export async function deleteFilterAction(fd: FormData): Promise<ActionResult> {
 
 export async function markNotificationsReadAction(): Promise<ActionResult> {
   return run(async () => {
-    const { user } = await requireViewer();
-    await db.notification.updateMany({ where: { userId: user.id, readAt: null }, data: { readAt: new Date() } });
+    const { user, viewer } = await requireViewer();
+    await db.notification.updateMany({ where: { workspaceId: viewer.workspaceId, userId: user.id, readAt: null }, data: { readAt: new Date() } });
     revalidatePath("/activity");
     return { ok: true };
   });

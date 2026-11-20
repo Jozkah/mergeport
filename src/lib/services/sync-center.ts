@@ -5,8 +5,8 @@ import { expectedConsistencyDelaySeconds } from "@/lib/sync/engine";
 export type SpaceSyncView = { id: string; fullName: string; kind: string; facts: SyncFact[]; lastPolledAt: Date | null; nextPollAt: Date | null; lastPushedAt: Date | null };
 
 /** Per space: what is saved here, what is queued, what has been published and what teammates have not had a chance to see yet. */
-export async function syncCenter(db: Db, pollSeconds: number, now = new Date()): Promise<SpaceSyncView[]> {
-  const spaces = await db.space.findMany({ orderBy: [{ kind: "asc" }, { createdAt: "asc" }] });
+export async function syncCenter(db: Db, workspaceId: string, pollSeconds: number, now = new Date()): Promise<SpaceSyncView[]> {
+  const spaces = await db.space.findMany({ where: { workspaceId }, orderBy: [{ kind: "asc" }, { createdAt: "asc" }] });
   const out: SpaceSyncView[] = [];
   for (const s of spaces) {
     const [queued, sending, failed, blocked, conflicts] = await Promise.all([

@@ -40,8 +40,8 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
     return <HubTeamPage backend={backend} githubApp={result ? { result, reason: sp.reason } : null} />;
   }
   const demo = isDemo();
-  const cfg = await db.teamConfig.findUnique({ where: { id: "team" } });
-  const spaces = await db.space.findMany({ orderBy: [{ kind: "asc" }, { createdAt: "asc" }] });
+  const cfg = await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } });
+  const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId }, orderBy: [{ kind: "asc" }, { createdAt: "asc" }] });
   const team = await getTeamService();
   const engine = await getEngine();
 

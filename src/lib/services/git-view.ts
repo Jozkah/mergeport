@@ -17,11 +17,11 @@ import { renderMarkdown } from "@/lib/markdown";
 const MAX_ENTRY_BYTES = 6_000_000;
 const MAX_ROWS = 400;
 
-async function cached<T>(db: Db, key: string, load: () => Promise<T>, o: { cache?: boolean } = {}): Promise<T> {
+async function cached<T>(db: Db, workspaceId: string, key: string, load: () => Promise<T>, o: { cache?: boolean } = {}): Promise<T> {
   if (o.cache !== false) {
-    const hit = await db.gitCache.findUnique({ where: { key } });
+    const hit = await db.gitCache.findUnique({ where: { workspaceId_key: { workspaceId, key } } });
     if (hit) {
-      void db.gitCache.update({ where: { key }, data: { accessedAt: new Date() } }).catch(() => {});
+      void db.gitCache.update({ where: { workspaceId_key: { workspaceId, key } }, data: { accessedAt: new Date() } }).catch(() => {});
       return hit.payload as T;
     }
   }
@@ -29,24 +29,24 @@ async function cached<T>(db: Db, key: string, load: () => Promise<T>, o: { cache
   if (o.cache !== false) {
     const text = JSON.stringify(value);
     if (text.length <= MAX_ENTRY_BYTES) {
-      await db.gitCache.upsert({ where: { key }, create: { key, payload: value as Prisma.InputJsonValue, bytes: text.length }, update: { payload: value as Prisma.InputJsonValue, bytes: text.length, accessedAt: new Date() } }).catch(() => {});
-      void prune(db);
+      await db.gitCache.upsert({ where: { workspaceId_key: { workspaceId, key } }, create: { workspaceId, key, payload: value as Prisma.InputJsonValue, bytes: text.length }, update: { payload: value as Prisma.InputJsonValue, bytes: text.length, accessedAt: new Date() } }).catch(() => {});
+      void prune(db, workspaceId);
     }
   }
   return value;
 }
 
 let lastPrune = 0;
-async function prune(db: Db) {
+async function prune(db: Db, workspaceId: string) {
   if (Date.now() - lastPrune < 60_000) return;
   lastPrune = Date.now();
   try {
-    const n = await db.gitCache.count();
+    const n = await db.gitCache.count({ where: { workspaceId } });
     if (n > MAX_ROWS) {
-      const old = await db.gitCache.findMany({ orderBy: { accessedAt: "asc" }, take: n - MAX_ROWS, select: { key: true } });
-      await db.gitCache.deleteMany({ where: { key: { in: old.map((o) => o.key) } } });
+      const old = await db.gitCache.findMany({ where: { workspaceId }, orderBy: { accessedAt: "asc" }, take: n - MAX_ROWS, select: { key: true } });
+      await db.gitCache.deleteMany({ where: { workspaceId, key: { in: old.map((o) => o.key) } } });
     }
-    await db.gitCache.deleteMany({ where: { accessedAt: { lt: new Date(Date.now() - 30 * 86400_000) } } });
+    await db.gitCache.deleteMany({ where: { workspaceId, accessedAt: { lt: new Date(Date.now() - 30 * 86400_000) } } });
   } catch {
     // pruning is best effort
   }
@@ -78,7 +78,7 @@ export async function pullFilesView(db: Db, v: Viewer, id: string, canComment: b
     const r = await port.listPullFiles(item.repository.owner.login, item.repository.name, item.number);
     return { files: r.files.map(buildDiffFile), truncated: r.truncated };
   };
-  const { files, truncated } = key ? await cached(db, key, load) : await load();
+  const { files, truncated } = key ? await cached(db, v.workspaceId, key, load) : await load();
   const inline: Record<string, InlineComment[]> = {};
   for (const c of item.comments) {
     if (!c.path || !c.line) continue;
@@ -98,7 +98,7 @@ export async function pullCommitsView(db: Db, v: Viewer, id: string): Promise<{ 
     const r = await port.listPullCommits(item.repository.owner.login, item.repository.name, item.number);
     return { commits: r.commits.map(toCommitView), truncated: r.truncated };
   };
-  return item.headSha ? cached(db, `prcommits:2:${item.repositoryId}:${item.number}:${item.baseRef ?? "-"}:${item.headSha}`, load) : load();
+  return item.headSha ? cached(db, v.workspaceId, `prcommits:2:${item.repositoryId}:${item.number}:${item.baseRef ?? "-"}:${item.headSha}`, load) : load();
 }
 
 const toCommitView = (c: RemoteCommit): CommitView => ({ sha: c.sha, message: c.message, body: c.body ?? "", author: c.author, authorAvatar: c.authorAvatar ?? null, date: c.date ? c.date.toISOString() : null });
@@ -108,7 +108,7 @@ export async function commitFilesView(db: Db, v: Viewer, id: string, sha: string
   if (!/^[0-9a-f]{7,40}$/i.test(sha)) throw new ValidationError("That is not a commit id");
   const item = await loadItem(db, v, id);
   const port = await portFor(db, item.repositoryId);
-  return cached(db, `commitfiles:2:${item.repositoryId}:${sha.toLowerCase()}`, async () => {
+  return cached(db, v.workspaceId, `commitfiles:2:${item.repositoryId}:${sha.toLowerCase()}`, async () => {
     const r = await port.listCommitFiles(item.repository.owner.login, item.repository.name, sha);
     return { files: r.files.map(buildDiffFile), truncated: r.truncated };
   });
@@ -126,7 +126,7 @@ export async function compareFilesView(db: Db, v: Viewer, id: string, from: stri
   if (item.type !== "PULL_REQUEST") throw new NotFoundError();
   const port = await portFor(db, item.repositoryId);
   const immutable = from.length === 40 && to.length === 40;
-  const r = await cached(db, `cmp:1:${item.repositoryId}:${from.toLowerCase()}:${to.toLowerCase()}`, async () => {
+  const r = await cached(db, v.workspaceId, `cmp:1:${item.repositoryId}:${from.toLowerCase()}:${to.toLowerCase()}`, async () => {
     const c = await port.compareCommits(item.repository.owner.login, item.repository.name, from, to);
     return { files: c.files.map(buildDiffFile), truncated: c.truncated };
   }, { cache: immutable });
@@ -150,7 +150,7 @@ export async function pullBlobView(db: Db, v: Viewer, id: string, path: string):
   const item = await loadItem(db, v, id);
   if (!item.headSha) throw new ValidationError("This pull request has no head commit yet");
   const port = await portFor(db, item.repositoryId);
-  return cached(db, `blob:1:${item.repositoryId}:${item.headSha}:${path}`, async () => {
+  return cached(db, v.workspaceId, `blob:1:${item.repositoryId}:${item.headSha}:${path}`, async () => {
     const c = await port.getContents(item.repository.owner.login, item.repository.name, path, item.headSha!);
     if (c.kind !== "file") throw new NotFoundError();
     return toBlob(c.file);
@@ -185,5 +185,5 @@ export async function repoContentsView(db: Db, v: Viewer, repositoryId: string, 
     return { kind: "dir", entries: c.entries, readme };
   };
   // A commit id never changes; a branch name does, so it is always asked again (the request itself is ETag-cached by GitHub).
-  return at && isSha(at) ? cached(db, `code:1:${repo.id}:${at}:${clean}`, load) : load();
+  return at && isSha(at) ? cached(db, v.workspaceId, `code:1:${repo.id}:${at}:${clean}`, load) : load();
 }

@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Projects() {
   const { viewer } = await requireAdminViewer();
-  const spaces = await db.space.findMany({ where: { access: "OK", canWrite: true }, orderBy: [{ kind: "asc" }, { name: "asc" }] });
+  const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId, access: "OK", canWrite: true }, orderBy: [{ kind: "asc" }, { name: "asc" }] });
   const [projectsRaw, reposRaw, members] = await Promise.all([
     db.project.findMany({ where: { workspaceId: viewer.workspaceId }, include: { repositories: true, members: true }, orderBy: { name: "asc" } }),
     db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: { not: "REMOVED" } }, select: { id: true, fullName: true }, orderBy: { fullName: "asc" } }),

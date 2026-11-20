@@ -56,7 +56,7 @@ export default async function Overview() {
         <p className="mt-1 text-[13px] text-ink-3">What needs you, and what is waiting on someone else, across the repositories you can see.</p>
       </div>
 
-      <AiShortcuts show={await aiEnabled(db)}>
+      <AiShortcuts show={await aiEnabled(db, viewer.workspaceId)}>
         <AiTool tool="focus" label="What should I do first?" />
       </AiShortcuts>
 

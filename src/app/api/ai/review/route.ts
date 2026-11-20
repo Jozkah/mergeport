@@ -14,13 +14,13 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   return withViewerStream(req, async (v, _body, step) => {
     if (isDemo()) throw new ValidationError("The demo does not send anything to an AI endpoint.");
-    const cfg = await loadAiConfig(db, openVault(keyFileFor(resolveDbFile())));
+    const cfg = await loadAiConfig(db, v.workspaceId, openVault(keyFileFor(resolveDbFile())));
     if (!cfg) throw new ValidationError("Set up the AI endpoint in Settings first.");
     const r = await analyzeWorkspace(db, v, cfg, { step });
     step("Saving the suggestions");
     const counts = await saveSuggestions(db, v, r.drafts, "suggest");
-    if (r.model) await rememberModel(db, r.model);
-    await db.aiSettings.updateMany({ where: { id: "ai" }, data: { lastSummary: r.summary || null, lastRunAt: new Date() } });
-    return { summary: r.summary, model: r.model, counts, suggestions: await listSuggestions(db) };
+    if (r.model) await rememberModel(db, v.workspaceId, r.model);
+    await db.aiSettings.updateMany({ where: { workspaceId: v.workspaceId }, data: { lastSummary: r.summary || null, lastRunAt: new Date() } });
+    return { summary: r.summary, model: r.model, counts, suggestions: await listSuggestions(db, v) };
   });
 }

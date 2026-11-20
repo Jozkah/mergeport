@@ -8,8 +8,8 @@ export async function gettingStarted(db: Db, v: Viewer): Promise<Step[]> {
     db.repository.count({ where: repoWhere(v) }),
     db.project.count({ where: { workspaceId: v.workspaceId, ...projectWhere(v) } }),
     db.planningItem.count({ where: { project: { workspaceId: v.workspaceId } } }),
-    db.reviewRule.count(),
-    db.teamConfig.findUnique({ where: { id: "team" } }),
+    db.reviewRule.count({ where: { workspaceId: v.workspaceId } }),
+    db.teamConfig.findUnique({ where: { workspaceId: v.workspaceId } }),
   ]);
   return [
     { key: "repos", title: "Connect your repositories", why: "Pick the repositories you work in. Mergeport only reads them with your own GitHub sign-in.", href: "/repositories/connect", cta: "Choose repositories", done: repos > 0 },

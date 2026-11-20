@@ -65,9 +65,9 @@ export async function createSpaceAction(fd: FormData): Promise<ActionResult> {
 
 export async function inviteAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
+    const { viewer } = await requireViewer();
     const t = await team();
-    const space = await db.space.findUniqueOrThrow({ where: { id: str(fd, "spaceId") } });
+    const space = await db.space.findUniqueOrThrow({ where: { id: str(fd, "spaceId"), workspaceId: viewer.workspaceId } });
     const plan = t.planInvite(space, str(fd, "usernames").split(/[,\s]+/), str(fd, "permission") === "pull" ? "pull" : "push");
     const out = await t.invite(space, plan, { confirmed: checked(fd, "confirm") });
     revalidatePath("/team");
@@ -80,9 +80,9 @@ export async function inviteAction(fd: FormData): Promise<ActionResult> {
 
 export async function revokeAccessAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
+    const { viewer } = await requireViewer();
     const t = await team();
-    const space = await db.space.findUniqueOrThrow({ where: { id: str(fd, "spaceId") } });
+    const space = await db.space.findUniqueOrThrow({ where: { id: str(fd, "spaceId"), workspaceId: viewer.workspaceId } });
     await t.revokeInvitationOrAccess(space, str(fd, "username"));
     revalidatePath("/team");
     return { ok: true, message: "Invitation or access removed on GitHub. Anything already downloaded stays downloaded." };
@@ -173,9 +173,9 @@ export async function dismissRestoredAction(fd: FormData): Promise<ActionResult>
 
 export async function setPollSecondsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
+    const { viewer } = await requireViewer();
     const n = Math.max(15, Math.min(600, Number(str(fd, "seconds")) || 30));
-    await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", pollSeconds: n }, update: { pollSeconds: n } });
+    await db.teamConfig.upsert({ where: { workspaceId: viewer.workspaceId }, create: { workspaceId: viewer.workspaceId, pollSeconds: n }, update: { pollSeconds: n } });
     revalidatePath("/sync");
     return { ok: true, message: `Active polling every ${n} seconds` };
   });
@@ -208,12 +208,12 @@ export async function setProjectSpaceAction(fd: FormData): Promise<ActionResult>
     const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
     if (!p) throw new ValidationError("Unknown project");
     if (spaceId) {
-      const s = await db.space.findUnique({ where: { id: spaceId } });
+      const s = await db.space.findUnique({ where: { id: spaceId, workspaceId: viewer.workspaceId } });
       if (!s?.canWrite || s.access !== "OK") throw new ValidationError("You need write access to that space");
       const linked = (await db.projectRepository.findMany({ where: { projectId } })).map((l) => l.repositoryId);
-      await assertSameAudience(db, spaceId, linked);
+      await assertSameAudience(db, viewer.workspaceId, spaceId, linked);
     }
-    await db.project.update({ where: { id: projectId }, data: { spaceId } });
+    await db.project.update({ where: { id: projectId, workspaceId: viewer.workspaceId }, data: { spaceId } });
     revalidatePath("/admin/projects");
     return { ok: true, message: spaceId ? "Project and its cards are now shared through that space." : "Project is local again." };
   });

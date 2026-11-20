@@ -85,7 +85,7 @@ export async function buildSnapshot(db: Db, v: Viewer, now = new Date()): Promis
       out.push(`- "${t.title.slice(0, 80)}" in ${t.project.name}, ${t.column.name}, ${priorityName(t.priority).toLowerCase()}${due ? `, due ${due}${due < today ? " (OVERDUE)" : ""}` : ""}`);
     }
   }
-  const broken = await db.repository.findMany({ where: { trackingStatus: "ACTIVE", syncError: { not: null } }, select: { fullName: true, syncError: true }, take: 4 });
+  const broken = await db.repository.findMany({ where: { workspaceId: v.workspaceId, trackingStatus: "ACTIVE", syncError: { not: null } }, select: { fullName: true, syncError: true }, take: 4 });
   if (broken.length) out.push("", `Repositories that failed to sync: ${broken.map((r) => r.fullName).join(", ")}`);
   if (out.length === 1) out.push("", "Nothing needs attention right now.");
   return { text: out.join("\n"), refs, projects: projects.map((p) => ({ id: p.id, name: p.name })) };
@@ -170,7 +170,7 @@ export async function saveSuggestions(db: Db, v: Viewer, drafts: SuggestionDraft
   const since = new Date(now.getTime() - REPEAT_DAYS * 86_400_000);
   let autos = 0;
   for (const d of drafts) {
-    const known = await db.aiSuggestion.findFirst({ where: { sourceKey: d.sourceKey, OR: [{ state: "NEW" }, { createdAt: { gte: since } }] }, select: { id: true } });
+    const known = await db.aiSuggestion.findFirst({ where: { workspaceId: v.workspaceId, sourceKey: d.sourceKey, OR: [{ state: "NEW" }, { createdAt: { gte: since } }] }, select: { id: true } });
     if (known) {
       counts.skipped++;
       continue;
@@ -178,11 +178,11 @@ export async function saveSuggestions(db: Db, v: Viewer, drafts: SuggestionDraft
     const clear = d.kind === "review" || d.kind === "changes";
     if (mode === "create" && clear && autos < AUTO_CAP) {
       const task = await makeTask(db, v, d);
-      await db.aiSuggestion.create({ data: { sourceKey: d.sourceKey, title: d.title, reason: d.reason, payload: { ...d.payload, href: d.href }, state: "AUTO", taskId: task.id, decidedAt: now } });
+      await db.aiSuggestion.create({ data: { workspaceId: v.workspaceId, sourceKey: d.sourceKey, title: d.title, reason: d.reason, payload: { ...d.payload, href: d.href }, state: "AUTO", taskId: task.id, decidedAt: now } });
       autos++;
       counts.created++;
     } else {
-      await db.aiSuggestion.create({ data: { sourceKey: d.sourceKey, title: d.title, reason: d.reason, payload: { ...d.payload, href: d.href } } });
+      await db.aiSuggestion.create({ data: { workspaceId: v.workspaceId, sourceKey: d.sourceKey, title: d.title, reason: d.reason, payload: { ...d.payload, href: d.href } } });
       counts.suggested++;
     }
   }
@@ -203,50 +203,50 @@ async function makeTask(db: Db, v: Viewer, d: Pick<SuggestionDraft, "title" | "p
   return task;
 }
 
-export async function listSuggestions(db: Db) {
-  const rows = await db.aiSuggestion.findMany({ where: { state: "NEW" }, orderBy: { createdAt: "desc" }, take: 50 });
+export async function listSuggestions(db: Db, v: Viewer) {
+  const rows = await db.aiSuggestion.findMany({ where: { workspaceId: v.workspaceId, state: "NEW" }, orderBy: { createdAt: "desc" }, take: 50 });
   return rows.map((r) => ({ id: r.id, title: r.title, reason: r.reason, href: String((r.payload as { href?: unknown })?.href ?? ""), createdAt: r.createdAt }));
 }
 
 export async function acceptSuggestions(db: Db, v: Viewer, ids: string[]): Promise<number> {
   let made = 0;
   for (const id of ids.slice(0, 20)) {
-    const s = await db.aiSuggestion.findFirst({ where: { id, state: "NEW" } });
+    const s = await db.aiSuggestion.findFirst({ where: { id, workspaceId: v.workspaceId, state: "NEW" } });
     if (!s) continue;
     const p = s.payload as SuggestionDraft["payload"];
     const task = await makeTask(db, v, { title: s.title, payload: p });
-    await db.aiSuggestion.update({ where: { id }, data: { state: "ACCEPTED", taskId: task.id, decidedAt: new Date() } });
+    await db.aiSuggestion.update({ where: { id, workspaceId: v.workspaceId }, data: { state: "ACCEPTED", taskId: task.id, decidedAt: new Date() } });
     made++;
   }
   return made;
 }
 
-export async function dismissSuggestions(db: Db, ids: string[]): Promise<number> {
-  const r = await db.aiSuggestion.updateMany({ where: { id: { in: ids.slice(0, 50) }, state: "NEW" }, data: { state: "DISMISSED", decidedAt: new Date() } });
+export async function dismissSuggestions(db: Db, v: Viewer, ids: string[]): Promise<number> {
+  const r = await db.aiSuggestion.updateMany({ where: { workspaceId: v.workspaceId, id: { in: ids.slice(0, 50) }, state: "NEW" }, data: { state: "DISMISSED", decidedAt: new Date() } });
   return r.count;
 }
 
 export type AutopilotRun = "off" | "no-config" | "no-profile" | "not-yet" | "done" | "error";
 
 /** The daily background review. Runs at most once per local day (after 07:00), at most every 30 minutes after a failure, and only when the autopilot is on. */
-export async function runAutopilot(db: Db, vault: Vault, opts: { now?: Date; f?: Fetch; force?: boolean } = {}): Promise<AutopilotRun> {
+export async function runAutopilot(db: Db, workspaceId: string, vault: Vault, opts: { now?: Date; f?: Fetch; force?: boolean } = {}): Promise<AutopilotRun> {
   const now = opts.now ?? new Date();
-  const row = await db.aiSettings.findUnique({ where: { id: "ai" } });
+  const row = await db.aiSettings.findUnique({ where: { workspaceId } });
   if (!row || (row.autopilot !== "suggest" && row.autopilot !== "create")) return "off";
-  const cfg = await loadAiConfig(db, vault);
+  const cfg = await loadAiConfig(db, workspaceId, vault);
   if (!cfg || !cfg.apiKey) return "no-config";
-  const user = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
-  const viewer = user ? await loadViewer(db, user.id) : null;
+  const member = await db.member.findFirst({ where: { workspaceId, status: "ACTIVE", user: { isDemo: false } }, orderBy: { createdAt: "asc" } });
+  const viewer = member ? await loadViewer(db, member.userId, workspaceId) : null;
   if (!viewer) return "no-profile";
   const day = todayIn(viewer.timezone, now);
   const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: viewer.timezone, hour: "2-digit", hour12: false }).format(now)) % 24;
   if (!opts.force && (row.lastRunDay === day || hour < 7 || (row.lastRunAt && now.getTime() - row.lastRunAt.getTime() < COOLDOWN_MS))) return "not-yet";
-  await db.aiSettings.update({ where: { id: "ai" }, data: { lastRunAt: now } }); // a failed run waits out the cooldown instead of retrying every tick
+  await db.aiSettings.update({ where: { workspaceId }, data: { lastRunAt: now } }); // a failed run waits out the cooldown instead of retrying every tick
   try {
     const r = await analyzeWorkspace(db, viewer, cfg, { now, f: opts.f });
     await saveSuggestions(db, viewer, r.drafts, row.autopilot as Autopilot, now);
-    if (r.model) await rememberModel(db, r.model);
-    await db.aiSettings.update({ where: { id: "ai" }, data: { lastRunDay: day, lastSummary: r.summary || null } });
+    if (r.model) await rememberModel(db, workspaceId, r.model);
+    await db.aiSettings.update({ where: { workspaceId }, data: { lastRunDay: day, lastSummary: r.summary || null } });
     return "done";
   } catch (e) {
     console.error("AI autopilot failed:", e instanceof Error ? e.message : e);

@@ -25,7 +25,7 @@ export default async function AiPage({ searchParams }: { searchParams: Promise<{
       </>
     );
   }
-  const ai = await getAiView(db);
+  const ai = await getAiView(db, viewer.workspaceId);
   const projects = (await listProjects(db, viewer)).map((p) => ({ id: p.id, name: p.name }));
   return (
     <>
@@ -34,7 +34,7 @@ export default async function AiPage({ searchParams }: { searchParams: Promise<{
         subtitle="Let it review everything for you, ask about a pull request or issue, or turn notes into tasks."
         help={<>Answers use only what Mergeport has stored for repositories you can see, and link the items they come from. The assistant never changes anything by itself. Which model answers is chosen from the endpoint each time (<Link href="/settings#ai" className="underline">Settings</Link>).</>}
       />
-      <AiAssistant configured={ai.saved} projects={projects} defaultProjectId={projects[0]?.id ?? ""} suggestions={await listSuggestions(db)} summary={ai.lastSummary} lastRun={ai.lastRunAt ? formatInstant(ai.lastRunAt, viewer.timezone) : null} autopilot={ai.autopilot} initialTab={tab === "review" || tab === "ask" || tab === "tasks" || tab === "brief" || tab === "approvals" || tab === "today" ? tab : undefined} approvals={(await listPending(db)).map((p) => ({ id: p.id, summary: p.summary, detail: p.detail, href: p.href, createdAt: p.createdAt.toISOString(), error: p.error }))} />
+      <AiAssistant configured={ai.saved} projects={projects} defaultProjectId={projects[0]?.id ?? ""} suggestions={await listSuggestions(db, viewer)} summary={ai.lastSummary} lastRun={ai.lastRunAt ? formatInstant(ai.lastRunAt, viewer.timezone) : null} autopilot={ai.autopilot} initialTab={tab === "review" || tab === "ask" || tab === "tasks" || tab === "brief" || tab === "approvals" || tab === "today" ? tab : undefined} approvals={(await listPending(db, viewer)).map((p) => ({ id: p.id, summary: p.summary, detail: p.detail, href: p.href, createdAt: p.createdAt.toISOString(), error: p.error }))} />
     </>
   );
 }

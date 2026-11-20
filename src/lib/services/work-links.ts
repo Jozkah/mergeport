@@ -34,7 +34,7 @@ async function across(db: Db, v: Viewer, repos: { id: string; fullName: string }
 export async function linksForPull(db: Db, v: Viewer, workItemId: string): Promise<WorkLinks> {
   const item = await requireWorkItem(db, v, workItemId);
   if (item.type !== "PULL_REQUEST") return { machine: null, capturedAt: null, stale: false, branch: null, matches: [], mapped: false };
-  const repo = await db.repository.findUniqueOrThrow({ where: { id: item.repositoryId }, select: { id: true, fullName: true } });
+  const repo = await db.repository.findUniqueOrThrow({ where: { id: item.repositoryId, workspaceId: v.workspaceId }, select: { id: true, fullName: true } });
   return across(db, v, [repo], item.headRef);
 }
 
@@ -42,7 +42,7 @@ export async function linksForTask(db: Db, v: Viewer, taskId: string): Promise<W
   const t = await loadTask(db, v, taskId);
   const linked = t.workItemId ? await db.workItem.findUnique({ where: { id: t.workItemId }, select: { headRef: true, repositoryId: true, type: true } }) : null;
   const branch = t.branchRef ?? (linked?.type === "PULL_REQUEST" ? linked.headRef : null);
-  const repos = await db.repository.findMany({ where: { projects: { some: { projectId: t.projectId } }, ...(linked ? { id: linked.repositoryId } : {}) }, select: { id: true, fullName: true } });
+  const repos = await db.repository.findMany({ where: { workspaceId: v.workspaceId, projects: { some: { projectId: t.projectId } }, ...(linked ? { id: linked.repositoryId } : {}) }, select: { id: true, fullName: true } });
   return across(db, v, repos, branch);
 }
 

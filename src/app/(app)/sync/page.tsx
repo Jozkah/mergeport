@@ -23,19 +23,19 @@ const val = (v: unknown) => (v === undefined || v === null ? "none" : typeof v =
 export default async function SyncPage() {
   const { viewer } = await requireViewer();
   const engine = await getEngine();
-  const cfg = await db.teamConfig.findUnique({ where: { id: "team" } });
-  const spaces = await db.space.findMany({ orderBy: { createdAt: "asc" } });
-  const conflicts = await db.syncConflict.findMany({ where: { status: "OPEN" }, include: { space: true }, orderBy: { createdAt: "asc" } });
-  const restores = await db.hubRestore.findMany({ where: { status: "OPEN" }, include: { space: true }, orderBy: { at: "asc" } });
-  const quarantined = await db.outboxOp.findMany({ where: { status: "QUARANTINED" }, include: { space: true } });
-  const pendingOps = await db.outboxOp.findMany({ where: { status: { in: ["PENDING", "SENT", "FAILED"] } }, include: { space: true }, orderBy: { createdAt: "asc" }, take: 50 });
+  const cfg = await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } });
+  const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId }, orderBy: { createdAt: "asc" } });
+  const conflicts = await db.syncConflict.findMany({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { createdAt: "asc" } });
+  const restores = await db.hubRestore.findMany({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { at: "asc" } });
+  const quarantined = await db.outboxOp.findMany({ where: { status: "QUARANTINED", space: { workspaceId: viewer.workspaceId } }, include: { space: true } });
+  const pendingOps = await db.outboxOp.findMany({ where: { status: { in: ["PENDING", "SENT", "FAILED"] }, space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { createdAt: "asc" }, take: 50 });
   const poll = cfg?.pollSeconds ?? 30;
   const delay = expectedConsistencyDelaySeconds(poll);
   // A job still marked RUNNING by a process that died is not work in progress; it is reclaimed on a timer.
   const bootAt = processStartedAt();
-  const own = { workspaceId: viewer.workspaceId, isDemo: false, trackingStatus: { not: "REMOVED" as const } };
-  const sourceRepos = await db.repository.findMany({ where: own, select: { id: true, fullName: true, trackingStatus: true, rateLimited: true, syncError: true, statusDetail: true, lastSyncedAt: true }, orderBy: { fullName: "asc" } });
-  const [running, queued] = await Promise.all([db.job.count({ where: { type: "sync.repository", status: "RUNNING", lockedAt: { gte: bootAt } } }), db.job.count({ where: { type: "sync.repository", status: "QUEUED" } })]);
+  const own = { isDemo: false, trackingStatus: { not: "REMOVED" as const } };
+  const sourceRepos = await db.repository.findMany({ where: { workspaceId: viewer.workspaceId, ...own }, select: { id: true, fullName: true, trackingStatus: true, rateLimited: true, syncError: true, statusDetail: true, lastSyncedAt: true }, orderBy: { fullName: "asc" } });
+  const [running, queued] = await Promise.all([db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "RUNNING", lockedAt: { gte: bootAt } } }), db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "QUEUED" } })]);
   const source = deriveSourceStatus({
     tracked: sourceRepos.length, running, queued,
     refused: sourceRepos.filter((r) => r.trackingStatus === "DISCONNECTED").length,
@@ -45,7 +45,7 @@ export default async function SyncPage() {
   });
   const sourceProblems = sourceRepos.filter((r) => r.trackingStatus === "DISCONNECTED" || r.rateLimited || r.syncError);
   const lastSource = sourceRepos.reduce<Date | null>((m, r) => (r.lastSyncedAt && (!m || r.lastSyncedAt > m) ? r.lastSyncedAt : m), null);
-  const center = await syncCenter(db, poll);
+  const center = await syncCenter(db, viewer.workspaceId, poll);
   const teamSvc = await getTeamService();
   const quota = teamSvc && !isDemo() ? await Promise.race([teamSvc.rateLimit(), new Promise<null>((r) => setTimeout(() => r(null), 3000))]) : null;
   const states = engine ? await Promise.all(spaces.map(async (s) => [s, await engine.stateFor(s)] as const)) : [];

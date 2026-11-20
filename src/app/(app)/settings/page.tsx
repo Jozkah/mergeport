@@ -36,8 +36,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const setup = viewer.isAdmin && !isDemo() ? await planAutoSetup(db, viewer, { clonesFolder: clones }) : null;
   const prefs = await getPrefs(db, user.id);
   const { summary: watch, config: wcfg } = await watchView(db);
-  const ai = isDemo() ? null : await getAiView(db);
-  const poll = (await db.teamConfig.findUnique({ where: { id: "team" } }))?.pollSeconds ?? 30;
+  const ai = isDemo() ? null : await getAiView(db, viewer.workspaceId);
+  const poll = (await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } }))?.pollSeconds ?? 30;
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
     <>

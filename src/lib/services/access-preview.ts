@@ -24,9 +24,9 @@ const LABEL: Record<string, string> = { repo: "repositories", project: "projects
 
 export async function spaceContents(db: Db, v: Viewer, spaceId: string): Promise<SpaceContents> {
   if (!v.isAdmin) throw new ValidationError("Only an administrator can preview what a space shares");
-  const space = await db.space.findUnique({ where: { id: spaceId } });
+  const space = await db.space.findUnique({ where: { id: spaceId, workspaceId: v.workspaceId } });
   if (!space) throw new NotFoundError();
-  const team = await db.teamConfig.findUnique({ where: { id: "team" } });
+  const team = await db.teamConfig.findUnique({ where: { workspaceId: v.workspaceId } });
   const counts: Record<string, number> = {};
   const repos: { fullName: string; visibility: string }[] = [];
   const projectNames = new Map<string, string>();
@@ -34,7 +34,7 @@ export async function spaceContents(db: Db, v: Viewer, spaceId: string): Promise
   const titles: string[] = [];
   let tasks = 0;
   for (const def of ENTITY_TYPES) {
-    const rows = (await def.list(db, { commonSpaceId: team?.commonSpaceId ?? null })).filter((r) => r.spaceId === spaceId);
+    const rows = (await def.list(db, { commonSpaceId: team?.commonSpaceId ?? null, workspaceId: v.workspaceId })).filter((r) => r.spaceId === spaceId);
     if (rows.length === 0) continue;
     counts[LABEL[def.type] ?? def.type] = rows.length;
     for (const r of rows) {

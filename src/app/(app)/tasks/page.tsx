@@ -40,8 +40,8 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
   const [tasks, counts] = await Promise.all([listTasks(db, viewer, { scope, projectId: project?.id, status, label: sp.label || undefined, q: sp.q }), taskCounts(db, viewer)]);
   const peopleByProject: Record<string, string[]> = {};
   for (const p of projects) peopleByProject[p.id] = await assigneeCandidates(db, viewer, p.id);
-  const ai = isDemo() ? null : await getAiView(db);
-  const pendingAi = ai?.saved ? await db.aiSuggestion.count({ where: { state: "NEW" } }) : 0;
+  const ai = isDemo() ? null : await getAiView(db, viewer.workspaceId);
+  const pendingAi = ai?.saved ? await db.aiSuggestion.count({ where: { workspaceId: viewer.workspaceId, state: "NEW" } }) : 0;
   const today = todayIn(viewer.timezone);
   const now = new Date();
   const href = (over: Partial<Search>) => {

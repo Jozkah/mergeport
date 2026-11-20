@@ -23,9 +23,9 @@ const noDemo = () => {
 
 export async function saveAiSettingsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
+    const { viewer } = await requireViewer();
     noDemo();
-    await saveAiSettings(db, vault(), { baseUrl: str(fd, "baseUrl"), apiKey: str(fd, "apiKey"), clearKey: fd.get("clearKey") === "on", model: str(fd, "model"), autopilot: str(fd, "autopilot") });
+    await saveAiSettings(db, viewer.workspaceId, vault(), { baseUrl: str(fd, "baseUrl"), apiKey: str(fd, "apiKey"), clearKey: fd.get("clearKey") === "on", model: str(fd, "model"), autopilot: str(fd, "autopilot") });
     revalidatePath("/settings");
     revalidatePath("/tasks");
     return { ok: true, message: "Saved" };
@@ -35,9 +35,9 @@ export async function saveAiSettingsAction(fd: FormData): Promise<ActionResult> 
 /** Asks the endpoint what it offers now, using the address and key in the form (or the saved key when the key field is empty). */
 export async function listAiModelsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
+    const { viewer } = await requireViewer();
     noDemo();
-    const saved = await loadAiConfig(db, vault());
+    const saved = await loadAiConfig(db, viewer.workspaceId, vault());
     const baseUrl = normalizeBaseUrl(str(fd, "baseUrl") || saved?.baseUrl || DEFAULT_AI_BASE_URL);
     const apiKey = str(fd, "apiKey") || saved?.apiKey || null;
     const info = await listModelInfo({ baseUrl, apiKey, model: null });
@@ -70,8 +70,8 @@ export async function acceptSuggestionsAction(fd: FormData): Promise<ActionResul
 
 export async function dismissSuggestionsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
-    const n = await dismissSuggestions(db, idList(fd));
+    const { viewer } = await requireViewer();
+    const n = await dismissSuggestions(db, viewer, idList(fd));
     revalidatePath("/ai");
     return { ok: true, message: `Dismissed ${n}` };
   });
@@ -119,8 +119,8 @@ export async function approveActionAction(fd: FormData): Promise<ActionResult> {
 
 export async function rejectActionAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
-    const done = await reject(db, str(fd, "id"));
+    const { viewer } = await requireViewer();
+    const done = await reject(db, viewer, str(fd, "id"));
     revalidatePath("/ai");
     return done ? { ok: true, message: "Rejected. Nothing was sent." } : { ok: false, error: "That request is no longer waiting." };
   });

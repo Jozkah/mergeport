@@ -234,7 +234,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         {labels.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{labels.map((l) => <LabelChip key={l.name} {...l} />)}</div>}
       </header>
 
-      {!isDemo() && (await getAiView(db)).saved && <AiTool className="mb-5" tool="item" id={item.id} label="Where does this stand?" hint="AI summary of the discussion, what blocks it and the next step." />}
+      {!isDemo() && (await getAiView(db, viewer.workspaceId)).saved && <AiTool className="mb-5" tool="item" id={item.id} label="Where does this stand?" hint="AI summary of the discussion, what blocks it and the next step." />}
 
       {isPr && readiness && item.state === "OPEN" && (
         <div className="mb-5">

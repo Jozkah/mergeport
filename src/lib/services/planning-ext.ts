@@ -12,7 +12,7 @@ import { planningWhere } from "./queries";
 async function item(db: Db, v: Viewer, id: string) {
   const it = await db.planningItem.findFirst({ where: { id, ...(await planningWhere(db, v)) }, include: { column: true, workItem: true } });
   if (!it) throw new NotFoundError();
-  await assertProjectWritable(db, it.projectId); // every caller of item() mutates the card
+  await assertProjectWritable(db, v, it.projectId); // every caller of item() mutates the card
   if (it.workItem) await requireRepo(db, v, it.workItem.repositoryId, "manageWork");
   return it;
 }
@@ -228,10 +228,10 @@ export async function setShipped(db: Db, v: Viewer, milestoneId: string, shipped
   const ms = await db.dashboardMilestone.findFirst({ where: { id: milestoneId, workspaceId: v.workspaceId } });
   if (!ms) throw new NotFoundError();
   if (!v.isAdmin) throw new ValidationError("Only an administrator can mark a release as shipped");
-  await assertProjectWritable(db, ms.projectId);
+  await assertProjectWritable(db, v, ms.projectId);
   const url = info.url?.trim() || null;
   if (url && !/^https:\/\//i.test(url)) throw new ValidationError("The release link must start with https://");
-  await db.dashboardMilestone.update({ where: { id: milestoneId }, data: shipped ? { shippedAt: new Date(), releaseTag: info.tag?.trim().slice(0, 80) || null, releaseUrl: url } : { shippedAt: null } });
+  await db.dashboardMilestone.update({ where: { id: milestoneId, workspaceId: v.workspaceId }, data: shipped ? { shippedAt: new Date(), releaseTag: info.tag?.trim().slice(0, 80) || null, releaseUrl: url } : { shippedAt: null } });
   await audit(db, v, shipped ? "milestone.ship" : "milestone.unship", { type: "DashboardMilestone", id: milestoneId });
 }
 
@@ -240,7 +240,7 @@ export async function setShipped(db: Db, v: Viewer, milestoneId: string, shipped
 export async function setAutomation(db: Db, v: Viewer, projectId: string, mode: "off" | "suggest") {
   if (!v.isAdmin) throw new ValidationError("Only an administrator can change a project's automation");
   await requireProjectWrite(db, v, projectId);
-  await db.project.update({ where: { id: projectId }, data: { automation: mode } });
+  await db.project.update({ where: { id: projectId, workspaceId: v.workspaceId }, data: { automation: mode } });
   await audit(db, v, "project.automation", { type: "Project", id: projectId }, { mode });
 }
 
@@ -266,7 +266,7 @@ export async function suggestedMoves(db: Db, v: Viewer, projectId: string): Prom
 
 export async function applySuggestion(db: Db, v: Viewer, itemId: string) {
   const it = await item(db, v, itemId);
-  const project = await db.project.findUniqueOrThrow({ where: { id: it.projectId } });
+  const project = await db.project.findUniqueOrThrow({ where: { id: it.projectId, workspaceId: v.workspaceId } });
   const current = (await suggestedMoves(db, v, it.projectId)).find((s) => s.itemId === itemId);
   if (project.automation !== "suggest" || !current) throw new ValidationError("That suggestion no longer applies");
   const done = await db.planningColumn.findFirstOrThrow({ where: { projectId: it.projectId, key: "done" } });

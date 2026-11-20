@@ -47,7 +47,7 @@ async function main() {
   for (const [scope, name, query] of views) await step(`saved view "${name}"`, () => saveView(db, v, { scope, name, query }));
 
   // Only the project that is not shared with anyone: its board and automation settings stay on this computer.
-  const mine = await db.project.findFirst({ where: { name: "Mine", spaceId: null } });
+  const mine = await db.project.findFirst({ where: { workspaceId: v.workspaceId, name: "Mine", spaceId: null } });
   if (mine) {
     await step('board "Delivery" on Mine', () => createBoard(db, v, { projectId: mine.id, template: "delivery", density: "compact" }));
     await step('board "Maintenance" on Mine', () => createBoard(db, v, { projectId: mine.id, template: "maintenance", groupBy: "repository", density: "compact" }));

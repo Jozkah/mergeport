@@ -43,7 +43,7 @@ export async function setSubscriptionMuted(db: Db, v: Viewer, id: string, muted:
   if (!v.isAdmin) throw new ValidationError("Only an administrator can change shared subscriptions");
   const s = await db.upstreamSubscription.findFirst({ where: { id, workspaceId: v.workspaceId } });
   if (!s) throw new NotFoundError();
-  await db.upstreamSubscription.update({ where: { id }, data: { muted } });
+  await db.upstreamSubscription.update({ where: { id, workspaceId: v.workspaceId }, data: { muted } });
 }
 
 export async function deleteSubscription(db: Db, v: Viewer, id: string) {
@@ -63,7 +63,7 @@ export async function upstreamRelevance(db: Db, v: Viewer, mappingId: string): P
   const byNumber = new Map(items.map((i) => [i.number, i]));
   const filesOf = async (i: (typeof items)[number]): Promise<string[] | null> => {
     if (i.type !== "PULL_REQUEST" || !i.headSha) return null;
-    const hit = await db.gitCache.findUnique({ where: { key: `prfiles:2:${i.repositoryId}:${i.number}:${i.baseRef ?? "-"}:${i.headSha}` } });
+    const hit = await db.gitCache.findUnique({ where: { workspaceId_key: { workspaceId: v.workspaceId, key: `prfiles:2:${i.repositoryId}:${i.number}:${i.baseRef ?? "-"}:${i.headSha}` } } });
     const files = (hit?.payload as { files?: { filename: string }[] } | undefined)?.files;
     return files ? files.map((f) => f.filename) : null;
   };

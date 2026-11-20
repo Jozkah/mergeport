@@ -336,32 +336,32 @@ const stored = (r: { id: string; day: string; generatedAt: Date; readAt: Date | 
   return p && p.version === 1 ? { id: r.id, day: r.day, generatedAt: r.generatedAt, readAt: r.readAt, payload: p } : null;
 };
 
-export async function getDigest(db: Db, userId: string, day: string): Promise<StoredDigest | null> {
-  const r = await db.dailyDigest.findUnique({ where: { userId_day: { userId, day } } });
+export async function getDigest(db: Db, v: Pick<Viewer, "userId" | "workspaceId">, day: string): Promise<StoredDigest | null> {
+  const r = await db.dailyDigest.findUnique({ where: { workspaceId_userId_day: { workspaceId: v.workspaceId, userId: v.userId, day } } });
   return r ? stored(r) : null;
 }
 
 /** Days that have a stored digest, newest first. */
-export async function listDigestDays(db: Db, userId: string, take = 60): Promise<{ day: string; readAt: Date | null }[]> {
-  return db.dailyDigest.findMany({ where: { userId }, orderBy: { day: "desc" }, take, select: { day: true, readAt: true } });
+export async function listDigestDays(db: Db, v: Pick<Viewer, "userId" | "workspaceId">, take = 60): Promise<{ day: string; readAt: Date | null }[]> {
+  return db.dailyDigest.findMany({ where: { workspaceId: v.workspaceId, userId: v.userId }, orderBy: { day: "desc" }, take, select: { day: true, readAt: true } });
 }
 
 /**
  * The newest stored digest. Demo mode has no scheduler (nothing runs there), so the first one is made on demand from the demo data.
  */
 export async function latestDigest(db: Db, viewer: Viewer, now = new Date()): Promise<StoredDigest | null> {
-  const newest = await db.dailyDigest.findFirst({ where: { userId: viewer.userId }, orderBy: { day: "desc" } });
+  const newest = await db.dailyDigest.findFirst({ where: { workspaceId: viewer.workspaceId, userId: viewer.userId }, orderBy: { day: "desc" } });
   if (!newest && isDemo()) return (await generateDigest(db, viewer, { now })).digest;
   return newest ? stored(newest) : null;
 }
 
-export async function unreadDigestCount(db: Db, userId: string): Promise<number> {
-  return db.dailyDigest.count({ where: { userId, readAt: null } });
+export async function unreadDigestCount(db: Db, v: Pick<Viewer, "userId" | "workspaceId">): Promise<number> {
+  return db.dailyDigest.count({ where: { workspaceId: v.workspaceId, userId: v.userId, readAt: null } });
 }
 
-export async function markDigestRead(db: Db, userId: string, day: string, now = new Date()): Promise<void> {
-  await db.dailyDigest.updateMany({ where: { userId, day, readAt: null }, data: { readAt: now } });
-  await db.notification.updateMany({ where: { userId, kind: DIGEST_KIND, href: digestHref(day), readAt: null }, data: { readAt: now } });
+export async function markDigestRead(db: Db, v: Pick<Viewer, "userId" | "workspaceId">, day: string, now = new Date()): Promise<void> {
+  await db.dailyDigest.updateMany({ where: { workspaceId: v.workspaceId, userId: v.userId, day, readAt: null }, data: { readAt: now } });
+  await db.notification.updateMany({ where: { workspaceId: v.workspaceId, userId: v.userId, kind: DIGEST_KIND, href: digestHref(day), readAt: null }, data: { readAt: now } });
 }
 
 /**
@@ -372,19 +372,19 @@ export async function markDigestRead(db: Db, userId: string, day: string, now = 
 export async function generateDigest(db: Db, viewer: Viewer, opts: BuildOptions & { replace?: boolean } = {}): Promise<{ digest: StoredDigest; created: boolean }> {
   const now = opts.now ?? new Date();
   const day = opts.day ?? reportedDay(now, opts.tz ?? viewer.timezone).day;
-  const existing = await getDigest(db, viewer.userId, day);
+  const existing = await getDigest(db, viewer, day);
   if (existing && !opts.replace) return { digest: existing, created: false };
   const payload = await buildDigest(db, viewer, { ...opts, now, day });
   const json = payload as unknown as Prisma.InputJsonValue;
   if (existing) {
-    const row = await db.dailyDigest.update({ where: { id: existing.id }, data: { payload: json, generatedAt: now, readAt: null } });
+    const row = await db.dailyDigest.update({ where: { id: existing.id, workspaceId: viewer.workspaceId }, data: { payload: json, generatedAt: now, readAt: null } });
     return { digest: stored(row)!, created: false };
   }
   let row;
   try {
-    row = await db.dailyDigest.create({ data: { userId: viewer.userId, day, payload: json, generatedAt: now } });
+    row = await db.dailyDigest.create({ data: { workspaceId: viewer.workspaceId, userId: viewer.userId, day, payload: json, generatedAt: now } });
   } catch {
-    const raced = await getDigest(db, viewer.userId, day); // another caller stored it between our read and write
+    const raced = await getDigest(db, viewer, day); // another caller stored it between our read and write
     if (raced) return { digest: raced, created: false };
     throw new Error("Could not store the digest");
   }
@@ -400,13 +400,13 @@ export type DigestRun = "generated" | "disabled" | "not-yet" | "have-it" | "no-p
  * One scheduler check, safe to repeat every few minutes (and the catch-up after the app was closed at the configured hour): generates
  * the digest of the previous local day when the hour has passed and none exists. Reads only the local database.
  */
-export async function runDailyDigest(db: Db, now = new Date()): Promise<DigestRun> {
-  const user = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
-  const viewer = user ? await loadViewer(db, user.id) : null;
+export async function runDailyDigest(db: Db, workspaceId: string, now = new Date()): Promise<DigestRun> {
+  const member = await db.member.findFirst({ where: { workspaceId, status: "ACTIVE", user: { isDemo: false } }, orderBy: { createdAt: "asc" } });
+  const viewer = member ? await loadViewer(db, member.userId, workspaceId) : null;
   if (!viewer) return "no-profile";
   const { digest: settings } = await getPrefs(db, viewer.userId);
   const { day } = reportedDay(now, viewer.timezone);
-  const haveDay = (await db.dailyDigest.count({ where: { userId: viewer.userId, day } })) > 0;
+  const haveDay = (await db.dailyDigest.count({ where: { workspaceId: viewer.workspaceId, userId: viewer.userId, day } })) > 0;
   if (!settings.enabled) return "disabled";
   if (haveDay) return "have-it";
   if (!digestDue({ now, tz: viewer.timezone, settings, haveDay })) return "not-yet";

@@ -53,6 +53,39 @@ const ENTRIES: Entry[] = [
   { table: "ReviewDraft", delegate: "reviewDraft", key: ["id"], remap: { userId: "user" } },
 ];
 
+/**
+ * The rows of each table that belong to ONE workspace (and, for personal state, one person). An export reads nothing else, so a
+ * database holding many workspaces never leaks one into another's backup. Every table in ENTRIES must have an entry here.
+ */
+const IN_PROJECT = (w: string) => ({ project: { workspaceId: w } });
+const SCOPE: Record<string, (w: string, userId: string) => Record<string, unknown>> = {
+  Project: (w) => ({ workspaceId: w }),
+  ProjectRepository: IN_PROJECT,
+  PlanningColumn: IN_PROJECT,
+  DashboardMilestone: (w) => ({ workspaceId: w }),
+  Epic: IN_PROJECT,
+  Iteration: IN_PROJECT,
+  PlanBoard: IN_PROJECT,
+  PlanningItem: IN_PROJECT,
+  PlanningLink: (w) => ({ from: IN_PROJECT(w) }),
+  TaskComment: (w) => ({ item: IN_PROJECT(w) }),
+  TaskCheckItem: (w) => ({ item: IN_PROJECT(w) }),
+  PlanEvent: IN_PROJECT,
+  ReviewRule: (w) => ({ workspaceId: w }),
+  WaitingRule: (w) => ({ workspaceId: w }),
+  ForkMapping: (w) => ({ fork: { workspaceId: w } }),
+  UpstreamIssueTriage: (w) => ({ mapping: { fork: { workspaceId: w } } }),
+  BackportRecord: (w) => ({ mapping: { fork: { workspaceId: w } } }),
+  LabelMap: (w) => ({ workspaceId: w }),
+  UpstreamSubscription: (w) => ({ workspaceId: w }),
+  ReviewerAvailability: (w) => ({ workspaceId: w }),
+  SavedFilter: (_w, u) => ({ userId: u }),
+  NotificationPref: (_w, u) => ({ userId: u }),
+  InboxState: (_w, u) => ({ userId: u }),
+  SeenState: (_w, u) => ({ userId: u }),
+  ReviewDraft: (_w, u) => ({ userId: u }),
+};
+
 /** Columns that must never travel, whatever a table holds. A final guard behind the table list. */
 const FORBIDDEN = /(^|_)(token|secret|password|rootPath|path)$/i;
 const PATH_OK = new Set(["path"]); // a repository-relative file path in a review draft is content, not a local folder
@@ -99,14 +132,14 @@ export async function exportBackup(db: Db, v: Viewer, now = new Date()): Promise
   const tables: Backup["tables"] = {};
   for (const e of ENTRIES) {
     const cols = (await columns(db, e.table)).filter((c) => !FORBIDDEN.test(c) || (e.table === "ReviewDraft" && PATH_OK.has(c)));
-    const rows = await (db as never as Record<string, { findMany(a: unknown): Promise<Record<string, unknown>[]> }>)[e.delegate].findMany({});
+    const rows = await (db as never as Record<string, { findMany(a: unknown): Promise<Record<string, unknown>[]> }>)[e.delegate].findMany({ where: SCOPE[e.table](v.workspaceId, v.userId) });
     tables[e.table] = rows.map((r) => Object.fromEntries(cols.filter((c) => c in r).map((c) => [c, r[c]])));
   }
   // Rows of other people's personal state never belong in this person's backup.
   tables.SavedFilter = (tables.SavedFilter ?? []).filter((r) => r.userId === v.userId);
   for (const t of ["NotificationPref", "InboxState", "SeenState", "ReviewDraft"]) tables[t] = (tables[t] ?? []).filter((r) => r.userId === v.userId);
-  const ops = await db.outboxOp.findMany({ where: { status: { in: ["PENDING", "FAILED", "SENT", "QUARANTINED"] } } });
-  const spaces = new Map((await db.space.findMany({ select: { id: true, repoOwner: true, repoName: true, remoteId: true } })).map((s) => [s.id, s]));
+  const ops = await db.outboxOp.findMany({ where: { status: { in: ["PENDING", "FAILED", "SENT", "QUARANTINED"] }, space: { workspaceId: v.workspaceId } } });
+  const spaces = new Map((await db.space.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true, repoOwner: true, repoName: true, remoteId: true } })).map((s) => [s.id, s]));
   const outbox = ops.map((o) => ({ id: o.id, entityType: o.entityType, entityId: o.entityId, kind: o.kind, data: o.data, baseVersion: o.baseVersion, status: o.status, space: spaces.get(o.spaceId)?.remoteId ?? null }));
   const bundle: Backup = {
     format: BACKUP_FORMAT,
@@ -148,7 +181,7 @@ async function mapsFor(db: Db, v: Viewer, b: Backup): Promise<Maps> {
     const id = local.get(r.githubId);
     if (id) repoById.set(r.id, id);
   }
-  const spaces = await db.space.findMany({ select: { id: true, remoteId: true } });
+  const spaces = await db.space.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true, remoteId: true } });
   return { workspaceId: v.workspaceId, userId: v.userId, memberId: v.memberId, repoById, spaceByRemote: new Map(spaces.map((s) => [s.remoteId, s.id])), spaces: new Set(spaces.map((s) => s.id)) };
 }
 
@@ -176,11 +209,15 @@ async function pass(db: Db, v: Viewer, b: Backup, write: boolean): Promise<Resto
   const m = await mapsFor(db, v, b);
   const tables: TablePreview[] = [];
   const skipped = new Map<string, number>();
+  // Projects this workspace owns (plus the ones this restore creates): a row of a child table may only name one of them.
+  const ownProjects = new Set((await db.project.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true } })).map((p) => p.id));
+  const restoredItems = new Set<string>();
+  const ownsItem = async (id: unknown) => typeof id === "string" && (restoredItems.has(id) || (await db.planningItem.count({ where: { id, project: { workspaceId: v.workspaceId } } })) > 0);
   for (const e of ENTRIES) {
     const rows = b.tables[e.table] ?? [];
     const cols = await columns(db, e.table);
     const t: TablePreview = { table: e.table, create: 0, update: 0, same: 0, skipped: 0 };
-    const delegate = (db as never as Record<string, { findUnique(a: unknown): Promise<Record<string, unknown> | null>; create(a: unknown): Promise<unknown>; update(a: unknown): Promise<unknown> }>)[e.delegate];
+    const delegate = (db as never as Record<string, { findUnique(a: unknown): Promise<Record<string, unknown> | null>; findFirst(a: unknown): Promise<Record<string, unknown> | null>; create(a: unknown): Promise<unknown>; update(a: unknown): Promise<unknown> }>)[e.delegate];
     for (const raw of rows) {
       const r = remapRow(e, Object.fromEntries(Object.entries(raw).filter(([c]) => cols.includes(c))), m);
       if ("skip" in r) {
@@ -189,10 +226,29 @@ async function pass(db: Db, v: Viewer, b: Backup, write: boolean): Promise<Resto
         continue;
       }
       let row = r.row;
+      if (typeof row.projectId === "string" && e.table !== "Project" && !ownProjects.has(row.projectId)) {
+        t.skipped++;
+        skipped.set(`${e.table}|belongs to another workspace`, (skipped.get(`${e.table}|belongs to another workspace`) ?? 0) + 1);
+        continue;
+      }
       // A card that followed a GitHub item is re-linked by the next sync (it keeps repository id and number); the local link is not guessed here.
       if (e.table === "PlanningItem") row = { ...row, workItemId: null };
+      const itemRefs = e.table === "PlanningLink" ? [row.fromId, row.toId] : e.table === "TaskComment" || e.table === "TaskCheckItem" ? [row.itemId] : [];
+      if (itemRefs.length && !(await Promise.all(itemRefs.map(ownsItem))).every(Boolean)) {
+        t.skipped++;
+        skipped.set(`${e.table}|belongs to another workspace`, (skipped.get(`${e.table}|belongs to another workspace`) ?? 0) + 1);
+        continue;
+      }
       const where = e.compound ? { [e.compound]: Object.fromEntries(e.key.map((k) => [k, row[k]])) } : { [e.key[0]]: row[e.key[0]] };
       const cur = await delegate.findUnique({ where });
+      // A row with this key that exists but is not this workspace's (or this person's) is never touched: a crafted file cannot reach into another tenant.
+      if (cur && !(await delegate.findFirst({ where: { AND: [Object.fromEntries(e.key.map((k) => [k, row[k]])), SCOPE[e.table](v.workspaceId, v.userId)] } }))) {
+        t.skipped++;
+        skipped.set(`${e.table}|belongs to another workspace`, (skipped.get(`${e.table}|belongs to another workspace`) ?? 0) + 1);
+        continue;
+      }
+      if (e.table === "Project") ownProjects.add(String(row.id));
+      if (e.table === "PlanningItem") restoredItems.add(String(row.id));
       if (!cur) {
         t.create++;
         if (write) await delegate.create({ data: row });

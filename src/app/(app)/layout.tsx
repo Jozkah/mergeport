@@ -53,7 +53,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     db.repository.findMany({ where: repoWhere(viewer), select: { id: true, fullName: true }, orderBy: { fullName: "asc" }, take: 300 }),
   ]);
   // What the AI has waiting for you: suggested tasks, and requests from AI apps to approve. Shown on the sidebar row and the top-bar button.
-  const [aiSuggestions, aiRequests] = isDemo() ? [0, 0] : await Promise.all([db.aiSuggestion.count({ where: { state: "NEW" } }), pendingCount(db)]);
+  const [aiSuggestions, aiRequests] = isDemo() ? [0, 0] : await Promise.all([db.aiSuggestion.count({ where: { workspaceId: viewer.workspaceId, state: "NEW" } }), pendingCount(db, viewer)]);
   const counts = {
     needsMyReview: q.needsMyReview.length,
     needsTeam: q.needsTeamReview.length,
@@ -61,7 +61,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     changes: q.changesRequested.length,
     blocked: q.blocked.length,
     inbox: (await inbox(db, viewer, { queues: q })).unread,
-    digest: await unreadDigestCount(db, viewer.userId),
+    digest: await unreadDigestCount(db, viewer),
     ai: aiSuggestions + aiRequests,
     tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login.toLowerCase(), column: { key: { not: "done" } } }] } }),
   };
@@ -69,13 +69,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const profile = await checkProfile(); // last known answer; refreshed in the background, never waits on gh
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   const [spaceCount, conflictRows, restoreRows, quarantined, pendingOps, offlineSpaces] = await Promise.all([
-    db.space.count(),
-    db.syncConflict.count({ where: { status: "OPEN" } }),
+    db.space.count({ where: { workspaceId: viewer.workspaceId } }),
+    db.syncConflict.count({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } } }),
     // A restored server needs a decision (send my copies again, or keep the server's), like a conflict does.
-    db.hubRestore.count({ where: { status: "OPEN" } }),
-    db.outboxOp.count({ where: { status: "QUARANTINED" } }),
-    db.outboxOp.count({ where: { status: { in: ["PENDING", "SENT", "FAILED"] } } }),
-    db.space.count({ where: { lastError: "offline" } }),
+    db.hubRestore.count({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } } }),
+    db.outboxOp.count({ where: { status: "QUARANTINED", space: { workspaceId: viewer.workspaceId } } }),
+    db.outboxOp.count({ where: { status: { in: ["PENDING", "SENT", "FAILED"] }, space: { workspaceId: viewer.workspaceId } } }),
+    db.space.count({ where: { workspaceId: viewer.workspaceId, lastError: "offline" } }),
   ]);
   const openConflicts = conflictRows + restoreRows;
   // The single state shown in the top bar is the MOST SEVERE one across spaces (what needs a person comes first).
@@ -83,22 +83,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   let aggregate: SyncStateName = openConflicts ? "conflict" : quarantined ? "revoked" : offlineSpaces ? "offline" : pendingOps ? "pending" : "synced";
   const engine = await getEngine();
   if (engine && spaceCount > 0) {
-    const states = await Promise.all((await db.space.findMany()).map(async (s) => (await engine.stateFor(s)).state as SyncStateName));
+    const states = await Promise.all((await db.space.findMany({ where: { workspaceId: viewer.workspaceId } })).map(async (s) => (await engine.stateFor(s)).state as SyncStateName));
     aggregate = states.sort((x, y) => SEVERITY.indexOf(x) - SEVERITY.indexOf(y))[0] ?? aggregate;
   }
   if (restoreRows) aggregate = "conflict";
   // Refreshing tracked source repositories is real work too, and it exists with no team space at all.
   // A job still marked RUNNING by a process that died is not work in progress; it is reclaimed on a timer.
   const bootAt = processStartedAt();
-  const own = { workspaceId: viewer.workspaceId, isDemo: false, trackingStatus: { not: "REMOVED" as const } };
+  const own = { isDemo: false, trackingStatus: { not: "REMOVED" as const } };
   const [tracked, running, queued, refused, rateLimited, failed, neverSynced] = await Promise.all([
-    db.repository.count({ where: own }),
-    db.job.count({ where: { type: "sync.repository", status: "RUNNING", lockedAt: { gte: bootAt } } }),
-    db.job.count({ where: { type: "sync.repository", status: "QUEUED" } }),
-    db.repository.count({ where: { ...own, trackingStatus: "DISCONNECTED" } }),
-    db.repository.count({ where: { ...own, rateLimited: true } }),
-    db.repository.count({ where: { ...own, trackingStatus: "ACTIVE", rateLimited: false, syncError: { not: null } } }),
-    db.repository.count({ where: { ...own, lastSyncedAt: null } }),
+    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own } }),
+    db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "RUNNING", lockedAt: { gte: bootAt } } }),
+    db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "QUEUED" } }),
+    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, trackingStatus: "DISCONNECTED" } }),
+    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, rateLimited: true } }),
+    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, trackingStatus: "ACTIVE", rateLimited: false, syncError: { not: null } } }),
+    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, lastSyncedAt: null } }),
   ]);
   const source = deriveSourceStatus({ tracked, running, queued, refused, rateLimited, failed, neverSynced });
   const candidates: { state: SyncStateName; pending: number; conflicts: number; detail?: string; scope?: "source" }[] = [];
@@ -109,7 +109,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
   const wsList = isDemo() ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId.toString());
   const workspaces = wsList && { ...wsList, switchable };
-  const aiQuick = isDemo() || !(await getAiView(db)).saved ? null : <AiQuick suggestions={aiSuggestions} requests={aiRequests} />;
+  const aiQuick = isDemo() || !(await getAiView(db, viewer.workspaceId)).saved ? null : <AiQuick suggestions={aiSuggestions} requests={aiRequests} />;
   const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: ws.name };
   return (
     <TooltipProvider>

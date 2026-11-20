@@ -19,7 +19,7 @@ export const metadata = { title: "Repositories" };
 export default async function Repositories({ searchParams: _searchParams }: { searchParams: Promise<{ all?: string }> }) {
   const { viewer } = await requireViewer();
   const now = new Date();
-  const [repos, spaces] = await Promise.all([listRepositories(db, viewer), db.space.findMany({ where: { access: "OK" }, orderBy: [{ kind: "asc" }, { name: "asc" }] })]);
+  const [repos, spaces] = await Promise.all([listRepositories(db, viewer), db.space.findMany({ where: { workspaceId: viewer.workspaceId, access: "OK" }, orderBy: [{ kind: "asc" }, { name: "asc" }] })]);
   // Repositories the team's GitHub App covers (last result of "Add my tracked repositories"; local data, no GitHub request).
   const instant = await instantRepoIds(db);
   const watch = await watchView(db, instant);

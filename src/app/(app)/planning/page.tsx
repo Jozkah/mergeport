@@ -53,7 +53,7 @@ export default async function Planning({ searchParams }: { searchParams: Promise
   const colName = new Map(columns.map((c) => [c.key, c.name]));
   const projectsSeg = <Segmented label="Project" items={projects.map((p) => ({ href: href({ project: p.id }), label: p.name, active: p.id === project.id }))} />;
   const viewSeg = <Segmented label="View" items={VIEWS.map((v) => ({ href: href({ view: v, board: "" }), label: v === "map" ? "Dependencies" : v[0].toUpperCase() + v.slice(1), active: v === view }))} />;
-  const automation = (await db.project.findUnique({ where: { id: project.id }, select: { automation: true } }))?.automation ?? "off";
+  const automation = (await db.project.findUnique({ where: { id: project.id, workspaceId: viewer.workspaceId }, select: { automation: true } }))?.automation ?? "off";
   const boards = view === "board" ? await listBoards(db, viewer, project.id) : [];
   const board = boards.find((b) => b.id === sp.board) ?? null;
   const boardCols = board ? boardColumns(board) : null;

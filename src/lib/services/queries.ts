@@ -380,13 +380,13 @@ export async function visibleForkMappings(db: Db, v: Viewer) {
 
 export async function unreadNotificationCount(db: Db, v: Viewer) {
   // Notifications tied to a repository are only counted while the viewer still has access to it.
-  return db.notification.count({ where: { userId: v.userId, readAt: null, OR: [{ repositoryId: null }, { repositoryId: { in: await visibleIds(db, v) } }] } });
+  return db.notification.count({ where: { workspaceId: v.workspaceId, userId: v.userId, readAt: null, OR: [{ repositoryId: null }, { repositoryId: { in: await visibleIds(db, v) } }] } });
 }
 async function visibleIds(db: Db, v: Viewer) {
   return (await db.repository.findMany({ where: repoWhere(v), select: { id: true } })).map((r) => r.id);
 }
 export async function listNotifications(db: Db, v: Viewer, take = 30) {
-  return db.notification.findMany({ where: { userId: v.userId, OR: [{ repositoryId: null }, { repositoryId: { in: await visibleIds(db, v) } }] }, orderBy: { createdAt: "desc" }, take });
+  return db.notification.findMany({ where: { workspaceId: v.workspaceId, userId: v.userId, OR: [{ repositoryId: null }, { repositoryId: { in: await visibleIds(db, v) } }] }, orderBy: { createdAt: "desc" }, take });
 }
 
 export async function deriveForIds(db: Db, v: Viewer, ids: string[], now = new Date(), contextProjectId?: string | null): Promise<Map<string, DerivedItem>> {

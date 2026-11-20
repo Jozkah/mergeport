@@ -84,12 +84,12 @@ export async function trackLocally(db: Db, v: Viewer, metas: RepoMeta[]) {
 export async function removeFromTracking(db: Db, v: Viewer, repositoryId: string) {
   const repo = await requireRepo(db, v, repositoryId, "view");
   if (repo.spaceId) {
-    const space = await db.space.findUnique({ where: { id: repo.spaceId } });
+    const space = await db.space.findUnique({ where: { id: repo.spaceId, workspaceId: v.workspaceId } });
     if (!space?.canWrite) throw new ValidationError("This repository is shared through a space you can only read, so it cannot be removed here.");
   }
   const now = new Date();
   await db.$transaction([
-    db.repository.update({ where: { id: repo.id }, data: { trackingStatus: "REMOVED" } }),
+    db.repository.update({ where: { id: repo.id, workspaceId: v.workspaceId }, data: { trackingStatus: "REMOVED" } }),
     db.repositoryGrant.updateMany({ where: { repositoryId: repo.id, revokedAt: null }, data: { revokedAt: now } }),
     db.deviceRepoMapping.deleteMany({ where: { repositoryId: repo.id } }),
     db.worktreeSnapshot.deleteMany({ where: { repositoryId: repo.id } }),
@@ -104,23 +104,23 @@ export async function removeFromTracking(db: Db, v: Viewer, repositoryId: string
  */
 export async function shareRepositoryToSpace(db: Db, v: Viewer, repositoryId: string, spaceId: string) {
   const repo = await requireRepo(db, v, repositoryId, "view");
-  const space = await db.space.findUnique({ where: { id: spaceId } });
+  const space = await db.space.findUnique({ where: { id: spaceId, workspaceId: v.workspaceId } });
   if (!space || space.access !== "OK") throw new NotFoundError();
   if (!space.canWrite) throw new ValidationError("You only have read access to that space.");
   if (repo.spaceId && repo.spaceId !== space.id) throw new ValidationError("This repository is already shared through another space. A repository belongs to one audience.");
-  const elsewhere = await db.project.count({ where: { spaceId: { not: null, notIn: [space.id] }, repositories: { some: { repositoryId: repo.id } } } });
+  const elsewhere = await db.project.count({ where: { workspaceId: v.workspaceId, spaceId: { not: null, notIn: [space.id] }, repositories: { some: { repositoryId: repo.id } } } });
   if (elsewhere) throw new ValidationError("A project shared through a different space links this repository. Unlink it there first.");
-  await db.repository.update({ where: { id: repo.id }, data: { spaceId: space.id } });
+  await db.repository.update({ where: { id: repo.id, workspaceId: v.workspaceId }, data: { spaceId: space.id } });
   await audit(db, v, "repository.share", { type: "Repository", id: repo.id }, { space: space.name });
 }
 
 export async function unshareRepository(db: Db, v: Viewer, repositoryId: string) {
   const repo = await requireRepo(db, v, repositoryId, "view");
   if (!repo.spaceId) return;
-  const space = await db.space.findUnique({ where: { id: repo.spaceId } });
+  const space = await db.space.findUnique({ where: { id: repo.spaceId, workspaceId: v.workspaceId } });
   if (!space?.canWrite) throw new ValidationError("You only have read access to that space.");
-  const linked = await db.project.count({ where: { spaceId: repo.spaceId, repositories: { some: { repositoryId: repo.id } } } });
+  const linked = await db.project.count({ where: { workspaceId: v.workspaceId, spaceId: repo.spaceId, repositories: { some: { repositoryId: repo.id } } } });
   if (linked) throw new ValidationError("A project shared through that space still links this repository. Unlink it from the project first.");
-  await db.repository.update({ where: { id: repo.id }, data: { spaceId: null } });
+  await db.repository.update({ where: { id: repo.id, workspaceId: v.workspaceId }, data: { spaceId: null } });
   await audit(db, v, "repository.unshare", { type: "Repository", id: repo.id });
 }

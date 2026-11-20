@@ -48,7 +48,7 @@ export async function loadTask(db: Db, v: Viewer, id: string) {
 /** loadTask for a mutation: also refuses when the task's project is shared into a space this person can only read. */
 export async function loadTaskForWrite(db: Db, v: Viewer, id: string) {
   const task = await loadTask(db, v, id);
-  await assertProjectWritable(db, task.projectId);
+  await assertProjectWritable(db, v, task.projectId);
   return task;
 }
 
