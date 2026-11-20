@@ -149,6 +149,20 @@ model Workspace {
   milestones    DashboardMilestone[]
   audit         AuditLog[]
   notifications Notification[]
+  waitingRecords WaitingRecord[]
+  reviewerAvailability ReviewerAvailability[]
+  labelMaps     LabelMap[]
+  upstreamSubscriptions UpstreamSubscription[]
+  spaces        Space[]
+  teamConfig    TeamConfig?
+  hubSession    HubSession?
+  aiSettings    AiSettings?
+  aiSuggestions AiSuggestion[]
+  aiPendingActions AiPendingAction[]
+  dailyDigests  DailyDigest[]
+  gitCache      GitCache[]
+  discoveryCache DiscoveryCache[]
+  jobs          Job[]
 }
 
 model User {
@@ -481,6 +495,7 @@ model WaitingRecord {
   clearedById    String?
   clearReason    String?
 
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   workItem     WorkItem?     @relation(fields: [workItemId], references: [id], onDelete: Cascade)
   planningItem PlanningItem? @relation(fields: [planningItemId], references: [id], onDelete: Cascade)
 
@@ -547,12 +562,16 @@ model PlanningItem {
 /// Immutable GitHub answers keyed by commit (diffs, file contents, commit lists), so reopening a pull request or a file costs
 /// nothing. Safe to delete at any time; it is rebuilt on demand and pruned by age and size.
 model GitCache {
-  key        String   @id
+  workspaceId String
+  key        String
   payload    Json
   bytes      Int
   createdAt  DateTime @default(now())
   accessedAt DateTime @default(now())
 
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, key])
   @@index([accessedAt])
 }
 
@@ -620,6 +639,8 @@ model DashboardMilestone {
   owner     Member?             @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   items     PlanningItem[]
   repoLinks MilestoneRepoLink[]
+
+  @@index([workspaceId])
 }
 
 model MilestoneRepoLink {
@@ -837,6 +858,7 @@ model Notification {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt])
+  @@index([workspaceId, userId])
 }
 
 model AuditLog {
@@ -856,6 +878,8 @@ model AuditLog {
 
 model Job {
   id          String    @id @default(cuid())
+  /// Null only for system-wide jobs that serve no single tenant (see docs/tenancy.md); every per-workspace job carries it.
+  workspaceId String?
   type        String
   payload     Json
   dedupeKey   String?   @unique
@@ -870,7 +894,10 @@ model Job {
   createdAt   DateTime  @default(now())
   finishedAt  DateTime?
 
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
   @@index([status, runAt])
+  @@index([workspaceId])
 }
 
 
@@ -888,7 +915,8 @@ model PublicCacheEntry {
 /// Last known result of a network discovery (repositories, invitations, space candidates), so pages render from local
 /// state. `fetchedAt` is the last SUCCESSFUL fetch and stays put while later attempts fail.
 model DiscoveryCache {
-  key         String    @id // "repos" | "invitations" | "candidates" | "inv-status:<spaceId>"
+  workspaceId String
+  key         String // "repos" | "invitations" | "candidates" | "inv-status:<spaceId>"
   payload     Json?
   fetchedAt   DateTime?
   state       String    @default("EMPTY") // EMPTY | FRESH | RETRYING | OFFLINE | AUTH | RATE_LIMITED | ERROR
@@ -896,6 +924,10 @@ model DiscoveryCache {
   attempts    Int       @default(0)
   nextRetryAt DateTime?
   updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, key])
 }
 
 model RateLimitState {
@@ -949,6 +981,7 @@ enum TeamBackend {
 /// A coordination space = one private GitHub repository with exactly one audience (its collaborators).
 model Space {
   id             String      @id @default(cuid())
+  workspaceId    String
   remoteId       String // spaceId from the manifest
   teamRemoteId   String
   kind           SpaceKind
@@ -988,12 +1021,13 @@ model Space {
   /// a bounded number of times; entries marked `gaveUp` are only kept as a visible note until the entity changes again.
   hubDeferred    Json?
 
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   restores  HubRestore[]
   entities  SyncEntity[]
   outbox    OutboxOp[]
   conflicts SyncConflict[]
 
-  @@unique([backend, repoOwner, repoName, hubSpaceId])
+  @@unique([workspaceId, backend, repoOwner, repoName, hubSpaceId])
 }
 
 /// What we last agreed on with the remote for one entity file: enables 3-way merges.
@@ -1072,7 +1106,8 @@ model HubRestore {
 }
 
 model TeamConfig {
-  id            String   @id @default("team")
+  id            String   @id @default(cuid())
+  workspaceId   String   @unique
   mode          TeamMode @default(PERSONAL)
   teamRemoteId  String?
   name          String?
@@ -1087,17 +1122,22 @@ model TeamConfig {
   backend       TeamBackend @default(GITHUB)
   hubOrigin     String?
   updatedAt     DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 /// The one hub login of this client; `cipher` is the encrypted hub session token.
 model HubSession {
-  id        String   @id @default("session")
+  id        String   @id @default(cuid())
+  workspaceId String @unique
   origin    String
   cipher    String
   githubId  BigInt
   login     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 /// Personal inbox state per item. Never synchronised: what you have read, finished or snoozed is yours alone.
@@ -1135,6 +1175,8 @@ model ReviewerAvailability {
   backupLogin      String?
   note             String?
   createdAt        DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, login])
 }
@@ -1253,6 +1295,8 @@ model LabelMap {
   repoKey     String   @default("")
   createdAt   DateTime @default(now())
 
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
   @@unique([workspaceId, spelling, repoKey])
 }
 
@@ -1265,6 +1309,10 @@ model UpstreamSubscription {
   criteria    Json
   muted       Boolean  @default(false)
   createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 /// An explicit record that an upstream change is being (or was) brought to a branch. Evidence is kept apart from the person's decision.
@@ -1291,20 +1339,24 @@ model BackportRecord {
 /// One generated daily digest per person and local day (day = the day reported, the previous local day). Built from this computer's own data, personal, never synchronised.
 model DailyDigest {
   id          String    @id @default(cuid())
+  workspaceId String
   userId      String
   day         String // YYYY-MM-DD in the person's time zone
   payload     Json
   generatedAt DateTime  @default(now())
   readAt      DateTime?
 
-  @@unique([userId, day])
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId, day])
 }
 
 /// The OpenAI-compatible endpoint used to draft tasks from plain text. One row per profile, never synchronised.
 /// `cipher` is the API key encrypted with the profile's vault key (see hub/session-vault.ts). `model` is whatever the endpoint
 /// currently offers; it is chosen from the endpoint's own model list and can change at any time.
 model AiSettings {
-  id        String   @id @default("ai")
+  id        String   @id @default(cuid())
+  workspaceId String @unique
   baseUrl   String
   cipher    String?
   model     String?
@@ -1316,12 +1368,15 @@ model AiSettings {
   lastRunDay String?
   lastSummary String?
   updatedAt DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 /// A task the AI thinks you should have, from the daily review or "Analyze my workspace". Nothing becomes a task until it is accepted
 /// (or the autopilot level is "create" and the case is a clear one). `sourceKey` names the thing it is about, so it is not suggested twice.
 model AiSuggestion {
   id        String    @id @default(cuid())
+  workspaceId String
   sourceKey String
   title     String
   reason    String
@@ -1332,7 +1387,9 @@ model AiSuggestion {
   createdAt DateTime  @default(now())
   decidedAt DateTime?
 
-  @@index([state, createdAt])
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, state, createdAt])
   @@index([sourceKey])
 }
 
@@ -1340,6 +1397,7 @@ model AiSuggestion {
 /// approves it in Mergeport, which then performs it as themselves. Local, never synchronised.
 model AiPendingAction {
   id         String    @id @default(cuid())
+  workspaceId String
   /// comment | request-review | review
   kind       String
   workItemId String
@@ -1351,5 +1409,7 @@ model AiPendingAction {
   createdAt  DateTime  @default(now())
   decidedAt  DateTime?
 
-  @@index([state, createdAt])
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, state, createdAt])
 }
