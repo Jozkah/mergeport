@@ -139,6 +139,15 @@ An OWNER or ADMIN invites an address from Settings > Members (`/settings/members
   members: the member list shows that anyway.)
 - **Limits** (`rate-limit.ts` rows, keys `inv:`): 20 invitations per admin per hour, 100 per workspace per day, one mail per
   (workspace, address) per minute (invite and resend share it). A failed delivery withdraws the invitation (nothing is logged but the fact).
+- **Mail is sent after the row is committed**, and a request waits at most 2 seconds for the mail server (`MAIL_WAIT_MS`). A failed send
+  never withdraws the invitation: `Invitation.sendFailedAt` marks it ("email not sent, use Resend" on the members page) and Resend retries
+  with a new token. The invite form answers "sent to X", "saved, the email is on its way" or "saved, could not be sent, use Resend".
+- **Signed-in invitees see their invitations.** `/onboarding` lists pending, unexpired invitations addressed to the user's VERIFIED email
+  (inviter still allowed) above the create form, with a Join button (`acceptInvitationById`, the same checks as the link), so an invitee
+  does not create a stray workspace.
+- **`Origin: null`.** A page with `Referrer-Policy: no-referrer` makes browsers send `Origin: null` on same-origin form posts, so the
+  invite page uses `same-origin`. As a safeguard `proxy.ts` and `sameOrigin()` accept `Origin: null` only with `Sec-Fetch-Site: same-origin`
+  (set by the browser, not by page script); cross-site, same-site, none and absent are refused.
 - Audit: `invitation.created/resent/revoked/accepted`.
 
 ## Hosted: no GitHub yet (fail-closed list)

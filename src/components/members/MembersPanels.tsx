@@ -87,7 +87,7 @@ export function MembersPanel({ viewer, members, invitations }: { viewer: Viewer;
           <ul className="mt-3 max-h-72 overflow-y-auto" aria-label="Pending invitations">
             {invitations.map((i) => (
               <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
-                <span className="min-w-0 max-w-full break-all">{i.email} <span className="text-ink-3">({ROLE_LABEL[i.role]}, {i.expired ? "expired" : <>expires {i.expiresAt.toISOString().slice(0, 10)}</>})</span></span>
+                <span className="min-w-0 max-w-full break-all">{i.email} <span className="text-ink-3">({ROLE_LABEL[i.role]}, {i.sendFailed ? "email not sent, use Resend, " : ""}{i.expired ? "expired" : <>expires {i.expiresAt.toISOString().slice(0, 10)}</>})</span></span>
                 <span className="flex flex-wrap gap-2">
                   <ActionForm action={resendInvitationAction} submitLabel="Resend" pendingLabel="Sending…" submitClassName="btn !h-10" submitAriaLabel={`Resend invitation to ${i.email}`} className="[&>div:last-child]:!mt-0">
                     <input type="hidden" name="invitationId" value={i.id} />

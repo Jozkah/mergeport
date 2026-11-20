@@ -40,19 +40,23 @@ function mailer(): Mailer {
   }
 }
 
+/** The row exists whatever happened to the mail; the list is refreshed either way, and a failed send says so and points at Resend. */
+const mailResult = (r: { email: string; mail: "sent" | "pending" | "failed" }, again = false): ActionResult => {
+  const ok = done(r.mail === "sent" ? `Invitation ${again ? "sent again" : "sent"} to ${r.email}. It works for 7 days.` : `Invitation saved for ${r.email}. The email is on its way; if it does not arrive, use Resend.`);
+  return r.mail === "failed" ? { ok: false, error: `Invitation saved, but the email to ${r.email} could not be sent. Use Resend in the list below.` } : ok;
+};
+
 export async function inviteMemberAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireWriter();
-    await createInvitation(db, viewer, { email: str(fd, "email"), role: str(fd, "role"), mailer: mailer(), origin: await origin() });
-    return done("Invitation sent. It works for 7 days.");
+    return mailResult(await createInvitation(db, viewer, { email: str(fd, "email"), role: str(fd, "role"), mailer: mailer(), origin: await origin() }));
   });
 }
 
 export async function resendInvitationAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireWriter();
-    await resendInvitation(db, viewer, str(fd, "invitationId"), { mailer: mailer(), origin: await origin() });
-    return done("Invitation sent again. The earlier link no longer works.");
+    return mailResult(await resendInvitation(db, viewer, str(fd, "invitationId"), { mailer: mailer(), origin: await origin() }), true);
   });
 }
 

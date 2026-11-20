@@ -41,7 +41,11 @@ export function proxy(req: NextRequest) {
     const origin = req.headers.get("origin");
     const site = req.headers.get("sec-fetch-site");
     let ok = false;
-    if (origin) {
+    if (origin === "null") {
+      // A form posted from a page with Referrer-Policy: no-referrer, or from a sandboxed frame, carries "Origin: null". Only the browser-set
+      // Sec-Fetch-Site (page script cannot forge it) can tell a same-origin post from a cross-site one.
+      ok = site === "same-origin";
+    } else if (origin) {
       try {
         ok = new URL(origin).host === host;
       } catch {

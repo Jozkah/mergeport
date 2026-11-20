@@ -8,7 +8,7 @@ import { sha256 } from "@/lib/crypto";
 import { loadViewer } from "@/lib/authz/viewer";
 import { consumeMagicLink, requestMagicLink } from "@/lib/auth/magic-link";
 import { take } from "@/lib/auth/rate-limit";
-import { INVITE_LIMITS, INVITE_TTL_MS, acceptInvitation, createInvitation, listInvitations, previewInvitation, resendInvitation, revokeInvitation } from "@/lib/services/invitations";
+import { INVITE_LIMITS, INVITE_TTL_MS, MAIL_WAIT_MS, acceptInvitation, createInvitation, listInvitations, previewInvitation, resendInvitation, revokeInvitation } from "@/lib/services/invitations";
 import { removeMember } from "@/lib/services/members";
 
 let db: Db;
@@ -114,15 +114,36 @@ describe("sending", () => {
     await ins("three", "revoked"); // a revoked row does not count
   });
 
-  it("a failed delivery withdraws the invitation so the admin can try again", async () => {
+  it("a failed delivery keeps the invitation, marks it 'email not sent', and Resend delivers it", async () => {
     const { viewer, ws } = await workspaceWithOwner(db);
     const failing = { send: async () => { throw new Error("smtp down"); } };
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(createInvitation(db, viewer, { email: "eve@example.com", role: "MEMBER", mailer: failing, origin: ORIGIN })).rejects.toThrow(/could not be sent/);
+    const r = await createInvitation(db, viewer, { email: "eve@example.com", role: "MEMBER", mailer: failing, origin: ORIGIN });
+    expect(r.mail).toBe("failed");
     expect(spy).toHaveBeenCalled();
     expect(JSON.stringify(spy.mock.calls)).not.toContain("eve@example.com");
     spy.mockRestore();
-    expect(await db.invitation.count({ where: { workspaceId: ws.id, acceptedAt: null, revokedAt: null } })).toBe(0);
+    expect(await db.invitation.count({ where: { workspaceId: ws.id, acceptedAt: null, revokedAt: null } })).toBe(1);
+    expect((await listInvitations(db, viewer))[0]).toMatchObject({ email: "eve@example.com", sendFailed: true });
+    const again = await resendInvitation(db, viewer, r.id, { mailer, origin: ORIGIN, now: new Date(Date.now() + 2 * INVITE_LIMITS.gapMs) });
+    expect(again.mail).toBe("sent");
+    expect(mailer.sent).toHaveLength(1);
+    expect((await listInvitations(db, viewer))[0].sendFailed).toBe(false);
+    const eve = await person(db, "eve@example.com");
+    expect((await acceptInvitation(db, tokenOf(mailer), { id: eve.id, email: eve.email, emailVerifiedAt: eve.emailVerifiedAt })).ok).toBe(true);
+  });
+
+  it("a slow mail server does not hold the request: it answers 'pending' after MAIL_WAIT_MS and the send still finishes", async () => {
+    const { viewer } = await workspaceWithOwner(db);
+    let release!: () => void;
+    const slow = { send: () => new Promise<void>((resolve) => (release = resolve)) };
+    const t0 = Date.now();
+    const r = await createInvitation(db, viewer, { email: "slow@example.com", role: "MEMBER", mailer: slow, origin: ORIGIN });
+    expect(r.mail).toBe("pending");
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(MAIL_WAIT_MS - 100);
+    expect(Date.now() - t0).toBeLessThan(MAIL_WAIT_MS + 3000);
+    expect(await db.invitation.count({ where: { revokedAt: null } })).toBe(1); // already listed while the mail is in flight
+    release();
   });
 });
 

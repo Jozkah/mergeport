@@ -9,7 +9,8 @@ import { ROLE_LABEL } from "@/lib/authz/roles";
 import { db } from "@/lib/db";
 import { previewInvitation } from "@/lib/services/invitations";
 
-export const metadata = { title: "Invitation", referrer: "no-referrer" };
+/** "same-origin": nothing is sent to other sites, but a same-origin form post keeps a real Origin header ("no-referrer" makes browsers send "Origin: null"). */
+export const metadata = { title: "Invitation", referrer: "same-origin" };
 export const dynamic = "force-dynamic";
 
 const Shell = ({ children }: { children: React.ReactNode }) => (

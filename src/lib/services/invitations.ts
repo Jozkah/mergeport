@@ -51,19 +51,42 @@ async function memberForEmail(db: Db, workspaceId: string, email: string) {
   return db.member.findFirst({ where: { workspaceId, userId: { in: users.map((u) => u.id) } }, select: { status: true } });
 }
 
-async function deliver(to: { email: string; workspaceName: string; inviter: string; role: Role; token: string; expiresAt: Date }, s: Sender, undo: () => Promise<void>) {
+/** How long a request waits for the mail server before it answers. The send itself carries on in the background. */
+export const MAIL_WAIT_MS = 2000;
+/** sent: handed to the mail server; pending: still being sent when the request answered; failed: the server refused (the row says so, Resend retries). */
+export type MailState = "sent" | "pending" | "failed";
+
+/**
+ * Sends the invitation mail AFTER the row is committed, and waits at most MAIL_WAIT_MS for the result. A failure never withdraws the
+ * invitation: it is recorded on the row (`sendFailedAt`, shown as "email not sent" with Resend) so the admin sees it even when it
+ * happened after the request had answered. The address and link never reach the log.
+ */
+async function deliver(db: Db, row: { id: string; workspaceId: string }, to: { email: string; workspaceName: string; inviter: string; role: Role; token: string; expiresAt: Date }, s: Sender): Promise<MailState> {
+  const sending: Promise<MailState> = (async () => {
+    try {
+      await s.mailer.send(invitationMail({ to: to.email, workspaceName: to.workspaceName, inviter: to.inviter, role: to.role, link: linkFor(s.origin, to.token), expiresAt: to.expiresAt }));
+      await db.invitation.updateMany({ where: { id: row.id, workspaceId: row.workspaceId, sendFailedAt: { not: null } }, data: { sendFailedAt: null } });
+      return "sent";
+    } catch {
+      console.error("[invite] invitation email could not be delivered");
+      await db.invitation.updateMany({ where: { id: row.id, workspaceId: row.workspaceId, acceptedAt: null }, data: { sendFailedAt: new Date() } }).catch(() => {});
+      return "failed";
+    }
+  })();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waited = new Promise<MailState>((resolve) => {
+    timer = setTimeout(() => resolve("pending"), MAIL_WAIT_MS);
+    timer.unref?.();
+  });
   try {
-    await s.mailer.send(invitationMail({ to: to.email, workspaceName: to.workspaceName, inviter: to.inviter, role: to.role, link: linkFor(s.origin, to.token), expiresAt: to.expiresAt }));
-  } catch {
-    // The address and the link stay out of the log. The invitation is withdrawn so the admin can simply try again.
-    console.error("[invite] invitation email could not be delivered");
-    await undo();
-    throw new ValidationError("The invitation email could not be sent. Check the server's mail settings and try again.");
+    return await Promise.race([sending, waited]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 /** Invites an address. Re-inviting an address replaces its pending invitation (new token, new role); the old link stops working. */
-export async function createInvitation(db: Db, v: Viewer, input: { email: unknown; role: unknown } & Sender): Promise<{ id: string }> {
+export async function createInvitation(db: Db, v: Viewer, input: { email: unknown; role: unknown } & Sender): Promise<{ id: string; email: string; mail: MailState }> {
   const now = input.now ?? new Date();
   const email = normalizeEmail(input.email);
   if (!email) throw new ValidationError("Enter a valid email address.");
@@ -93,14 +116,12 @@ export async function createInvitation(db: Db, v: Viewer, input: { email: unknow
     throw e;
   }
   const ws = await db.workspace.findUniqueOrThrow({ where: { id: v.workspaceId }, select: { name: true } });
-  await deliver({ email, workspaceName: ws.name, inviter: v.login, role, token, expiresAt }, { ...input, now }, async () => {
-    await db.invitation.updateMany({ where: { id, workspaceId: v.workspaceId, acceptedAt: null }, data: { revokedAt: new Date() } });
-  });
-  return { id };
+  const mail = await deliver(db, { id, workspaceId: v.workspaceId }, { email, workspaceName: ws.name, inviter: v.login, role, token, expiresAt }, { ...input, now });
+  return { id, email, mail };
 }
 
 /** A fresh token for a pending invitation; the previous link no longer matches anything. */
-export async function resendInvitation(db: Db, v: Viewer, invitationId: unknown, s: Sender): Promise<void> {
+export async function resendInvitation(db: Db, v: Viewer, invitationId: unknown, s: Sender): Promise<{ email: string; mail: MailState }> {
   const now = s.now ?? new Date();
   const actor = await actorOf(db, v);
   const inv = typeof invitationId === "string" ? await db.invitation.findFirst({ where: { id: invitationId, workspaceId: v.workspaceId, acceptedAt: null, revokedAt: null } }) : null;
@@ -113,9 +134,8 @@ export async function resendInvitation(db: Db, v: Viewer, invitationId: unknown,
   if (r.count !== 1) throw new NotFoundError();
   await audit(db, { workspaceId: v.workspaceId, userId: v.userId }, "invitation.resent", { type: "Invitation", id: inv.id });
   const ws = await db.workspace.findUniqueOrThrow({ where: { id: v.workspaceId }, select: { name: true } });
-  await deliver({ email: inv.emailLowercased, workspaceName: ws.name, inviter: v.login, role: inv.role as Role, token, expiresAt }, { ...s, now }, async () => {
-    await db.invitation.updateMany({ where: { id: inv.id, workspaceId: v.workspaceId, acceptedAt: null }, data: { revokedAt: new Date() } });
-  });
+  const mail = await deliver(db, { id: inv.id, workspaceId: v.workspaceId }, { email: inv.emailLowercased, workspaceName: ws.name, inviter: v.login, role: inv.role as Role, token, expiresAt }, { ...s, now });
+  return { email: inv.emailLowercased, mail };
 }
 
 export async function revokeInvitation(db: Db, v: Viewer, invitationId: unknown, now = new Date()): Promise<void> {
@@ -128,13 +148,13 @@ export async function revokeInvitation(db: Db, v: Viewer, invitationId: unknown,
   await audit(db, { workspaceId: v.workspaceId, userId: v.userId }, "invitation.revoked", { type: "Invitation", id: inv.id });
 }
 
-export type InvitationRow = { id: string; email: string; role: Role; invitedBy: string | null; createdAt: Date; expiresAt: Date; expired: boolean };
+export type InvitationRow = { id: string; email: string; role: Role; invitedBy: string | null; createdAt: Date; expiresAt: Date; expired: boolean; sendFailed: boolean };
 
 /** Pending invitations (not accepted, not revoked), newest first. Never returns a token or its hash. */
 export async function listInvitations(db: Db, v: Viewer, now = new Date()): Promise<InvitationRow[]> {
   if (!can(v, "manageMembers")) throw new ForbiddenError("Administrator only");
   const rows = await db.invitation.findMany({ where: { workspaceId: v.workspaceId, acceptedAt: null, revokedAt: null }, include: { invitedBy: { include: { user: { select: { login: true } } } } }, orderBy: { createdAt: "desc" } });
-  return rows.map((r) => ({ id: r.id, email: r.emailLowercased, role: r.role as Role, invitedBy: r.invitedBy?.user.login ?? null, createdAt: r.createdAt, expiresAt: r.expiresAt, expired: r.expiresAt <= now }));
+  return rows.map((r) => ({ id: r.id, email: r.emailLowercased, role: r.role as Role, invitedBy: r.invitedBy?.user.login ?? null, createdAt: r.createdAt, expiresAt: r.expiresAt, expired: r.expiresAt <= now, sendFailed: r.sendFailedAt !== null }));
 }
 
 /** The person who sent an invitation must still be an ACTIVE member who may invite that role; otherwise their invitations are dead. */
@@ -144,6 +164,24 @@ async function inviterStillAllowed(db: Db | Tx, workspaceId: string, inviterId: 
     ? await (db as Tx).$queryRaw<{ role: string; status: string }[]>`SELECT "role"::text AS "role", "status"::text AS "status" FROM "Member" WHERE "id" = ${inviterId} AND "workspaceId" = ${workspaceId} FOR SHARE`
     : (await db.member.findMany({ where: { id: inviterId, workspaceId }, select: { role: true, status: true } })).map((m) => ({ role: m.role as string, status: m.status as string }));
   return rows.length === 1 && can({ role: rows[0].role, status: rows[0].status }, "manageMembers", { newRole: role });
+}
+
+/**
+ * Invitations waiting for this person: pending, unexpired, sent to THEIR VERIFIED address by someone who may still invite. Only a user
+ * with a verified email gets any (an unverified or GitHub-only account proves nothing). Shown on onboarding so an invitee does not
+ * create a stray workspace; joining still needs a click.
+ */
+export async function pendingInvitationsFor(db: Db, user: Joiner, now = new Date()): Promise<{ id: string; workspaceName: string; role: Role }[]> {
+  if (!user.email || !user.emailVerifiedAt) return [];
+  const rows = await db.invitation.findMany({
+    where: { emailLowercased: user.email, acceptedAt: null, revokedAt: null, expiresAt: { gt: now } },
+    select: { id: true, workspaceId: true, role: true, invitedByMemberId: true, workspace: { select: { name: true } } },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  });
+  const out: { id: string; workspaceName: string; role: Role }[] = [];
+  for (const r of rows) if (await inviterStillAllowed(db, r.workspaceId, r.invitedByMemberId, r.role)) out.push({ id: r.id, workspaceName: r.workspace.name, role: r.role as Role });
+  return out;
 }
 
 export type InvitePreview = { workspaceName: string; role: Role; email: string };
@@ -169,10 +207,25 @@ class Rollback extends Error {}
  * RETURNING is the whole single-use check: of any number of simultaneous accepts exactly one claims the row, and the member row is
  * created in the same transaction (unique on workspace and user). The user's own address must be verified and equal the invited one.
  */
-export async function acceptInvitation(db: Db, token: unknown, user: { id: string; email: string | null; emailVerifiedAt: Date | null }, now = new Date()): Promise<AcceptResult> {
+type Joiner = { id: string; email: string | null; emailVerifiedAt: Date | null };
+
+export async function acceptInvitation(db: Db, token: unknown, user: Joiner, now = new Date()): Promise<AcceptResult> {
   if (typeof token !== "string" || token.length < 20 || token.length > 200) return { ok: false, reason: "invalid" };
-  const hash = sha256(token);
-  const row = await db.invitation.findUnique({ where: { tokenHash: hash }, select: { workspaceId: true, emailLowercased: true, acceptedAt: true, revokedAt: true, expiresAt: true } });
+  return acceptRow(db, { tokenHash: sha256(token) }, user, now);
+}
+
+/**
+ * Accepts an invitation listed to the signed-in user on the onboarding page, which has no token: the row id stands in for it. The same
+ * rules apply (the user's verified address must equal the invited one, single-use claim, inviter still allowed); an id of someone else's
+ * invitation fails as "wrong-email", an unknown id as "invalid".
+ */
+export async function acceptInvitationById(db: Db, invitationId: unknown, user: Joiner, now = new Date()): Promise<AcceptResult> {
+  if (typeof invitationId !== "string" || invitationId.length < 5 || invitationId.length > 100) return { ok: false, reason: "invalid" };
+  return acceptRow(db, { id: invitationId }, user, now);
+}
+
+async function acceptRow(db: Db, key: { tokenHash: string } | { id: string }, user: Joiner, now: Date): Promise<AcceptResult> {
+  const row = await db.invitation.findUnique({ where: key, select: { id: true, workspaceId: true, emailLowercased: true, acceptedAt: true, revokedAt: true, expiresAt: true } });
   if (!row) return { ok: false, reason: "invalid" };
   const joined = async () => {
     const m = await db.member.findFirst({ where: { workspaceId: row.workspaceId, userId: user.id, status: "ACTIVE" }, select: { id: true } });
@@ -185,7 +238,7 @@ export async function acceptInvitation(db: Db, token: unknown, user: { id: strin
     return await db.$transaction(async (tx): Promise<AcceptResult> => {
       const claimed = await tx.$queryRaw<{ id: string; workspaceId: string; invitedByMemberId: string | null; role: string }[]>`
         UPDATE "Invitation" SET "acceptedAt" = ${now}
-        WHERE "tokenHash" = ${hash} AND "acceptedAt" IS NULL AND "revokedAt" IS NULL AND "expiresAt" > ${now}
+        WHERE "id" = ${row.id} AND "acceptedAt" IS NULL AND "revokedAt" IS NULL AND "expiresAt" > ${now}
         RETURNING "id", "workspaceId", "invitedByMemberId", "role"::text AS "role"`;
       if (claimed.length !== 1) throw new Rollback();
       const { id, workspaceId, role, invitedByMemberId } = claimed[0];

@@ -29,6 +29,7 @@ export function sameOrigin(req: Request): boolean {
   const host = req.headers.get("host");
   const origin = req.headers.get("origin");
   if (!host) return false;
+  if (origin === "null") return req.headers.get("sec-fetch-site") === "same-origin"; // see proxy.ts
   if (origin) {
     try {
       return new URL(origin).host === host;

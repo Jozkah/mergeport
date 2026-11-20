@@ -30,6 +30,7 @@ const ALLOW: Allow[] = [
   { file: "src/app/account-actions.ts", fn: "signOutEverywhereAction", reason: "Ends the caller's own sessions; touches no workspace data." },
   { file: "src/app/account-actions.ts", fn: "switchWorkspaceAction", reason: "Chooses among the caller's own ACTIVE memberships; selectWorkspace re-checks membership." },
   { file: "src/app/invite/actions.ts", fn: "acceptInviteAction", reason: "The caller is not a member yet; acceptInvitation checks the token and the verified address." },
+  { file: "src/app/invite/actions.ts", fn: "acceptPendingInviteAction", reason: "Same as acceptInviteAction: the caller is not a member yet; the invitation is listed to their verified address and accepted by id under the same checks." },
   { file: "src/app/sign-in/actions.ts", fn: "startGhLoginAction", reason: "Local app sign-in, before any session exists." },
   { file: "src/app/workspace-actions.ts", fn: "leaveWorkspaceAction", reason: "A reader may leave too; leaveWorkspace refuses the owner and re-reads the membership." },
   { file: "src/app/actions.ts", fn: "setTimezoneAction", reason: "The caller's own timezone." },

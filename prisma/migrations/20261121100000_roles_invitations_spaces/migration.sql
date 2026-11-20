@@ -33,6 +33,7 @@ CREATE TABLE "Invitation" (
     "expiresAt" TIMESTAMP(3) NOT NULL,
     "acceptedAt" TIMESTAMP(3),
     "revokedAt" TIMESTAMP(3),
+    "sendFailedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Invitation_pkey" PRIMARY KEY ("id")

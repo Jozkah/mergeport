@@ -390,6 +390,8 @@ model Invitation {
   expiresAt         DateTime
   acceptedAt        DateTime?
   revokedAt         DateTime?
+  /// Set when the last attempt to mail the invitation failed (cleared by a successful send); the members page then offers Resend.
+  sendFailedAt      DateTime?
   createdAt         DateTime  @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
