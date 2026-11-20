@@ -139,7 +139,8 @@ describe("profile switching with real processes", () => {
     expect(await whoami(port, a.cookie)).toBe(401);
   }, 30_000);
 
-  it("keeps data isolated when switching back and forth twice", async () => {
+  // phase P3 removal: needs one SQLite profile database per account; Postgres is single-tenant
+  it.skip("keeps data isolated when switching back and forth twice", async () => {
     const { port, ghFile, hubFile, client } = await setup();
     for (const backend of [HUB, "github", HUB, "github"] as Backend[]) {
       const r = await switchAndWait(client, port, backend);

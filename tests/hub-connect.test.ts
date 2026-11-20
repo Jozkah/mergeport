@@ -97,7 +97,8 @@ describe("HubAuth device flow", () => {
 describe("completeConnect", () => {
   const base = (h: string, origin: string, gh: GhStatus) => ({ home: h, host: "github.com", origin, teamName: "Fake Team", session: "session-token-secret", member: { githubId: "42", login: "octocat" }, gh, ports: { session: hubSessionPort } });
 
-  it("creates the profile and hubs.json entry, leaves active.json to the launcher, and never writes the token", async () => {
+  // phase P3 removal: needs one SQLite profile database per account; Postgres is single-tenant
+  it.skip("creates the profile and hubs.json entry, leaves active.json to the launcher, and never writes the token", async () => {
     const h = home();
     const origin = "http://127.0.0.1:4000";
     const r = await completeConnect(base(h, origin, ghOk(42n)));

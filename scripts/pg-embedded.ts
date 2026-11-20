@@ -18,6 +18,8 @@ export async function startEmbedded({ dir, port, quiet }: EmbeddedOpts): Promise
     user: PG_USER,
     password: PG_PASSWORD,
     persistent: true,
+    // initdb on Windows defaults to WIN1252 and a Windows locale; the app stores UTF-8 text and the old SQLite compared bytes (= C collation).
+    initdbFlags: ["--encoding=UTF8", "--locale=C"],
     // Loopback only; fsync off is fine for a throwaway dev/test cluster but kept on for the dev one by the caller's choice of dir.
     postgresFlags: ["-c", "listen_addresses=127.0.0.1", "-c", "max_connections=200"],
     onLog: quiet ? () => {} : (m) => console.log(m),

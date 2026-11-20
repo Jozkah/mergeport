@@ -4,6 +4,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
+// The custom runner is Postgres-irrelevant but still used by the hub (hub/src/db.ts, phase P3), so it keeps running against the legacy SQLite migrations.
+const legacyDir = path.resolve("prisma", "legacy", "migrations-sqlite");
 const file = path.resolve(".data", `client-migrate-${process.pid}.db`);
 afterEach(() => {
   for (const s of ["", "-wal", "-shm"]) fs.rmSync(file + s, { force: true });
@@ -11,7 +13,7 @@ afterEach(() => {
 
 const run = () =>
   new Promise<{ code: number; out: string; err: string }>((resolve) => {
-    execFile(process.execPath, ["--import", "tsx", path.resolve("tests", "fixtures", "apply-migrations.ts"), file], { encoding: "utf8", windowsHide: true }, (e, out, err) => resolve({ code: e ? ((e as { code?: number }).code ?? 1) : 0, out, err }));
+    execFile(process.execPath, ["--import", "tsx", path.resolve("tests", "fixtures", "apply-migrations.ts"), file], { encoding: "utf8", windowsHide: true, env: { ...process.env, MERGEPORT_MIGRATIONS: legacyDir } }, (e, out, err) => resolve({ code: e ? ((e as { code?: number }).code ?? 1) : 0, out, err }));
   });
 
 describe("starting several processes at once", () => {
@@ -24,7 +26,7 @@ describe("starting several processes at once", () => {
     const db = new Database(file, { readonly: true });
     try {
       const names = db.prepare("SELECT name FROM _mergeport_migrations ORDER BY name").all().map((r) => (r as { name: string }).name);
-      const onDisk = fs.readdirSync("prisma/migrations").filter((n) => fs.existsSync(path.join("prisma/migrations", n, "migration.sql"))).sort();
+      const onDisk = fs.readdirSync(legacyDir).filter((n) => fs.existsSync(path.join(legacyDir, n, "migration.sql"))).sort();
       expect(names).toEqual(onDisk);
       expect(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'DiscoveryCache'").get()).toBeTruthy();
     } finally {

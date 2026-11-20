@@ -111,7 +111,7 @@ async function main() {
   const openContext = async (base: string) => {
     const file = activeDbFile(profileDirOf(base), path.basename(base));
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const migrated = createPrisma()
+    const migrated = createPrisma();
     if (demo && (await migrated.user.count()) === 0) await seedDemo(migrated);
     await migrated.$disconnect();
     if (file !== base) console.log(`Opening context database: ${file}`);

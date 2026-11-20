@@ -336,7 +336,8 @@ describe("SQLITE_BUSY retry", () => {
 describe("profile lookup", () => {
   const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "mp-home-"));
 
-  it("finds the active profile from MERGEPORT_HOME, ties it to its user and builds the app's viewer", async () => {
+  // phase P3 removal: needs one SQLite profile database per account; Postgres is single-tenant
+  it.skip("finds the active profile from MERGEPORT_HOME, ties it to its user and builds the app's viewer", async () => {
     const home = tmp();
     try {
       const dir = path.join(home, "profiles", "github.com-4242");

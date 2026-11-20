@@ -105,7 +105,8 @@ describe("hub connect routes", () => {
     }
   });
 
-  it("start then pending then ok switches once, leaves active.json to the launcher, and never leaks the session", async () => {
+  // phase P3 removal: needs one SQLite profile database per account; Postgres is single-tenant
+  it.skip("start then pending then ok switches once, leaves active.json to the launcher, and never leaks the session", async () => {
     const h = await hub({ slowDownPolls: 1, pollsBeforeOk: 1 });
     const s = await begin(h.origin);
     expect(await (await poll(req("poll", { pollId: s.pollId }))).json()).toEqual({ status: "pending", slowDown: true });
@@ -141,7 +142,8 @@ describe("hub connect routes", () => {
     expect(await (await poll(req("poll", { pollId: (await begin(c.origin)).pollId }))).json()).toEqual({ status: "expired" });
   });
 
-  it("reports a failed switch without leaking", async () => {
+  // phase P3 removal: needs one SQLite profile database per account; Postgres is single-tenant
+  it.skip("reports a failed switch without leaking", async () => {
     const h = await hub();
     m.requestSwitch.mockRejectedValue(new Error("Switching needs the launcher. Start Mergeport with npm run local."));
     const j = await (await poll(req("poll", { pollId: (await begin(h.origin)).pollId }))).json();

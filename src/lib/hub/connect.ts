@@ -132,7 +132,7 @@ export async function completeConnect(i: ConnectInput): Promise<{ ok: true; back
   const backend = hubBackendId(origin);
   const id = i.gh.identity;
   const dbFile = profileDbPath(i.home, i.host, id.id, backend);
-  const prisma = createPrisma(dbFile);
+  const prisma = createPrisma();
   try {
     await ensureLocalProfile(prisma, id);
   } finally {

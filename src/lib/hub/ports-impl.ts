@@ -13,7 +13,7 @@ import type { HubLinkState } from "@/lib/hub/link";
 export const keyFileFor = (dbFile: string) => path.join(path.dirname(dbFile), "key");
 
 async function withDb<T>(dbFile: string, f: (db: Db) => Promise<T>): Promise<T> {
-  const db = createPrisma(dbFile);
+  const db = createPrisma();
   try {
     return await f(db);
   } finally {
