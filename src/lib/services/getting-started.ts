@@ -1,5 +1,6 @@
 import type { Db } from "@/lib/db";
 import { projectWhere, repoWhere, type Viewer } from "@/lib/authz/viewer";
+import { planningWhere } from "./queries";
 import type { Step } from "@/components/onboarding/GettingStarted";
 
 /** What the guide shows, computed from what the person already has: a step ticks itself once it is true. */
@@ -7,7 +8,7 @@ export async function gettingStarted(db: Db, v: Viewer): Promise<Step[]> {
   const [repos, projects, tasks, rules, team] = await Promise.all([
     db.repository.count({ where: repoWhere(v) }),
     db.project.count({ where: { workspaceId: v.workspaceId, ...projectWhere(v) } }),
-    db.planningItem.count({ where: { project: { workspaceId: v.workspaceId } } }),
+    db.planningItem.count({ where: await planningWhere(db, v) }),
     db.reviewRule.count({ where: { workspaceId: v.workspaceId } }),
     db.teamConfig.findUnique({ where: { workspaceId: v.workspaceId } }),
   ]);

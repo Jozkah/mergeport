@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { Db } from "@/lib/db";
-import type { Viewer } from "@/lib/authz/viewer";
+import { accessSpaceWhere, type Viewer } from "@/lib/authz/viewer";
 import { ValidationError } from "@/lib/errors";
 
 /**
@@ -22,11 +22,11 @@ export const BACKUP_FORMAT = "mergeport-backup";
 export const BACKUP_VERSION = 1;
 const MAX_BYTES = 80 * 1024 * 1024;
 
-type Entry = { table: string; delegate: string; /** Primary key columns: one "id", or the composite columns in Prisma's order. */ key: string[]; compound?: string; remap?: Record<string, "workspace" | "user" | "member" | "repo" | "self-optional-space"> };
+type Entry = { table: string; delegate: string; /** Primary key columns: one "id", or the composite columns in Prisma's order. */ key: string[]; compound?: string; remap?: Record<string, "workspace" | "user" | "member" | "repo" | "self-optional-space" | "access-space"> };
 
 // Parents before children, so a restore never meets a missing parent.
 const ENTRIES: Entry[] = [
-  { table: "Project", delegate: "project", key: ["id"], remap: { workspaceId: "workspace", spaceId: "self-optional-space" } },
+  { table: "Project", delegate: "project", key: ["id"], remap: { workspaceId: "workspace", spaceId: "self-optional-space", accessSpaceId: "access-space" } },
   { table: "ProjectRepository", delegate: "projectRepository", key: ["projectId", "repositoryId"], compound: "projectId_repositoryId", remap: { repositoryId: "repo" } },
   { table: "PlanningColumn", delegate: "planningColumn", key: ["id"] },
   { table: "DashboardMilestone", delegate: "dashboardMilestone", key: ["id"], remap: { workspaceId: "workspace", ownerId: "member" } },
@@ -57,19 +57,21 @@ const ENTRIES: Entry[] = [
  * The rows of each table that belong to ONE workspace (and, for personal state, one person). An export reads nothing else, so a
  * database holding many workspaces never leaks one into another's backup. Every table in ENTRIES must have an entry here.
  */
-const IN_PROJECT = (w: string) => ({ project: { workspaceId: w } });
-const SCOPE: Record<string, (w: string, userId: string) => Record<string, unknown>> = {
-  Project: (w) => ({ workspaceId: w }),
+// Projects in a RESTRICTED access space the person is not in are not theirs to export or overwrite, administrator or not (docs/roles.md).
+type ScopeFn = (w: string, userId: string, memberId: string) => Record<string, unknown>;
+const IN_PROJECT = (w: string, _u: string, m: string) => ({ project: { workspaceId: w, AND: [accessSpaceWhere({ memberId: m })] } });
+const SCOPE: Record<string, ScopeFn> = {
+  Project: (w, _u, m) => ({ workspaceId: w, AND: [accessSpaceWhere({ memberId: m })] }),
   ProjectRepository: IN_PROJECT,
   PlanningColumn: IN_PROJECT,
-  DashboardMilestone: (w) => ({ workspaceId: w }),
+  DashboardMilestone: (w, _u, m) => ({ workspaceId: w, OR: [{ projectId: null }, { project: { AND: [accessSpaceWhere({ memberId: m })] } }] }),
   Epic: IN_PROJECT,
   Iteration: IN_PROJECT,
   PlanBoard: IN_PROJECT,
   PlanningItem: IN_PROJECT,
-  PlanningLink: (w) => ({ from: IN_PROJECT(w) }),
-  TaskComment: (w) => ({ item: IN_PROJECT(w) }),
-  TaskCheckItem: (w) => ({ item: IN_PROJECT(w) }),
+  PlanningLink: (w, u, m) => ({ from: IN_PROJECT(w, u, m) }),
+  TaskComment: (w, u, m) => ({ item: IN_PROJECT(w, u, m) }),
+  TaskCheckItem: (w, u, m) => ({ item: IN_PROJECT(w, u, m) }),
   PlanEvent: IN_PROJECT,
   ReviewRule: (w) => ({ workspaceId: w }),
   WaitingRule: (w) => ({ workspaceId: w }),
@@ -132,7 +134,7 @@ export async function exportBackup(db: Db, v: Viewer, now = new Date()): Promise
   const tables: Backup["tables"] = {};
   for (const e of ENTRIES) {
     const cols = (await columns(db, e.table)).filter((c) => !FORBIDDEN.test(c) || (e.table === "ReviewDraft" && PATH_OK.has(c)));
-    const rows = await (db as never as Record<string, { findMany(a: unknown): Promise<Record<string, unknown>[]> }>)[e.delegate].findMany({ where: SCOPE[e.table](v.workspaceId, v.userId) });
+    const rows = await (db as never as Record<string, { findMany(a: unknown): Promise<Record<string, unknown>[]> }>)[e.delegate].findMany({ where: SCOPE[e.table](v.workspaceId, v.userId, v.memberId) });
     tables[e.table] = rows.map((r) => Object.fromEntries(cols.filter((c) => c in r).map((c) => [c, r[c]])));
   }
   // Rows of other people's personal state never belong in this person's backup.
@@ -172,7 +174,7 @@ export function parseBackup(text: string): Backup {
 export type TablePreview = { table: string; create: number; update: number; same: number; skipped: number };
 export type RestorePreview = { exportedAt: string; from: string; unsentEdits: number; tables: TablePreview[]; skipped: { table: string; why: string; count: number }[]; outbox: { restorable: number; skipped: number }; notes: string[] };
 
-type Maps = { workspaceId: string; userId: string; memberId: string; repoById: Map<string, string>; spaceByRemote: Map<string, string>; spaces: Set<string> };
+type Maps = { workspaceId: string; userId: string; memberId: string; repoById: Map<string, string>; spaceByRemote: Map<string, string>; spaces: Set<string>; accessSpaces: Set<string> };
 
 async function mapsFor(db: Db, v: Viewer, b: Backup): Promise<Maps> {
   const local = new Map((await db.repository.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true, githubId: true } })).map((r) => [r.githubId.toString(), r.id]));
@@ -182,7 +184,9 @@ async function mapsFor(db: Db, v: Viewer, b: Backup): Promise<Maps> {
     if (id) repoById.set(r.id, id);
   }
   const spaces = await db.space.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true, remoteId: true } });
-  return { workspaceId: v.workspaceId, userId: v.userId, memberId: v.memberId, repoById, spaceByRemote: new Map(spaces.map((s) => [s.remoteId, s.id])), spaces: new Set(spaces.map((s) => s.id)) };
+  // Access spaces this person may put a project in: this workspace's COMMON space and the restricted ones they belong to. Any other id is skipped.
+  const access = await db.accessSpace.findMany({ where: { workspaceId: v.workspaceId, OR: [{ kind: "COMMON" }, { members: { some: { memberId: v.memberId } } }] }, select: { id: true } });
+  return { workspaceId: v.workspaceId, userId: v.userId, memberId: v.memberId, repoById, spaceByRemote: new Map(spaces.map((s) => [s.remoteId, s.id])), spaces: new Set(spaces.map((s) => s.id)), accessSpaces: new Set(access.map((s) => s.id)) };
 }
 
 function remapRow(e: Entry, row: Record<string, unknown>, m: Maps): { row: Record<string, unknown> } | { skip: string } {
@@ -198,6 +202,10 @@ function remapRow(e: Entry, row: Record<string, unknown>, m: Maps): { row: Recor
       if (!to) return { skip: "its repository is not tracked on this computer" };
       out[col] = to;
     } else if (kind === "self-optional-space") out[col] = m.spaces.has(String(val)) ? val : null;
+    else if (kind === "access-space") {
+      // Never null: dropping a restricted project into the common space would show it to everyone. Not one of this person's spaces: skip.
+      if (!m.accessSpaces.has(String(val))) return { skip: "its space is not one you can use in this workspace" };
+    }
   }
   return { row: out };
 }
@@ -210,7 +218,7 @@ async function pass(db: Db, v: Viewer, b: Backup, write: boolean): Promise<Resto
   const tables: TablePreview[] = [];
   const skipped = new Map<string, number>();
   // Projects this workspace owns (plus the ones this restore creates): a row of a child table may only name one of them.
-  const ownProjects = new Set((await db.project.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true } })).map((p) => p.id));
+  const ownProjects = new Set((await db.project.findMany({ where: { workspaceId: v.workspaceId, AND: [accessSpaceWhere(v)] }, select: { id: true } })).map((p) => p.id));
   const restoredItems = new Set<string>();
   // Parents this restore creates or finds in THIS workspace, by table: id -> the project they belong to (or "" when they have none).
   const restored = { PlanningColumn: new Map<string, string>(), Epic: new Map<string, string>(), Iteration: new Map<string, string>(), DashboardMilestone: new Map<string, string>(), ForkMapping: new Map<string, string>() };
@@ -281,7 +289,7 @@ async function pass(db: Db, v: Viewer, b: Backup, write: boolean): Promise<Resto
       const where = e.compound ? { [e.compound]: Object.fromEntries(e.key.map((k) => [k, row[k]])) } : { [e.key[0]]: row[e.key[0]] };
       const cur = await delegate.findUnique({ where });
       // A row with this key that exists but is not this workspace's (or this person's) is never touched: a crafted file cannot reach into another tenant.
-      if (cur && !(await delegate.findFirst({ where: { AND: [Object.fromEntries(e.key.map((k) => [k, row[k]])), SCOPE[e.table](v.workspaceId, v.userId)] } }))) {
+      if (cur && !(await delegate.findFirst({ where: { AND: [Object.fromEntries(e.key.map((k) => [k, row[k]])), SCOPE[e.table](v.workspaceId, v.userId, v.memberId)] } }))) {
         t.skipped++;
         skipped.set(`${e.table}|belongs to another workspace`, (skipped.get(`${e.table}|belongs to another workspace`) ?? 0) + 1);
         continue;

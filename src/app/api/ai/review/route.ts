@@ -1,4 +1,5 @@
 import { db, resolveDbFile } from "@/lib/db";
+import { requireWrite } from "@/lib/authz/viewer";
 import { withViewerStream } from "@/lib/api-post";
 import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 /** "Analyze my workspace": always leaves suggestions to accept or dismiss, whatever the autopilot level. */
 export async function POST(req: Request) {
   return withViewerStream(req, async (v, _body, step) => {
+    requireWrite(v); // saves suggestions and settings: a reader only looks
     if (isDemo()) throw new ValidationError("The demo does not send anything to an AI endpoint.");
     const cfg = await loadAiConfig(db, v.workspaceId, openVault(keyFileFor(resolveDbFile())));
     if (!cfg) throw new ValidationError("Set up the AI endpoint in Settings first.");

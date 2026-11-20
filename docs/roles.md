@@ -9,7 +9,7 @@ Hosted workspaces have four roles and one owner. The policy is one table in `src
 OWNER > ADMIN > MEMBER > READER. A workspace has **exactly one OWNER**: the person who created it in `/onboarding`. The database allows at
 most one (`Member_one_owner`, a partial unique index) and the services never remove, demote or let the owner leave, so there is
 always one. Existing workspaces were migrated by `20261121100000_roles_invitations_spaces`: the oldest ADMIN of each (ties by id)
-became OWNER; a workspace with no ADMIN gives it to its oldest member; old MEMBER and ADMIN rows kept their role.
+became OWNER; a workspace with no ACTIVE ADMIN gives it to its oldest ACTIVE member; a removed (REVOKED) member is never made OWNER; old MEMBER and ADMIN rows kept their role. A workspace with no ACTIVE member at all gets no OWNER: nobody can sign in to it, so nobody can invite or transfer, and an operator promotes one row by hand (`UPDATE "Member" SET role='OWNER', status='ACTIVE' WHERE id=...`; the unique index allows exactly one).
 
 | Action | OWNER | ADMIN | MEMBER | READER |
 | --- | --- | --- | --- | --- |

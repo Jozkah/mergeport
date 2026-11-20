@@ -176,7 +176,7 @@ export async function blockedByCount(db: Db, itemId: string) {
 export async function milestoneProgress(db: Db, v: Viewer, milestoneId: string) {
   const ms = await db.dashboardMilestone.findFirst({ where: { id: milestoneId, workspaceId: v.workspaceId } });
   if (!ms) throw new NotFoundError();
-  if (!v.isAdmin && ms.projectId) await requireProject(db, v, ms.projectId);
+  if (ms.projectId) await requireProject(db, v, ms.projectId);
   const items = await db.planningItem.findMany({
     where: { AND: [{ milestoneId }, await planningWhere(db, v)] },
     include: { column: true },

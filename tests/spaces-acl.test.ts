@@ -7,7 +7,8 @@ import { seedDemo, type DemoIds } from "@/lib/demo/seed";
 import { ConflictError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import { loadViewer, projectWhere, requireProject, requireProjectWrite, type Viewer } from "@/lib/authz/viewer";
 import { resolveScope } from "@/lib/scope";
-import { createCard } from "@/lib/services/planning";
+import { createCard, milestoneProgress } from "@/lib/services/planning";
+import { releaseReadiness } from "@/lib/services/planning-ext";
 import { listProjects, searchGlobal, listRepositories } from "@/lib/services/queries";
 import { createTask, getTask, listTasks, taskCounts, updateTask } from "@/lib/services/tasks";
 import { planningBoard, roadmap } from "@/lib/services/planning-view";
@@ -97,6 +98,28 @@ describe("a restricted space is invisible to people outside it", () => {
     const common = await ensureCommonSpace(db, ids.ws.id);
     await db.project.update({ where: { id: ids.projects.dash.id }, data: { accessSpaceId: common.id } });
     expect((await listProjects(db, b)).map((p) => p.name).sort()).toEqual(["Atlas", "Dashboard"]);
+  });
+});
+
+describe("counts and milestones do not reveal a restricted project to an administrator outside it", () => {
+  it("a milestone of the project is not found, and a shared milestone's totals leave its cards out", async () => {
+    const shared = await db.dashboardMilestone.create({ data: { workspaceId: ids.ws.id, name: "Shared", ownerId: ids.members.admin.id, targetDate: new Date("2026-12-01") } });
+    await db.planningItem.update({ where: { id: ids.cards.cApiPr.id }, data: { milestoneId: shared.id } }); // an Atlas card
+    expect((await releaseReadiness(db, admin, shared.id)).total).toBe(1);
+    await restrictAtlas();
+    await expect(releaseReadiness(db, admin, ids.milestone.id)).rejects.toThrow(NotFoundError); // the Beta milestone belongs to Atlas
+    await expect(milestoneProgress(db, admin, ids.milestone.id)).rejects.toThrow(NotFoundError);
+    const r = await releaseReadiness(db, admin, shared.id);
+    expect(r.total).toBe(0);
+    expect(r.hidden).toBe(0);
+  });
+
+  it("the getting-started task step counts only cards the person can see", async () => {
+    await db.planningItem.deleteMany({ where: { projectId: ids.projects.dash.id } });
+    await restrictAtlas();
+    const step = (await gettingStarted(db, admin)).find((x) => x.key === "task")!;
+    expect(step.done).toBe(false);
+    expect((await gettingStarted(db, a)).find((x) => x.key === "task")!.done).toBe(true);
   });
 });
 

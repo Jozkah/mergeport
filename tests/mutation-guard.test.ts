@@ -12,6 +12,17 @@ import { describe, expect, it } from "vitest";
  * Route handlers: see src/lib/api-viewer.ts and the POST routes (ai/draft calls requireWrite itself; backup restore is admin-only in the service).
  */
 const GUARD = /\b(requireWriter|requireAdminViewer|requireWrite|writerCtx)\(/;
+/** A database write written out in the function itself. When a guard exists it must come first; services called from the function are not inspected (not practical without types). */
+const MUTATION = /\b(?:db|tx|prisma)\.\w+\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(|\$executeRaw/;
+/** Comments (and a guard named only in one) must not count. A `//` inside a URL string is left alone. */
+const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(?<![:"'`\w])\/\/[^\n]*/g, "");
+const guardedFirst = (body: string) => {
+  const code = stripComments(body);
+  const g = GUARD.exec(code);
+  if (!g) return false;
+  const m = MUTATION.exec(code);
+  return !m || g.index < m.index;
+};
 
 type Allow = { file: string; fn: string; reason: string };
 const ALLOW: Allow[] = [
@@ -70,7 +81,7 @@ function actionFunctions(): { fns: Fn[]; inline: string[] } {
     while ((m = re.exec(src))) starts.push({ name: m[1], at: m.index });
     starts.forEach((s, i) => {
       const body = src.slice(s.at, i + 1 < starts.length ? starts[i + 1].at : src.length);
-      fns.push({ file: rel(f), name: s.name, guarded: GUARD.test(body) });
+      fns.push({ file: rel(f), name: s.name, guarded: guardedFirst(body) });
     });
   }
   return { fns, inline };
@@ -108,5 +119,59 @@ describe("every exported server action passes a role guard", () => {
     const mine = fns.filter((f) => f.file === "src/app/workspace-actions.ts" && f.name !== "leaveWorkspaceAction");
     expect(mine.length).toBeGreaterThanOrEqual(12);
     expect(mine.every((f) => f.guarded)).toBe(true);
+  });
+});
+
+/**
+ * Route handlers: a POST, PUT, PATCH or DELETE under src/app must pass the same guard, or be listed with a reason. The local app's own
+ * routes (src/app/api/local) are loopback-only, answer 404 on a hosted server and have no workspace viewer.
+ */
+const ROUTE_ALLOW: { file: string; reason: string }[] = [
+  { file: "src/app/api/backup/preview/route.ts", reason: "Read-only preview; previewRestore refuses non-administrators and writes nothing." },
+  { file: "src/app/api/backup/restore/route.ts", reason: "restoreBackup refuses non-administrators (an administrator always writes), and applies the space ACL." },
+  { file: "src/app/api/sync/visibility/route.ts", reason: "Local app: reports whether the tab is visible to the scheduler; authorized by the launch token, changes no workspace data." },
+  { file: "src/app/auth/magic/request/route.ts", reason: "Sign-in: asks for a link before any session exists." },
+];
+const ROUTE_ALLOW_PREFIX = [{ prefix: "src/app/api/local/", reason: "Local app routes: loopback only, 404 when hosted, no workspace viewer." }];
+
+function routeHandlers() {
+  const out: { file: string; method: string; guarded: boolean }[] = [];
+  for (const f of walk(path.join(root, "src/app")).filter((x) => /route\.ts$/.test(x))) {
+    const src = fs.readFileSync(f, "utf8");
+    const re = /^export (?:async )?function (POST|PUT|PATCH|DELETE)\b/gm;
+    const starts: { method: string; at: number }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) starts.push({ method: m[1], at: m.index });
+    starts.forEach((st, i) => out.push({ file: rel(f), method: st.method, guarded: guardedFirst(src.slice(st.at, i + 1 < starts.length ? starts[i + 1].at : src.length)) }));
+  }
+  return out;
+}
+
+describe("every mutating route handler passes a role guard", () => {
+  const handlers = routeHandlers();
+  const allowed = (file: string) => ROUTE_ALLOW.some((a) => a.file === file) || ROUTE_ALLOW_PREFIX.some((a) => file.startsWith(a.prefix));
+
+  it("finds the handlers", () => {
+    expect(handlers.length).toBeGreaterThan(10);
+    expect(handlers.some((h) => h.file === "src/app/api/ai/draft/route.ts" && h.guarded)).toBe(true);
+  });
+
+  it("has no POST/PUT/PATCH/DELETE without a guard that is not allowlisted", () => {
+    expect(handlers.filter((h) => !h.guarded && !allowed(h.file)).map((h) => `${h.file}: ${h.method}`)).toEqual([]);
+  });
+
+  it("has no stale allowlist entry", () => {
+    expect(ROUTE_ALLOW.filter((a) => !handlers.some((h) => h.file === a.file && !h.guarded)).map((a) => a.file)).toEqual([]);
+    expect(ROUTE_ALLOW_PREFIX.filter((a) => !handlers.some((h) => h.file.startsWith(a.prefix) && !h.guarded)).map((a) => a.prefix)).toEqual([]);
+  });
+});
+
+describe("the guard detector itself", () => {
+  it("ignores a guard that only appears in a comment, and demands it before a database write", () => {
+    expect(guardedFirst("export async function a() {\n  // requireWriter() later\n  await db.task.create({});\n}")).toBe(false);
+    expect(guardedFirst("export async function a() {\n  /* requireWrite(v) */\n}")).toBe(false);
+    expect(guardedFirst("export async function a() {\n  await db.task.create({});\n  await requireWriter();\n}")).toBe(false);
+    expect(guardedFirst("export async function a() {\n  const { viewer } = await requireWriter();\n  await db.task.create({});\n}")).toBe(true);
+    expect(guardedFirst("export async function a() {\n  const u = \"https://x.example\"; requireWrite(v);\n}")).toBe(true);
   });
 });

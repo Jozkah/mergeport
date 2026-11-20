@@ -11,7 +11,9 @@ import { resolveActiveWorkspaceId, selectWorkspace } from "@/lib/authz/active-wo
 import { loadViewer, requireRepo, requireWrite } from "@/lib/authz/viewer";
 import { changeRole, leaveWorkspace, listMembers, reinstateMember, removeMember, transferOwnership } from "@/lib/services/members";
 import { createRestrictedSpace, setSpaceMember } from "@/lib/services/access-spaces";
-import { person } from "./roles-helpers";
+import { person, tokenOf } from "./roles-helpers";
+import { ORIGIN, RecordingMailer } from "./auth-mocks";
+import { acceptInvitation, createInvitation, previewInvitation } from "@/lib/services/invitations";
 
 let db: Db;
 let n = 0;
@@ -22,12 +24,12 @@ beforeEach(() => {
 const roleOf = async (memberId: string) => (await db.member.findUniqueOrThrow({ where: { id: memberId } })).role;
 const owners = (workspaceId: string) => db.member.count({ where: { workspaceId, role: "OWNER" } });
 
-async function team() {
-  const w = await workspaceWithOwner(db, "owner@example.com");
-  const admin = await addMember(db, w.ws.id, "admin@example.com", "ADMIN");
-  const admin2 = await addMember(db, w.ws.id, "admin2@example.com", "ADMIN");
-  const member = await addMember(db, w.ws.id, "member@example.com", "MEMBER");
-  const reader = await addMember(db, w.ws.id, "reader@example.com", "READER");
+async function team(tag = "") {
+  const w = await workspaceWithOwner(db, `${tag}owner@example.com`);
+  const admin = await addMember(db, w.ws.id, `${tag}admin@example.com`, "ADMIN");
+  const admin2 = await addMember(db, w.ws.id, `${tag}admin2@example.com`, "ADMIN");
+  const member = await addMember(db, w.ws.id, `${tag}member@example.com`, "MEMBER");
+  const reader = await addMember(db, w.ws.id, `${tag}reader@example.com`, "READER");
   const ownerMember = await db.member.findFirstOrThrow({ where: { workspaceId: w.ws.id, userId: w.owner.id } });
   return { ...w, admin, admin2, member, reader, ownerMember };
 }
@@ -52,7 +54,7 @@ describe("a new workspace", () => {
 
   it("the migration made each existing workspace's oldest ADMIN its OWNER (oldest member when it had no ADMIN)", async () => {
     const sql = fs.readFileSync(path.resolve("prisma/migrations/20261121100000_roles_invitations_spaces/migration.sql"), "utf8");
-    const backfill = /UPDATE "Member" SET "role" = 'OWNER'[\s\S]*?\);\n/.exec(sql)![0];
+    const backfill = /^UPDATE "Member" SET "role" = 'OWNER'[\s\S]*?\);\r?\n/m.exec(sql)![0];
     const index = /CREATE UNIQUE INDEX "Member_one_owner"[^\n]*;/.exec(sql)![0];
     // Rebuild the pre-migration situation: no owners at all, mixed roles and ages.
     await db.$executeRawUnsafe(`DROP INDEX "Member_one_owner"`);
@@ -69,6 +71,18 @@ describe("a new workspace", () => {
     const w2o = await m(w2, await u("w2o@x.com"), "MEMBER", at(5)); // no admin: the oldest member
     const w2y = await m(w2, await u("w2y@x.com"), "MEMBER", at(6));
     const w3a = await m(w3, await u("w3a@x.com"), "ADMIN", at(7)); // the only member
+    const w4 = await mk("w4");
+    const w4gone = await m(w4, await u("w4gone@x.com"), "ADMIN", at(8)); // the oldest ADMIN, but removed
+    await db.member.update({ where: { id: w4gone.id }, data: { status: "REVOKED", revokedAt: at(9) } });
+    const w4a = await m(w4, await u("w4a@x.com"), "ADMIN", at(10));
+    const w4m = await m(w4, await u("w4m@x.com"), "MEMBER", at(9));
+    const w5 = await mk("w5"); // every member removed: nobody is made OWNER
+    const w5gone = await m(w5, await u("w5gone@x.com"), "ADMIN", at(11));
+    await db.member.update({ where: { id: w5gone.id }, data: { status: "REVOKED", revokedAt: at(12) } });
+    const w6 = await mk("w6"); // no ACTIVE admin: the oldest ACTIVE member, not the removed admin
+    const w6gone = await m(w6, await u("w6gone@x.com"), "ADMIN", at(13));
+    await db.member.update({ where: { id: w6gone.id }, data: { status: "REVOKED", revokedAt: at(14) } });
+    const w6m = await m(w6, await u("w6m@x.com"), "MEMBER", at(15));
     await db.$executeRawUnsafe(backfill);
     await db.$executeRawUnsafe(index);
     expect(await roleOf(w1a1.id)).toBe("OWNER");
@@ -77,7 +91,14 @@ describe("a new workspace", () => {
     expect(await roleOf(w2o.id)).toBe("OWNER");
     expect(await roleOf(w2y.id)).toBe("MEMBER");
     expect(await roleOf(w3a.id)).toBe("OWNER");
-    for (const w of [w1, w2, w3]) expect(await owners(w)).toBe(1);
+    expect(await roleOf(w4gone.id)).toBe("ADMIN"); // a removed admin is never the owner
+    expect(await roleOf(w4a.id)).toBe("OWNER");
+    expect(await roleOf(w4m.id)).toBe("MEMBER");
+    expect(await roleOf(w5gone.id)).toBe("ADMIN");
+    expect(await owners(w5)).toBe(0); // no active member: left without an owner on purpose (docs/roles.md)
+    expect(await roleOf(w6gone.id)).toBe("ADMIN");
+    expect(await roleOf(w6m.id)).toBe("OWNER");
+    for (const w of [w1, w2, w3, w4, w6]) expect(await owners(w)).toBe(1);
   });
 });
 
@@ -275,6 +296,93 @@ describe("transfer ownership", () => {
     expect(await owners(b.ws.id)).toBe(1);
     expect((await loadViewer(db, b.owner.id, b.ws.id))?.role).toBe("OWNER");
     expect(await roleOf(bAdmin.member.id)).toBe("ADMIN");
+  });
+});
+
+describe("concurrent member administration never leaves a workspace without an OWNER", () => {
+  const rounds = [0, 1, 2, 3, 4];
+  it("transfer racing with a removal of the new owner", async () => {
+    for (const i of rounds) {
+      const t = await team(`r${i}`);
+      const other = await t.admin2.viewer();
+      await Promise.allSettled([transferOwnership(db, t.viewer, t.admin.member.id), removeMember(db, other, t.admin.member.id)]);
+      expect(await owners(t.ws.id)).toBe(1);
+      const owner = await db.member.findFirstOrThrow({ where: { workspaceId: t.ws.id, role: "OWNER" } });
+      expect(owner.status).toBe("ACTIVE");
+    }
+  });
+
+  it("transfer racing with a demotion of the new owner", async () => {
+    for (const i of rounds) {
+      const t = await team(`d${i}`);
+      const other = await t.admin2.viewer();
+      await Promise.allSettled([transferOwnership(db, t.viewer, t.admin.member.id), changeRole(db, other, t.admin.member.id, "READER")]);
+      expect(await owners(t.ws.id)).toBe(1);
+      expect((await db.member.findFirstOrThrow({ where: { workspaceId: t.ws.id, role: "OWNER" } })).status).toBe("ACTIVE");
+    }
+  });
+
+  it("transfer racing with the new owner leaving", async () => {
+    for (const i of rounds) {
+      const t = await team(`l${i}`);
+      const target = await t.admin.viewer();
+      await Promise.allSettled([transferOwnership(db, t.viewer, t.admin.member.id), leaveWorkspace(db, target)]);
+      expect(await owners(t.ws.id)).toBe(1);
+      expect((await db.member.findFirstOrThrow({ where: { workspaceId: t.ws.id, role: "OWNER" } })).status).toBe("ACTIVE");
+    }
+  });
+});
+
+describe("a removed or demoted inviter leaves no live invitations", () => {
+  const mailer = new RecordingMailer();
+  const invite = (v: Parameters<typeof createInvitation>[1], email: string, role = "MEMBER") => createInvitation(db, v, { email, role, mailer, origin: ORIGIN });
+  const accept = async (email: string, token: string) => {
+    const u = (await db.user.findUnique({ where: { email } })) ?? (await person(db, email));
+    return acceptInvitation(db, token, { id: u.id, email: u.email, emailVerifiedAt: u.emailVerifiedAt });
+  };
+
+  it("removing the inviter revokes their pending invitations; accepting one is refused", async () => {
+    const t = await team("i");
+    const v = await t.admin.viewer();
+    await invite(v, "guest1@example.com");
+    const token = tokenOf(mailer);
+    await invite(t.viewer, "guest2@example.com"); // the owner's own invitation stays
+    const keep = tokenOf(mailer);
+    await removeMember(db, t.viewer, t.admin.member.id);
+    expect(await db.invitation.count({ where: { workspaceId: t.ws.id, acceptedAt: null, revokedAt: null } })).toBe(1);
+    expect(await accept("guest1@example.com", token)).toEqual({ ok: false, reason: "invalid" });
+    expect((await accept("guest2@example.com", keep)).ok).toBe(true);
+  });
+
+  it("demoting the inviter below ADMIN revokes theirs too; a demotion that keeps ADMIN does not", async () => {
+    const t = await team("j");
+    const v = await t.admin.viewer();
+    await invite(v, "g1@example.com");
+    await changeRole(db, t.viewer, t.admin.member.id, "ADMIN");
+    expect(await db.invitation.count({ where: { workspaceId: t.ws.id, acceptedAt: null, revokedAt: null } })).toBe(1);
+    await changeRole(db, t.viewer, t.admin.member.id, "MEMBER");
+    expect(await db.invitation.count({ where: { workspaceId: t.ws.id, acceptedAt: null, revokedAt: null } })).toBe(0);
+  });
+
+  it("even a row that somehow stayed pending cannot be accepted once its inviter is no longer allowed (checked at accept time)", async () => {
+    const t = await team("k");
+    const v = await t.admin.viewer();
+    await invite(v, "late@example.com");
+    const token = tokenOf(mailer);
+    await db.member.update({ where: { id: t.admin.member.id }, data: { role: "MEMBER" } }); // bypasses the service: no revocation happened
+    expect(await previewInvitation(db, token)).toBeNull();
+    expect(await accept("late@example.com", token)).toEqual({ ok: false, reason: "invalid" });
+    await db.member.update({ where: { id: t.admin.member.id }, data: { role: "ADMIN" } });
+    expect(await previewInvitation(db, token)).not.toBeNull(); // the claim rolled back: it works again for an allowed inviter
+    expect((await accept("late@example.com", token)).ok).toBe(true);
+  });
+
+  it("an invitation whose inviter row is gone or removed cannot be accepted", async () => {
+    const t = await team("m");
+    await invite(await t.admin.viewer(), "x1@example.com");
+    const token = tokenOf(mailer);
+    await db.member.update({ where: { id: t.admin.member.id }, data: { status: "REVOKED", revokedAt: new Date() } });
+    expect(await accept("x1@example.com", token)).toEqual({ ok: false, reason: "invalid" });
   });
 });
 

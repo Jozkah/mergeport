@@ -1,5 +1,5 @@
 import type { Db } from "@/lib/db";
-import { assertProjectWritable, requireProject, requireProjectWrite, requireRepo, type Viewer } from "@/lib/authz/viewer";
+import { accessSpaceWhere, assertProjectWritable, requireProject, requireProjectWrite, requireRepo, type Viewer } from "@/lib/authz/viewer";
 import { positionBetween } from "@/lib/domain/planning";
 import { BOARD_TEMPLATES, DENSITIES, GROUPINGS, cleanBoardColumns, type BoardColumn, type GroupBy } from "@/lib/domain/boards";
 import { NotFoundError, ValidationError } from "@/lib/errors";
@@ -201,13 +201,13 @@ export type ReleaseReadiness = {
 export async function releaseReadiness(db: Db, v: Viewer, milestoneId: string): Promise<ReleaseReadiness> {
   const ms = await db.dashboardMilestone.findFirst({ where: { id: milestoneId, workspaceId: v.workspaceId } });
   if (!ms) throw new NotFoundError();
-  if (!v.isAdmin && ms.projectId) await requireProject(db, v, ms.projectId);
+  if (ms.projectId) await requireProject(db, v, ms.projectId); // administrators included: a restricted space hides its milestones
   const items = await db.planningItem.findMany({
     where: { AND: [{ milestoneId }, await planningWhere(db, v)] },
     include: { column: true, workItem: { select: { type: true, state: true, checksState: true, title: true } }, waiting: { where: { status: "PENDING" } }, blockedBy: { include: { from: { include: { column: true, workItem: { select: { type: true, state: true } } } } } } },
   });
   const { blockerFinished } = await import("@/lib/domain/deps");
-  const total = await db.planningItem.count({ where: { milestoneId } });
+  const total = await db.planningItem.count({ where: { milestoneId, project: { workspaceId: v.workspaceId, AND: [accessSpaceWhere(v)] } } });
   const title = (i: (typeof items)[number]) => i.workItem?.title ?? i.title;
   const unfinished = items.filter((i) => i.column.key !== "done");
   return {

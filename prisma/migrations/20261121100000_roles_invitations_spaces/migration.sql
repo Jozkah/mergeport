@@ -8,11 +8,14 @@ ALTER TABLE "Member" ALTER COLUMN "role" TYPE "MemberRole" USING ("role"::text::
 ALTER TABLE "Member" ALTER COLUMN "role" SET DEFAULT 'MEMBER';
 DROP TYPE "MemberRole_old";
 
--- Every existing workspace gets exactly one OWNER: its oldest ADMIN (ties by id); a workspace with no ADMIN at all gets its oldest member.
+-- Every existing workspace with an ACTIVE member gets exactly one OWNER: its oldest ACTIVE ADMIN (ties by id); with no ACTIVE ADMIN, its oldest
+-- ACTIVE member. A REVOKED member is never made OWNER. A workspace with no ACTIVE member at all gets no OWNER (nobody can use it; an operator
+-- promotes one row by hand: UPDATE "Member" SET "role" = 'OWNER', "status" = 'ACTIVE' WHERE "id" = ...; the unique index below allows it).
 UPDATE "Member" SET "role" = 'OWNER'
 WHERE "id" IN (
   SELECT DISTINCT ON ("workspaceId") "id"
   FROM "Member"
+  WHERE "status" = 'ACTIVE'
   ORDER BY "workspaceId", ("role" = 'ADMIN') DESC, "createdAt" ASC, "id" ASC
 );
 

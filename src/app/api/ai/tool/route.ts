@@ -1,4 +1,5 @@
 import { db, resolveDbFile } from "@/lib/db";
+import { requireWrite } from "@/lib/authz/viewer";
 import { withViewerStream } from "@/lib/api-post";
 import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
@@ -15,6 +16,7 @@ const TOOLS: ToolName[] = ["digest", "standup", "item", "focus"];
 /** The small read-only AI jobs: briefing from the digest, stand-up, where one pull request or issue stands. */
 export async function POST(req: Request) {
   return withViewerStream(req, async (v, body, step) => {
+    requireWrite(v); // remembers the model in the workspace settings: writers only
     if (isDemo()) throw new ValidationError("The demo does not send anything to an AI endpoint.");
     const input = JSON.parse(body || "{}") as { tool?: string; id?: string; day?: string };
     const tool = TOOLS.find((t) => t === input.tool);
