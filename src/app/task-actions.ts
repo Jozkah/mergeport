@@ -7,6 +7,7 @@ import { run, type ActionResult } from "@/lib/action-result";
 import { requireViewer } from "@/lib/auth/current";
 import { addCheckItems, deleteCheckItem, editCheckItem, moveCheckItem, setCheckItemDone } from "@/lib/services/checklist";
 import { addComment, createTask, deleteComment, deleteTask, editComment, updateTask } from "@/lib/services/tasks";
+import { promoteTask } from "@/lib/services/task-promotion";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const day = (s: string) => (s ? new Date(s + "T00:00:00Z") : null);
@@ -20,6 +21,7 @@ function refresh(id?: string) {
 
 export async function createTaskAction(fd: FormData): Promise<ActionResult> {
   let id = "";
+  let retryRepo = "";
   const r = await run(async () => {
     const { viewer } = await requireViewer();
     const t = await createTask(db, viewer, {
@@ -32,10 +34,23 @@ export async function createTaskAction(fd: FormData): Promise<ActionResult> {
       labels: str(fd, "labels"),
     });
     id = t.id;
+    // Ticking "also create a GitHub issue" is the confirmation: the same flow as "Turn into a GitHub issue", so the task and the issue
+    // stay ONE linked record. The task is created first and survives a GitHub failure; the person is then sent to the explicit panel to retry.
+    const issueRepo = str(fd, "issueRepo");
+    let message = "Task created";
+    if (issueRepo) {
+      try {
+        const p = await promoteTask(db, viewer, t.id, issueRepo);
+        message = `Task created, and issue #${p.number} created on GitHub`;
+      } catch (e) {
+        retryRepo = issueRepo;
+        message = `Task created, but the GitHub issue was not created: ${e instanceof Error ? e.message : "GitHub did not accept it"}. You can retry from the task.`;
+      }
+    }
     refresh();
-    return { ok: true, message: "Task created", data: { id: t.id } };
+    return { ok: true, message, data: { id: t.id } };
   });
-  if (r.ok && fd.get("goto") === "1") redirect(`/tasks/${id}`);
+  if (r.ok && fd.get("goto") === "1") redirect(`/tasks/${id}${retryRepo ? `?promote=${encodeURIComponent(retryRepo)}#promote` : ""}`);
   return r;
 }
 

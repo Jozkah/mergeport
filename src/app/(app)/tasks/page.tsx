@@ -18,6 +18,7 @@ import { NewTask } from "@/components/tasks/NewTask";
 import { AiTasks } from "@/components/tasks/AiTasks";
 import { getAiView } from "@/lib/services/ai";
 import { isDemo } from "@/lib/env";
+import { issueDestinationsByProject } from "@/lib/services/task-promotion";
 
 export const metadata = { title: "Tasks" };
 
@@ -40,6 +41,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
   const [tasks, counts] = await Promise.all([listTasks(db, viewer, { scope, projectId: project?.id, status, label: sp.label || undefined, q: sp.q }), taskCounts(db, viewer)]);
   const peopleByProject: Record<string, string[]> = {};
   for (const p of projects) peopleByProject[p.id] = await assigneeCandidates(db, viewer, p.id);
+  const issueRepos = isDemo() ? {} : await issueDestinationsByProject(db, viewer, projects.map((p) => p.id));
   const ai = isDemo() ? null : await getAiView(db);
   const pendingAi = ai?.saved ? await db.aiSuggestion.count({ where: { state: "NEW" } }) : 0;
   const today = todayIn(viewer.timezone);
@@ -58,7 +60,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
       <PageHeader
         title="Tasks"
         subtitle="Create a task, give it to someone, and talk about it. Tasks are the same cards as on the planning board and sync to everyone in the project's team."
-        actions={projects.length > 0 ? <>{ai && <AiTasks projects={projects.map((p) => ({ id: p.id, name: p.name }))} defaultProjectId={project?.id ?? projects[0].id} configured={ai.saved} />}<TemplateButton projects={projects.map((p) => ({ id: p.id, name: p.name }))} /><NewTask projects={projects.map((p) => ({ id: p.id, name: p.name }))} peopleByProject={peopleByProject} me={viewer.login} defaultProjectId={project?.id ?? projects[0].id} /></> : undefined}
+        actions={projects.length > 0 ? <>{ai && <AiTasks projects={projects.map((p) => ({ id: p.id, name: p.name }))} defaultProjectId={project?.id ?? projects[0].id} configured={ai.saved} />}<TemplateButton projects={projects.map((p) => ({ id: p.id, name: p.name }))} /><NewTask projects={projects.map((p) => ({ id: p.id, name: p.name }))} peopleByProject={peopleByProject} me={viewer.login} defaultProjectId={project?.id ?? projects[0].id} issueRepos={issueRepos} /></> : undefined}
       />
       {ai && ai.saved && <p className="mb-3 text-[12.5px] text-ink-3"><Link href="/ai?tab=review" className="underline">Let the AI suggest tasks from your pull requests</Link>{pendingAi > 0 ? ` (${pendingAi} waiting for you)` : ""}</p>}
       <ScopeNote scope={workScope} />
