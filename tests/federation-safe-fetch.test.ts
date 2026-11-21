@@ -171,9 +171,9 @@ describe("safeFetchJson with an injected resolver and transport", () => {
   it("the pinned lookup answers both the plain and the all:true form with only the validated address", async () => {
     const t = transport({});
     await safeFetchJson("https://peer.test/", {}, { ...t.deps, resolve: resolver({ "peer.test": ["2606:4700:4700::1111"] }) });
-    const lookup = (t.seen[0].options as unknown as { lookup: Function }).lookup;
+    const lookup = (t.seen[0].options as unknown as { lookup: (n: string, o: object, cb: (e: unknown, a: unknown) => void) => void }).lookup;
     let all: unknown;
-    lookup("anything-else.test", { all: true }, (_e: unknown, a: unknown) => (all = a));
+    lookup("anything-else.test", { all: true }, (_e, a) => (all = a));
     expect(all).toEqual([{ address: "2606:4700:4700::1111", family: 6 }]);
   });
 

@@ -13,7 +13,7 @@ import { createTask } from "@/lib/services/tasks";
 import { decryptSecret, encryptSecret, federationState, normaliseOrigin, parseKey, pkceChallenge } from "@/lib/federation/config";
 import { completeCallback, listLinks, remoteGet, settleRefreshes, startLink, unlink, workspaceLinks } from "@/lib/federation/consumer";
 import { canCreateLink, checkOrigin, loadPolicy, savePolicy } from "@/lib/federation/policy";
-import { approveAuthorization, authenticate, denyAuthorization, eligibleWorkspaces, exchangeToken, myGrants, parseAuthorizeRequest, revokeAllFromOrigin, revokeGrant, workspaceGrants } from "@/lib/federation/provider";
+import { approveAuthorization, authenticate, denyAuthorization, eligibleWorkspaces, myGrants, parseAuthorizeRequest, revokeAllFromOrigin, revokeGrant, workspaceGrants } from "@/lib/federation/provider";
 import { meRoute, projectRoute, projectsRoute, revokeRoute, tasksRoute, tokenRoute } from "@/lib/federation/provider-http";
 import type { BoardDto, ProjectDto, TaskDto } from "@/lib/federation/read-api";
 

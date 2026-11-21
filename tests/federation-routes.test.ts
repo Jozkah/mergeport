@@ -129,7 +129,11 @@ describe("the consent page (this instance as provider)", () => {
       if (typeof v === "string") return void out.push(v);
       if (!v || typeof v !== "object" || seen.has(v)) return;
       seen.add(v);
-      for (const [k, x] of Object.entries(v)) if (k !== "type" && k !== "_owner" && k !== "_store") (out.push(k), walk(x));
+      for (const [k, x] of Object.entries(v)) {
+        if (k === "type" || k === "_owner" || k === "_store") continue;
+        out.push(k);
+        walk(x);
+      }
     };
     walk(el);
     return out.join(" ");
