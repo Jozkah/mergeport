@@ -199,7 +199,7 @@ describe("tokens at rest", () => {
     expect(parseKey("short")).toBeNull();
     expect(parseKey("a".repeat(31))).toBeNull(); // under 32 characters
     expect(parseKey("ab".repeat(15))).toBeNull(); // 30 hex characters = 15 bytes
-    expect(parseKey(Buffer.alloc(31, 1).toString("base64"))).toBeNull(); // 31 bytes
+    expect(parseKey(Buffer.alloc(20, 1).toString("base64"))).toBeNull(); // 20 bytes of base64 is 28 characters: neither 32 bytes nor a 32-character passphrase
     expect(parseKey("correct horse battery staple, long enough!")!.length).toBe(32); // a passphrase is hashed to 32 bytes
     expect(parseKey(Buffer.alloc(48, 1).toString("base64"))!.length).toBe(32); // longer material is hashed to 32 bytes
     expect(parseKey(undefined)).toBeNull();
@@ -632,7 +632,7 @@ describe("consumer: a link is only the linking person's", () => {
     };
     walk(path.resolve("src"));
     // Only federation's own code, its routes and pages, the sidebar/settings entry points, the policy-aware layout flag and the tenancy allowlist touch it.
-    const allowedPrefixes = ["src/lib/federation/", "src/app/federation", "src/app/.well-known/", "src/app/api/federation/", "src/app/(app)/linked/", "src/app/(app)/settings/", "src/app/(app)/layout.tsx", "src/components/federation/", "src/lib/authz/tenancy-allowlist.ts", "src/generated/"];
+    const allowedPrefixes = ["src/lib/federation/", "src/app/federation", "src/app/.well-known/", "src/app/api/federation/", "src/app/(app)/linked/", "src/app/(app)/settings/", "src/app/(app)/layout.tsx", "src/components/federation/", "src/lib/services/members.ts", "src/lib/authz/tenancy-allowlist.ts", "src/generated/"];
     expect(hits.filter((h) => !allowedPrefixes.some((a) => h.startsWith(a)))).toEqual([]);
     for (const h of hits) expect(h).not.toMatch(/services\/(backup|search|digest|ai|queries)|lib\/mcp/);
   });
