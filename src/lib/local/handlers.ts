@@ -1,8 +1,8 @@
 import { db } from "@/lib/db";
-import { canSpend } from "@/lib/domain/sync";
-import { installationBudgetKey, portForSync } from "@/lib/github/factory";
+import * as budget from "@/lib/github/budget";
+import { SOURCE_BUDGET_KEY } from "@/lib/github/budget";
+import { portForSync } from "@/lib/github/factory";
 import { GithubNotConnectedError } from "@/lib/github/hosted";
-import { GithubError } from "@/lib/github/port";
 import { workspaceGithubStatus } from "@/lib/github/status";
 import type { Handler, JobRow } from "@/lib/jobs";
 import { UPDATE_JOB, maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
@@ -16,35 +16,14 @@ import { setStatus, syncFork, syncItem, syncRepository } from "@/lib/sync/reposi
  * refreshes can never starve shared-state sync, and vice versa.
  */
 
-export const SOURCE_BUDGET_KEY = "source";
 export const RECONCILE_EVERY_MS = 15 * 60_000;
 export const DIGEST_EVERY_MS = 10 * 60_000;
 export const AI_AUTOPILOT_EVERY_MS = 30 * 60_000;
 
-/**
- * The rate-limit budget a repository's jobs spend from. The local app has one credential and one budget ("source"). A hosted
- * repository spends from its INSTALLATION's budget (`installation:<id>`): GitHub's quota belongs to the installation token, which
- * every workspace using that installation shares, and one installation running dry must not stall the others.
- */
-export async function sourceBudgetKeyFor(repositoryId: string): Promise<string> {
-  if (!isHosted()) return SOURCE_BUDGET_KEY;
-  const repo = await db.repository.findUnique({ where: { id: repositoryId }, select: { installationId: true } });
-  return repo?.installationId != null ? installationBudgetKey(repo.installationId) : SOURCE_BUDGET_KEY;
-}
-
-export async function guardSourceBudget(key: string = SOURCE_BUDGET_KEY) {
-  const rl = await db.rateLimitState.findUnique({ where: { key } });
-  const state = rl ? { remaining: rl.remaining, limit: rl.limit, resetAt: rl.resetAt } : null;
-  if (!canSpend(state, 10, 25)) {
-    const secs = Math.max(30, Math.ceil((state!.resetAt.getTime() - Date.now()) / 1000));
-    throw new GithubError("rate-limited", "Waiting for the GitHub API budget to reset", secs, state!.resetAt);
-  }
-}
-
-async function recordRate(rate: { remaining: number; limit: number; resetAt: Date } | null, key: string = SOURCE_BUDGET_KEY) {
-  if (!rate) return;
-  await db.rateLimitState.upsert({ where: { key }, create: { key, ...rate }, update: { ...rate } });
-}
+export { SOURCE_BUDGET_KEY };
+export const sourceBudgetKeyFor = (repositoryId: string) => budget.sourceBudgetKeyFor(db, repositoryId);
+export const guardSourceBudget = (key: string = SOURCE_BUDGET_KEY) => budget.guardSourceBudget(db, key);
+const recordRate = (rate: { remaining: number; limit: number; resetAt: Date } | null, key: string = SOURCE_BUDGET_KEY) => budget.recordRate(db, rate, key);
 
 /**
  * Runs `fn` once per workspace, in a fixed order (id), so one failing tenant cannot starve the ones after it. Each failure is logged

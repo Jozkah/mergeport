@@ -108,7 +108,7 @@ export default async function Attention({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="My attention" subtitle="Who is expected to act, and since when." />
-      {viewer.githubLogin === null && <div className="mb-4"><Banner tone="info" title="Link GitHub to see your reviews">Reviews and pull requests are matched to a GitHub account, and yours is not linked yet. Team queues still show.</Banner></div>}
+      {viewer.githubLogin === null && <div className="mb-4"><Banner tone="info" title="Personal review queues need a linked GitHub account.">Team queues still show.</Banner></div>}
       <AiShortcuts show={await aiEnabled(db, viewer.workspaceId)}><AiTool tool="focus" label="Where should I start?" hint="The AI reads these queues and tells you what to do first." /></AiShortcuts>
       <ScopeNote scope={scope} />
       <ViewBar scope="attention" views={await listViews(db, viewer, "attention")} />

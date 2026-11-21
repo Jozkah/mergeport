@@ -1,6 +1,6 @@
 import type { Db } from "@/lib/db";
 import { InstallationGoneError, InstallationSuspendedError, type InstallationTokenProvider } from "./app-auth";
-import { markInstallationLoss } from "./binding";
+import { markInstallationState } from "./binding";
 
 /**
  * Detecting loss without webhooks: when minting an installation token fails because the installation was uninstalled (404) or
@@ -11,11 +11,11 @@ import { markInstallationLoss } from "./binding";
 /** Records what a token failure says. Returns true when the error was a loss and the row was marked. Any other error is ignored. */
 export async function noteInstallationError(db: Db, installationId: bigint, error: unknown): Promise<boolean> {
   if (error instanceof InstallationGoneError) {
-    await markInstallationLoss(db, installationId, "gone");
+    await markInstallationState(db, installationId, "deleted");
     return true;
   }
   if (error instanceof InstallationSuspendedError) {
-    await markInstallationLoss(db, installationId, "suspended");
+    await markInstallationState(db, installationId, "suspended");
     return true;
   }
   return false;

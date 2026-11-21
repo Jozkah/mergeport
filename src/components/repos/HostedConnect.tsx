@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import type { Viewer } from "@/lib/authz/viewer";
 import { listInstallationRepos } from "@/lib/services/installation-repos";
+import { workspaceGithubStatus } from "@/lib/github/status";
 import { trackInstallationReposAction } from "@/app/actions";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Banner, EmptyState, Mono, PageHeader, Panel, SimplePill } from "@/components/ui/primitives";
@@ -13,10 +14,11 @@ import { FolderGit2, Globe, Lock } from "@/components/ui/icons";
  * does not give anyone access to a repository: people see repositories through grants.
  */
 export async function HostedConnect({ viewer }: { viewer: Viewer }) {
-  const list = await listInstallationRepos(db, viewer.workspaceId);
   const header = <PageHeader title="Connect repositories" subtitle="Repositories your workspace's GitHub connection can read. Choosing one starts tracking it here; it does not change access on GitHub or who in this workspace can see it." />;
 
-  if (list.state === "not-connected") {
+  // A member's page view makes no GitHub call at all: the connection state is local data, and only an administrator's panel lists repositories.
+  const status = await workspaceGithubStatus(db, viewer.workspaceId);
+  if (status.state === "none" || status.state === "removed") {
     return (
       <>
         {header}
@@ -28,7 +30,7 @@ export async function HostedConnect({ viewer }: { viewer: Viewer }) {
       </>
     );
   }
-  if (list.state === "suspended") {
+  if (status.state === "suspended") {
     return (
       <>
         {header}
@@ -52,6 +54,7 @@ export async function HostedConnect({ viewer }: { viewer: Viewer }) {
       </>
     );
   }
+  const list = await listInstallationRepos(db, viewer.workspaceId);
   return (
     <>
       {header}

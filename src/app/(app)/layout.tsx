@@ -6,7 +6,6 @@ import { GithubConnectionBanner } from "@/components/shell/GithubConnectionBanne
 import { connectionState } from "@/lib/github/connection-state";
 import { can } from "@/lib/authz/roles";
 import { isHosted } from "@/lib/public-url";
-import { workspaceGithubStatus } from "@/lib/github/status";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { readScope, scopeKey } from "@/lib/scope";
 import { Suspense } from "react";
@@ -118,8 +117,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Switching needs the launcher's control channel; without it (plain dev server) the label is static, and demo shows nothing.
   const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
   const hosted = isHosted();
-  // One shared answer to "is this workspace connected to GitHub": the not-connected notice shows only until a binding exists.
-  const ghStatus = hosted ? await workspaceGithubStatus(db, viewer.workspaceId) : null;
   const mine = hosted ? await activeWorkspaces(db, user.id) : [];
   const accountSwitcher = mine.length > 1 ? { workspaces: mine, active: viewer.workspaceId } : null;
   const wsList = isDemo() || hosted ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId?.toString() ?? "");

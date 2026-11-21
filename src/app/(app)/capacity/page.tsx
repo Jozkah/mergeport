@@ -15,7 +15,7 @@ export default async function Capacity() {
   const { viewer } = await requireViewer();
   const now = new Date();
   const rows = await reviewCapacity(db, viewer, now);
-  const mine = rows.find((r) => r.login.toLowerCase() === viewer.login.toLowerCase());
+  const mine = rows.find((r) => r.login.toLowerCase() === (viewer.githubLogin ?? viewer.login).toLowerCase()); // GitHub login first; the sign-in name only so a person without a linked account can still set their own availability
   const options = viewer.isAdmin ? rows : rows.filter((r) => r.login === mine?.login);
   return (
     <>

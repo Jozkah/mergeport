@@ -19,6 +19,7 @@ import { mapLocalRoot, scanWorktrees, unmapLocalRoot } from "@/lib/services/work
 import { audit } from "@/lib/services/audit";
 import { portForDiscovery, publicPort } from "@/lib/github/factory";
 import { trackInstallationRepos } from "@/lib/services/installation-repos";
+import { isHosted } from "@/lib/public-url";
 import { applyWatchlist } from "@/lib/services/watchlist";
 import { readCached } from "@/lib/local/discovery";
 import type { Discovery } from "@/lib/github/port";
@@ -39,7 +40,8 @@ const urlRe = /^(?:https?:\/\/github\.com\/)?([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._
 /** Public import via the official public REST API, with no credential at all. Nothing is shared with teammates. */
 export async function importPublicAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireWriter();
+    // Hosted: an administrator's decision (a member importing would otherwise give themselves access).
+    const { viewer } = isHosted() ? await requireAdminViewer() : await requireWriter();
     const m = urlRe.exec(str(fd, "repo"));
     if (!m) throw new ValidationError("Enter a GitHub URL or owner/repo");
     const meta = await publicPort(db).getRepository(m[1], m[2]).catch((e) => {
@@ -48,6 +50,7 @@ export async function importPublicAction(fd: FormData): Promise<ActionResult> {
     });
     if (meta.visibility !== "PUBLIC") throw new ValidationError("Only public repositories can be imported by URL");
     const [r] = await trackLocally(db, viewer, [meta]);
+    if (r.trackingStatus === "REMOVED") throw new ValidationError("That repository was removed from tracking. Connect it again from Connect repositories.");
     await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id, full: true }, dedupeKey: `sync:${r.id}` });
     revalidatePath("/repositories");
     return { ok: true, message: `${meta.fullName} is tracked on this computer. It is not shared with teammates.` };
@@ -91,7 +94,7 @@ export async function trackInstallationReposAction(fd: FormData): Promise<Action
 
 export async function untrackRepositoryAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireWriter();
+    const { viewer } = isHosted() ? await requireAdminViewer() : await requireWriter();
     await removeFromTracking(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/repositories");
     return { ok: true, message: "Repository removed from tracking. Nothing was deleted on GitHub." };
@@ -470,6 +473,9 @@ export async function mapForkAction(fd: FormData): Promise<ActionResult> {
 export async function watchlistAction(input: { text: string }): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireAdminViewer();
+    // Hosted: repositories read through this workspace's GitHub connection are chosen on Connect repositories. Tracking by address would
+    // create repositories nothing can read (no installation), which would sit there silently stale.
+    if (isHosted()) throw new ValidationError("Adding by address is not available for this workspace. Choose repositories on Connect repositories.");
     const port = await portForDiscovery(db, { id: (viewer.githubId ?? 0n).toString(), login: viewer.login }, { workspaceId: viewer.workspaceId });
     const results = await applyWatchlist(db, viewer, port, String(input.text ?? ""));
     revalidatePath("/forks");

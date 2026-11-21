@@ -1,3 +1,6 @@
+import { guardSourceBudget, recordRate, sourceBudgetKeyFor } from "@/lib/github/budget";
+import type { RateInfo } from "@/lib/github/port";
+import { isHosted } from "@/lib/public-url";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { repoWhere, viaRepo, type Viewer } from "@/lib/authz/viewer";
@@ -59,7 +62,14 @@ async function loadItem(db: Db, v: Viewer, id: string) {
 }
 
 export async function portFor(db: Db, repositoryId: string) {
-  const port = await portForSync(db, repositoryId);
+  // Hosted: an interactive read spends the installation's budget like a sync does (checked first, every answer recorded).
+  let onRate: ((r: RateInfo) => void) | undefined;
+  if (isHosted()) {
+    const key = await sourceBudgetKeyFor(db, repositoryId);
+    await guardSourceBudget(db, key);
+    onRate = (r) => void recordRate(db, r, key).catch(() => {});
+  }
+  const port = await portForSync(db, repositoryId, { onRate });
   if (!port) throw new ValidationError("No credential can read this repository right now.");
   return port;
 }

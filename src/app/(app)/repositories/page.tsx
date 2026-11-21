@@ -94,7 +94,7 @@ export default async function Repositories({ searchParams: _searchParams }: { se
       )}
 
       <Panel title={`Tracked repositories (${repos.length})`} icon={FolderGit2} id="repos"
-        actions={
+        actions={isHosted() && !viewer.isAdmin ? undefined :
           <ActionForm action={importPublicAction} submitLabel="Track" pendingLabel="Checking…" className="flex w-full items-center gap-2 sm:w-auto [&>div]:!mt-0" submitClassName="btn btn-primary !h-8">
             <label className="sr-only" htmlFor="pub-url">Public repository URL or owner/repo</label>
             <input id="pub-url" name="repo" className="input !h-8 !w-full sm:!w-60" placeholder="Public URL or owner/repo" required />

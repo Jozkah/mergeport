@@ -9,7 +9,7 @@ import { DemoPort } from "./demo";
 import { GithubNotConnectedError, GithubWritesDisabledError, assertGithubAvailable } from "./hosted";
 import { profileFetch } from "@/lib/local/profile-runner";
 import { OctokitPort, createOctokit, type CacheStore } from "./octokit";
-import { GithubError, type Discovery, type GithubPort } from "./port";
+import { GithubError, type Discovery, type GithubPort, type RateInfo } from "./port";
 import { githubAppFetch } from "./transport";
 
 /**
@@ -74,9 +74,9 @@ async function installationToken(db: Db, bound: BoundInstallation): Promise<stri
 }
 
 /** The installation-backed port of one binding: read-only (the App has read permissions only), cached under the installation's own key prefix. */
-export async function installationPort(db: Db, bound: BoundInstallation, o: { baseUrl?: string } = {}): Promise<OctokitPort> {
+export async function installationPort(db: Db, bound: BoundInstallation, o: { baseUrl?: string; onRate?: (r: RateInfo) => void } = {}): Promise<OctokitPort> {
   const token = await installationToken(db, bound);
-  return new OctokitPort(createOctokit(token, githubAppFetch(), o.baseUrl ?? githubApiBase()), { cache: dbCache(db, installationCachePrefix(bound.installationId)) });
+  return new OctokitPort(createOctokit(token, githubAppFetch(), o.baseUrl ?? githubApiBase()), { cache: dbCache(db, installationCachePrefix(bound.installationId)), onRate: o.onRate });
 }
 
 /** The binding that serves a repository: its own installation, if the workspace still has a usable proved binding to it. */
@@ -91,11 +91,11 @@ async function boundFor(db: Db, repo: { workspaceId: string; installationId: big
  * Source repositories: demo store in demo mode; hosted, the repository's installation (no binding: the typed not-connected error);
  * otherwise the person's gh credential.
  */
-export async function portForSync(db: Db, repositoryId: string): Promise<GithubPort | null> {
+export async function portForSync(db: Db, repositoryId: string, o: { onRate?: (r: RateInfo) => void } = {}): Promise<GithubPort | null> {
   const repo = await db.repository.findUnique({ where: { id: repositoryId } });
   if (!repo) return null;
   if (repo.isDemo) return new DemoPort(db, "demo-sync");
-  if (isHosted()) return installationPort(db, await boundFor(db, repo));
+  if (isHosted()) return installationPort(db, await boundFor(db, repo), { onRate: o.onRate });
   return ghPort(db);
 }
 

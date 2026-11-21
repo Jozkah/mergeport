@@ -40,6 +40,14 @@ role string or an unknown action gets nothing.
   activity, planning, the federation read API, the CLI and every id route (page or API: a hidden item is "not found", never "forbidden")
   all go through `repoWhere` / `viaRepo` / `requireRepo`; `tests/github-hosted-visibility.test.ts` walks them. Tracking a repository from
   an installation is an administrator action and grants nobody anything.
+- **Tracking and untracking are administrator actions when hosted** (`importPublicAction`, `untrackRepositoryAction`, `trackLocally`,
+  `removeFromTracking`): a member can neither give themselves a grant by importing a public URL nor revoke everyone's by untracking. Hosted
+  `trackLocally` never creates or revives a grant and never re-activates an untracked repository. When sync sees a PUBLIC repository
+  turn private, every unrevoked grant on it is revoked and an audit row `repository.visibility-flip` is written. Stored daily digests of
+  the people who lose access are deleted (`purgeDigests`) on a revoked grant, an untracked repository, a removed member and that flip,
+  so a snapshot never outlives the access it was made from.
+- **Known limitation:** `runDailyDigest` generates a workspace's digest only for its oldest member (unchanged behaviour); other members get
+  theirs when they open the page and regenerate.
 - **GitHub identity is not the sign-in name.** `Viewer.githubLogin` is the person's GitHub login, or null without a linked GitHub account
   (`login` is the mailbox local part for an email user). Review queues, the inbox, the digest, review-request notifications and AI context
   match GitHub data on `githubLogin` only, so an email user named "alice" never inherits the GitHub user "alice"'s reviews. People

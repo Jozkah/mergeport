@@ -7,7 +7,7 @@ import { can, type Subject } from "@/lib/authz/roles";
 import { GithubAppError } from "./app-auth";
 import type { GithubAppConfig } from "./app-config";
 import { claimAppState } from "./app-state";
-import { bindInstallation, markInstallationLoss, refreshInstallationFacts, unbindInstallation, type InstallationFacts, type InstallationStatus } from "./binding";
+import { bindInstallation, markInstallationState, refreshInstallationFacts, unbindInstallation, type InstallationFacts, type InstallationStatus } from "./binding";
 import { exchangeCode, fetchInstallationFacts, getOrgMembership, getUser, listUserInstallations, revokeUserToken, GITHUB_WEB_BASE, type ConnectDeps, type GithubUser } from "./connect-api";
 import type { ConnectResult } from "./connect-messages";
 
@@ -232,7 +232,7 @@ export async function checkInstallation(
   try {
     const facts = await fetchInstallationFacts(config, deps, installationId);
     if (!facts) {
-      await markInstallationLoss(db, installationId, "gone");
+      await markInstallationState(db, installationId, "deleted");
       return "removed";
     }
     await refreshInstallationFacts(db, facts);

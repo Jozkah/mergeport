@@ -143,7 +143,7 @@ describe("a workspace without a connection stays 'not connected'", () => {
     expect(await drain()).toEqual(["done"]);
     expect(await db().workItem.count()).toBe(0);
     expect(gh.server.calls.filter((c) => c.startsWith("inst:"))).toEqual([]);
-    expect(await workspaceGithubStatus(db(), w.ws.id)).toEqual({ configured: true, bound: false, suspended: false });
+    expect(await workspaceGithubStatus(db(), w.ws.id)).toEqual({ configured: true, bound: false, suspended: false, state: "none" });
     expect((await listInstallationRepos(db(), w.ws.id)).state).toBe("not-connected");
     await expect(trackInstallationRepos(db(), w.viewer, [githubIdOf("pub")])).rejects.toBeInstanceOf(GithubNotConnectedError);
   });
@@ -223,7 +223,7 @@ describe("when GitHub says the installation is gone", () => {
     resetInstallationTokenCache();
     await enqueue(db(), { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: "s", workspaceId: w.ws.id });
     expect(await drain()).toEqual(["done"]);
-    expect(await workspaceGithubStatus(db(), w.ws.id)).toEqual({ configured: true, bound: false, suspended: true });
+    expect(await workspaceGithubStatus(db(), w.ws.id)).toEqual({ configured: true, bound: false, suspended: true, state: "suspended" });
   });
 });
 

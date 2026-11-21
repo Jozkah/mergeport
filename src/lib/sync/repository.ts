@@ -5,6 +5,7 @@ import { canSpend, shouldApplyUpdate } from "@/lib/domain/sync";
 import { classifyCompare, classifyUpstreamMerge } from "@/lib/domain/forks";
 import { GithubError, type GithubPort, type RemoteComment, type RemoteWorkItem } from "@/lib/github/port";
 import { mapLimit } from "@/lib/util";
+import { purgeDigests } from "@/lib/services/digest-purge";
 import { indexList, sameLogin } from "@/lib/domain/text-index";
 import { refreshHubWatch } from "@/lib/hub/watch";
 import { parsePrefs, wantsInApp } from "@/lib/domain/notify-prefs";
@@ -203,6 +204,7 @@ export async function syncRepository(db: Db, port: GithubPort, repositoryId: str
   try {
     // Refresh canonical metadata first: handles rename, transfer, default-branch change and archive.
     const meta = await port.getRepository(owner, name);
+    const wasPublic = repo.visibility === "PUBLIC";
     // A transfer changes the owner too; later requests are built from owner + name, so both move together. The REMOVED guard stays.
     const newOwner = await db.githubOwner.upsert({
       where: { githubId: meta.owner.githubId },
@@ -213,6 +215,15 @@ export async function syncRepository(db: Db, port: GithubPort, repositoryId: str
       where: { id: repo.id, trackingStatus: { not: "REMOVED" } },
       data: { ownerId: newOwner.id, htmlUrl: meta.htmlUrl, fullName: meta.fullName, name: meta.name, defaultBranch: meta.defaultBranch, archived: meta.archived, visibility: meta.visibility, isFork: meta.isFork, parentGithubId: meta.parentGithubId ?? null, parentFullName: meta.parentFullName ?? null, permissions: (meta.permissions ?? undefined) as Prisma.InputJsonValue | undefined },
     });
+
+    // A public repository turning private: grants given while it was public (a member who tracked it, or an administrator's blanket grant) must
+    // not carry over. Everyone but owners and administrators loses it until someone grants it again on purpose, and stored digests go.
+    if (wasPublic && meta.visibility !== "PUBLIC") {
+      const holders = await db.repositoryGrant.findMany({ where: { repositoryId: repo.id, revokedAt: null }, select: { member: { select: { userId: true } } } });
+      await db.repositoryGrant.updateMany({ where: { repositoryId: repo.id, revokedAt: null }, data: { revokedAt: now } });
+      await purgeDigests(db, repo.workspaceId, holders.map((h) => h.member.userId));
+      await db.auditLog.create({ data: { workspaceId: repo.workspaceId, action: "repository.visibility-flip", targetType: "Repository", targetId: repo.id, meta: { from: "PUBLIC", to: meta.visibility, grantsRevoked: holders.length } } });
+    }
 
     const touched: RemoteWorkItem[] = [];
     for (let page = 1; ; ) {

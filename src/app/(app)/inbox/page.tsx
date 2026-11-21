@@ -31,7 +31,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         subtitle="Pull requests waiting on you. Done clears it for you only."
         actions={<ReadAllButton disabled={unread === 0} />}
       />
-      {viewer.githubLogin === null && <div className="mb-4"><Banner tone="info" title="Link GitHub to see your reviews">Review requests are matched to a GitHub account, and yours is not linked yet.</Banner></div>}
+      {viewer.githubLogin === null && <div className="mb-4"><Banner tone="info" title="Personal review queues need a linked GitHub account.">Review requests are matched to a GitHub account.</Banner></div>}
       <div className="mb-4">
         <Segmented label="Inbox views" items={TABS.map((t) => ({ href: `/inbox?tab=${t.key}`, label: t.label, active: t.key === tab, count: counts[t.key] }))} />
       </div>

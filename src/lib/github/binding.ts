@@ -1,7 +1,7 @@
 import type { Db } from "@/lib/db";
 import { audit } from "@/lib/services/audit";
 import { makeBoundInstallation, type BoundInstallation } from "./bound-installation";
-// markInstallationState and listBoundInstallations below are also the connect flow's; there is one copy of each.
+// markInstallationState (the only writer of suspendedAt/deletedAt for a loss) and listBoundInstallations are used by the factory and the connect flow.
 
 /**
  * The only file that writes `Repository.installationId`, writes or deletes a `WorkspaceInstallation`, or issues a `BoundInstallation`
@@ -107,14 +107,6 @@ export async function refreshInstallationFacts(db: Db, facts: InstallationFacts)
   });
 }
 
-/** GitHub said the installation is gone (404) or suspended (403): remember it so the page shows it and no token is requested for it. */
-export async function markInstallationLoss(db: Db, installationId: bigint, kind: "gone" | "suspended", now = new Date()): Promise<void> {
-  await db.githubInstallation.updateMany({
-    where: { installationId, ...(kind === "gone" ? { deletedAt: null } : { suspendedAt: null }) },
-    data: kind === "gone" ? { deletedAt: now } : { suspendedAt: now },
-  });
-}
-
 export type InstallationStatus = "active" | "suspended" | "removed";
 
 /** The workspace's bindings with the installation's facts, newest first, for the settings page. */
@@ -145,6 +137,8 @@ export async function listBoundInstallations(db: Db, workspaceId: string): Promi
  * and tracked repositories stay, and work again if the installation does.
  */
 export async function markInstallationState(db: Db, installationId: bigint, state: "active" | "suspended" | "deleted", now = new Date()): Promise<boolean> {
+  // A loss is recorded once (the first time stamp is kept); "active" clears both.
+  const where = state === "active" ? { installationId } : state === "suspended" ? { installationId, suspendedAt: null } : { installationId, deletedAt: null };
   const data = state === "active" ? { suspendedAt: null, deletedAt: null } : state === "suspended" ? { suspendedAt: now } : { deletedAt: now };
-  return (await db.githubInstallation.updateMany({ where: { installationId }, data })).count === 1;
+  return (await db.githubInstallation.updateMany({ where, data })).count === 1;
 }
