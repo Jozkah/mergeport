@@ -14,7 +14,7 @@ import net from "node:net";
  *  - no redirects: any 3xx except 304 Not Modified is an error (nothing to re-validate, no credentials to strip). No cookies are ever sent or kept;
  *  - connect timeout 5 s, total 10 s, response capped at 2 MB, the answer must be application/json.
  */
-export type SafeFetchErrorCode = "bad-url" | "scheme" | "blocked-address" | "dns" | "redirect" | "timeout" | "too-large" | "content-type" | "network" | "bad-header";
+export type SafeFetchErrorCode = "bad-url" | "scheme" | "port" | "blocked-address" | "dns" | "redirect" | "timeout" | "too-large" | "content-type" | "network" | "bad-header";
 
 export class SafeFetchError extends Error {
   constructor(public code: SafeFetchErrorCode, message: string) {
@@ -102,6 +102,8 @@ function blockedV6(b: number[], allowLoopback: boolean): boolean {
   if (zeros(0, 10) && b[10] === 0xff && b[11] === 0xff) return blockedV4(embedded(), allowLoopback); // ::ffff:a.b.c.d (mapped)
   if (zeros(0, 12)) return true; // ::a.b.c.d (deprecated compatible form)
   if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && zeros(4, 12)) return blockedV4(embedded(), allowLoopback); // 64:ff9b::/96 NAT64
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && b[4] === 0x00 && b[5] === 0x01) return true; // 64:ff9b:1::/48 local-use NAT64
+  if (zeros(0, 8) && b[8] === 0xff && b[9] === 0xff && b[10] === 0 && b[11] === 0) return true; // ::ffff:0:0:0/96 SIIT (IPv4-translated)
   if (b[0] === 0x01 && b[1] === 0x00 && zeros(2, 8)) return true; // 100::/64 discard
   if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x00 && b[3] === 0x00) return true; // 2001::/32 Teredo
   if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return true; // 2001:db8::/32 documentation
@@ -143,6 +145,7 @@ export async function safeFetchJson(rawUrl: string, init: SafeFetchInit = {}, de
   }
   if (url.protocol !== "https:" && !(allowInsecure && url.protocol === "http:")) throw new SafeFetchError("scheme", "Only https addresses are allowed.");
   if (url.username || url.password) throw new SafeFetchError("bad-url", "Addresses with credentials are not allowed.");
+  if (url.port && !allowInsecure) throw new SafeFetchError("port", "Only the standard https port is allowed."); // no port scanning through error messages
   for (const k of Object.keys(init.headers ?? {})) if (FORBIDDEN_HEADERS.has(k.toLowerCase())) throw new SafeFetchError("bad-header", `The ${k} header is not allowed.`);
 
   // Resolve once, check every answer, pin the first. An IP literal is its own answer.

@@ -46,6 +46,21 @@ async function revokePendingInvitations(tx: Tx, workspaceId: string, memberId: s
 }
 
 /**
+ * Federation access (docs/federation.md) never outlives the consent it was given under. Grants this person approved as a provider are
+ * revoked; with `links` (a removal) their links to other instances are ended too (token deleted, cache cleared). A reinstated or
+ * demoted person must approve again, at the role they have now.
+ */
+async function endFederationAccess(tx: Tx, workspaceId: string, userId: string, now: Date, links: boolean) {
+  await tx.federationGrant.updateMany({ where: { workspaceId, userId, revokedAt: null }, data: { revokedAt: now } });
+  if (!links) return;
+  await tx.federationLink.updateMany({ where: { workspaceId, userId, status: { in: ["ACTIVE", "PENDING"] } }, data: { status: "REVOKED", tokenEnc: null, verifierEnc: null, stateHash: null, revokedAt: now } });
+  await tx.federationCache.deleteMany({ where: { workspaceId, userId } });
+}
+
+const ROLE_RANK: Record<string, number> = { OWNER: 0, ADMIN: 1, MEMBER: 2, READER: 3 };
+const lowered = (from: string, to: string) => (ROLE_RANK[to] ?? 9) > (ROLE_RANK[from] ?? 9);
+
+/**
  * Ends a membership: REVOKED (not deleted, so authorship and the audit trail keep pointing at someone), their project, space and
  * repository grants dropped, and every login of theirs that was bound to this workspace unbound. loadViewer and
  * resolveActiveWorkspaceId already require an ACTIVE row on every request, so access ends on the next call whatever a cookie says.
@@ -57,6 +72,7 @@ async function endMembership(tx: Tx, workspaceId: string, member: { id: string; 
   await tx.accessSpaceMember.deleteMany({ where: { memberId: member.id } });
   await tx.repositoryGrant.updateMany({ where: { memberId: member.id, revokedAt: null }, data: { revokedAt: now } });
   await tx.session.updateMany({ where: { userId: member.userId, activeWorkspaceId: workspaceId }, data: { activeWorkspaceId: null } });
+  await endFederationAccess(tx, workspaceId, member.userId, now, true);
 }
 
 /** Everyone in the workspace, active first. Administrators only: the list carries email addresses. */
@@ -81,6 +97,7 @@ export async function changeRole(db: Db, v: Viewer, memberId: unknown, newRole: 
     if (isAdminRole(t.role) && !isAdminRole(newRole)) await assertAdminRemains(tx, v.workspaceId, t.id);
     await tx.member.update({ where: { id: t.id, workspaceId: v.workspaceId }, data: { role: newRole } });
     if (!isAdminRole(newRole)) await revokePendingInvitations(tx, v.workspaceId, t.id, new Date());
+    if (lowered(t.role, newRole)) await endFederationAccess(tx, v.workspaceId, t.userId, new Date(), false); // a grant approved at a higher role must not outlive it
     await audit(tx, { workspaceId: v.workspaceId, userId: v.userId }, "member.role", { type: "Member", id: t.id }, { from: t.role, to: newRole });
   });
 }
@@ -108,6 +125,7 @@ export async function reinstateMember(db: Db, v: Viewer, memberId: unknown, role
     if (!can(actor, "manageMembers", { targetRole: role, newRole: role })) throw new ForbiddenError("You cannot do that");
     if (t.status !== "REVOKED") throw new ConflictError("This person is not removed.");
     await tx.member.update({ where: { id: t.id, workspaceId: v.workspaceId }, data: { status: "ACTIVE", revokedAt: null, role } });
+    await endFederationAccess(tx, v.workspaceId, t.userId, new Date(), false); // belt: removals made before grants were revoked at removal
     await audit(tx, { workspaceId: v.workspaceId, userId: v.userId }, "member.reinstated", { type: "Member", id: t.id }, { role });
   });
 }
@@ -139,6 +157,7 @@ export async function transferOwnership(db: Db, v: Viewer, targetMemberId: unkno
     if (down.count !== 1) throw new ConflictError("Ownership changed while you were doing this. Reload and try again.");
     const up = await tx.member.updateMany({ where: { id: t.id, workspaceId: v.workspaceId, role: "ADMIN", status: "ACTIVE" }, data: { role: "OWNER" } });
     if (up.count !== 1) throw new ConflictError("That person is no longer an active admin. Nothing was changed.");
+    await endFederationAccess(tx, v.workspaceId, actor.userId, new Date(), false); // the previous owner's role dropped
     await audit(tx, { workspaceId: v.workspaceId, userId: v.userId }, "workspace.ownership", { type: "Member", id: t.id }, { from: actor.id, to: t.id });
   });
 }

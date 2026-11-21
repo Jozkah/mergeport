@@ -60,7 +60,7 @@ describe("handshake: authorization code + PKCE S256 + state", () => {
     const pending = await db.federationLink.findFirstOrThrow({ where: { workspaceId: w.aWs, status: "PENDING" } });
     expect(pending.stateHash).toBe(sha256(p.state)); // only the hash of the state is stored
     expect(pending.verifierEnc).not.toContain(p.code_challenge);
-    expect(pkceChallenge(decryptSecret(pending.verifierEnc!, KEY)!)).toBe(p.code_challenge);
+    expect(pkceChallenge(decryptSecret(pending.verifierEnc!, KEY, `verifier:${pending.id}`)!)).toBe(p.code_challenge);
   });
 
   async function codeFor(userId = w.ids.users.a.id) {
@@ -70,7 +70,7 @@ describe("handshake: authorization code + PKCE S256 + state", () => {
     const { redirectTo } = await approveAuthorization(w.B, userId, req.req, w.ids.ws.id);
     const back = paramsOf(redirectTo);
     const pending = await db.federationLink.findFirstOrThrow({ where: { workspaceId: w.aWs, status: "PENDING" } });
-    const verifier = decryptSecret(pending.verifierEnc!, KEY)!;
+    const verifier = decryptSecret(pending.verifierEnc!, KEY, `verifier:${pending.id}`)!;
     return { code: back.code, state: back.state, verifier, back, redirectUri: req.req.redirectUri };
   }
   const exchange = (b: Record<string, string>) => tokenRoute(w.B, new Request(`${B_ORIGIN}/api/federation/v1/token`, { method: "POST", body: JSON.stringify(b) }));
@@ -177,8 +177,9 @@ describe("tokens at rest", () => {
     const link = await db.federationLink.findFirstOrThrow({ where: { id: linkId, workspaceId: w.aWs } });
     expect(link.tokenEnc).not.toContain(token);
     expect(link.tokenEnc!.startsWith("v1.")).toBe(true);
-    expect(decryptSecret(link.tokenEnc!, KEY)).toBe(token);
-    expect(decryptSecret(link.tokenEnc!, Buffer.alloc(32, 7))).toBeNull(); // another key cannot read it
+    expect(decryptSecret(link.tokenEnc!, KEY, `token:${link.id}`)).toBe(token);
+    expect(decryptSecret(link.tokenEnc!, Buffer.alloc(32, 7), `token:${link.id}`)).toBeNull(); // another key cannot read it
+    expect(decryptSecret(link.tokenEnc!, KEY, "token:another-link")).toBeNull(); // bound to its own link row: a copy elsewhere is useless
     // nothing anywhere in the federation tables (events, cache, grants, links) holds the token or the code in clear
     const dump = JSON.stringify([await db.federationEvent.findMany({ where: { workspaceId: w.ids.ws.id } }), await db.federationEvent.findMany({ where: { workspaceId: w.aWs } }), await db.federationGrant.findMany({ where: { workspaceId: w.ids.ws.id } }), await db.federationLink.findMany({ where: { workspaceId: w.aWs } }), await db.federationCache.findMany({ where: { workspaceId: w.aWs } })]);
     expect(dump).not.toContain(token);
@@ -186,15 +187,21 @@ describe("tokens at rest", () => {
   });
 
   it("AES-256-GCM: round trip, tamper detection, key formats", () => {
-    const blob = encryptSecret("secret-token", KEY);
+    const blob = encryptSecret("secret-token", KEY, "aad");
     expect(blob).not.toContain("secret-token");
-    expect(decryptSecret(blob, KEY)).toBe("secret-token");
-    expect(encryptSecret("secret-token", KEY)).not.toBe(blob); // fresh IV
-    expect(decryptSecret(blob.slice(0, -2) + "AA", KEY)).toBeNull();
-    expect(decryptSecret("garbage", KEY)).toBeNull();
+    expect(decryptSecret(blob, KEY, "aad")).toBe("secret-token");
+    expect(decryptSecret(blob, KEY, "other")).toBeNull();
+    expect(encryptSecret("secret-token", KEY, "aad")).not.toBe(blob); // fresh IV
+    expect(decryptSecret(blob.slice(0, -2) + "AA", KEY, "aad")).toBeNull();
+    expect(decryptSecret("garbage", KEY, "aad")).toBeNull();
     expect(parseKey(KEY.toString("hex"))!.equals(KEY)).toBe(true);
     expect(parseKey(KEY.toString("base64"))!.equals(KEY)).toBe(true);
     expect(parseKey("short")).toBeNull();
+    expect(parseKey("a".repeat(31))).toBeNull(); // under 32 characters
+    expect(parseKey("ab".repeat(15))).toBeNull(); // 30 hex characters = 15 bytes
+    expect(parseKey(Buffer.alloc(31, 1).toString("base64"))).toBeNull(); // 31 bytes
+    expect(parseKey("correct horse battery staple, long enough!")!.length).toBe(32); // a passphrase is hashed to 32 bytes
+    expect(parseKey(Buffer.alloc(48, 1).toString("base64"))!.length).toBe(32); // longer material is hashed to 32 bytes
     expect(parseKey(undefined)).toBeNull();
   });
 });
@@ -224,7 +231,8 @@ describe("operator ceiling", () => {
   it("normalises addresses to an https origin and refuses junk", () => {
     expect(normaliseOrigin("B.Test", false)).toBe("https://b.test");
     expect(normaliseOrigin("https://b.test/projects?x=1#y", false)).toBe("https://b.test");
-    expect(normaliseOrigin("https://b.test:8443", false)).toBe("https://b.test:8443");
+    expect(normaliseOrigin("https://b.test:8443", false)).toBeNull(); // only the standard port outside development
+    expect(normaliseOrigin("https://b.test:8443", true)).toBe("https://b.test:8443");
     for (const bad of ["", "ftp://b.test", "https://user:pw@b.test", "javascript:alert(1)", "https://", "not a host"]) expect(normaliseOrigin(bad, false), bad).toBeNull();
   });
   it("ceiling allowlist limits even a workspace set to any", async () => {

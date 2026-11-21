@@ -29,7 +29,7 @@ export default async function LinkedProject({ params, searchParams }: { params: 
   const link = await db.federationLink.findFirst({ where: { id: linkId, workspaceId: viewer.workspaceId, userId: viewer.userId, status: "ACTIVE" }, select: { peerOrigin: true } });
   if (!link) notFound();
   const peer = link.peerOrigin.replace(/^https?:\/\//, "");
-  const base = `/linked/${linkId}/projects/${projectId}`;
+  const base = `/linked/${encodeURIComponent(linkId)}/projects/${encodeURIComponent(projectId)}`;
 
   const board = list ? null : await remoteGet<BoardDto>(ctx, viewer, linkId, `/projects/${projectId}`, { background: true });
   const tasks = list ? await remoteGet<{ tasks: TaskDto[]; nextCursor: string | null }>(ctx, viewer, linkId, `/projects/${projectId}/tasks?limit=100`, { background: true }) : null;

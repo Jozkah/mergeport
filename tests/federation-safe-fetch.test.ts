@@ -13,7 +13,7 @@ describe("address classification", () => {
     // IPv6
     "::", "::1", "fe80::1", "fe80::abcd:1", "febf::1", "fc00::1", "fd00:ec2::254", "fdff::1", "ff02::1", "ff00::", "fec0::1", "100::1", "2001::1", "2001:db8::1", "2002:7f00:1::", "2002:a00:1::",
     // IPv4 inside IPv6: mapped, compatible, NAT64
-    "::ffff:127.0.0.1", "::ffff:7f00:1", "::ffff:10.0.0.1", "::ffff:a00:1", "::ffff:169.254.169.254", "::ffff:192.168.0.1", "0:0:0:0:0:ffff:127.0.0.1", "::127.0.0.1", "::7f00:1", "64:ff9b::7f00:1", "64:ff9b::169.254.169.254",
+    "::ffff:127.0.0.1", "::ffff:7f00:1", "::ffff:10.0.0.1", "::ffff:a00:1", "::ffff:169.254.169.254", "::ffff:192.168.0.1", "64:ff9b:1::1", "64:ff9b:1:abcd::1", "::ffff:0:8.8.8.8", "::ffff:0:808:808", "0:0:0:0:ffff:0:a00:1", "0:0:0:0:0:ffff:127.0.0.1", "::127.0.0.1", "::7f00:1", "64:ff9b::7f00:1", "64:ff9b::169.254.169.254",
     // not an address at all
     "", "localhost", "999.1.1.1", "1.2.3", "gggg::1", "fe80::1%eth0", "1::2::3",
   ];
@@ -103,6 +103,17 @@ describe("safeFetchJson with an injected resolver and transport", () => {
     expect((t.seen[0].options.headers as Record<string, string>)["content-length"]).toBe(String(Buffer.byteLength('{"é":1}')));
   });
 
+  it("outside development only the standard https port is allowed (no port scanning through error messages)", async () => {
+    const t = transport({});
+    const d = { ...t.deps, resolve: resolver({ "peer.test": ["93.184.216.34"] }) };
+    for (const url of ["https://peer.test:8443/", "https://peer.test:22/", "https://peer.test:80/", "https://peer.test:6379/x"]) await fails(safeFetchJson(url, {}, d), "port");
+    expect(t.seen).toHaveLength(0);
+    await safeFetchJson("https://peer.test:443/", {}, d); // the default port, written out, is the default port
+    expect(t.seen).toHaveLength(1);
+    await safeFetchJson("http://peer.test:8080/", { allowInsecure: true }, d); // the development override keeps ports
+    expect(t.seen).toHaveLength(2);
+  });
+
   it("refuses http, credentials in the address, bad addresses and a Cookie header", async () => {
     const t = transport({});
     const d = { ...t.deps, resolve: resolver({ "peer.test": ["93.184.216.34"] }) };
@@ -137,7 +148,7 @@ describe("safeFetchJson with an injected resolver and transport", () => {
     expect(t.seen).toHaveLength(0);
   });
 
-  it.each(["https://10.0.0.1/", "https://127.0.0.1:8443/", "https://[::1]/", "https://[::ffff:127.0.0.1]/", "https://[fe80::1]/", "https://169.254.169.254/latest/meta-data", "https://2130706433/", "https://0x7f000001/", "https://017700000001/", "https://127.1/", "https://[::ffff:a00:1]/"])("refuses the IP literal %s without resolving it", async (url) => {
+  it.each(["https://10.0.0.1/", "https://127.0.0.1/", "https://[::1]/", "https://[::ffff:127.0.0.1]/", "https://[fe80::1]/", "https://169.254.169.254/latest/meta-data", "https://2130706433/", "https://0x7f000001/", "https://017700000001/", "https://127.1/", "https://[::ffff:a00:1]/"])("refuses the IP literal %s without resolving it", async (url) => {
     const calls: string[] = [];
     const t = transport({});
     await fails(safeFetchJson(url, {}, { ...t.deps, resolve: resolver({}, calls) }), "blocked-address");
@@ -264,7 +275,8 @@ describe("safeFetchJson over real sockets", () => {
     const r = await safeFetchJson(`${base}/ok`, { allowInsecure: true });
     expect(r.json).toEqual({ hello: "world", cookie: null });
     await fails(safeFetchJson(`${base}/ok`), "scheme");
-    await fails(safeFetchJson(`https://127.0.0.1:${new URL(base).port}/ok`), "blocked-address");
+    await fails(safeFetchJson(`https://127.0.0.1:${new URL(base).port}/ok`), "port");
+    await fails(safeFetchJson("https://127.0.0.1/ok"), "blocked-address");
   });
 
   it("pins the connection: the name in the URL is irrelevant, the resolved (checked) address is where the socket goes", async () => {

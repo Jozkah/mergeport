@@ -38,19 +38,27 @@ export function normaliseOrigin(input: string, allowInsecure: boolean): string |
   }
   if (u.protocol !== "https:" && !(allowInsecure && u.protocol === "http:")) return null;
   if (u.username || u.password || !u.hostname) return null;
+  // Only the default port: a member must not be able to aim the server at arbitrary ports and read the error to scan a network.
+  if (u.port && !allowInsecure) return null;
   return u.origin;
 }
 
-/** 32-byte key from 64 hex characters or base64 (standard or url-safe). */
+export const KEY_PROBLEM = "MERGEPORT_ENCRYPTION_KEY must hold at least 32 bytes of key material: 64 hex characters, base64 of 32 or more bytes, or a passphrase of 32 or more characters. It encrypts the access tokens of linked instances; changing it later makes existing links unusable, so people must unlink and link again.";
+
+/**
+ * The AES-256 key from the environment. Accepted: 64 or more hex characters, base64 of 32 or more bytes, or a passphrase of 32 or more
+ * characters. Exactly 32 bytes are used as they are; longer material and passphrases are hashed (sha256) to 32 bytes. Anything shorter is refused.
+ */
 export function parseKey(raw: string | undefined): Buffer | null {
   const v = raw?.trim();
   if (!v) return null;
-  if (/^[0-9a-fA-F]{64}$/.test(v)) return Buffer.from(v, "hex");
+  const pack = (b: Buffer) => (b.length === 32 ? b : createHash("sha256").update(b).digest());
+  if (/^[0-9a-fA-F]+$/.test(v) && v.length % 2 === 0 && v.length >= 64) return pack(Buffer.from(v, "hex"));
   if (/^[A-Za-z0-9+/_-]+={0,2}$/.test(v)) {
     const b = Buffer.from(v.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-    if (b.length === 32) return b;
+    if (b.length >= 32) return pack(b);
   }
-  return null;
+  return v.length >= 32 ? pack(Buffer.from(v, "utf8")) : null;
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env): FederationConfig {
@@ -70,7 +78,7 @@ export function federationState(env: NodeJS.ProcessEnv = process.env, hosted: bo
   const config = readConfig(env);
   if (!hosted || config.mode === "off") return { kind: "absent" };
   const problems: string[] = [];
-  if (!config.key) problems.push("MERGEPORT_ENCRYPTION_KEY must be 32 random bytes (64 hex characters or base64). It encrypts the access tokens of linked instances.");
+  if (!config.key) problems.push(KEY_PROBLEM);
   if (env.MERGEPORT_FEDERATION_ALLOW_INSECURE === "1" && env.NODE_ENV === "production") problems.push("MERGEPORT_FEDERATION_ALLOW_INSECURE is ignored in production.");
   if (!config.key) return { kind: "misconfigured", problems, config };
   return { kind: "enabled", config };
@@ -86,21 +94,26 @@ export function activeConfig(): FederationConfig | null {
 
 const b64u = (b: Buffer) => b.toString("base64url");
 
-/** AES-256-GCM, `v1.<iv|tag|ciphertext>` (base64url). The key never leaves the environment; the output never contains the plaintext. */
-export function encryptSecret(plain: string, key: Buffer): string {
+/**
+ * AES-256-GCM, `v1.<iv|tag|ciphertext>` (base64url). The key never leaves the environment; the output never contains the plaintext.
+ * `aad` (for example `token:<link id>`) is authenticated but not stored: a ciphertext copied to another row does not decrypt there.
+ */
+export function encryptSecret(plain: string, key: Buffer, aad: string): string {
   const iv = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", key, iv);
+  c.setAAD(Buffer.from(aad, "utf8"));
   const ct = Buffer.concat([c.update(plain, "utf8"), c.final()]);
   return `v1.${b64u(Buffer.concat([iv, c.getAuthTag(), ct]))}`;
 }
 
 /** Null when the blob is malformed, was made under another key, or was altered. */
-export function decryptSecret(blob: string, key: Buffer): string | null {
+export function decryptSecret(blob: string, key: Buffer, aad: string): string | null {
   if (!blob.startsWith("v1.")) return null;
   try {
     const raw = Buffer.from(blob.slice(3), "base64url");
     if (raw.length < 12 + 16) return null;
     const d = createDecipheriv("aes-256-gcm", key, raw.subarray(0, 12));
+    d.setAAD(Buffer.from(aad, "utf8"));
     d.setAuthTag(raw.subarray(12, 28));
     return Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString("utf8");
   } catch {

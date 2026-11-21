@@ -10,6 +10,7 @@ import { Banner, EmptyState, PageHeader, Panel, SimplePill } from "@/components/
 import { Globe, ShieldCheck } from "@/components/ui/icons";
 import { revokeGrantAction, unlinkAction } from "@/app/federation-actions";
 import { formatInstant } from "@/lib/format";
+import { isHosted } from "@/lib/public-url";
 import { liveCtx } from "@/lib/federation/context";
 import { listLinks, remoteGet, type Remote } from "@/lib/federation/consumer";
 import { canCreateLink, loadPolicy } from "@/lib/federation/policy";
@@ -36,14 +37,21 @@ const RESULT: Record<string, { tone: "info" | "warn" | "error"; title: string; t
 export default async function LinkedPage({ searchParams }: { searchParams: Promise<{ result?: string }> }) {
   const { viewer } = await requireViewer();
   const ctx = liveCtx();
-  if (!ctx) notFound();
+  // Switched off (or no key): the page exists only for someone who still holds a link or a grant, and then only to END them.
+  if (!ctx && !isHosted()) notFound();
   const result = RESULT[(await searchParams).result ?? ""];
   const policy = await loadPolicy(db, viewer.workspaceId);
   const links = await listLinks(db, viewer);
   const grants = await myGrants(db, viewer);
-  const canLink = canCreateLink(viewer.role, policy) && policy.outboundMode !== "off" && policy.maxPeers > 0;
+  if (!ctx && links.length === 0 && grants.length === 0) notFound();
+  const canLink = ctx !== null && canCreateLink(viewer.role, policy) && policy.outboundMode !== "off" && policy.maxPeers > 0;
+  const failed = (error: string): Remote<{ projects: ProjectDto[] }> => ({ state: "error", data: null, fetchedAt: null, stale: false, error });
   const remotes = await Promise.all(
-    links.map((l) => remoteGet<{ projects: ProjectDto[] }>(ctx, viewer, l.id, "/projects?limit=100", { background: true }).catch((): Remote<{ projects: ProjectDto[] }> => ({ state: "error", data: null, fetchedAt: null, stale: false, error: "Could not load." }))),
+    links.map((l) =>
+      ctx
+        ? remoteGet<{ projects: ProjectDto[] }>(ctx, viewer, l.id, "/projects?limit=100", { background: true }).catch(() => failed("Could not load."))
+        : Promise.resolve<Remote<{ projects: ProjectDto[] }>>({ state: "blocked", data: null, fetchedAt: null, stale: false, error: "Linking is switched off on this server. You can still unlink." }),
+    ),
   );
   return (
     <>
@@ -80,12 +88,12 @@ export default async function LinkedPage({ searchParams }: { searchParams: Promi
                 </div>
               )}
               {r.state === "error" && r.data && <p className="px-4 pt-3 text-[12.5px] text-ink-3">Showing the last answer from {r.fetchedAt ? formatInstant(r.fetchedAt, viewer.timezone) : "earlier"}.</p>}
-              {r.data && r.data.projects.length === 0 && <EmptyState icon={Globe} title="No projects">You can see no projects over there, or none are shared with your account.</EmptyState>}
-              {r.data && r.data.projects.length > 0 && (
+              {r.data && (r.data.projects ?? []).length === 0 && <EmptyState icon={Globe} title="No projects">You can see no projects over there, or none are shared with your account.</EmptyState>}
+              {r.data && (r.data.projects ?? []).length > 0 && (
                 <ul>
-                  {r.data.projects.map((p) => (
+                  {(r.data.projects ?? []).map((p) => (
                     <li key={p.id} className="border-b border-line last:border-b-0">
-                      <Link href={`/linked/${l.id}/projects/${p.id}`} className="block p-4 hover:bg-subtle">
+                      <Link href={`/linked/${encodeURIComponent(l.id)}/projects/${encodeURIComponent(p.id)}`} className="block p-4 hover:bg-subtle">
                         <p className="truncate font-medium">{p.name}</p>
                         {p.description && <p className="mt-0.5 line-clamp-2 text-[12.5px] text-ink-3">{p.description}</p>}
                       </Link>
@@ -99,7 +107,7 @@ export default async function LinkedPage({ searchParams }: { searchParams: Promi
         {links.length === 0 && !result && <EmptyState icon={Globe} title="Nothing linked yet">Link another Mergeport instance to see its projects here, read-only.</EmptyState>}
         <Panel title="Link an instance" icon={Globe} id="link-new">
           <div className="p-4">
-            {canLink ? <LinkInstanceForm /> : <p className="text-[13px] text-ink-3">{policy.outboundMode === "off" || policy.maxPeers === 0 ? "Linking to other instances is turned off for this workspace." : "Your role cannot link instances in this workspace."} An administrator can change this in Settings.</p>}
+            {canLink ? <LinkInstanceForm /> : <p className="text-[13px] text-ink-3">{ctx === null ? "Linking is switched off on this server." : policy.outboundMode === "off" || policy.maxPeers === 0 ? "Linking to other instances is turned off for this workspace." : "Your role cannot link instances in this workspace."} An administrator can change this in Settings.</p>}
           </div>
         </Panel>
         <Panel title="Apps with access to your data" icon={ShieldCheck} id="linked-apps" summary={`${grants.length}`}>

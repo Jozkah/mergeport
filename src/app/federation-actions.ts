@@ -7,7 +7,7 @@ import { requireAdminViewer, requireViewer, requireWriter } from "@/lib/auth/cur
 import { safeEqual } from "@/lib/crypto";
 import { db } from "@/lib/db";
 import { ForbiddenError, ValidationError } from "@/lib/errors";
-import { liveCtx, type FedCtx } from "@/lib/federation/context";
+import { liveCtx, revokeCtx, type FedCtx } from "@/lib/federation/context";
 import { startLink, unlink } from "@/lib/federation/consumer";
 import { savePolicy } from "@/lib/federation/policy";
 import { approveAuthorization, denyAuthorization, parseAuthorizeRequest, revokeAllFromOrigin, revokeGrant } from "@/lib/federation/provider";
@@ -40,8 +40,7 @@ export async function startLinkAction(fd: FormData): Promise<ActionResult> {
 export async function unlinkAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireViewer();
-    const ctx = await ctxOrThrow();
-    await unlink(ctx, viewer, str(fd, "linkId"));
+    await unlink(revokeCtx(clientIpFromHeaders(await headers())), viewer, str(fd, "linkId")); // works even when linking is switched off
     revalidatePath("/linked");
     revalidatePath("/settings/linked");
     return { ok: true, message: "Unlinked." };
@@ -79,8 +78,7 @@ export async function denyFederationAction(fd: FormData): Promise<ActionResult> 
 export async function revokeGrantAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireViewer();
-    await ctxOrThrow();
-    await revokeGrant(db, viewer, str(fd, "grantId"));
+    await revokeGrant(db, viewer, str(fd, "grantId")); // works even when linking is switched off
     revalidatePath("/linked");
     revalidatePath("/settings/linked");
     return { ok: true, message: "Access revoked. It stops working now." };

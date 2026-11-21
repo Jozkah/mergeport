@@ -307,6 +307,57 @@ describe("proxy: Origin rules, server-to-server exemption, framing", () => {
   });
 });
 
+describe("revocation is never blocked by federation being switched off", () => {
+  async function holdings(existing?: Awaited<ReturnType<typeof signedIn>>) {
+    const w = existing ?? (await signedIn());
+    const grant = await state.db!.federationGrant.create({ data: { workspaceId: w.ws.id, userId: w.owner.id, clientOrigin: CLIENT, tokenHash: "h".repeat(64), expiresAt: new Date(Date.now() + 86400_000) } });
+    const link = await state.db!.federationLink.create({ data: { workspaceId: w.ws.id, userId: w.owner.id, peerOrigin: "https://peer.test", status: "ACTIVE", tokenEnc: "v1.not-decryptable", lastUsedAt: new Date() } });
+    await state.db!.federationCache.create({ data: { workspaceId: w.ws.id, userId: w.owner.id, linkId: link.id, key: "/projects", bodyJson: { projects: null }, fetchedAt: new Date() } });
+    return { w, grant, link };
+  }
+  const form = (o: Record<string, string>) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(o)) fd.set(k, v);
+    return fd;
+  };
+
+  it.each([
+    ["the ceiling is off", () => {}],
+    ["the key is missing", () => vi.stubEnv("MERGEPORT_FEDERATION", "any")],
+  ])("%s: the person can still revoke a grant and unlink", async (_n, setup) => {
+    setup();
+    const { grant, link } = await holdings();
+    const { revokeGrantAction, unlinkAction, startLinkAction } = await import("@/app/federation-actions");
+    expect(await revokeGrantAction(form({ grantId: grant.id }))).toMatchObject({ ok: true });
+    expect((await state.db!.federationGrant.findFirstOrThrow({ where: { id: grant.id, workspaceId: grant.workspaceId } })).revokedAt).not.toBeNull();
+    expect(await unlinkAction(form({ linkId: link.id }))).toMatchObject({ ok: true });
+    expect(await state.db!.federationLink.findFirstOrThrow({ where: { id: link.id, workspaceId: link.workspaceId } })).toMatchObject({ status: "REVOKED", tokenEnc: null });
+    expect(await state.db!.federationCache.count({ where: { workspaceId: link.workspaceId } })).toBe(0);
+    expect(await startLinkAction(form({ address: "https://peer.test" }))).toMatchObject({ ok: false }); // everything else stays closed
+  });
+
+  it("the /linked page exists in that state only for someone who still holds something, and then offers Unlink and nothing else", async () => {
+    const LinkedPage = (await import("@/app/(app)/linked/page")).default;
+    const me = await signedIn();
+    expect(await digestOf(LinkedPage({ searchParams: Promise.resolve({}) }))).toContain("404"); // nothing held: absent
+    const { w } = await holdings(me);
+    const el = JSON.stringify((await LinkedPage({ searchParams: Promise.resolve({}) })) as never, (k, v) => (k === "type" || k === "_owner" || k === "_store" || typeof v === "function" ? undefined : v));
+    expect(el).toContain("switched off");
+    expect(el).toContain("Unlink");
+    expect(el).not.toContain("Link instance"); // no way to start a new link
+    expect(w.ws.id).toBeTruthy();
+  });
+
+  it("when on, a poisoned cache entry cannot crash /linked and Unlink stays reachable", async () => {
+    on();
+    const LinkedPage = (await import("@/app/(app)/linked/page")).default;
+    await holdings(); // the cache holds {"projects": null}; the peer is unreachable in the test
+    const el = JSON.stringify((await LinkedPage({ searchParams: Promise.resolve({}) })) as never, (k, v) => (k === "type" || k === "_owner" || k === "_store" || typeof v === "function" ? undefined : v));
+    expect(el).toContain("Unlink");
+    expect(el).toContain("peer.test");
+  });
+});
+
 describe("a seeded second workspace on the same database is untouched by any of this", () => {
   it("the federation tables start empty and the tenancy classification includes them", async () => {
     await seedDemo(state.db!, BASE);

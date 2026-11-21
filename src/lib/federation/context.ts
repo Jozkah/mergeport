@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import type { Db } from "@/lib/db";
 import { publicOrigin } from "@/lib/public-url";
-import { activeConfig, type FederationConfig } from "./config";
+import { activeConfig, readConfig, type FederationConfig } from "./config";
 import { realFedFetch, type FedFetch } from "./safe-fetch";
 
 /**
@@ -28,4 +28,12 @@ export function liveCtx(ip?: string | null): FedCtx | null {
   const origin = publicOrigin();
   if (!config || !origin) return null;
   return { db, selfOrigin: origin.origin, config, fetch: realFedFetch, ip };
+}
+
+/**
+ * A context for ENDING things only (unlink, revoke): it exists even when the operator turned federation off or the key is missing,
+ * because revocation must never be blocked by being disabled. Without a key the token cannot be decrypted, so the peer is simply not told.
+ */
+export function revokeCtx(ip?: string | null): FedCtx {
+  return liveCtx(ip) ?? { db, selfOrigin: publicOrigin()?.origin ?? "", config: readConfig(), fetch: realFedFetch, ip };
 }

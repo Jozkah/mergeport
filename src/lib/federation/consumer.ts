@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { take } from "@/lib/auth/rate-limit";
@@ -10,6 +11,7 @@ import { nowOf, type FedCtx } from "./context";
 import { recordEvent } from "./events";
 import { canCreateLink, checkOrigin, loadPolicy } from "./policy";
 import { CALLBACK_PATH, WELL_KNOWN_PATH } from "./provider";
+import { parsePeerBody } from "./schemas";
 import { SafeFetchError } from "./safe-fetch";
 
 /**
@@ -19,6 +21,21 @@ import { SafeFetchError } from "./safe-fetch";
 export const PENDING_TTL_MS = 10 * 60_000;
 export const CACHE_TTL_MS = 60_000;
 const API = "/api/federation/v1";
+
+type Tx = Parameters<Parameters<Db["$transaction"]>[0]>[0];
+type LiveLink = { id: string; userId: string; peerOrigin: string; status: string };
+
+/** One workspace's link bookkeeping runs one transaction at a time, so counting and then linking cannot race. */
+const lockWorkspace = (tx: Tx, workspaceId: string) => tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))::text AS locked`;
+
+/** The reason a person may not have one more link to `peer`, or null. `live` is the links that count (their own link excluded by the caller). */
+function limitProblem(live: LiveLink[], userId: string, peer: string, policy: { maxLinksPerUser: number; maxPeers: number }): string | null {
+  if (live.some((l) => l.userId === userId && l.peerOrigin === peer)) return "You are already linked to that instance. Unlink it first to link again.";
+  if (live.filter((l) => l.userId === userId).length >= policy.maxLinksPerUser) return `You can link at most ${policy.maxLinksPerUser} instance${policy.maxLinksPerUser === 1 ? "" : "s"} in this workspace.`;
+  const peers = new Set(live.filter((l) => l.status === "ACTIVE").map((l) => l.peerOrigin)); // pending links do not occupy a peer slot; activation decides
+  if (!peers.has(peer) && peers.size >= policy.maxPeers) return policy.maxPeers === 0 ? "Linking is not allowed in this workspace." : policy.maxPeers === 1 ? "This workspace can be linked to a single instance, and it already is." : `This workspace can be linked to at most ${policy.maxPeers} instances.`;
+  return null;
+}
 
 const peerMessage = (e: unknown): string => (e instanceof SafeFetchError ? e.message : "Could not reach that instance.");
 
@@ -45,14 +62,10 @@ export async function startLink(ctx: FedCtx, v: Viewer, address: string): Promis
   }
   if (!(await take(db, `fed:start:${v.userId}`, 10, 3600_000, now))) throw new ConflictError("Too many attempts. Try again in a while.");
 
-  const live = await db.federationLink.findMany({
-    where: { workspaceId: v.workspaceId, OR: [{ status: "ACTIVE" }, { status: "PENDING", pendingExpiresAt: { gt: now } }] },
-    select: { userId: true, peerOrigin: true, status: true },
-  });
-  if (live.some((l) => l.userId === v.userId && l.peerOrigin === peer && l.status === "ACTIVE")) throw new ValidationError("You are already linked to that instance. Unlink it first to link again.");
-  if (live.filter((l) => l.userId === v.userId && l.peerOrigin !== peer).length >= policy.maxLinksPerUser) throw new ForbiddenError(`You can link at most ${policy.maxLinksPerUser} instance${policy.maxLinksPerUser === 1 ? "" : "s"} in this workspace.`);
-  const peers = new Set(live.filter((l) => l.status === "ACTIVE").map((l) => l.peerOrigin));
-  if (!peers.has(peer) && peers.size >= policy.maxPeers) throw new ForbiddenError(policy.maxPeers === 0 ? "Linking is not allowed in this workspace." : policy.maxPeers === 1 ? "This workspace can be linked to a single instance, and it already is." : `This workspace can be linked to at most ${policy.maxPeers} instances.`);
+  // Early answer before any network call; the same check is repeated under the workspace lock when the pending link is written.
+  const early = await db.federationLink.findMany({ where: { workspaceId: v.workspaceId, OR: [{ status: "ACTIVE" }, { status: "PENDING", pendingExpiresAt: { gt: now } }] }, select: { id: true, userId: true, peerOrigin: true, status: true } });
+  const earlyProblem = limitProblem(early.filter((l) => !(l.status === "PENDING" && l.userId === v.userId && l.peerOrigin === peer)), v.userId, peer, policy);
+  if (earlyProblem) throw new ForbiddenError(earlyProblem);
 
   let doc: unknown;
   try {
@@ -69,10 +82,15 @@ export async function startLink(ctx: FedCtx, v: Viewer, address: string): Promis
 
   const state = randomToken(32);
   const verifier = randomToken(48);
+  const linkId = randomUUID();
   await db.$transaction(async (tx) => {
+    await lockWorkspace(tx, v.workspaceId);
     await tx.federationLink.deleteMany({ where: { workspaceId: v.workspaceId, userId: v.userId, peerOrigin: peer, status: "PENDING" } });
+    const live = await tx.federationLink.findMany({ where: { workspaceId: v.workspaceId, OR: [{ status: "ACTIVE" }, { status: "PENDING", pendingExpiresAt: { gt: now } }] }, select: { id: true, userId: true, peerOrigin: true, status: true } });
+    const problem = limitProblem(live, v.userId, peer, policy);
+    if (problem) throw new ForbiddenError(problem);
     await tx.federationLink.create({
-      data: { workspaceId: v.workspaceId, userId: v.userId, peerOrigin: peer, status: "PENDING", stateHash: sha256(state), verifierEnc: encryptSecret(verifier, config.key!), pendingExpiresAt: new Date(now.getTime() + PENDING_TTL_MS) },
+      data: { id: linkId, workspaceId: v.workspaceId, userId: v.userId, peerOrigin: peer, status: "PENDING", stateHash: sha256(state), verifierEnc: encryptSecret(verifier, config.key!, `verifier:${linkId}`), pendingExpiresAt: new Date(now.getTime() + PENDING_TTL_MS) },
     });
   });
   await recordEvent(db, { workspaceId: v.workspaceId, userId: v.userId, kind: "link.started", peerOrigin: peer });
@@ -116,7 +134,7 @@ export async function completeCallback(ctx: FedCtx, userId: string, p: { code?: 
     await settle("REVOKED", "refused by policy", "link.failed");
     return { ok: false, code: "refused", error: decision.ok ? "Your role cannot link instances in this workspace." : decision.reason };
   }
-  const verifier = decryptSecret(link.verifierEnc, config.key);
+  const verifier = decryptSecret(link.verifierEnc, config.key, `verifier:${link.id}`);
   if (!verifier) {
     await settle("REVOKED", "verifier", "link.failed");
     return invalid;
@@ -139,7 +157,23 @@ export async function completeCallback(ctx: FedCtx, userId: string, p: { code?: 
     await settle("REVOKED", "token refused", "link.failed");
     return { ok: false, code: "peer", error: "The other instance did not accept the link request." };
   }
-  await db.federationLink.updateMany({ where: { id: link.id, workspaceId: link.workspaceId, userId }, data: { status: "ACTIVE", tokenEnc: encryptSecret(token, config.key), verifierEnc: null, lastError: null, lastUsedAt: now } });
+  // Activation recounts under the workspace lock: concurrent starts may all have passed the early check, only the limit decides here.
+  const over = await db.$transaction(async (tx) => {
+    await lockWorkspace(tx, link.workspaceId);
+    const p = await tx.federationPolicy.findUnique({ where: { workspaceId: link.workspaceId } });
+    const live = await tx.federationLink.findMany({ where: { workspaceId: link.workspaceId, status: "ACTIVE", id: { not: link.id } }, select: { id: true, userId: true, peerOrigin: true, status: true } });
+    const problem = limitProblem(live, userId, link.peerOrigin, { maxLinksPerUser: p?.maxLinksPerUser ?? policy.maxLinksPerUser, maxPeers: p?.maxPeers ?? policy.maxPeers });
+    if (problem) return problem;
+    await tx.federationLink.updateMany({ where: { id: link.id, workspaceId: link.workspaceId, userId }, data: { status: "ACTIVE", tokenEnc: encryptSecret(token!, config.key!, `token:${link.id}`), verifierEnc: null, lastError: null, lastUsedAt: now } });
+    return null;
+  });
+  if (over) {
+    // The peer already issued a token: hand it back, store nothing.
+    await ctx.fetch(`${link.peerOrigin}${API}/revoke`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: "{}", allowInsecure: config.allowInsecure }).catch(() => undefined);
+    await recordEvent(db, { workspaceId: link.workspaceId, userId, kind: "policy.refused", peerOrigin: link.peerOrigin, linkId: link.id, meta: { reason: over, at: "activate" } });
+    await settle("REVOKED", "over the link limit", "link.failed");
+    return { ok: false, code: "refused", error: over };
+  }
   await recordEvent(db, { workspaceId: link.workspaceId, userId, kind: "link.created", peerOrigin: link.peerOrigin, linkId: link.id });
   // Who we are over there, for the page heading. Best effort: the link is already good.
   try {
@@ -175,7 +209,7 @@ export async function unlink(ctx: FedCtx, v: Viewer, linkId: string): Promise<vo
   const link = await db.federationLink.findFirst({ where: { id: linkId, workspaceId: v.workspaceId } });
   if (!link || (link.userId !== v.userId && !can(v, "manageSpaces"))) throw new NotFoundError();
   if (link.status === "REVOKED") return;
-  const token = link.tokenEnc && config.key ? decryptSecret(link.tokenEnc, config.key) : null;
+  const token = link.tokenEnc && config.key ? decryptSecret(link.tokenEnc, config.key, `token:${link.id}`) : null;
   // Delete first, tell the peer second: the link is gone here even if the peer cannot be reached.
   await db.federationLink.updateMany({ where: { id: link.id, workspaceId: v.workspaceId }, data: { status: "REVOKED", tokenEnc: null, verifierEnc: null, stateHash: null, revokedAt: nowOf(ctx), lastError: null } });
   await db.federationCache.deleteMany({ where: { workspaceId: v.workspaceId, linkId: link.id } });
@@ -218,7 +252,12 @@ export async function remoteGet<T>(ctx: FedCtx, v: Viewer, linkId: string, path:
     return { state: "blocked", data: null, fetchedAt: null, stale: false, error: decision.reason };
   }
   const cached = await db.federationCache.findUnique({ where: { workspaceId_linkId_key: { workspaceId: v.workspaceId, linkId: link.id, key: path } } });
-  const entry = cached && cached.userId === v.userId ? cached : null;
+  let entry = cached && cached.userId === v.userId ? cached : null;
+  if (entry && parsePeerBody(path, entry.bodyJson) === null) {
+    // A cached body that no longer fits the shapes (an old version, or a row written before validation) is dropped, never rendered.
+    await db.federationCache.deleteMany({ where: { workspaceId: v.workspaceId, linkId: link.id, key: path } });
+    entry = null;
+  }
   const age = entry ? now.getTime() - entry.fetchedAt.getTime() : Infinity;
   if (entry && age < CACHE_TTL_MS && !opts.force) return { state: "ok", data: entry.bodyJson as T, fetchedAt: entry.fetchedAt, stale: false };
 
@@ -235,7 +274,7 @@ async function refreshFromPeer<T>(ctx: FedCtx, v: Viewer, link: { id: string; pe
   const { db, config } = ctx;
   const now = nowOf(ctx);
   const fallback = (error: string, state: RemoteState = "error"): Remote<T> => ({ state, data: entry ? (entry.bodyJson as T) : null, fetchedAt: entry?.fetchedAt ?? null, stale: entry !== null, error });
-  const token = link.tokenEnc && config.key ? decryptSecret(link.tokenEnc, config.key) : null;
+  const token = link.tokenEnc && config.key ? decryptSecret(link.tokenEnc, config.key, `token:${link.id}`) : null;
   if (!token) return { state: "revoked", data: null, fetchedAt: null, stale: false, error: "This link can no longer be used. Unlink it and link again." };
   let res;
   try {
@@ -265,7 +304,14 @@ async function refreshFromPeer<T>(ctx: FedCtx, v: Viewer, link: { id: string; pe
     return fallback(msg);
   }
   const etag = res.headers.etag ?? null;
-  const body = res.json as Prisma.InputJsonValue;
+  // Untrusted: validated against strict shapes BEFORE it is cached or rendered; unknown fields are dropped.
+  const valid = parsePeerBody(path, res.json);
+  if (valid === null) {
+    const msg = "The other instance sent an answer this version cannot read.";
+    await db.federationLink.updateMany({ where: { id: link.id, workspaceId: v.workspaceId, userId: v.userId }, data: { lastError: msg } });
+    return fallback(msg);
+  }
+  const body = valid as Prisma.InputJsonValue;
   await db.federationCache.upsert({
     where: { workspaceId_linkId_key: { workspaceId: v.workspaceId, linkId: link.id, key: path } },
     create: { workspaceId: v.workspaceId, userId: v.userId, linkId: link.id, key: path, etag, bodyJson: body, fetchedAt: now },

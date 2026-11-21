@@ -111,7 +111,7 @@ export async function linkUp(w: World, consumer: Viewer = w.aOwner, provider: { 
   const r = await completeCallback(w.A, consumer.userId, { code: back.code, state: back.state });
   if (!r.ok) throw new Error(r.error);
   const link = await w.db.federationLink.findFirstOrThrow({ where: { id: r.linkId, workspaceId: consumer.workspaceId } });
-  const token = decryptSecret(link.tokenEnc!, KEY)!;
+  const token = decryptSecret(link.tokenEnc!, KEY, `token:${link.id}`)!;
   return { linkId: r.linkId, token, authorizeUrl, code: back.code, state: back.state };
 }
 
