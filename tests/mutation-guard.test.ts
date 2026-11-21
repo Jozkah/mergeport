@@ -138,6 +138,7 @@ const ROUTE_ALLOW: { file: string; reason: string }[] = [
   { file: "src/app/api/sync/visibility/route.ts", reason: "Local app: reports whether the tab is visible to the scheduler; authorized by the launch token, changes no workspace data." },
   { file: "src/app/auth/magic/request/route.ts", reason: "Sign-in: asks for a link before any session exists." },
   { file: "src/app/api/federation/v1/token/route.ts", reason: "Server to server: a one-time PKCE code is the credential; there is no session or viewer. 404 unless federation is on." },
+  { file: "src/app/api/github/webhook/route.ts", reason: "Server to server: GitHub signs the body with the App's webhook secret (HMAC checked before anything else); there is no session or viewer. 404 unless hosted and the App is configured. It only queues refreshes and records installation state of installations we already hold." },
   { file: "src/app/api/federation/v1/revoke/route.ts", reason: "Server to server: the bearer token being revoked is the credential; it only ever ends that token." },
 ];
 const ROUTE_ALLOW_PREFIX = [{ prefix: "src/app/api/local/", reason: "Local app routes: loopback only, 404 when hosted, no workspace viewer." }];

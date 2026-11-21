@@ -4,6 +4,8 @@ import { SOURCE_BUDGET_KEY } from "@/lib/github/budget";
 import { portForSync } from "@/lib/github/factory";
 import { GithubNotConnectedError } from "@/lib/github/hosted";
 import { workspaceGithubStatus } from "@/lib/github/status";
+import { pruneGithubAppData } from "@/lib/github/webhook-maintenance";
+import { enqueueHostedReconcile } from "@/lib/github/webhook-pacing";
 import type { Handler, JobRow } from "@/lib/jobs";
 import { UPDATE_JOB, maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
 import { isHosted } from "@/lib/public-url";
@@ -112,8 +114,8 @@ const rawHandlers: Record<string, Handler> = {
       if (isHosted()) {
         // Only workspaces with a usable GitHub connection, and only repositories served by an installation. Others have nothing to reconcile.
         if (!(await workspaceGithubStatus(db, workspaceId)).bound) return;
-        const served = await db.repository.findMany({ where: { workspaceId, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false, installationId: { not: null } }, select: { id: true } });
-        for (const r of served) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}`, workspaceId });
+        // An installation that sends webhooks reconciles hourly instead (webhook-pacing.ts); anything unhealthy or silent still runs every time.
+        await enqueueHostedReconcile(db, workspaceId);
         return;
       }
       const repos = await db.repository.findMany({ where: { workspaceId, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
@@ -122,6 +124,10 @@ const rawHandlers: Record<string, Handler> = {
       const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases", mapping: { fork: { workspaceId } } }, select: { mappingId: true } });
       for (const w of watches) await maybeRequestReleaseCheck(db, w.mappingId);
     });
+  }) as Handler,
+  // Hosted housekeeping (no GitHub, no network): old webhook delivery ids and expired install states. A system-wide job.
+  "github.maintenance": (async () => {
+    await pruneGithubAppData(db);
   }) as Handler,
   // Local only (no GitHub, no network): makes the daily digest once per local day, and catches up after the app was closed.
   "digest.daily": (async () => {

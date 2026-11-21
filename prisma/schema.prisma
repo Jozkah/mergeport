@@ -1664,6 +1664,8 @@ model GithubInstallation {
   repositorySelection InstallationRepositorySelection @default(SELECTED)
   suspendedAt         DateTime?
   deletedAt           DateTime?
+  /// When the last verified webhook for this installation was accepted. Drives the "Live updates" status and the slower reconcile cadence.
+  lastWebhookAt       DateTime?
   createdAt           DateTime                        @default(now())
   updatedAt           DateTime                        @updatedAt
 
