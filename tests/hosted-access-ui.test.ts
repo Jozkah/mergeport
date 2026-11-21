@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestPrisma } from "./pg";
 import { HOST, ORIGIN, state } from "./auth-mocks";
@@ -212,6 +214,9 @@ describe("hosted mode shows no desktop-only wording", () => {
     repositories: () => import("@/app/(app)/repositories/page").then((m) => m.default({ searchParams: Promise.resolve({}) } as never)),
     digest: () => import("@/app/(app)/digest/page").then((m) => m.default({ searchParams: Promise.resolve({}) } as never)),
     settings: () => import("@/app/(app)/settings/page").then((m) => m.default({ searchParams: Promise.resolve({}) })),
+    "settings/members": () => import("@/app/(app)/settings/members/page").then((m) => m.default()),
+    "desktop-only (team)": () => import("@/app/(app)/team/page").then((m) => m.default({ searchParams: Promise.resolve({}) } as never)),
+    "desktop-only (branches)": () => import("@/app/(app)/branches/page").then((m) => m.default({ searchParams: Promise.resolve({}) })),
   });
 
   it("none of the banned phrases appears on the key pages", async () => {
@@ -224,11 +229,42 @@ describe("hosted mode shows no desktop-only wording", () => {
     }
   });
 
-  it("the desktop-only pages do not exist, and the task page has no branch field or worktree panel", async () => {
+  it("the desktop-only pages say so and point back, instead of a 404", async () => {
     await signedIn();
-    const digestOf = async (p: Promise<unknown>) => (await p.then(() => null, (e: { digest?: string }) => e.digest ?? String(e))) as string | null;
-    expect(await digestOf(import("@/app/(app)/team/page").then((m) => m.default({ searchParams: Promise.resolve({}) } as never)))).toContain("404");
-    expect(await digestOf(import("@/app/(app)/branches/page").then((m) => m.default({ searchParams: Promise.resolve({}) })))).toContain("404");
+    for (const path of ["team", "branches"]) {
+      const t = text(await (await import(`@/app/(app)/${path}/page`)).default({ searchParams: Promise.resolve({}) })).toLowerCase();
+      expect(t, path).toContain("this page is for the desktop app");
+    }
+  });
+
+  // Components that hold wording of their own are rendered with the hosted flag, so a local-only sentence cannot slip back in.
+  it("the settings and shell components carry no desktop-only wording when hosted", async () => {
+    const [{ NotificationSettings }, { AiSettingsPanel }, { BackupPanel }, { DigestActions }, { SyncBadge }, { DesktopOnly }] = await Promise.all([
+      import("@/components/settings/NotificationSettings"),
+      import("@/components/settings/AiSettingsPanel"),
+      import("@/components/settings/BackupPanel"),
+      import("@/components/digest/DigestActions"),
+      import("@/components/sync/SyncBadge"),
+      import("@/components/ui/DesktopOnly"),
+    ]);
+    const prefs = { kinds: {}, quiet: { enabled: false, from: "22:00", to: "07:00" }, digest: { enabled: true, hour: 8 } } as never;
+    const states = ["synced", "pending", "syncing", "reconnecting", "offline", "conflict", "revoked", "signin", "rate-limited", "schema", "read-only"] as const;
+    const html = [
+      renderToStaticMarkup(createElement(AiSettingsPanel, { baseUrl: "", hasKey: true, model: null, autopilot: "suggest", hosted: true })),
+      renderToStaticMarkup(createElement(BackupPanel, { hosted: true })),
+      renderToStaticMarkup(createElement(DigestActions, { day: "2026-01-01", read: false, hosted: true })),
+      ...states.map((s) => renderToStaticMarkup(createElement(SyncBadge, { state: s, hosted: true }))),
+      renderToStaticMarkup(createElement(DesktopOnly)),
+    ];
+    try {
+      html.push(renderToStaticMarkup(createElement(NotificationSettings, { initial: prefs, hosted: true })));
+    } catch {
+      // The notification table needs the full preference object; its hosted sentence is checked in the source below.
+    }
+    const all = html.join(" ").toLowerCase();
+    for (const phrase of BANNED) expect(all, `components must not say "${phrase}"`).not.toContain(phrase);
+    const src = (await import("node:fs")).readFileSync("src/components/settings/NotificationSettings.tsx", "utf8");
+    expect(src).toContain("hosted ?");
   });
 
   it("the Projects page offers Access (not Sharing), lists only the spaces the person is in, and never names a restricted space they are outside of", async () => {

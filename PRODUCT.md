@@ -51,7 +51,7 @@ No real data, customers or metrics. All demo data is synthetic and labelled. Bri
 3. Review waiting is its own dimension; labels route attention but never grant authority.
 4. Never fabricate: no fake live data, no silently successful writes, no invented trends.
 5. Explicit, confirmed, reversible actions for anything that touches GitHub; never overwrite someone's same-record edit silently.
-6. Motion explains change and never delays work: nothing animates on keystrokes, filters or background refresh.
+6. Motion explains change and never delays work: nothing animates on keystrokes, filters or background refresh. A value changes with motion only when the change answers something the person just did (a press, a tap, a key within the last three seconds); the same change arriving through a refresh timer, live update or another tab is swapped in silently. `Metric` implements this.
 
 ## Accessibility & Inclusion
 

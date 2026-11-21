@@ -21,8 +21,12 @@ export function SubmitButton({ children, pendingLabel = "Working…", className 
   useEffect(() => {
     const form = mine.current?.form;
     if (!form) return;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    // React (function actions, onSubmit handlers) prevents default at the root, after this listener: look one tick later.
     const onSubmit = (e: Event) => {
-      if (!e.defaultPrevented) setNavigating(true);
+      t = setTimeout(() => {
+        if (!e.defaultPrevented) setNavigating(true);
+      }, 0);
     };
     const onShow = (e: PageTransitionEvent) => {
       if (e.persisted) setNavigating(false);
@@ -30,6 +34,7 @@ export function SubmitButton({ children, pendingLabel = "Working…", className 
     form.addEventListener("submit", onSubmit);
     window.addEventListener("pageshow", onShow);
     return () => {
+      clearTimeout(t);
       form.removeEventListener("submit", onSubmit);
       window.removeEventListener("pageshow", onShow);
     };

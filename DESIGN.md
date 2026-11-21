@@ -64,3 +64,20 @@ Purposeful, short, interruptible, always tied to a state change. The full matrix
 - Where it moves: sub-navigation collapse, mobile drawer, dialogs, tooltips, the sliding segmented pill, board cards (glide, enter, leave, one-off ring), toast stack, form feedback (check draw, one shake), sync pill (label cross-fade, one ring when a state needs a person), changed numbers and bars, theme switch.
 - Not animated, on purpose: table rows, typing, filters and search results, polling refreshes, unchanged counts, anything on first render or navigation.
 - Reduced motion redefines the tokens (distance 0, scale 1, blur 0, short durations), so every keyframe becomes a short fade; the board glide becomes a one-off outline. Information never depends on motion: state is always text + icon + colour.
+
+## Shared components and form rules (hosted UI review)
+
+One implementation each; do not hand-roll these in a page.
+
+- **`SubmitButton`** (`forms/SubmitButton.tsx`): the button of every plain `<form action>`. Disabled and `aria-busy` while pending, spinner, labels stacked in one grid cell (no width jump), `pendingLabel`. A POST to a route handler marks itself busy on submit; `RedirectLink` does the same for provider links ("Redirecting…").
+- **`ActionForm`**: result lifecycle (message clears on input or submit, a success line clears after ~4 s, an error stays until the next edit); `onDone` returning `true` (or `keepBusyOnDone`) holds the button pending until navigation and shows "Redirecting…"; `submitDisabled`, `requireDirty` (settings: button off until a field changed), `hideSubmit` (a Select with `autoSubmit` sends it), `layout="inline"` for a field plus button on one row; the error line reserves its height; `closeOnSuccess` also raises a toast.
+- **Buttons**: `.btn-lg` is the prominent form button (40 px, 44 px on touch). Do not write `!h-10` or `[&>div:last-child]:!mt-0`.
+- **`Select`**: restores its default on `form.reset()`, `onChange`, `autoSubmit` (submits the closest form when a different option is chosen), `required` (an empty choice blocks the form). A role is saved by choosing it; there is no separate Save.
+- **Names and addresses**: `.wrap-any` (`overflow-wrap:anywhere`) for user-supplied text; `<bdi>` around names and emails; `Host` shows a peer address without its scheme, truncated with the full origin in `title`, and `showScheme` wherever trust matters (consent shows the full origin in mono).
+- **`RoleChip` / `ScopeChip`**: roles and scopes are neutral (icon, no status colour). Status colours are reserved for real states, and every state pill has an icon (`SimplePill` defaults one per tone).
+- **`AuthShell`, `ErrorScreen`, `OrDivider`**: the one frame for sign-in, invitation, onboarding and consent (logo, one panel, one h1, 460 px). A dead end always offers its next step (home or sign in).
+- **`ConfirmSheet`**: every action that removes, revokes or hands over something. It names the consequence, has an explicit Cancel next to the danger button, and a toast confirms.
+- **`Disclosure`**: the one wrapper for `<details>`: 40 px row, chevron turns via `group-open`, focus ring.
+- **Hosted consent**: one form with Approve and Deny, same size, one pending state; the full origin with scheme sits under the heading, a non-https origin (loopback excepted) adds a warning banner; the 30-day expiry is a normal-contrast list item.
+- **Hosted wording**: nothing says "this computer", "gh" or "GitHub CLI" in a hosted workspace (`tests/hosted-access-ui.test.ts` renders pages and components with the hosted flag). Desktop-only routes show "This page is for the desktop app". GitHub not being connected is a dismissible warning banner with no development-phase wording.
+- **Navigation**: sidebar links use `prefetch={false}` (pages are `force-dynamic`), and member or account actions revalidate the pages they change, not the root layout.
