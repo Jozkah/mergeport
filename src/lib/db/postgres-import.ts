@@ -43,7 +43,8 @@ export function parseSchema(text: string): Map<string, ModelInfo> {
       } else if (enums.has(type) && !list) info.fields.push({ name, type: "Enum", optional });
       else if (!list) {
         const rel = /@relation\([^)]*fields:\s*\[([^\]]+)\]/.exec(line);
-        if (rel) info.relations.push({ name, target: type, from: rel[1].split(",").map((s) => s.trim()), optional });
+        // A composite relation (e.g. Repository (workspaceId, installationId) -> WorkspaceInstallation) cannot be checked one field at a time; legacy data never has one.
+        if (rel && !rel[1].includes(",")) info.relations.push({ name, target: type, from: rel[1].split(",").map((s) => s.trim()), optional });
       }
     }
     out.set(info.name, info);
