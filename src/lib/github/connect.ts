@@ -31,12 +31,12 @@ const RATE_WINDOW_MS = 10 * 60_000;
 const START_MAX = 15;
 const CALLBACK_MAX = 20;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
-const STATE_SHAPE = /^([A-Za-z0-9_-]{1,64})\.([A-Za-z0-9_-]{20,128})$/;
+export const STATE_SHAPE = /^([A-Za-z0-9_-]{1,64})\.([A-Za-z0-9_-]{20,128})$/;
 const INSTALLATION_ID = /^[1-9]\d{0,15}$/;
 
-const nonceHashOf = (nonce: string) => sha256(`ghconnect-nonce:${nonce}`);
+export const nonceHashOf = (nonce: string) => sha256(`ghconnect-nonce:${nonce}`);
 /** PKCE S256 challenge for a verifier. The browser nonce doubles as the verifier (43 URL-safe characters, never sent to GitHub in the clear). */
-const challengeOf = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
+export const challengeOf = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
 
 export const connectRedirectUri = (publicOrigin: string) => `${publicOrigin.replace(/\/+$/, "")}${CALLBACK_PATH}`;
 

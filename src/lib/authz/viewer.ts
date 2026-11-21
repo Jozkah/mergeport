@@ -1,6 +1,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { ForbiddenError, NotFoundError } from "@/lib/errors";
+import { validRepoGithubIds } from "@/lib/github/access-cache";
 import { can, isAdminRole, type Role, type Subject } from "./roles";
 
 /**
@@ -22,6 +23,12 @@ export type Viewer = {
    * matches a person against GitHub data (review queues, inbox, digest, review requests) uses this field.
    */
   githubLogin: string | null;
+  /**
+   * GitHub ids of the repositories of THIS workspace that GitHub says the person may read and that were checked recently (see
+   * src/lib/github/access-cache.ts). Loaded once per request; empty for administrators (they see everything anyway) and for people
+   * without a linked GitHub account. Optional so a hand-built viewer without it simply has no GitHub-derived access.
+   */
+  githubRepoIds?: bigint[];
   timezone: string;
   /** The workspace role (docs/roles.md). Read the policy through can(); do not compare strings in new code. */
   role: Role;
@@ -41,7 +48,7 @@ export type Capability = "view" | "manageWork" | "review";
  * ACTIVE member of it, otherwise null. Without it the only accepted shortcut is a user with exactly one active membership:
  * several memberships and no choice is ambiguous and yields null rather than a guess.
  */
-export async function loadViewer(db: Db, userId: string, workspaceId?: string | null): Promise<Viewer | null> {
+export async function loadViewer(db: Db, userId: string, workspaceId?: string | null, opts: { now?: Date } = {}): Promise<Viewer | null> {
   const where = { userId, status: "ACTIVE" as const };
   let m;
   if (workspaceId) {
@@ -51,16 +58,19 @@ export async function loadViewer(db: Db, userId: string, workspaceId?: string | 
     m = all.length === 1 ? all[0] : null;
   }
   if (!m) return null;
+  const isAdmin = isAdminRole(m.role);
   return {
     userId,
     memberId: m.id,
     workspaceId: m.workspaceId,
     login: m.user.login,
     githubId: m.user.githubId,
-    githubLogin: m.user.githubId !== null ? m.user.login : null,
+    // The linked account's login. Only a legacy local user (whose githubId came from `gh`, so there is no stored login) falls back to `login`.
+    githubLogin: m.user.githubId === null ? null : (m.user.githubLogin ?? m.user.login),
+    githubRepoIds: isAdmin || m.user.githubId === null ? [] : await validRepoGithubIds(db, userId, m.workspaceId, opts.now),
     timezone: m.user.timezone,
     role: m.role,
-    isAdmin: isAdminRole(m.role),
+    isAdmin,
   };
 }
 
@@ -68,14 +78,24 @@ export async function loadViewer(db: Db, userId: string, workspaceId?: string | 
  * Filter for repositories this viewer may see. Use it in every query that touches repo-owned data.
  *
  * The rule, in one place (a hosted installation token sees everything the installation can access, so what a person may see is
- * decided here, never by GitHub's token): OWNER and ADMIN see every tracked repository of the workspace; everyone else (MEMBER,
- * READER) sees a repository only through an explicit, unrevoked RepositoryGrant. Visibility does not widen that: a public repository
- * is not visible to a member without a grant either, and a private one never is. Untracked (REMOVED) repositories are visible to nobody.
+ * decided here, never by GitHub's token): OWNER and ADMIN see every tracked repository of the workspace. Everyone else (MEMBER,
+ * READER) sees a repository through EITHER of two additive routes:
+ *  1. an explicit, unrevoked RepositoryGrant; or
+ *  2. GitHub says they may read it: the repository is tracked through an installation (`installationId` set) and the viewer has a
+ *     fresh GithubRepoAccess row for it (`viewer.githubRepoIds`, loaded by `loadViewer`; rows older than 30 minutes count for nothing).
+ * A public repository is not visible by that fact alone, and a hand-built viewer without `githubRepoIds` has route 1 only. Untracked
+ * (REMOVED) repositories are visible to nobody. Route 2 is read access only: changing things still needs a grant and a role that writes.
+ *
+ * The disjunction sits under `AND`, so a caller that spreads the result and adds its own `OR` (WorkListPage does) cannot replace it.
+ * Do not spread it and then set `AND`: tests/github-access.test.ts scans for that.
  */
 export function repoWhere(v: Viewer): Prisma.RepositoryWhereInput {
   const base: Prisma.RepositoryWhereInput = { workspaceId: v.workspaceId, trackingStatus: { not: "REMOVED" } };
   if (v.isAdmin) return base;
-  return { ...base, grants: { some: { memberId: v.memberId, revokedAt: null } } };
+  const granted: Prisma.RepositoryWhereInput = { grants: { some: { memberId: v.memberId, revokedAt: null } } };
+  const ids = v.githubRepoIds;
+  if (!ids || ids.length === 0) return { ...base, ...granted };
+  return { ...base, AND: [{ OR: [granted, { githubId: { in: ids }, installationId: { not: null } }] }] };
 }
 
 /** Same filter, for models that hold a `repository` relation (WorkItem, Branch, ...). */
@@ -108,7 +128,8 @@ export async function requireRepo(db: Db, v: Viewer, repositoryId: string, cap: 
   const g = await db.repositoryGrant.findFirst({
     where: { memberId: v.memberId, repositoryId, revokedAt: null },
   });
-  if (!g) throw new NotFoundError();
+  // Visible through GitHub's own answer but without a grant: the person may look, not change.
+  if (!g) throw new ForbiddenError("You can see this repository but have no grant to change it");
   if (cap === "manageWork" && !g.canManageWork) throw new ForbiddenError("Your grant does not include managing work");
   if (cap === "review" && !g.canReview) throw new ForbiddenError("Your grant does not include reviewing");
   return repo;
@@ -125,7 +146,8 @@ export async function capabilitiesFor(db: Db, v: Viewer, repositoryId: string): 
   if (!can(subjectOf(v), "write")) return { view: true, manageWork: false, review: false };
   if (v.isAdmin) return { view: true, manageWork: true, review: true };
   const g = await db.repositoryGrant.findFirst({ where: { memberId: v.memberId, repositoryId, revokedAt: null } });
-  return { view: Boolean(g), manageWork: Boolean(g?.canManageWork), review: Boolean(g?.canReview) };
+  const view = Boolean(g) || (await db.repository.count({ where: { id: repositoryId, ...repoWhere(v) } })) > 0;
+  return { view, manageWork: Boolean(g?.canManageWork), review: Boolean(g?.canReview) };
 }
 
 /**

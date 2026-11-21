@@ -71,15 +71,49 @@ const asUser = (token: string): Record<string, string> => ({ authorization: `Bea
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
 
-/** The user-to-server token for a code, or null when GitHub refuses it (bad, used or expired code, a PKCE mismatch, a wrong secret). Throws only when GitHub cannot be reached. */
-export async function exchangeCode(config: Pick<GithubAppConfig, "clientId" | "clientSecret">, deps: ConnectDeps, input: { code: string; redirectUri: string; codeVerifier?: string }): Promise<string | null> {
+/** What GitHub's token endpoint hands out. The lifetimes are whatever GitHub says (seconds); null means GitHub gave none (a token that does not expire). */
+export type UserTokens = { accessToken: string; refreshToken: string | null; expiresInSeconds: number | null; refreshExpiresInSeconds: number | null };
+
+const seconds = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v > 0 && v < 10 * 365 * 86400 ? Math.floor(v) : null);
+
+function tokensOf(r: { status: number; json: unknown }): { tokens: UserTokens | null; error: string | null } {
+  const j = obj(r.json);
+  const token = j?.access_token;
+  const error = typeof j?.error === "string" ? j.error : null;
+  if (r.status !== 200 || error || typeof token !== "string" || token.length === 0) return { tokens: null, error };
+  return {
+    tokens: { accessToken: token, refreshToken: typeof j?.refresh_token === "string" && j.refresh_token ? j.refresh_token : null, expiresInSeconds: seconds(j?.expires_in), refreshExpiresInSeconds: seconds(j?.refresh_token_expires_in) },
+    error: null,
+  };
+}
+
+/** The user-to-server tokens for a code, or null when GitHub refuses it (bad, used or expired code, a PKCE mismatch, a wrong secret). Throws only when GitHub cannot be reached. */
+export async function exchangeCodeForTokens(config: Pick<GithubAppConfig, "clientId" | "clientSecret">, deps: ConnectDeps, input: { code: string; redirectUri: string; codeVerifier?: string }): Promise<UserTokens | null> {
   const body: Record<string, string> = { client_id: config.clientId, client_secret: config.clientSecret, code: input.code, redirect_uri: input.redirectUri };
   if (input.codeVerifier) body.code_verifier = input.codeVerifier;
   const r = await send(deps, `${oauthBase(deps)}/login/oauth/access_token`, { method: "POST", headers: { accept: "application/json", "content-type": "application/json", "user-agent": "mergeport" }, body: JSON.stringify(body) });
   if (r.status === 429 || r.status >= 500) throw unavailable("GitHub did not accept the request right now.", r.status);
-  const j = obj(r.json);
-  const token = j?.access_token;
-  return r.status === 200 && typeof token === "string" && token.length > 0 && !j?.error ? token : null;
+  return tokensOf(r).tokens;
+}
+
+/** The user-to-server token for a code (the connect flow keeps nothing but this one string for the length of its callback). */
+export async function exchangeCode(config: Pick<GithubAppConfig, "clientId" | "clientSecret">, deps: ConnectDeps, input: { code: string; redirectUri: string; codeVerifier?: string }): Promise<string | null> {
+  return (await exchangeCodeForTokens(config, deps, input))?.accessToken ?? null;
+}
+
+/**
+ * Trades a refresh token for a new pair (GitHub rotates the refresh token: the old one stops working). `"rejected"` means GitHub
+ * refused THIS refresh token (`bad_refresh_token`): the person has to link again. Any other refusal or failure throws (nothing is
+ * concluded about the person's link from an App-level problem or an outage).
+ */
+export async function refreshUserTokens(config: Pick<GithubAppConfig, "clientId" | "clientSecret">, deps: ConnectDeps, refreshToken: string): Promise<UserTokens | "rejected"> {
+  const body = { client_id: config.clientId, client_secret: config.clientSecret, grant_type: "refresh_token", refresh_token: refreshToken };
+  const r = await send(deps, `${oauthBase(deps)}/login/oauth/access_token`, { method: "POST", headers: { accept: "application/json", "content-type": "application/json", "user-agent": "mergeport" }, body: JSON.stringify(body) });
+  if (r.status === 429 || r.status >= 500) throw unavailable("GitHub did not accept the request right now.", r.status);
+  const { tokens, error } = tokensOf(r);
+  if (tokens) return tokens;
+  if (error === "bad_refresh_token") return "rejected";
+  throw unavailable("GitHub did not renew the sign-in.", r.status);
 }
 
 /** Best effort: ends the user token at GitHub as soon as the proof is done. A failure changes nothing (the token is not kept either way). */
@@ -136,6 +170,42 @@ export async function getOrgMembership(deps: ConnectDeps, token: string, org: st
   if (r.status !== 200) return null;
   const j = obj(r.json);
   return typeof j?.role === "string" && typeof j?.state === "string" ? { role: j.role, state: j.state } : null;
+}
+
+export type UserInstallationRepo = { id: bigint; permission: string };
+/** Highest repository permission GitHub reports for the person, from the `permissions` object of a repository. Null when it shows none. */
+function permissionOf(v: unknown): string | null {
+  const p = obj(v);
+  if (!p) return null;
+  for (const k of ["admin", "maintain", "push", "triage", "pull"]) if (p[k] === true) return k;
+  return null;
+}
+/** Repositories read per installation: this many pages of 100 at most. */
+export const MAX_REPOSITORY_PAGES = 50;
+
+/**
+ * `GET /user/installations/:id/repositories`, all pages up to the cap: the repositories of one installation THIS person can access, with
+ * their permission. `complete` is false when the cap was reached (the caller must not treat a missing repository as "no access" then).
+ * `null` when GitHub refuses (401/403/404: the person cannot use that installation). A repository that shows no permission is left out.
+ */
+export async function listUserInstallationRepositories(deps: ConnectDeps, token: string, installationId: bigint): Promise<{ repos: UserInstallationRepo[]; complete: boolean } | null> {
+  const repos: UserInstallationRepo[] = [];
+  for (let page = 1; page <= MAX_REPOSITORY_PAGES; page++) {
+    const r = await send(deps, `${apiBase(deps)}/user/installations/${installationId}/repositories?per_page=100&page=${page}`, { headers: asUser(token) });
+    if (r.status === 401 || r.status === 403 || r.status === 404) return null;
+    if (r.status !== 200) throw unavailable("GitHub did not answer the repositories request.", r.status);
+    const j = obj(r.json);
+    const items = Array.isArray(j?.repositories) ? (j.repositories as unknown[]) : null;
+    if (!items) throw unavailable("GitHub returned an unexpected repositories answer.", r.status);
+    for (const it of items) {
+      const o = obj(it);
+      const id = toId(o?.id);
+      const permission = permissionOf(o?.permissions);
+      if (id !== null && permission) repos.push({ id, permission });
+    }
+    if (items.length < 100) return { repos, complete: true };
+  }
+  return { repos, complete: false };
 }
 
 /**

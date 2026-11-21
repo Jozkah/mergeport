@@ -30,17 +30,22 @@ import { getPrefs } from "@/lib/services/notification-prefs";
 import { McpPanel } from "@/components/settings/McpPanel";
 import { AiSettingsPanel } from "@/components/settings/AiSettingsPanel";
 import { getAiView } from "@/lib/services/ai";
+import { GithubAccountPanel } from "@/components/settings/GithubAccountPanel";
+import { githubAppConfigured } from "@/lib/github/app-config";
+import { LINK_MESSAGES, isLinkResult } from "@/lib/github/link-messages";
+import { userTokenKey } from "@/lib/github/user-token";
 
 export const metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ clones?: string }> }) {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ clones?: string; githublink?: string | string[] }> }) {
   const { viewer, user } = await requireViewer();
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   const hosted = isHosted(); // hosted: no "this computer", no local clones, no gh on the server
   const gh = isDemo() || hosted ? null : await currentGhStatus();
   const zones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["UTC"];
-  const clones = (await searchParams).clones ?? path.dirname(process.cwd()); // by default the folder that holds this app, where clones usually sit
+  const sp = await searchParams;
+  const clones = sp.clones ?? path.dirname(process.cwd()); // by default the folder that holds this app, where clones usually sit
   const setup = viewer.isAdmin && !isDemo() && !hosted ? await planAutoSetup(db, viewer, { clonesFolder: clones }) : null;
   const prefs = await getPrefs(db, user.id);
   const { summary: watch, config: wcfg } = await watchView(db);
@@ -51,6 +56,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const ghInstalls = hosted && !isDemo() ? await listWorkspaceInstallations(db, viewer.workspaceId) : [];
   const ghActive = ghInstalls.filter((i) => i.status === "active").length;
   const poll = (await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } }))?.pollSeconds ?? 30;
+  // The person's own GitHub link (hosted). The result code from the callback is looked up in a fixed table, never shown as given.
+  const tokenRow = hosted && !isDemo() ? await db.githubUserToken.findUnique({ where: { userId: user.id }, select: { status: true, accessCheckedAt: true } }) : null;
+  const linkCode = Array.isArray(sp.githublink) ? sp.githublink[0] : sp.githublink;
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
     <>
@@ -95,6 +103,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <Link href="/settings/linked" className="btn mt-3">Open linked instances</Link>
             </div>
           </Panel>
+        )}
+        {hosted && !isDemo() && (
+          <GithubAccountPanel
+            view={{ available: githubAppConfigured() && userTokenKey() !== null, link: tokenRow ? { login: user.githubLogin, state: tokenRow.status === "OK" ? "ok" : "relink", checkedAt: tokenRow.accessCheckedAt } : null, timezone: user.timezone }}
+            result={isLinkResult(linkCode) ? LINK_MESSAGES[linkCode] : null}
+          />
         )}
         {hosted && (
           <Panel title="Account" icon={LogOut} id="account">
