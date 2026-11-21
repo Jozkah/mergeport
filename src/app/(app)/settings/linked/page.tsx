@@ -98,7 +98,7 @@ export default async function LinkedSettings() {
                   <li key={g.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 last:border-b-0">
                     <div className="min-w-0">
                       <p className="flex min-w-0 items-baseline gap-1.5 font-medium"><Host origin={g.clientOrigin} className="min-w-0" /> <span className="shrink-0 font-normal text-ink-3">as <bdi>{g.who}</bdi></span></p>
-                      <p className="text-[12.5px] text-ink-3">Approved {formatInstant(g.createdAt, viewer.timezone)}; {g.lastUsedAt ? `last used ${formatInstant(g.lastUsedAt, viewer.timezone)}` : "not used yet"}.</p>
+                      <p className="tnum text-[12.5px] text-ink-3">Approved {formatInstant(g.createdAt, viewer.timezone)}; {g.lastUsedAt ? `last used ${formatInstant(g.lastUsedAt, viewer.timezone)}` : "not used yet"}.</p>
                     </div>
                     <ConfirmSheet
                       title="Revoke this access?"
@@ -143,7 +143,7 @@ export default async function LinkedSettings() {
                 <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 last:border-b-0">
                   <div className="min-w-0">
                     <p className="flex min-w-0 items-baseline gap-1.5 font-medium"><Host origin={l.peerOrigin} className="min-w-0" /> <span className="shrink-0 font-normal text-ink-3">linked by <bdi>{l.who}</bdi></span></p>
-                    <p className="text-[12.5px] text-ink-3">{l.lastUsedAt ? `Last used ${formatInstant(l.lastUsedAt, viewer.timezone)}.` : "Not used yet."}</p>
+                    <p className="tnum text-[12.5px] text-ink-3">{l.lastUsedAt ? `Last used ${formatInstant(l.lastUsedAt, viewer.timezone)}.` : "Not used yet."}</p>
                     {l.lastError && <p className="wrap-any text-[12.5px] text-blocked">{l.lastError}</p>}
                   </div>
                   {l.lastError && <SimplePill tone="blocked" icon={CircleAlert}>Last request failed</SimplePill>}

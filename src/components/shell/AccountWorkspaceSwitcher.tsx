@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { useFormStatus } from "react-dom";
 import { switchWorkspaceAction } from "@/app/account-actions";
 import { LoaderCircle } from "@/components/ui/icons";
@@ -19,10 +20,22 @@ function Field({ workspaces, active }: { workspaces: { id: string; name: string 
   );
 }
 
-/** Hosted accounts with several workspaces. Choosing one switches at once (the server checks the id against the person's ACTIVE memberships). */
+/** Hosted accounts with several workspaces. Choosing one switches at once (the server checks the id against the person's ACTIVE memberships). A refused switch puts the picker back on the workspace that is actually active. */
 export function AccountWorkspaceSwitcher({ workspaces, active, className = "" }: { workspaces: { id: string; name: string }[]; active: string; className?: string }) {
+  const form = useRef<HTMLFormElement>(null);
   return (
-    <form action={switchWorkspaceAction} className={`flex items-center gap-1.5 ${className}`}>
+    <form
+      ref={form}
+      action={async (fd) => {
+        try {
+          await switchWorkspaceAction(fd);
+        } catch (e) {
+          form.current?.reset();
+          throw e;
+        }
+      }}
+      className={`flex items-center gap-1.5 ${className}`}
+    >
       <Field workspaces={workspaces} active={active} />
     </form>
   );

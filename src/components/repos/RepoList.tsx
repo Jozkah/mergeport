@@ -8,9 +8,10 @@ import { refreshRepositoryAction, untrackRepositoryAction } from "@/app/actions"
 import { shareRepositoryAction, unshareRepositoryAction } from "@/app/team-actions";
 import { ActionMenu } from "@/components/ui/ActionMenu";
 import { Avatar } from "@/components/ui/Avatar";
+import { PendingLabel } from "@/components/ui/PendingLabel";
 import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/ToastProvider";
-import { Building2, GitFork, Globe, Lock, LoaderCircle, Search, Unplug, User, Users, X, Zap } from "@/components/ui/icons";
+import { Building2, GitFork, Globe, Lock, Search, Unplug, User, Users, X, Zap } from "@/components/ui/icons";
 import { ctx } from "@/lib/ctx";
 
 export type RepoRow = {
@@ -125,7 +126,7 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
       {picked.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-line bg-canvas px-3 py-2 text-[12.5px]" role="region" aria-label="Selected repositories">
           <strong className="font-medium">{picked.size} selected</strong>
-          <button type="button" className="btn !h-7 !px-2.5 !text-[12.5px]" disabled={pending} aria-busy={pending} data-loading={pending} onClick={() => refresh([...picked])}>{pending && <LoaderCircle size={12} aria-hidden className="animate-spin motion-reduce:animate-none" />}Refresh</button>
+          <button type="button" className="btn !h-7 !px-2.5 !text-[12.5px]" aria-disabled={pending || undefined} aria-busy={pending} data-loading={pending} onClick={() => { if (!pending) refresh([...picked]); }}><PendingLabel mode={pending ? "pending" : "idle"} pending="Refreshing…" size={12}>Refresh</PendingLabel></button>
           <button type="button" className="btn btn-danger !h-7 !px-2.5 !text-[12.5px]" disabled={pending} aria-busy={pending} onClick={() => setDialog({ kind: "untrack", ids: [...picked] })}>Stop tracking</button>
           <button type="button" className="ml-auto text-ink-3 hover:text-ink" onClick={() => setPicked(new Set())}>Clear</button>
         </div>
@@ -256,10 +257,12 @@ function ShareDialog({ open, id, name, spaces, onClose, onDone, onError }: { ope
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || !chosen || !id}
+              disabled={!chosen || !id}
+              aria-disabled={busy || undefined}
               aria-busy={busy}
               data-loading={busy}
               onClick={async () => {
+                if (busy) return;
                 setBusy(true);
                 const r = await shareRepositoryAction(fd({ repositoryId: id!, spaceId: chosen, confirm: "on" }));
                 setBusy(false);
@@ -267,8 +270,7 @@ function ShareDialog({ open, id, name, spaces, onClose, onDone, onError }: { ope
                 else onError(r.error);
               }}
             >
-              {busy && <LoaderCircle size={14} aria-hidden className="animate-spin motion-reduce:animate-none" />}
-              {busy ? "Sharing…" : "Share"}
+              <PendingLabel mode={busy ? "pending" : "idle"} pending="Sharing…">Share</PendingLabel>
             </button>
           </div>
         </D.Content>

@@ -39,9 +39,9 @@ describe("SubmitButton", () => {
       </form>,
     );
     const btn = screen.getByRole("button");
-    expect(btn.hasAttribute("disabled")).toBe(false);
+    expect(btn.hasAttribute("aria-disabled")).toBe(false);
     await act(async () => { fireEvent.click(btn); });
-    await waitFor(() => expect(btn.hasAttribute("disabled")).toBe(true));
+    await waitFor(() => expect(btn.hasAttribute("aria-disabled")).toBe(true));
     expect(btn.getAttribute("aria-busy")).toBe("true");
     await act(async () => { fireEvent.click(btn); fireEvent.click(btn); });
     expect(calls).toBe(1);
@@ -49,7 +49,7 @@ describe("SubmitButton", () => {
     expect(btn.textContent).toContain("Send");
     expect(btn.textContent).toContain("Sending…");
     await act(async () => { g.release(); });
-    await waitFor(() => expect(btn.hasAttribute("disabled")).toBe(false));
+    await waitFor(() => expect(btn.hasAttribute("aria-disabled")).toBe(false));
   });
 });
 
@@ -82,10 +82,10 @@ describe("ActionForm result lifecycle", () => {
     render(<ActionForm action={async () => ok} submitLabel="Go" pendingLabel="Going…" onDone={() => true}><input aria-label="n" /></ActionForm>);
     const btn = screen.getByRole("button");
     await act(async () => { fireEvent.submit(btn.closest("form")!); });
-    await waitFor(() => expect(btn.hasAttribute("disabled")).toBe(true));
+    await waitFor(() => expect(btn.hasAttribute("aria-disabled")).toBe(true));
     expect(btn.textContent).toContain("Redirecting…");
     await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
-    expect(btn.hasAttribute("disabled")).toBe(true); // still held: the page is about to leave
+    expect(btn.hasAttribute("aria-disabled")).toBe(true); // still held: the page is about to leave
   });
 
   it("requireDirty keeps the button off until a field differs from what loaded", async () => {

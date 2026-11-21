@@ -72,7 +72,7 @@ export function Topbar({ hosted, aiQuick, unread, menu, syncNote, theme, sync, s
       {workspaces ? <div className="hidden sm:block"><WorkspaceSwitcher {...workspaces} /></div> : null}
       {accountSwitcher ? <div className="hidden sm:block"><AccountWorkspaceSwitcher {...accountSwitcher} /></div> : null}
       {scopePicker}
-      {syncNote && <span className="hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
+      {syncNote && <span className="tnum hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
       {sync && <SyncBadge {...sync} href="/sync" hosted={hosted} />}
       {aiQuick}
       <ThemeToggle initial={theme} />

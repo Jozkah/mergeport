@@ -10,6 +10,7 @@ import {
   changeRoleAction, reinstateMemberAction, removeMemberAction, resendInvitationAction, revokeInvitationAction, setProjectSpaceAclAction, transferOwnershipAction,
 } from "@/app/workspace-actions";
 import type { Role } from "@/lib/authz/roles";
+import { formatDateOnly } from "@/lib/format";
 
 /** A little longer than the row-leave animation (--duration-fast, 250 ms). */
 const FOLD_MS = 320;
@@ -112,9 +113,9 @@ export function RemovedMembers({ members }: { members: { id: string; name: strin
   );
 }
 
-/** The expiry in the viewer's own time zone (the server does not know it), so the text is allowed to differ between server and browser. */
-function ExpiresOn({ iso }: { iso: string }) {
-  return <time dateTime={iso} className="tnum" suppressHydrationWarning>{new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" })}</time>;
+/** One fixed format (en-US, UTC calendar day) on server and browser, so the text is identical in both and never flips after hydration. */
+export function ExpiresOn({ iso }: { iso: string }) {
+  return <time dateTime={iso} className="tnum">{formatDateOnly(new Date(iso))}</time>;
 }
 
 export function PendingInvitations({ invitations }: { invitations: InvitationView[] }) {

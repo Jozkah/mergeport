@@ -3,7 +3,7 @@ import { ConflictError, ForbiddenError, NotFoundError, UnauthenticatedError, Val
 import { GithubError } from "@/lib/github/port";
 import { GithubNotConnectedError } from "@/lib/github/hosted";
 
-export type ActionResult = { ok: true; message?: string; data?: Record<string, unknown> } | { ok: false; error: string; retryable?: boolean };
+export type ActionResult = { ok: true; message?: string; data?: Record<string, unknown> } | { ok: false; error: string; retryable?: boolean; /** The form field (its `name`) the error is about: it is marked invalid, described by the message and focused. */ field?: string };
 
 /** Maps domain errors to messages a person can act on. Unknown errors are logged and reported generically. */
 export async function run(fn: () => Promise<ActionResult | void>): Promise<ActionResult> {

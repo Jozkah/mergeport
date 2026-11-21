@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { LoaderCircle } from "@/components/ui/icons";
+import { PendingLabel } from "@/components/ui/PendingLabel";
 
 /**
- * The submit button of every plain `<form action>` (server action or a POST to a route). Disabled while the form is pending, so
- * a double click cannot send it twice. The two labels sit in one grid cell, so the button keeps the width of the longer one and
+ * The submit button of every plain `<form action>` (server action or a POST to a route). aria-disabled while the form is pending
+ * (it keeps keyboard focus; the click is swallowed), so a double click cannot send it twice. The two labels sit in one grid cell, so the button keeps the width of the longer one and
  * nothing shifts when the label swaps. A string `action` (a POST to a route handler) navigates away without a tracked
  * transition, so the submit event also marks the button busy; a restored page (back button) resets it.
  */
@@ -39,6 +40,12 @@ export function SubmitButton({ children, pendingLabel = "Working…", className 
       window.removeEventListener("pageshow", onShow);
     };
   }, []);
+  // A POST that never left the page (blocked navigation) lets go again after a while.
+  useEffect(() => {
+    if (!navigating) return;
+    const t = setTimeout(() => setNavigating(false), 10_000);
+    return () => clearTimeout(t);
+  }, [navigating]);
   const busy = pending || navigating;
   return (
     <button
@@ -50,26 +57,29 @@ export function SubmitButton({ children, pendingLabel = "Working…", className 
       }}
       type="submit"
       className={className}
-      disabled={disabled || busy}
+      disabled={disabled}
+      // aria-disabled (not disabled) while busy: the button keeps keyboard focus, and the click is swallowed.
+      aria-disabled={busy || undefined}
       aria-busy={busy}
       data-loading={busy}
+      onClick={(e) => {
+        if (busy) e.preventDefault();
+        else rest.onClick?.(e);
+      }}
     >
       {iconOnly ? (
         busy ? <LoaderCircle size={16} aria-hidden className="animate-spin motion-reduce:animate-none" /> : children
       ) : (
-        <>
-          {busy ? <LoaderCircle size={14} aria-hidden className="shrink-0 animate-spin motion-reduce:animate-none" /> : null}
-          <span className="inline-grid text-center">
-            <span className={`col-start-1 row-start-1 ${busy ? "invisible" : ""}`}>{children}</span>
-            <span className={`col-start-1 row-start-1 ${busy ? "" : "invisible"}`} aria-hidden={!busy}>{pendingLabel}</span>
-          </span>
-        </>
+        <PendingLabel mode={busy ? "pending" : "idle"} pending={pendingLabel}>{children}</PendingLabel>
       )}
     </button>
   );
 }
 
-/** A provider link that leaves the page: shows "Redirecting…" and ignores further clicks once pressed. */
+/** How long "Redirecting…" is believed before the link can be pressed again (a navigation that never happened). */
+const REDIRECT_MS = 10_000;
+
+/** A provider link that leaves the page: shows "Redirecting…" and ignores further clicks once pressed. Modified clicks (new tab) do nothing special. */
 export function RedirectLink({ href, children, className = "btn", pendingLabel = "Redirecting…" }: { href: string; children: ReactNode; className?: string; pendingLabel?: string }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -79,23 +89,29 @@ export function RedirectLink({ href, children, className = "btn", pendingLabel =
     window.addEventListener("pageshow", onShow);
     return () => window.removeEventListener("pageshow", onShow);
   }, []);
+  useEffect(() => {
+    if (!busy) return;
+    const t = setTimeout(() => setBusy(false), REDIRECT_MS);
+    return () => clearTimeout(t);
+  }, [busy]);
   return (
     <a
       href={href}
       className={className}
       aria-busy={busy}
-      aria-disabled={busy}
+      aria-disabled={busy || undefined}
       data-loading={busy}
       onClick={(e) => {
-        if (busy) e.preventDefault();
-        else setBusy(true);
+        if (busy) {
+          e.preventDefault();
+          return;
+        }
+        // Only a plain primary click leaves this page; a new-tab or download click must not stick on "Redirecting…".
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        setBusy(true);
       }}
     >
-      {busy ? <LoaderCircle size={14} aria-hidden className="shrink-0 animate-spin motion-reduce:animate-none" /> : null}
-      <span className="inline-grid text-center">
-        <span className={`col-start-1 row-start-1 ${busy ? "invisible" : ""}`}>{children}</span>
-        <span className={`col-start-1 row-start-1 ${busy ? "" : "invisible"}`} aria-hidden={!busy}>{pendingLabel}</span>
-      </span>
+      <PendingLabel mode={busy ? "pending" : "idle"} pending={pendingLabel}>{children}</PendingLabel>
     </a>
   );
 }

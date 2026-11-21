@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 
-// When the person last pressed, tapped or typed in this tab. A number that changes right after that is the answer to their own
+// When the person last pressed or tapped in this tab (or hit Enter/Space). A number that changes right after that is the answer to their own
 // action; one that changes with no input just before it arrived through a background refresh, and house rule 6 (PRODUCT.md) says
 // those never animate.
 let lastInput = 0;
@@ -10,7 +10,15 @@ if (typeof window !== "undefined") {
   const mark = () => {
     lastInput = Date.now();
   };
-  for (const e of ["pointerdown", "keydown", "touchstart"]) window.addEventListener(e, mark, { capture: true, passive: true });
+  // A press or tap, or Enter/Space on a focused control. Typing (a filter, a search box) is not an action on a number: it never animates one.
+  for (const e of ["pointerdown", "touchstart"]) window.addEventListener(e, mark, { capture: true, passive: true });
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    // Space inside a text field is typing; Enter there submits (an action), and Space on a button or checkbox presses it.
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    if (e.key === " " && t && (t.isContentEditable || t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && ["text", "search", "email", "url", "tel", "password", "number"].includes((t as HTMLInputElement).type)))) return;
+    mark();
+  }, { capture: true, passive: true });
 }
 const OWN_ACTION_MS = 3000;
 const ownAction = () => Date.now() - lastInput < OWN_ACTION_MS;
