@@ -6,10 +6,12 @@ import { isDemo } from "@/lib/env";
 import { currentGhStatus } from "@/lib/local/identity";
 import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 import { ActionForm } from "@/components/forms/ActionForm";
+import { ConfirmSheet } from "@/components/forms/ConfirmSheet";
 import { ThemeSelect } from "@/components/shell/ThemeControls";
 import { Mono, PageHeader, Panel, SimplePill } from "@/components/ui/primitives";
-import { KeyRound, RefreshCw, Settings } from "@/components/ui/icons";
+import { KeyRound, LogOut, RefreshCw, Settings } from "@/components/ui/icons";
 import { autoSetupAction, setRepoWatchAction, setTimezoneAction } from "@/app/actions";
+import { signOutEverywhereFormAction } from "@/app/account-actions";
 import { saveDigestSettingsAction } from "@/app/digest-actions";
 import { setPollSecondsAction } from "@/app/team-actions";
 import { watchView } from "@/lib/local/repo-watch";
@@ -20,7 +22,7 @@ import { Bell, Globe, Newspaper, Users, Wand2 } from "@/components/ui/icons";
 import { isHosted } from "@/lib/public-url";
 import { federationState } from "@/lib/federation/config";
 import Link from "next/link";
-import { ROLE_LABEL } from "@/lib/authz/roles";
+import { RoleChip } from "@/components/ui/identity";
 import { BackupPanel } from "@/components/settings/BackupPanel";
 import { NotificationSettings } from "@/components/settings/NotificationSettings";
 import { getPrefs } from "@/lib/services/notification-prefs";
@@ -42,39 +44,60 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const prefs = await getPrefs(db, user.id);
   const { summary: watch, config: wcfg } = await watchView(db);
   const ai = isDemo() ? null : await getAiView(db, viewer.workspaceId);
+  // Counts for the panel summaries (hosted only: these panels do not exist locally).
+  const memberCount = hosted ? await db.member.count({ where: { workspaceId: viewer.workspaceId, status: "ACTIVE" } }) : 0;
+  const linkCount = hosted && viewer.isAdmin ? await db.federationLink.count({ where: { workspaceId: viewer.workspaceId, status: "ACTIVE" } }) : 0;
   const poll = (await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } }))?.pollSeconds ?? 30;
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
     <>
       <PageHeader
         title="Settings"
-        subtitle={`Signed in as @${user.login}${viewer.isAdmin ? ` (administrator of ${hosted ? "this workspace" : "the team space"})` : ""}.`}
+        subtitle={`Signed in as ${hosted ? (user.email ?? `@${user.login}`) : `@${user.login}`}${viewer.isAdmin ? ` (administrator of ${hosted ? "this workspace" : "the team space"})` : ""}.`}
         help={hosted ? <>The daily digest uses your timezone ({user.timezone}) and shows in the bell and on Overview.</> : <>These settings belong to this computer. The daily digest uses your timezone ({user.timezone}); it is built only from the data on this computer, with no network call, and shows in the bell and on Overview.</>}
       />
       <div className="fit-grid" style={{ "--fit-min": "520px" } as React.CSSProperties}>
         <Panel title="Display" icon={Settings} id="display">
           <div className="grid gap-5 p-4">
             <ThemeSelect initial={theme} />
-            <ActionForm action={setTimezoneAction} submitLabel="Save timezone" resetOnSuccess={false}>
+            <ActionForm action={setTimezoneAction} submitLabel="Save timezone" resetOnSuccess={false} requireDirty>
               <label className="label" htmlFor="tz">Timezone</label>
               <Select id="tz" name="timezone" defaultValue={user.timezone} className="select max-w-sm">{[...new Set(["UTC", user.timezone, ...zones])].map((z) => <option key={z} value={z}>{z}</option>)}</Select>
               <p className="mt-1 text-[12px] text-ink-3">Due and milestone dates are calendar dates and are not shifted.</p>
             </ActionForm>
           </div>
         </Panel>
-        {!isDemo() && (
-          <Panel title="Workspace members" icon={Users} id="members">
+        {hosted && !isDemo() && (
+          <Panel title={<>Workspace members (<span className="tnum">{memberCount}</span>)</>} icon={Users} id="members" summary={`${memberCount} member${memberCount === 1 ? "" : "s"}`}>
             <div className="p-4 text-[13px]">
-              <p>Your role: <strong>{ROLE_LABEL[viewer.role]}</strong>. {viewer.isAdmin ? "Invite people by email, change roles and control who sees which space." : "You can leave the workspace from the members page."}</p>
-              <Link href="/settings/members" className="btn mt-3 !h-10">Open members</Link>
+              <p className="flex flex-wrap items-center gap-2">Your role: <RoleChip role={viewer.role} /></p>
+              <p className="mt-2">{viewer.isAdmin ? "Invite people by email, change roles and control who sees which space." : "You can leave the workspace from the members page."}</p>
+              <Link href="/settings/members" className="btn mt-3">Open members</Link>
             </div>
           </Panel>
         )}
-        {viewer.isAdmin && federationState().kind !== "absent" && (
-          <Panel title="Linked instances" icon={Globe} id="linked-instances">
+        {hosted && viewer.isAdmin && federationState().kind !== "absent" && (
+          <Panel title={<>Linked instances (<span className="tnum">{linkCount}</span>)</>} icon={Globe} id="linked-instances" summary={`${linkCount} link${linkCount === 1 ? "" : "s"}`}>
             <div className="p-4 text-[13px]">
               <p>Decide whether people here may link other Mergeport instances (read-only), which instances may link to this workspace, and revoke what is linked.</p>
-              <Link href="/settings/linked" className="btn mt-3 !h-10">Open linked instances</Link>
+              <Link href="/settings/linked" className="btn mt-3">Open linked instances</Link>
+            </div>
+          </Panel>
+        )}
+        {hosted && (
+          <Panel title="Account" icon={LogOut} id="account">
+            <div className="p-4 text-[13px]">
+              <p>Signed in as <bdi className="break-all font-medium">{user.email ?? `@${user.login}`}</bdi>. The sign-out button in the top bar ends this browser only.</p>
+              <div className="mt-3">
+                <ConfirmSheet
+                  title="Sign out everywhere?"
+                  consequence="Every browser and device signed in as you is signed out now, including this one. You will need a new sign-in link to come back."
+                  action={signOutEverywhereFormAction}
+                  submitLabel="Sign out everywhere"
+                  pendingLabel="Signing out…"
+                  trigger={<button type="button" className="btn btn-danger">Sign out everywhere</button>}
+                />
+              </div>
             </div>
           </Panel>
         )}

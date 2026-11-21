@@ -2,9 +2,11 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireAdminViewer } from "@/lib/authz-page";
 import { ActionForm } from "@/components/forms/ActionForm";
+import { ConfirmSheet } from "@/components/forms/ConfirmSheet";
+import { Host } from "@/components/ui/identity";
 import { Select } from "@/components/ui/Select";
 import { Banner, PageHeader, Panel, SimplePill } from "@/components/ui/primitives";
-import { Globe, ShieldCheck } from "@/components/ui/icons";
+import { CircleAlert, Globe, ShieldCheck } from "@/components/ui/icons";
 import { revokeAllFromOriginAction, revokeGrantAction, saveFederationPolicyAction, unlinkAction } from "@/app/federation-actions";
 import { formatInstant } from "@/lib/format";
 import { federationState } from "@/lib/federation/config";
@@ -34,14 +36,14 @@ export default async function LinkedSettings() {
           <div className="grid gap-2 p-4 text-[13px]">
             <p>
               Operator limit: <strong>{config.mode === "any" ? "any instance" : "only listed instances"}</strong>
-              {config.mode === "allowlist" ? <> ({config.allowlist.length === 0 ? "none listed" : config.allowlist.join(", ")})</> : null}. It is set by the server&apos;s environment and cannot be changed here.
+              {config.mode === "allowlist" ? <> ({config.allowlist.length === 0 ? "none listed" : config.allowlist.join(", ")})</> : null}. It is set by whoever runs this server and cannot be changed here.
             </p>
             {state.kind === "misconfigured" && <Banner tone="error" title="Linking is not working on this server">{state.problems.join(" ")}</Banner>}
           </div>
         </Panel>
         <Panel title="Policy for this workspace" icon={Globe} id="policy">
           <div className="p-4">
-            <ActionForm action={saveFederationPolicyAction} submitLabel="Save policy" pendingLabel="Saving…" resetOnSuccess={false} className="grid max-w-xl gap-3">
+            <ActionForm action={saveFederationPolicyAction} submitLabel="Save policy" pendingLabel="Saving…" resetOnSuccess={false} className="grid max-w-xl gap-3" requireDirty>
               <div>
                 <label className="label" htmlFor="fp-out">Links from this workspace to other instances</label>
                 <Select id="fp-out" name="outboundMode" defaultValue={policy.outboundMode} className="select max-w-xs">
@@ -49,6 +51,7 @@ export default async function LinkedSettings() {
                   <option value="allowlist">Only the allow list</option>
                   <option value="any">Any allowed instance</option>
                 </Select>
+                <p className="mt-1 text-[12px] text-ink-3">{MODE_HELP}</p>
               </div>
               <div>
                 <label className="label" htmlFor="fp-in">Links from other instances to this workspace</label>
@@ -61,7 +64,8 @@ export default async function LinkedSettings() {
               </div>
               <div>
                 <label className="label" htmlFor="fp-list">Allow list (one address per line)</label>
-                <textarea id="fp-list" name="allowlist" rows={4} defaultValue={policy.allowlist.join("\n")} spellCheck={false} placeholder="https://mergeport.example.com" className="input !h-auto font-mono text-[12.5px]" />
+                <textarea id="fp-list" name="allowlist" rows={4} defaultValue={policy.allowlist.join("\n")} spellCheck={false} autoCapitalize="none" placeholder="https://mergeport.example.com" aria-describedby="fp-list-help" className="textarea font-mono text-[12.5px]" />
+                <p id="fp-list-help" className="mt-1 text-[12px] text-ink-3">Only used by the two modes that say &quot;allow list&quot;.</p>
               </div>
               <div>
                 <label className="label" htmlFor="fp-who">Who can create a link</label>
@@ -73,18 +77,18 @@ export default async function LinkedSettings() {
               <div className="flex flex-wrap gap-4">
                 <div>
                   <label className="label" htmlFor="fp-links">Links per person</label>
-                  <input id="fp-links" name="maxLinksPerUser" type="number" inputMode="numeric" min={0} max={50} step={1} defaultValue={policy.maxLinksPerUser} className="input tnum !w-28" />
+                  <input id="fp-links" name="maxLinksPerUser" type="number" inputMode="numeric" min={0} max={50} step={1} defaultValue={policy.maxLinksPerUser} className="input tnum w-28" />
                 </div>
                 <div>
-                  <label className="label" htmlFor="fp-peers">Linked instances (0 to 50)</label>
-                  <input id="fp-peers" name="maxPeers" type="number" inputMode="numeric" min={0} max={50} step={1} defaultValue={policy.maxPeers} className="input tnum !w-28" aria-describedby="fp-peers-help" />
-                  <p id="fp-peers-help" className="mt-1 text-[12px] text-ink-3">1 means a single linked instance.</p>
+                  <label className="label" htmlFor="fp-peers">Most instances this workspace can link</label>
+                  <input id="fp-peers" name="maxPeers" type="number" inputMode="numeric" min={0} max={50} step={1} defaultValue={policy.maxPeers} className="input tnum w-28" aria-describedby="fp-peers-help" />
+                  <p id="fp-peers-help" className="mt-1 text-[12px] text-ink-3">From 0 to 50. 1 means a single linked instance.</p>
                 </div>
               </div>
             </ActionForm>
           </div>
         </Panel>
-        <Panel title={<>Instances that can read this workspace (<span className="tnum">{grants.length}</span>)</>} icon={ShieldCheck} id="grants">
+        <Panel title={<>Instances that can read this workspace (<span className="tnum">{grants.length}</span>)</>} icon={ShieldCheck} id="grants" summary={`${grants.length} access${grants.length === 1 ? "" : "es"}`}>
           {grants.length === 0 ? (
             <p className="p-4 text-[13px] text-ink-3">No other instance holds access.</p>
           ) : (
@@ -93,26 +97,44 @@ export default async function LinkedSettings() {
                 {grants.map((g) => (
                   <li key={g.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 last:border-b-0">
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{g.clientOrigin.replace(/^https?:\/\//, "")} <span className="font-normal text-ink-3">as {g.who}</span></p>
+                      <p className="flex min-w-0 items-baseline gap-1.5 font-medium"><Host origin={g.clientOrigin} className="min-w-0" /> <span className="shrink-0 font-normal text-ink-3">as <bdi>{g.who}</bdi></span></p>
                       <p className="text-[12.5px] text-ink-3">Approved {formatInstant(g.createdAt, viewer.timezone)}; {g.lastUsedAt ? `last used ${formatInstant(g.lastUsedAt, viewer.timezone)}` : "not used yet"}.</p>
                     </div>
-                    <ActionForm action={revokeGrantAction} submitLabel="Revoke" pendingLabel="Revoking…" submitClassName="btn btn-danger !h-10" submitAriaLabel={`Revoke access of ${g.who} for ${g.clientOrigin}`} className="[&>div:last-child]:!mt-0">
+                    <ConfirmSheet
+                      title="Revoke this access?"
+                      consequence={`${g.who} can no longer see this workspace from ${g.clientOrigin}. It stops working now.`}
+                      action={revokeGrantAction}
+                      submitLabel="Revoke"
+                      pendingLabel="Revoking…"
+                      trigger={<button type="button" className="btn btn-danger" aria-label={`Revoke access of ${g.who} for ${g.clientOrigin}`}>Revoke</button>}
+                    >
                       <input type="hidden" name="grantId" value={g.id} />
-                    </ActionForm>
+                    </ConfirmSheet>
                   </li>
                 ))}
               </ul>
               <div className="flex flex-wrap gap-3 border-t border-line p-4">
-                {origins.map((o) => (
-                  <ActionForm key={o} action={revokeAllFromOriginAction} submitLabel={`Revoke all from ${o.replace(/^https?:\/\//, "")}`} pendingLabel="Revoking…" submitClassName="btn btn-danger !h-10" className="[&>div:last-child]:!mt-0">
-                    <input type="hidden" name="origin" value={o} />
-                  </ActionForm>
-                ))}
+                {origins.map((o) => {
+                  const n = grants.filter((g) => g.clientOrigin === o).length;
+                  return (
+                    <ConfirmSheet
+                      key={o}
+                      title={`Revoke ${n} grant${n === 1 ? "" : "s"} from ${o.replace(/^https?:\/\//, "")}?`}
+                      consequence={`Everyone who linked this workspace from ${o} loses access now. They can link again if the policy allows it.`}
+                      action={revokeAllFromOriginAction}
+                      submitLabel={`Revoke ${n} grant${n === 1 ? "" : "s"}`}
+                      pendingLabel="Revoking…"
+                      trigger={<button type="button" className="btn btn-danger">Revoke all from <span className="ml-1 max-w-48 truncate">{o.replace(/^https?:\/\//, "")}</span></button>}
+                    >
+                      <input type="hidden" name="origin" value={o} />
+                    </ConfirmSheet>
+                  );
+                })}
               </div>
             </>
           )}
         </Panel>
-        <Panel title={<>Links from this workspace (<span className="tnum">{links.length}</span>)</>} icon={Globe} id="links">
+        <Panel title={<>Links from this workspace (<span className="tnum">{links.length}</span>)</>} icon={Globe} id="links" summary={`${links.length} link${links.length === 1 ? "" : "s"}`}>
           {links.length === 0 ? (
             <p className="p-4 text-[13px] text-ink-3">Nobody here has linked another instance.</p>
           ) : (
@@ -120,13 +142,21 @@ export default async function LinkedSettings() {
               {links.map((l) => (
                 <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 last:border-b-0">
                   <div className="min-w-0">
-                    <p className="truncate font-medium">{l.peerOrigin.replace(/^https?:\/\//, "")} <span className="font-normal text-ink-3">linked by {l.who}</span></p>
+                    <p className="flex min-w-0 items-baseline gap-1.5 font-medium"><Host origin={l.peerOrigin} className="min-w-0" /> <span className="shrink-0 font-normal text-ink-3">linked by <bdi>{l.who}</bdi></span></p>
                     <p className="text-[12.5px] text-ink-3">{l.lastUsedAt ? `Last used ${formatInstant(l.lastUsedAt, viewer.timezone)}.` : "Not used yet."}</p>
+                    {l.lastError && <p className="wrap-any text-[12.5px] text-blocked">{l.lastError}</p>}
                   </div>
-                  {l.lastError && <SimplePill tone="changes">Error</SimplePill>}
-                  <ActionForm action={unlinkAction} submitLabel="Unlink" pendingLabel="Unlinking…" submitClassName="btn btn-danger !h-10" submitAriaLabel={`Unlink ${l.peerOrigin} for ${l.who}`} className="[&>div:last-child]:!mt-0">
+                  {l.lastError && <SimplePill tone="blocked" icon={CircleAlert}>Last request failed</SimplePill>}
+                  <ConfirmSheet
+                    title={`Unlink ${l.peerOrigin.replace(/^https?:\/\//, "")}?`}
+                    consequence={`${l.who} stops seeing that instance's projects here. Nothing is deleted there.`}
+                    action={unlinkAction}
+                    submitLabel="Unlink"
+                    pendingLabel="Unlinking…"
+                    trigger={<button type="button" className="btn btn-danger" aria-label={`Unlink ${l.peerOrigin} for ${l.who}`}>Unlink</button>}
+                  >
                     <input type="hidden" name="linkId" value={l.id} />
-                  </ActionForm>
+                  </ConfirmSheet>
                 </li>
               ))}
             </ul>

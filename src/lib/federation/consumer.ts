@@ -20,6 +20,8 @@ import { SafeFetchError } from "./safe-fetch";
  */
 export const PENDING_TTL_MS = 10 * 60_000;
 export const CACHE_TTL_MS = 60_000;
+/** A page render never waits longer than this for a peer: the typed safe-fetch timeout error ("took too long to answer") becomes the normal error state. */
+export const PEER_READ_TIMEOUT_MS = 8000;
 const API = "/api/federation/v1";
 
 type Tx = Parameters<Parameters<Db["$transaction"]>[0]>[0];
@@ -278,7 +280,7 @@ async function refreshFromPeer<T>(ctx: FedCtx, v: Viewer, link: { id: string; pe
   if (!token) return { state: "revoked", data: null, fetchedAt: null, stale: false, error: "This link can no longer be used. Unlink it and link again." };
   let res;
   try {
-    res = await ctx.fetch(`${link.peerOrigin}${API}${path}`, { headers: { authorization: `Bearer ${token}`, ...(entry?.etag ? { "if-none-match": entry.etag } : {}) }, allowInsecure: config.allowInsecure });
+    res = await ctx.fetch(`${link.peerOrigin}${API}${path}`, { headers: { authorization: `Bearer ${token}`, ...(entry?.etag ? { "if-none-match": entry.etag } : {}) }, allowInsecure: config.allowInsecure, totalTimeoutMs: PEER_READ_TIMEOUT_MS });
   } catch (e) {
     const msg = peerMessage(e);
     await db.federationLink.updateMany({ where: { id: link.id, workspaceId: v.workspaceId, userId: v.userId }, data: { lastError: msg } });

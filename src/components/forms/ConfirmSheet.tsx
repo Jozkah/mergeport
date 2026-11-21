@@ -25,6 +25,7 @@ export function ConfirmSheet({
   danger = true,
   children,
   submitDisabled,
+  onDone,
 }: {
   trigger: ReactNode;
   title: string;
@@ -36,10 +37,11 @@ export function ConfirmSheet({
   danger?: boolean;
   children?: ReactNode;
   submitDisabled?: boolean;
+  onDone?: (r: ActionResult) => void;
 }) {
   return (
     <Sheet title={title} description={consequence} trigger={trigger}>
-      <ActionForm action={action} submitLabel={submitLabel} pendingLabel={pendingLabel} submitClassName={danger ? "btn btn-danger" : "btn btn-primary"} closeOnSuccess secondary={<Cancel />} submitDisabled={submitDisabled}>
+      <ActionForm action={action} submitLabel={submitLabel} pendingLabel={pendingLabel} submitClassName={danger ? "btn btn-danger" : "btn btn-primary"} closeOnSuccess secondary={<Cancel />} submitDisabled={submitDisabled} onDone={onDone}>
         {children}
       </ActionForm>
     </Sheet>

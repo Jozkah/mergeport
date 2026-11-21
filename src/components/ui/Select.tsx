@@ -90,6 +90,8 @@ export function Select({ children, className, id, name, defaultValue, value, onC
         const changed = dec(v) !== current;
         flushSync(() => setInner(dec(v)));
         onChange?.({ target: { value: dec(v), name: name ?? "" }, currentTarget: { value: dec(v), name: name ?? "" } } as ChangeEvent<HTMLSelectElement>);
+        // The hidden input is not a native control the browser edits, so tell the form (dirty tracking, "clear the result on edit") it changed.
+        if (changed) field.current?.dispatchEvent(new Event("input", { bubbles: true }));
         if (autoSubmit && changed) field.current?.form?.requestSubmit();
       }}
     >

@@ -28,7 +28,7 @@ export function Sheet({ trigger, title, description, children, side = "center" }
         >
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
-              <D.Title className="text-[16px] font-medium text-ink">{title}</D.Title>
+              <D.Title className="wrap-any text-[16px] font-medium text-ink">{title}</D.Title>
               {description ? <D.Description className="mt-1 text-[13px] text-ink-3">{description}</D.Description> : <D.Description className="sr-only">{title}</D.Description>}
             </div>
             <D.Close className="btn btn-quiet btn-icon -mr-1.5" aria-label="Close">

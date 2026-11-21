@@ -34,6 +34,8 @@ export function ActionForm({
   submitAriaLabel,
   submitDisabled = false,
   layout = "stack",
+  hideSubmit = false,
+  requireDirty = false,
 }: {
   action: (fd: FormData) => Promise<ActionResult>;
   children: ReactNode;
@@ -56,6 +58,10 @@ export function ActionForm({
   submitDisabled?: boolean;
   /** "inline": the form is one row (field + button) with no top margin on the action row, replacing hand-written margin overrides. */
   layout?: "stack" | "inline";
+  /** No button: the form is sent by something else (a Select with autoSubmit). The status and error lines stay. */
+  hideSubmit?: boolean;
+  /** The button stays off until a field differs from what the form loaded with (and again after a save). For settings. */
+  requireDirty?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [result, setResult] = useState<ActionResult | null>(null);
@@ -68,6 +74,15 @@ export function ActionForm({
   const closeSheet = useSheetClose();
   const toast = useToast();
   const busy = pending || holding;
+  const baseline = useRef<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const snapshot = () => (ref.current ? JSON.stringify([...new FormData(ref.current).entries()].map(([k, v]) => [k, typeof v === "string" ? v : "file"])) : "");
+  useEffect(() => {
+    if (requireDirty) baseline.current = snapshot();
+  }, [requireDirty]);
+  const checkDirty = () => {
+    if (requireDirty && baseline.current !== null) setDirty(snapshot() !== baseline.current);
+  };
 
   // Real pending work only: after a few seconds say so in words, so a slow network is not mistaken for a dead button.
   useEffect(() => {
@@ -95,7 +110,7 @@ export function ActionForm({
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (busy || submitDisabled) return;
+    if (busy || submitDisabled || (requireDirty && !dirty)) return;
     setSlow(false);
     setMsgVisible(false);
     const fd = new FormData(e.currentTarget);
@@ -111,6 +126,10 @@ export function ActionForm({
       setMsgVisible(true);
       setSeq((n) => n + 1);
       if (r.ok && resetOnSuccess) ref.current?.reset();
+      if (r.ok && requireDirty) {
+        baseline.current = snapshot(); // what was just saved is the new starting point
+        setDirty(false);
+      }
       if (r.ok && closeOnSuccess) {
         closeSheet?.();
         if (r.data?.neutral !== true) toast.show("ok", r.message ?? "Saved");
@@ -126,14 +145,17 @@ export function ActionForm({
       ref={ref}
       onSubmit={submit}
       // Typing clears the previous outcome, so a stale error never sits beside a corrected field. Reset does not fire input.
-      onInput={() => { if (result && msgVisible) setMsgVisible(false); }}
-      onReset={() => setMsgVisible(false)}
+      onInput={() => { if (result && msgVisible) setMsgVisible(false); checkDirty(); }}
+      onChange={checkDirty}
+      onReset={() => { setMsgVisible(false); setDirty(false); }}
       className={className}
       aria-busy={busy}
     >
       {children}
       <div ref={row} className={`${layout === "inline" ? "" : "mt-3 "}flex flex-wrap items-center`} onAnimationEnd={(e) => { if (e.target === e.currentTarget) e.currentTarget.classList.remove("shake"); }}>
-        <button type="submit" className={submitClassName} disabled={busy || submitDisabled} data-loading={busy} aria-busy={busy} aria-label={submitAriaLabel}>
+        {hideSubmit ? (
+          busy ? <LoaderCircle size={14} aria-hidden className="animate-spin text-ink-3 motion-reduce:animate-none" /> : null
+        ) : <button type="submit" className={submitClassName} disabled={busy || submitDisabled || (requireDirty && !dirty)} data-loading={busy} aria-busy={busy} aria-label={submitAriaLabel}>
           {busy ? <LoaderCircle size={14} aria-hidden className="shrink-0 animate-spin motion-reduce:animate-none" /> : null}
           {/* Stacked labels: the button keeps the width of the longest one, so swapping never moves its neighbours. */}
           <span className="inline-grid text-center">
@@ -141,7 +163,7 @@ export function ActionForm({
             <span className={`col-start-1 row-start-1 ${mode === "pending" ? "" : "invisible"}`} aria-hidden={mode !== "pending"}>{pendingLabel}</span>
             {keepBusyOnDone || holding ? <span className={`col-start-1 row-start-1 ${mode === "hold" ? "" : "invisible"}`} aria-hidden={mode !== "hold"}>Redirecting…</span> : null}
           </span>
-        </button>
+        </button>}
         {secondary ? <span className="ml-2 inline-flex flex-wrap items-center gap-2">{secondary}</span> : null}
         {/* Two permanent regions: a region that changes role in the same render it gains text is often not announced. */}
         <p role="status" aria-live="polite" className="ml-2 min-h-5 text-[12.5px] empty:ml-0">
