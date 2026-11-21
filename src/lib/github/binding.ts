@@ -66,6 +66,22 @@ export async function bindInstallation(
   db: Db,
   input: { workspaceId: string; connectedByUserId: string; facts: InstallationFacts; proof: InstallationProof; now?: Date },
 ): Promise<{ created: boolean }> {
+  // Two people connecting the same new installation at once can both miss it and then collide on a unique key (the global row, or the
+  // workspace pair). The failed transaction is rolled back whole, so running it once more finds the winner's rows and takes the update path.
+  try {
+    return await bindOnce(db, input);
+  } catch (e) {
+    if (!isUniqueViolation(e)) throw e;
+    return bindOnce(db, input);
+  }
+}
+
+const isUniqueViolation = (e: unknown) => typeof e === "object" && e !== null && ((e as { code?: unknown }).code === "P2002" || /unique constraint/i.test(String((e as { message?: unknown }).message ?? "")));
+
+async function bindOnce(
+  db: Db,
+  input: { workspaceId: string; connectedByUserId: string; facts: InstallationFacts; proof: InstallationProof; now?: Date },
+): Promise<{ created: boolean }> {
   const { workspaceId, connectedByUserId, facts, proof } = input;
   const now = input.now ?? new Date();
   return db.$transaction(async (tx) => {

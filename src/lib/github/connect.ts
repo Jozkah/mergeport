@@ -130,6 +130,8 @@ export type CallbackInput = {
   deps?: ConnectDeps;
   proof?: ProofProvider;
   now?: Date;
+  /** Called once the state was successfully claimed (so the caller can drop the nonce cookie). Not called for malformed, unknown, used or expired states. */
+  onClaimed?: () => void;
 };
 
 /** Runs the callback and answers with ONE fixed result code. Nothing here returns or throws a value taken from the query or from GitHub. */
@@ -138,13 +140,14 @@ export async function completeConnect(db: Db, input: CallbackInput): Promise<Con
   const deps = input.deps ?? testOverrides?.deps ?? {};
   const proofProvider = input.proof ?? testOverrides?.proof ?? membershipProofProvider;
   try {
-    if (!(await take(db, `ghconnect:cb:${input.userId}`, CALLBACK_MAX, RATE_WINDOW_MS, now))) return "rate-limited";
-
+    // A callback without a well-formed state costs nothing: a cross-site GET must not burn the signed-in person's quota.
     const shape = STATE_SHAPE.exec(input.state ?? "");
     if (!shape) return "invalid-link";
+    if (!(await take(db, `ghconnect:cb:${input.userId}`, CALLBACK_MAX, RATE_WINDOW_MS, now))) return "rate-limited";
     // The workspace id at the front is untrusted: it only picks the row to try. The whole value is hashed and claimed once.
     const claimed = await claimAppState(db, { workspaceId: shape[1], stateHash: sha256(input.state!), now });
     if (!claimed) return "invalid-link";
+    input.onClaimed?.(); // only now is this browser's nonce cookie spent
     if (claimed.userId !== input.userId) return "invalid-link";
     if (!input.nonce || !claimed.nonceHash || !safeEqual(nonceHashOf(input.nonce), claimed.nonceHash)) return "invalid-link";
 

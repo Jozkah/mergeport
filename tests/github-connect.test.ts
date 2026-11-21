@@ -8,7 +8,7 @@ import { createSession, SESSION_COOKIE } from "@/lib/auth/session";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 import { resetGithubAppConfigCache } from "@/lib/github/app-config";
 import { InstallationGoneError, InstallationSuspendedError, createInstallationTokenProvider, resetInstallationTokenCache } from "@/lib/github/app-auth";
-import { loadBoundInstallation, listWorkspaceInstallations, setRepositoryInstallation } from "@/lib/github/binding";
+import { bindInstallation, loadBoundInstallation, listWorkspaceInstallations, setRepositoryInstallation } from "@/lib/github/binding";
 import { CONNECT_COOKIE, completeConnect, membershipProofProvider, setConnectOverridesForTests, type ProofProvider } from "@/lib/github/connect";
 import { noteInstallationError, withInstallationHealth } from "@/lib/github/installation-health";
 import { connectionState } from "@/lib/github/connection-state";
@@ -483,12 +483,34 @@ describe("callback: every refusal binds nothing", () => {
     expect(fake.oauthExchanges).toHaveLength(0);
   });
 
-  it("is rate limited per person", async () => {
-    await world();
+  it("is rate limited per person (well-formed states that claim nothing still cost quota)", async () => {
+    const w = await world();
     const codes: (string | null)[] = [];
-    for (let i = 0; i < 22; i++) codes.push(resultOf(await callbackRoute(request("/api/github/app/callback?state=x"))));
+    for (let i = 0; i < 22; i++) codes.push(resultOf(await callbackRoute(request(`/api/github/app/callback?state=${w.ws.id}.${"A".repeat(30)}`))));
     expect(codes.slice(0, 20).every((c) => c === "invalid-link")).toBe(true);
     expect(codes[20]).toBe("rate-limited");
+  });
+
+  it("a malformed callback costs nothing and does not delete the nonce cookie: 25 of them cannot lock out or break a real flow", async () => {
+    const w = await world();
+    const inst = fake.addInstallation("octo");
+    const b = await begin();
+    for (let i = 0; i < 25; i++) {
+      const res = await callbackRoute(request(i % 2 ? "/api/github/app/callback" : `/api/github/app/callback?state=junk${i}&code=x`));
+      expect(resultOf(res)).toBe("invalid-link");
+    }
+    expect(state.jar.get(CONNECT_COOKIE)?.value).toBe(b.nonce); // still there
+    expect(await db().rateLimitState.count({ where: { key: { startsWith: "ghconnect:cb:" } } })).toBe(0);
+    expect(resultOf(await callbackRoute(afterInstall(b, "octo", inst.id)))).toBe("connected"); // the real one still works
+    expect(state.jar.has(CONNECT_COOKIE)).toBe(false); // spent only once the state was claimed
+    expect(await bindings(w.ws.id)).toHaveLength(1);
+  });
+
+  it("a well-formed but unknown state does not delete the cookie either", async () => {
+    await world();
+    const b = await begin();
+    expect(resultOf(await callbackRoute(request(`/api/github/app/callback?state=${b.state.split(".")[0]}.${"B".repeat(40)}`)))).toBe("invalid-link");
+    expect(state.jar.get(CONNECT_COOKIE)?.value).toBe(b.nonce);
   });
 
   it("answers 404 when the App is not configured or the server is not hosted", async () => {
@@ -562,6 +584,36 @@ describe("workspaces stay apart", () => {
     expect(await bindings(b.ws.id)).toHaveLength(1);
     expect(await bindings(a.ws.id)).toHaveLength(1);
     expect(await db().githubInstallation.count({ where: { installationId: BigInt(inst.id) } })).toBe(1);
+  });
+});
+
+// ---------- concurrent binds ----------
+
+describe("concurrent binds of the same new installation", () => {
+  const facts = (id: bigint) => ({ installationId: id, accountGithubId: 5n, accountLogin: "acme", accountType: "ORGANIZATION" as const, repositorySelection: "ALL" as const, suspendedAt: null });
+  const proof = { githubUserId: 5n, method: "user-installations:org-admin" };
+
+  it("two binds for the same workspace end with one row and no error", async () => {
+    const w = await workspaceWithOwner(db());
+    for (let i = 0; i < 6; i++) {
+      const id = BigInt(5000 + i);
+      const r = await Promise.all([0, 1].map(() => bindInstallation(db(), { workspaceId: w.ws.id, connectedByUserId: w.owner.id, facts: facts(id), proof })));
+      expect(r.filter((x) => x.created)).toHaveLength(1);
+      expect(await db().workspaceInstallation.count({ where: { workspaceId: w.ws.id, installationId: id } })).toBe(1);
+      expect(await db().githubInstallation.count({ where: { installationId: id } })).toBe(1);
+    }
+  });
+
+  it("two binds from two workspaces both succeed and leave one global row and two bindings", async () => {
+    const a = await workspaceWithOwner(db(), "a@example.com", "A");
+    const b = await workspaceWithOwner(db(), "b@example.com", "B");
+    for (let i = 0; i < 6; i++) {
+      const id = BigInt(6000 + i);
+      const r = await Promise.all([a, b].map((w) => bindInstallation(db(), { workspaceId: w.ws.id, connectedByUserId: w.owner.id, facts: facts(id), proof })));
+      expect(r.every((x) => x.created)).toBe(true);
+      expect(await db().workspaceInstallation.count({ where: { installationId: id } })).toBe(2);
+      expect(await db().githubInstallation.count({ where: { installationId: id } })).toBe(1);
+    }
   });
 });
 

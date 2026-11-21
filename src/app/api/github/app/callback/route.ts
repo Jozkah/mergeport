@@ -31,7 +31,6 @@ export async function GET(req: Request) {
   if (!session) return done(`/sign-in?next=${encodeURIComponent("/settings/github")}`);
 
   const nonce = jar.get(CONNECT_COOKIE)?.value ?? null;
-  jar.delete({ name: CONNECT_COOKIE, path: CONNECT_COOKIE_PATH }); // one use, whatever happens next
 
   const q = new URL(req.url).searchParams;
   const param = (k: string) => {
@@ -47,6 +46,9 @@ export async function GET(req: Request) {
     nonce,
     config,
     redirectUri: `${origin.origin}${CALLBACK_PATH}`,
+    // The nonce cookie is dropped only once a real state was claimed: a forged or malformed GET (SameSite=Lax sends the session)
+    // must not break someone's flow in progress.
+    onClaimed: () => jar.delete({ name: CONNECT_COOKIE, path: CONNECT_COOKIE_PATH }),
   });
   return done(`/settings/github?github=${result}`);
 }

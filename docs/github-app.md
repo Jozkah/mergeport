@@ -104,7 +104,7 @@ trusted until GitHub itself has shown that this person controls it.
 2. **Callback** (`GET /api/github/app/callback`). In this order; every failure ends in a redirect to `/settings/github?github=<fixed code>` and nothing else:
    a signed-in session (otherwise sign in, nothing consumed); rate limit (20 per person per 10 minutes); state shape; `claimAppState` (one conditional UPDATE:
    same workspace prefix, hash, unused, unexpired); the claim belongs to the signed-in person; the nonce cookie matches in constant time (the cookie is deleted
-   either way); the person is still an ACTIVE member whose role may `manageGithub`. Then: exchange the `code` (client id and secret; the PKCE verifier on the
+   only once the state was claimed, so a forged or malformed GET cannot break a flow in progress; a callback without a well-formed state costs no rate-limit quota); the person is still an ACTIVE member whose role may `manageGithub`. Then: exchange the `code` (client id and secret; the PKCE verifier on the
    authorize path); `GET /user`; `GET /user/installations` (all pages); the installation must be in that list (on the install path the `installation_id` query
    value is only a CLAIM to look for, never used on its own); `GET /app/installations/:id` with the app JWT for the authoritative account, type, selection and
    suspension; **proof of control** (next point); then `bindInstallation` writes the global installation facts, the `WorkspaceInstallation` row (`verifiedAt`,
@@ -139,6 +139,12 @@ trusted until GitHub itself has shown that this person controls it.
 - **Uncertainty is refusal**: unexpected GitHub answers, timeouts, oversize bodies, a membership answer that is not a clear "active admin", or an unreadable
   suspension time never produce a binding.
 
+## Known limitations
+
+- A binding is proved once, at connect time. It is not re-proven if the connecting person later loses access (leaves the organization, is demoted). Follow-up: webhook-driven
+  re-proof, or re-proving on "Check again".
+- Two people connecting the same new installation at once is handled by retrying the transaction once on a unique-key collision (`bindInstallation`); both end connected.
+
 ## Needs a live check
 
 Everything above is tested against the fake only. Before relying on it, run the flow once against GitHub itself with a real App and write down the answers:
@@ -153,3 +159,8 @@ Everything above is tested against the fake only. Before relying on it, run the 
 4. The redirect when an organization member who is not an owner asks to install: `setup_action=request` without `installation_id` or `code` (assumed).
 5. That `DELETE /applications/<client_id>/token` ends a user token created by this flow (the revoke step is best effort and silent on failure).
 6. That `state` comes back unchanged through the install page (including the `.` in it).
+7. That the nonce cookie (`mp_gh_connect`, SameSite=Lax, path `/api/github/app`) survives the redirect from github.com back to the callback in Safari and Firefox, not only Chrome.
+8. That the callback response really carries the nonce-cookie deletion: the route calls `cookies().delete` and then returns a manually built redirect `Response`; confirm Next merges that
+   `Set-Cookie` into it (if not, the cookie lives until its 10 minute expiry, which is harmless because the state is single use, but should be known).
+9. That a collaborator who can see someone else's personal-account installation in `/user/installations` is refused (the check is `account.id` equals the user's id; the fake only simulates this).
+10. That a pending organization membership (`state: pending`) on `GET /user/memberships/orgs/<org>` is refused (the code refuses anything but `active` plus `admin`; the answer shape is assumed).
