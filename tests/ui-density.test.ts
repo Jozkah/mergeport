@@ -20,9 +20,9 @@ afterEach(() => {
 });
 
 describe("PageHeader", () => {
-  it("keeps the subtitle on one line with the full text on hover", () => {
+  it("clamps the subtitle to two lines with the full text on hover", () => {
     const html = renderToStaticMarkup(h(PageHeader, { title: "Team", subtitle: "A long subtitle" }));
-    expect(html).toMatch(/<p class="[^"]*truncate[^"]*" title="A long subtitle">A long subtitle<\/p>/);
+    expect(html).toMatch(/<p class="[^"]*line-clamp-2[^"]*" title="A long subtitle">A long subtitle<\/p>/);
     expect(html).not.toContain("<details");
   });
 

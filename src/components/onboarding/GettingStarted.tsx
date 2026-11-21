@@ -19,14 +19,16 @@ export function GettingStarted({ steps, dismissed = false }: { steps: Step[]; di
   const [gone, setGone] = useState(dismissed);
   // A person who hid the guide before it moved to a cookie keeps it hidden.
   useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
     try {
       if (!dismissed && localStorage.getItem(LEGACY_KEY) === "1") {
         document.cookie = `${COOKIE}=1; path=/; max-age=31536000; samesite=lax`;
-        setGone(true);
+        t = setTimeout(() => setGone(true), 0);
       }
     } catch {
       // storage unavailable: nothing to migrate
     }
+    return () => clearTimeout(t);
   }, [dismissed]);
   const required = steps.filter((s) => !s.optional);
   const left = required.filter((s) => !s.done).length;
