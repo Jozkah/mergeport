@@ -18,7 +18,7 @@ export async function gettingStarted(db: Db, v: Viewer): Promise<Step[]> {
   const ask = "Ask the owner or an administrator.";
   return [
     hosted
-      ? { key: "repos", title: "Connect your repositories", why: "GitHub is not connected to hosted workspaces yet; it arrives with the GitHub App phase. Nothing here signs in to GitHub for you.", href: "/repositories/connect", cta: "See status", done: repos > 0, optional: true }
+      ? { key: "repos", title: "Connect your repositories", why: "GitHub is not connected yet, so repository sync is off. Nothing here signs in to GitHub for you.", href: "/repositories/connect", cta: "See status", done: repos > 0, optional: true }
       : { key: "repos", title: "Connect your repositories", why: "Pick the repositories you work in. Mergeport only reads them with your own GitHub sign-in.", href: "/repositories/connect", cta: "Choose repositories", done: repos > 0 },
     { key: "project", title: "Group them into a project", why: "A project is a set of repositories you plan together, like “Website” or “Mobile app”.", href: "/admin/projects", cta: "Create a project", done: projects > 0, locked: v.isAdmin ? undefined : "The owner or an administrator creates projects. Ask them to add you to one." },
     { key: "task", title: "Add your first task", why: "Write down something to do, give it to someone, and move it across the board as it progresses.", href: "/tasks", cta: "Create a task", done: tasks > 0, locked: projects === 0 ? "Create a project first." : undefined },

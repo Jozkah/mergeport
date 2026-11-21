@@ -40,7 +40,7 @@ const LABELS: Record<string, string> = {
   search: "Search",
 };
 
-export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePicker, workspaces, accountSwitcher }: { aiQuick?: React.ReactNode; accountSwitcher?: { workspaces: { id: string; name: string }[]; active: string } | null; workspaces?: React.ComponentProps<typeof WorkspaceSwitcher> | null; scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
+export function Topbar({ hosted, aiQuick, unread, menu, syncNote, theme, sync, scopePicker, workspaces, accountSwitcher }: { hosted?: boolean; aiQuick?: React.ReactNode; accountSwitcher?: { workspaces: { id: string; name: string }[]; active: string } | null; workspaces?: React.ComponentProps<typeof WorkspaceSwitcher> | null; scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
   const path = usePathname();
   const parts = path.split("/").filter(Boolean);
   const crumbs = parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
@@ -73,7 +73,7 @@ export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePick
       {accountSwitcher ? <div className="hidden sm:block"><AccountWorkspaceSwitcher {...accountSwitcher} /></div> : null}
       {scopePicker}
       {syncNote && <span className="hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
-      {sync && <SyncBadge {...sync} href="/sync" />}
+      {sync && <SyncBadge {...sync} href="/sync" hosted={hosted} />}
       {aiQuick}
       <ThemeToggle initial={theme} />
       <Tip label={unread ? `Notifications (${unread} unread)` : "Notifications"}>

@@ -3,6 +3,7 @@ import { AiTool } from "@/components/ai/AiTool";
 import { aiEnabled } from "@/lib/services/ai";
 import { readScope, scopeKey } from "@/lib/scope";
 import Link from "next/link";
+import { isHosted } from "@/lib/public-url";
 import { requireViewer } from "@/lib/authz-page";
 import { db } from "@/lib/db";
 import { attentionFor } from "@/lib/services/request-cache";
@@ -103,7 +104,7 @@ export default async function Overview() {
 
         <div className="flex min-w-0 flex-col gap-5">
           <Panel title="Daily digest" icon={Newspaper} id="digest" actions={<Link href="/digest" className="btn">Open</Link>}>
-            {!digest ? <EmptyState icon={Newspaper} title="No digest yet">The first one is made on a morning Mergeport is open.</EmptyState> : (
+            {!digest ? <EmptyState icon={Newspaper} title="No digest yet">{isHosted() ? "The first one is made by the daily run." : "The first one is made on a morning Mergeport is open."}</EmptyState> : (
               <Link href={`/digest?day=${digest.day}`} className="block px-4 py-3 text-[13px] transition-colors duration-[var(--duration-feedback)] hover:bg-faint">
                 <p className="flex items-center gap-2 font-medium">
                   {formatDateOnly(new Date(digest.day + "T00:00:00Z"))}

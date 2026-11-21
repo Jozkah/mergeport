@@ -21,6 +21,8 @@ const label = (day: string) => formatDateOnly(new Date(day + "T00:00:00Z"));
 
 export default async function DigestPage({ searchParams }: { searchParams: Promise<{ day?: string }> }) {
   const { viewer } = await requireViewer();
+  const hosted = isHosted();
+  const where = hosted ? "in this workspace" : "on this computer"; // where the data lives, said once
   const sp = await searchParams;
   await latestDigest(db, viewer); // in demo mode (no scheduler) this makes the first digest
   const days = await listDigestDays(db, viewer);
@@ -32,7 +34,7 @@ export default async function DigestPage({ searchParams }: { searchParams: Promi
       <>
         <PageHeader title="Daily digest" subtitle="What you did yesterday, what was left undone, and what needs you or other people." />
         <EmptyState icon={Newspaper} title="No digest yet">
-          {s.enabled ? `${isHosted() ? "The first one is made by the daily run after" : "The first one is made on a day Mergeport is open after"} ${String(s.hour).padStart(2, "0")}:00. It is built only from the data ${isHosted() ? "in this workspace" : "on this computer"}.` : "The daily digest is turned off. You can turn it on in Settings."}
+          {s.enabled ? `${hosted ? "The first one is made by the daily run after" : "The first one is made on a day Mergeport is open after"} ${String(s.hour).padStart(2, "0")}:00. It is built only from the data ${where}.` : "The daily digest is turned off. You can turn it on in Settings."}
         </EmptyState>
       </>
     );
@@ -44,12 +46,12 @@ export default async function DigestPage({ searchParams }: { searchParams: Promi
     <>
       <PageHeader
         title={`Digest for ${label(digest.day)}`}
-        subtitle={<>Built {formatInstant(digest.generatedAt, viewer.timezone)} from the data {isHosted() ? "in this workspace" : "on this computer"}: nothing was fetched or sent. What is open and what needs attention is as of that moment.</>}
+        subtitle={<>Built {formatInstant(digest.generatedAt, viewer.timezone)} from the data {where}: nothing was fetched or sent. What is open and what needs attention is as of that moment.</>}
         actions={
           <>
             {older ? <Link href={`/digest?day=${older}`} className="btn" aria-label={`Older digest, ${label(older)}`}><ArrowLeft size={14} aria-hidden /> {label(older)}</Link> : <button type="button" className="btn" disabled>Older</button>}
             {newer ? <Link href={`/digest?day=${newer}`} className="btn" aria-label={`Newer digest, ${label(newer)}`}>{label(newer)} <ArrowRight size={14} aria-hidden /></Link> : <button type="button" className="btn" disabled>Newer</button>}
-            <DigestActions day={digest.day} read={!!digest.readAt} />
+            <DigestActions day={digest.day} read={!!digest.readAt} hosted={hosted} />
           </>
         }
       />

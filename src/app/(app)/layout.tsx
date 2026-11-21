@@ -2,7 +2,7 @@ import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
 import { activeWorkspaces } from "@/lib/auth/workspaces";
-import { GITHUB_NOT_CONNECTED } from "@/lib/github/hosted";
+import { Banner } from "@/components/ui/primitives";
 import { isHosted } from "@/lib/public-url";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { readScope, scopeKey } from "@/lib/scope";
@@ -128,7 +128,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <GlowManager />
       <ContextMenuProvider />
       <SpotlightProvider />
-      <SyncAnnouncer state={sync?.state ?? null} />
+      <SyncAnnouncer state={sync?.state ?? null} hosted={hosted} />
       <Suspense fallback={<aside className="hidden w-[250px] shrink-0 lg:block" />}>
         <Sidebar {...navProps} />
       </Suspense>
@@ -137,11 +137,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <DesktopNotifier />
           <Shortcuts />
           <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
-          <Topbar aiQuick={aiQuick} workspaces={workspaces} accountSwitcher={hosted ? accountSwitcher : undefined} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
+          <Topbar aiQuick={aiQuick} workspaces={workspaces} accountSwitcher={hosted ? accountSwitcher : undefined} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} hosted={hosted} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "hosted" && (
-          <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2" role="note">
-            {GITHUB_NOT_CONNECTED} Repository sync and GitHub actions are off until then; your workspace data is still here.
+          <div className="px-4 pt-3 lg:px-6">
+            <Banner tone="warn" dismissible storageKey="github-not-connected" title="GitHub is not connected yet">
+              Repository sync and GitHub actions are off. Your workspace data is still here.
+            </Banner>
           </div>
         )}
         {profile.kind === "mismatch" && (

@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { DesktopOnly } from "@/components/ui/DesktopOnly";
 import { isHosted } from "@/lib/public-url";
 import NextLink from "next/link";
 import { Select } from "@/components/ui/Select";
@@ -34,7 +34,7 @@ type SP = { name?: string; owner?: string; invite?: string; users?: string; perm
 
 export default async function TeamPage({ searchParams }: { searchParams: Promise<SP> }) {
   const { viewer } = await requireViewer();
-  if (isHosted()) notFound(); // desktop-only page: GitHub-repository teams / local worktrees do not exist on a hosted workspace
+  if (isHosted()) return <DesktopOnly />; // desktop-only page: GitHub-repository teams do not exist on a hosted workspace
   const backend = await currentBackend();
   const sp = await searchParams;
   if (isHubBackend(backend)) {

@@ -8,6 +8,7 @@ import { ActionForm } from "@/components/forms/ActionForm";
 import { Sheet } from "@/components/ui/dialog";
 import { EmptyState, PageHeader, Panel } from "@/components/ui/primitives";
 import { Layers, Plus } from "@/components/ui/icons";
+import { Disclosure } from "@/components/ui/Disclosure";
 import { createProjectAction, setProjectMembersAction, setProjectReposAction, setProjectReviewersAction } from "@/app/actions";
 import { byOwnerFirst, byPersonalFirst } from "@/lib/domain/ordering";
 import { projectReviewerRefs } from "@/lib/services/project-reviewers";
@@ -35,6 +36,12 @@ export default async function Projects() {
   const projects = [...projectsRaw].sort((x, y) => byPersonalFirst(me)(x.name, y.name));
   const repos = [...reposRaw].sort((x, y) => byOwnerFirst(me)(x.fullName, y.fullName));
   const reviewerText = new Map(await Promise.all(projects.map(async (p) => [p.id, (await projectReviewerRefs(db, viewer.workspaceId, p.id)).join(", ")] as const)));
+  // One line per project: counts, who reviews, who sees it. Long reviewer lists keep their first three names.
+  const reviewerShort = (id: string) => {
+    const all = (reviewerText.get(id) ?? "").split(", ").filter(Boolean);
+    return all.length > 3 ? `${all.slice(0, 3).join(", ")} +${all.length - 3}` : all.join(", ");
+  };
+  const lineOf = (p: (typeof projects)[number]) => `${p.repositories.length} repositories · ${p.members.length} people${reviewerShort(p.id) ? ` · reviewers: ${reviewerShort(p.id)}` : ""} · ${hosted ? (p.accessSpace?.kind === "RESTRICTED" ? `space: ${p.accessSpace.name}` : "Shared with the workspace") : p.spaceId ? "shared" : "only on this computer"}`;
   return (
     <>
       <PageHeader
@@ -52,17 +59,16 @@ export default async function Projects() {
       {projects.length === 0 ? <Panel title="Projects" icon={Layers}><EmptyState icon={Layers} title="No projects yet">Use <strong>New project</strong> to group repositories you plan together.</EmptyState></Panel> : (
         <div className="fit-grid" style={{ "--fit-min": "720px" } as React.CSSProperties}>
           {projects.map((p) => (
-            <Panel key={p.id} title={p.name} icon={Layers} id={`p-${p.id}`} actions={<span className="hidden text-[12px] text-ink-3 sm:inline">{p.repositories.length} repositories · {p.members.length} people{reviewerText.get(p.id) ? ` · reviewers: ${reviewerText.get(p.id)}` : ""} · {hosted ? (p.accessSpace?.kind === "RESTRICTED" ? `space: ${p.accessSpace.name}` : "Shared with the workspace") : p.spaceId ? "shared" : "only on this computer"}</span>}>
+            <Panel key={p.id} title={p.name} icon={Layers} id={`p-${p.id}`} actions={<span className="hidden max-w-[28rem] truncate text-[12px] text-ink-3 sm:inline" title={lineOf(p)}>{lineOf(p)}</span>}>
+              <p className="border-b border-line px-4 py-2 text-[12px] text-ink-3 sm:hidden">{lineOf(p)}</p>
               <div className="flex flex-col divide-y divide-line">
-                <details className="group p-4">
-                  <summary className="cursor-pointer list-none text-[13px] font-medium [&::-webkit-details-marker]:hidden">Repositories <span className="font-normal text-ink-3">({p.repositories.length})</span></summary>
+                <Disclosure className="px-4" summary={<span className="font-medium">Repositories</span>} meta={<>({p.repositories.length})</>}>
                   <ActionForm action={setProjectReposAction} submitLabel="Save repositories" resetOnSuccess={false} className="mt-3">
                     <input type="hidden" name="projectId" value={p.id} />
                     <RepoChecklist name="repo" repos={repos.map((r) => ({ id: r.id, fullName: r.fullName, checked: p.repositories.some((x) => x.repositoryId === r.id) }))} />
                   </ActionForm>
-                </details>
-                <details className="p-4">
-                  <summary className="cursor-pointer list-none text-[13px] font-medium [&::-webkit-details-marker]:hidden">People <span className="font-normal text-ink-3">({p.members.length})</span></summary>
+                </Disclosure>
+                <Disclosure className="px-4" summary={<span className="font-medium">People</span>} meta={<>({p.members.length})</>}>
                   <div className="mt-3">
                     {members.length === 0 ? (
                       <div className="rounded-[8px] border border-dashed border-line-strong p-3 text-[12.5px] text-ink-2">
@@ -83,20 +89,18 @@ export default async function Projects() {
                       </>
                     )}
                   </div>
-                </details>
-                <details className="p-4">
-                  <summary className="cursor-pointer list-none text-[13px] font-medium [&::-webkit-details-marker]:hidden">Required reviewers <span className="font-normal text-ink-3">({reviewerText.get(p.id) || "none"})</span></summary>
+                </Disclosure>
+                <Disclosure className="px-4" summary={<span className="font-medium">Required reviewers</span>} meta={<>({reviewerText.get(p.id) || "none"})</>}>
                   <div className="mt-3"><ActionForm action={setProjectReviewersAction} submitLabel="Save reviewers" resetOnSuccess={false} className="max-w-md">
                   <input type="hidden" name="projectId" value={p.id} />
                   <label className="label" htmlFor={`rv-${p.id}`}>Required reviewers</label>
                   <input id={`rv-${p.id}`} name="reviewers" className="input" defaultValue={reviewerText.get(p.id) ?? ""} placeholder="GitHubLogin, org/team-slug (empty = none)" />
                   <p className="mt-1 text-[12px] text-ink-3">Every open pull request here waits for these people. Authors cannot approve their own, so it stays unmet for them. Finer rules: Review routing.</p>
                 </ActionForm></div>
-                </details>
+                </Disclosure>
                 {hosted ? (
-                <details className="p-4">
-                  <summary className="cursor-pointer list-none text-[13px] font-medium [&::-webkit-details-marker]:hidden">Access <span className="font-normal text-ink-3">({p.accessSpace?.kind === "RESTRICTED" ? p.accessSpace.name : "Everyone"})</span></summary>
-                  <div className="mt-3"><ActionForm action={setProjectSpaceAclAction} submitLabel="Save access" resetOnSuccess={false} className="max-w-md">
+                <Disclosure className="px-4" summary={<span className="font-medium">Access</span>} meta={<>({p.accessSpace?.kind === "RESTRICTED" ? p.accessSpace.name : "Everyone"})</>}>
+                  <div className="mt-3"><ActionForm action={setProjectSpaceAclAction} submitLabel="Save access" pendingLabel="Saving…" resetOnSuccess={false} requireDirty className="max-w-md">
                     <input type="hidden" name="projectId" value={p.id} />
                     <label className="label" htmlFor={`ac-${p.id}`}>Who can see this project</label>
                     <Select id={`ac-${p.id}`} name="spaceId" defaultValue={p.accessSpaceId ?? ""} className="select">
@@ -105,10 +109,9 @@ export default async function Projects() {
                     </Select>
                     <p className="mt-1 text-[12px] text-ink-3">A restricted space is seen only by the people listed in it, and you must be one of them to move a project into or out of it. Manage spaces in Members.</p>
                   </ActionForm></div>
-                </details>
+                </Disclosure>
                 ) : (
-                <details className="p-4">
-                  <summary className="cursor-pointer list-none text-[13px] font-medium [&::-webkit-details-marker]:hidden">Sharing <span className="font-normal text-ink-3">({p.spaceId ? "shared through a team space" : "only on this computer"})</span></summary>
+                <Disclosure className="px-4" summary={<span className="font-medium">Sharing</span>} meta={<>({p.spaceId ? "shared through a team space" : "only on this computer"})</>}>
                   <div className="mt-3"><ActionForm action={setProjectSpaceAction} submitLabel="Save sharing" resetOnSuccess={false} className="max-w-md">
                   <input type="hidden" name="projectId" value={p.id} />
                   <label className="label" htmlFor={`sp-${p.id}`}>Shared through</label>
@@ -118,7 +121,7 @@ export default async function Projects() {
                   </Select>
                   <p className="mt-1 text-[12px] text-ink-3">The project, board and tasks go to that space&apos;s private repository; everyone who can read it sees them.</p>
                 </ActionForm></div>
-                </details>
+                </Disclosure>
                 )}
               </div>
             </Panel>

@@ -102,7 +102,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </Panel>
         )}
         <Panel title="Notifications" icon={Bell} id="notifications">
-          <NotificationSettings initial={prefs} />
+          <NotificationSettings initial={prefs} hosted={hosted} />
         </Panel>
         <Panel title="Daily digest" icon={Newspaper} id="digest">
           <div className="p-4">
@@ -116,7 +116,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </Panel>
         {ai && (
           <Panel title="AI assistant" icon={Wand2} id="ai" defaultOpen={false} summary={!ai.saved ? "Not set up" : `${ai.autopilot === "off" ? "Autopilot off" : ai.autopilot === "suggest" ? "Autopilot suggests" : "Autopilot creates tasks"}${ai.model ? ` · prefers ${ai.model}` : ""}`}>
-            <AiSettingsPanel baseUrl={ai.baseUrl} hasKey={ai.hasKey} model={ai.model} autopilot={ai.autopilot} />
+            <AiSettingsPanel baseUrl={ai.baseUrl} hasKey={ai.hasKey} model={ai.model} autopilot={ai.autopilot} hosted={hosted} />
           </Panel>
         )}
         {!isDemo() && !hosted && (
@@ -135,7 +135,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </Panel>}
         {viewer.isAdmin && (
           <Panel title="Backup and restore" icon={Settings} id="backup" defaultOpen={false} summary="Export a copy or restore from one">
-            <BackupPanel />
+            <BackupPanel hosted={hosted} />
           </Panel>
         )}
         {!hosted && <Panel title="Auto-sync of repositories" icon={RefreshCw} id="auto-sync" defaultOpen={false} summary={!watch.enabled ? "Off" : `On, every ${watch.effective} s`}>

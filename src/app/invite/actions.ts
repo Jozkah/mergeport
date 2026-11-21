@@ -19,7 +19,7 @@ export async function acceptInviteAction(formData: FormData): Promise<void> {
   const r = await acceptInvitation(db, token, { id: a.user.id, email: a.user.email, emailVerifiedAt: a.user.emailVerifiedAt });
   if (!r.ok) redirect(`/invite/${encodeURIComponent(token)}`); // the page explains why, from the same checks
   await selectWorkspace(db, a.session, r.workspaceId);
-  revalidatePath("/", "layout");
+  revalidatePath("/");
   redirect("/");
 }
 
@@ -30,6 +30,6 @@ export async function acceptPendingInviteAction(formData: FormData): Promise<voi
   const r = await acceptInvitationById(db, String(formData.get("invitationId") ?? ""), { id: a.user.id, email: a.user.email, emailVerifiedAt: a.user.emailVerifiedAt });
   if (!r.ok) redirect("/onboarding?error=invite");
   await selectWorkspace(db, a.session, r.workspaceId);
-  revalidatePath("/", "layout");
+  revalidatePath("/");
   redirect("/");
 }

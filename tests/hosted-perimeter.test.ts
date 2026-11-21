@@ -136,7 +136,7 @@ describe("startLocalSession falls back only to a user with a GitHub id", () => {
 });
 
 describe("hosted fail-closed: nothing reaches the server's own GitHub credential", () => {
-  const NOT_CONNECTED = /GitHub is not connected for this workspace/;
+  const NOT_CONNECTED = /GitHub is not connected yet/;
 
   it("the gh runner, status checks and the profile checker never spawn a process", async () => {
     const { defaultGhRunner } = await import("@/lib/github/exec");

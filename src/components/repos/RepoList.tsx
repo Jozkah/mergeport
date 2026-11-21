@@ -10,7 +10,7 @@ import { ActionMenu } from "@/components/ui/ActionMenu";
 import { Avatar } from "@/components/ui/Avatar";
 import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/ToastProvider";
-import { Building2, GitFork, Globe, Lock, Search, Unplug, User, Users, X, Zap } from "@/components/ui/icons";
+import { Building2, GitFork, Globe, Lock, LoaderCircle, Search, Unplug, User, Users, X, Zap } from "@/components/ui/icons";
 import { ctx } from "@/lib/ctx";
 
 export type RepoRow = {
@@ -64,7 +64,7 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
   const [limit, setLimit] = useState(PAGE);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<{ kind: "share" | "untrack"; ids: string[] } | null>(null);
-  const [, start] = useTransition();
+  const [pending, start] = useTransition();
 
   const counts = useMemo(
     () => ({
@@ -125,8 +125,8 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
       {picked.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-line bg-canvas px-3 py-2 text-[12.5px]" role="region" aria-label="Selected repositories">
           <strong className="font-medium">{picked.size} selected</strong>
-          <button type="button" className="btn !h-7 !px-2.5 !text-[12.5px]" onClick={() => refresh([...picked])}>Refresh</button>
-          <button type="button" className="btn btn-danger !h-7 !px-2.5 !text-[12.5px]" onClick={() => setDialog({ kind: "untrack", ids: [...picked] })}>Stop tracking</button>
+          <button type="button" className="btn !h-7 !px-2.5 !text-[12.5px]" disabled={pending} aria-busy={pending} data-loading={pending} onClick={() => refresh([...picked])}>{pending && <LoaderCircle size={12} aria-hidden className="animate-spin motion-reduce:animate-none" />}Refresh</button>
+          <button type="button" className="btn btn-danger !h-7 !px-2.5 !text-[12.5px]" disabled={pending} aria-busy={pending} onClick={() => setDialog({ kind: "untrack", ids: [...picked] })}>Stop tracking</button>
           <button type="button" className="ml-auto text-ink-3 hover:text-ink" onClick={() => setPicked(new Set())}>Clear</button>
         </div>
       )}
@@ -198,7 +198,7 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
       {!anyShared && !hosted && visible.length > 0 && <p className="text-[12px] text-ink-3">All repositories are only on this computer.</p>}
       {visible.length > shown.length && <button type="button" className="btn self-start" onClick={() => setLimit((l) => l + PAGE)}>Show {Math.min(PAGE, visible.length - shown.length)} more <span className="text-ink-3">of {visible.length - shown.length} left</span></button>}
 
-      <Dialog open={dialog?.kind === "untrack"} onClose={() => setDialog(null)} title={dialog && dialog.ids.length > 1 ? `Stop tracking ${dialog.ids.length} repositories?` : "Stop tracking this repository?"} description="Stopping tracking removes it from the dashboard on this computer only. Nothing is deleted or changed on GitHub, and you can connect it again later.">
+      <Dialog open={dialog?.kind === "untrack"} onClose={() => setDialog(null)} title={dialog && dialog.ids.length > 1 ? `Stop tracking ${dialog.ids.length} repositories?` : "Stop tracking this repository?"} description={`Stopping tracking removes it from the dashboard ${hosted ? "of this workspace" : "on this computer"} only. Nothing is deleted or changed on GitHub, and you can connect it again later.`}>
         <button type="button" className="btn btn-danger" onClick={() => { const ids = dialog!.ids; setDialog(null); run(ids.length === 1 ? "Removed from tracking." : `${ids.length} repositories removed from tracking.`, ids.map((id) => untrackRepositoryAction(fd({ repositoryId: id })) as Promise<{ ok: boolean; error?: string }>)); }}>Stop tracking</button>
       </Dialog>
       <ShareDialog open={dialog?.kind === "share"} id={dialog?.ids[0]} name={rows.find((r) => r.id === dialog?.ids[0])?.fullName ?? ""} spaces={writable} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); show("ok", msg); router.refresh(); }} onError={(m) => show("error", m)} />
@@ -257,6 +257,8 @@ function ShareDialog({ open, id, name, spaces, onClose, onDone, onError }: { ope
               type="button"
               className="btn btn-primary"
               disabled={busy || !chosen || !id}
+              aria-busy={busy}
+              data-loading={busy}
               onClick={async () => {
                 setBusy(true);
                 const r = await shareRepositoryAction(fd({ repositoryId: id!, spaceId: chosen, confirm: "on" }));
@@ -265,6 +267,7 @@ function ShareDialog({ open, id, name, spaces, onClose, onDone, onError }: { ope
                 else onError(r.error);
               }}
             >
+              {busy && <LoaderCircle size={14} aria-hidden className="animate-spin motion-reduce:animate-none" />}
               {busy ? "Sharing…" : "Share"}
             </button>
           </div>

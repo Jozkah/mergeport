@@ -9,7 +9,7 @@ import type { SyncStateName } from "@/components/sync/SyncBadge";
  * page: a conflict, revoked access, going offline, and coming back. It never fires for the first state it sees, never for
  * polling that changes nothing, and never moves focus; the Sync page and the top-bar pill carry the detail.
  */
-export function SyncAnnouncer({ state }: { state: SyncStateName | null }) {
+export function SyncAnnouncer({ state, hosted = false }: { state: SyncStateName | null; hosted?: boolean }) {
   const { show } = useToast();
   const prev = useRef<SyncStateName | null>(state);
   const wasDown = useRef(false);
@@ -22,12 +22,12 @@ export function SyncAnnouncer({ state }: { state: SyncStateName | null }) {
     else if (state === "revoked") show("error", "Your access to a shared space was removed. Unsent edits are kept aside on the Sync page.");
     else if (state === "signin") show("error", "GitHub refused access to some tracked repositories. Open Repositories to see which, and check your GitHub sign-in.");
     else if (state === "schema") show("error", "A shared space was written by a newer Mergeport. It is read-only until you update.");
-    else if (state === "offline") show("info", "GitHub can’t be reached. Edits are saved on this computer and sent when it is back.");
+    else if (state === "offline") show("info", hosted ? "GitHub can’t be reached. Changes are saved and sent when it is back." : "GitHub can’t be reached. Edits are saved on this computer and sent when it is back.");
     else if (state === "rate-limited") show("info", "GitHub’s request limit was reached. Edits stay queued until it resets.");
     else if (state === "synced" && wasDown.current) {
       wasDown.current = false;
       show("ok", "Back online. Everything was sent and is up to date.");
     }
-  }, [state, show]);
+  }, [state, show, hosted]);
   return null;
 }

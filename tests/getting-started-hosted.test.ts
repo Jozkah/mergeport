@@ -21,7 +21,7 @@ describe("the Get started card in a hosted workspace", () => {
   it("does not promise a GitHub sign-in or a GitHub-repository team, and points invitations at the members page", async () => {
     vi.stubEnv("MERGEPORT_PUBLIC_URL", "https://app.example.com");
     const s = await steps(ids.users.admin.id);
-    expect(s.repos.why).toMatch(/not connected to hosted workspaces yet/);
+    expect(s.repos.why).toMatch(/GitHub is not connected yet/);
     expect(s.repos.why).not.toMatch(/Only reads them with your own GitHub sign-in/i);
     expect(s.team.href).toBe("/settings/members");
     expect(s.team.cta).toBe("Invite people");

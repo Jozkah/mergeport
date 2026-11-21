@@ -79,7 +79,7 @@ function NavList({ items, onNavigate }: { items: Item[]; onNavigate?: () => void
         return (
           <li key={it.href}>
             <div className="relative">
-              <Link href={it.href} className="nav-item" data-section={sectionFor(it.href)} aria-current={active && !it.children ? "page" : undefined} onClick={onNavigate}>
+              <Link href={it.href} prefetch={false} className="nav-item" data-section={sectionFor(it.href)} aria-current={active && !it.children ? "page" : undefined} onClick={onNavigate}>
                 <I size={16} aria-hidden className="shrink-0 text-ink-3" />
                 <span className="min-w-0 flex-1 truncate">{it.label}</span>
                 {!it.children && it.count ? <span className="rounded-full bg-ink px-1.5 text-[11px] leading-[18px] text-ink-invert"><Metric value={it.count} /></span> : null}
@@ -97,7 +97,7 @@ function NavList({ items, onNavigate }: { items: Item[]; onNavigate?: () => void
                   const act = full === c.href;
                   return (
                     <li key={c.href}>
-                      <Link href={c.href} className="nav-item !text-[12.5px]" aria-current={act ? "page" : undefined} onClick={onNavigate}>
+                      <Link href={c.href} prefetch={false} className="nav-item !text-[12.5px]" aria-current={act ? "page" : undefined} onClick={onNavigate}>
                         <span className="min-w-0 flex-1 truncate">{c.label}</span>
                         {c.count ? <span className="text-[11.5px] text-ink-3"><Metric value={c.count} /></span> : null}
                       </Link>
@@ -173,7 +173,7 @@ function SidebarBody({ counts, isAdmin, user, onNavigate, workspace }: { counts:
         <MoreGroup items={nav.more} onNavigate={onNavigate} />
         {nav.admin.length > 0 && <Group label="Administration"><NavList items={nav.admin} onNavigate={onNavigate} /></Group>}
       </nav>
-      <Link href="/settings" onClick={onNavigate} className="flex items-center gap-2.5 rounded-[10px] border border-line bg-surface p-2 shadow-hair transition-colors duration-[var(--duration-feedback)] hover:bg-subtle">
+      <Link href="/settings" prefetch={false} onClick={onNavigate} className="flex items-center gap-2.5 rounded-[10px] border border-line bg-surface p-2 shadow-hair transition-colors duration-[var(--duration-feedback)] hover:bg-subtle">
         <Avatar login={user.login} url={user.avatarUrl} size={32} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-medium leading-4">{user.name ?? user.login}</span>

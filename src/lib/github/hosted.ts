@@ -3,9 +3,9 @@ import { isHosted } from "@/lib/public-url";
 /**
  * A hosted deployment has no GitHub credential of its own yet: the server's `gh` login belongs to whoever installed it, not to
  * any workspace. Every code path that would use it (the gh process, the profile runner, discovery, writes, the scheduler's GitHub
- * jobs) therefore stops here until the GitHub App phase gives each workspace its own connection.
+ * jobs) therefore stops here until each workspace has its own connection. The text is what a person reads, so it names no development phase.
  */
-export const GITHUB_NOT_CONNECTED = "GitHub is not connected for this workspace (arrives with the GitHub App phase).";
+export const GITHUB_NOT_CONNECTED = "GitHub is not connected yet. Repository sync and GitHub actions are off. Your workspace data is still here.";
 
 export class GithubNotConnectedError extends Error {
   readonly code = "github-not-connected";

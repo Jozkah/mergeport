@@ -18,14 +18,19 @@ const WORDS_LOCAL: { term: string; plain: string }[] = [
   { term: "Sync", plain: "Your changes are saved on this computer first, then sent to your team. Sync status shows what has arrived." },
 ];
 
-/** Hosted: the same words, minus everything that only makes sense for the desktop app (this computer, a private repository as a space, gh). */
-const WORDS_HOSTED = WORDS_LOCAL.map((w) =>
-  w.term === "Team and space"
-    ? { term: "Workspace and space", plain: "A workspace is your team's shared home. A space decides which people see which projects: everyone, or only the people listed in a restricted space." }
-    : w.term === "Sync"
-      ? { term: "Sync", plain: "Repository data is refreshed from GitHub in the background. Sync status shows what has arrived." }
-      : w,
-);
+/** Hosted: written out in full (not derived from the local list), so a wording change on one side cannot leak into the other. */
+const WORDS_HOSTED: { term: string; plain: string }[] = [
+  { term: "Repository", plain: "A project's code folder on GitHub. “Tracking” one only means this app watches it; nothing changes on GitHub." },
+  { term: "Project", plain: "A group of repositories you plan together, like “Website”. It has its own board and tasks." },
+  { term: "Task", plain: "A thing to do. It has an owner, a status (Backlog, Ready, In progress, In review, Blocked, Done), a due date and a discussion." },
+  { term: "Needs my review", plain: "Pull requests where GitHub, or a rule you set, expects you to review." },
+  { term: "Waiting on others", plain: "Work that is stuck until someone else decides. It shows who and for how long." },
+  { term: "Who reviews what", plain: "Rules that say which people must review which work, so “Needs my review” is right for everyone." },
+  { term: "Fork and upstream", plain: "A fork is your copy of someone else's repository. The upstream is the original. Forks shows how far your copy is behind." },
+  { term: "Watchlist", plain: "A list of repositories to keep an eye on. Paste addresses and Mergeport sets up the comparisons." },
+  { term: "Workspace and space", plain: "A workspace is your team's shared home. A space decides which people see which projects: everyone, or only the people listed in a restricted space." },
+  { term: "Sync", plain: "Repository data is refreshed from GitHub in the background. Sync status shows what has arrived." },
+];
 
 const STEPS_LOCAL = [
   { icon: FolderGit2, title: "Connect your repositories", text: "Choose the repositories you work in.", href: "/repositories/connect", cta: "Choose repositories" },
@@ -37,7 +42,15 @@ const STEPS_LOCAL = [
   { icon: GitFork, title: "Watch forks", text: "Optional. Paste repositories to see what upstream has that you lack.", href: "/forks", cta: "Forks" },
 ];
 
-const STEPS_HOSTED = STEPS_LOCAL.map((s) => (s.href === "/team" ? { ...s, title: "Invite people", text: "Optional. Invite colleagues, set roles and restrict who sees which project.", href: "/settings/members", cta: "Members" } : s));
+const STEPS_HOSTED = [
+  { icon: FolderGit2, title: "Connect your repositories", text: "Choose the repositories you work in.", href: "/repositories/connect", cta: "Choose repositories" },
+  { icon: Kanban, title: "Make a project", text: "Group repositories you plan together.", href: "/admin/projects", cta: "Projects" },
+  { icon: ListChecks, title: "Add tasks", text: "Create tasks, give them to people, and talk about them.", href: "/tasks", cta: "Tasks" },
+  { icon: BellRing, title: "Check My attention", text: "See what needs your review and what is waiting on others.", href: "/attention", cta: "My attention" },
+  { icon: Users, title: "Invite people", text: "Optional. Invite colleagues, set roles and restrict who sees which project.", href: "/settings/members", cta: "Members" },
+  { icon: Route, title: "Say who reviews what", text: "Optional. Make “Needs my review” accurate.", href: "/admin/rules", cta: "Who reviews what" },
+  { icon: GitFork, title: "Watch forks", text: "Optional. Paste repositories to see what upstream has that you lack.", href: "/forks", cta: "Forks" },
+];
 
 export default function Help() {
   const hosted = isHosted();

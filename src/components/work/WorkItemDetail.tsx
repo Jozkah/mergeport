@@ -9,6 +9,7 @@ import { STAGES, stageLabel } from "@/lib/domain/stages";
 import { sinceLastLooked } from "@/lib/services/seen";
 import { SinceYouLooked } from "@/components/review/SinceYouLooked";
 import { OwnersPanel } from "@/components/code/ReviewTools";
+import { isHosted } from "@/lib/public-url";
 import { WorktreePanel } from "@/components/work/WorktreePanel";
 import { linksForPull } from "@/lib/services/work-links";
 import { deriveReadiness } from "@/lib/domain/readiness";
@@ -56,7 +57,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   const manualOpen = derived.manualWaiting;
   const sinceLooked = await sinceLastLooked(db, viewer, item.id);
   const localLinks = isPr ? await linksForPull(db, viewer, item.id) : null;
-  const writeBlocked = !hasConnection ? "Sign in with the GitHub CLI (gh auth login) to make changes on GitHub." : undefined;
+  const writeBlocked = !hasConnection ? (isHosted() ? "GitHub is not connected yet, so changes on GitHub are off." : "Sign in with the GitHub CLI (gh auth login) to make changes on GitHub.") : undefined;
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
   const comments = item.comments;

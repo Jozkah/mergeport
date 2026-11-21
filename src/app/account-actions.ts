@@ -29,7 +29,7 @@ export async function createWorkspaceAction(formData: FormData): Promise<void> {
     if (e instanceof ConflictError) redirect(`/onboarding?error=limit${typed}`);
     throw e;
   }
-  revalidatePath("/", "layout");
+  revalidatePath("/"); // the redirect below renders the new workspace's page and layout; nothing else needs purging
   redirect("/");
 }
 
@@ -54,6 +54,6 @@ export async function switchWorkspaceAction(formData: FormData): Promise<void> {
   if (!a) redirect("/sign-in");
   const id = formData.get("workspaceId");
   if (typeof id === "string" && id) await selectWorkspace(db, a.session, id);
-  revalidatePath("/", "layout");
+  revalidatePath("/");
   redirect("/");
 }

@@ -37,7 +37,7 @@ export default async function Join({ searchParams }: { searchParams: Promise<{ r
         <div className="max-w-[640px] p-4 text-[13px]">
           {candidate ? <ul><CandidateCard c={candidate} /></ul> : !problem && (
             <form method="get" className="flex flex-wrap items-end gap-2">
-              <div><label className="label" htmlFor="jr">Repository (owner/repo) or join link</label><input id="jr" name="repo" className="input !w-80" required placeholder="owner/mergeport-team-workspace" /></div>
+              <div className="min-w-0 max-w-full"><label className="label" htmlFor="jr">Repository (owner/repo) or join link</label><input id="jr" name="repo" className="input w-full sm:!w-80" required spellCheck={false} autoCapitalize="none" autoComplete="off" placeholder="owner/mergeport-team-workspace" /></div>
               <button className="btn">Review</button>
             </form>
           )}

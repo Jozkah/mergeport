@@ -108,7 +108,7 @@ export async function leaveWorkspaceAction(): Promise<ActionResult> {
     await leaveWorkspace(db, viewer);
   });
   if (!r.ok) return r;
-  revalidatePath("/", "layout");
+  revalidatePath("/"); // leaving ends in a redirect to "/", which renders its own layout
   redirect("/");
 }
 
@@ -148,7 +148,8 @@ export async function setProjectSpaceAclAction(fd: FormData): Promise<ActionResu
   return run(async () => {
     const { viewer } = await requireWriter();
     await setProjectAccessSpace(db, viewer, str(fd, "projectId"), str(fd, "spaceId") || null);
-    revalidatePath("/", "layout");
+    // A move changes who sees a project: the pages that list projects, not every page of the app.
+    for (const path of ["/", "/admin/projects", "/planning", "/tasks"]) revalidatePath(path);
     return done("Project moved");
   });
 }
