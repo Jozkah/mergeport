@@ -170,6 +170,7 @@ model Workspace {
   discoveryCache DiscoveryCache[]
   jobs          Job[]
   installations WorkspaceInstallation[]
+  githubAppStates GithubAppState[]
   federationPolicy FederationPolicy?
   federationLinks  FederationLink[]
   federationGrants FederationGrant[]
@@ -313,6 +314,8 @@ model Repository {
 
   workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   owner       GithubOwner        @relation(fields: [ownerId], references: [id])
+  /// Binding that serves this repository. MATCH SIMPLE: a null installationId is unchecked. NO ACTION is checked at the end of the statement, so deleting a workspace (which cascades to both tables) still works.
+  installation WorkspaceInstallation? @relation(fields: [workspaceId, installationId], references: [workspaceId, installationId], onDelete: NoAction, onUpdate: NoAction)
   projects    ProjectRepository[]
   grants      RepositoryGrant[]
   workItems   WorkItem[]
@@ -1675,11 +1678,19 @@ model WorkspaceInstallation {
   workspaceId       String
   installationId    BigInt
   connectedByUserId String?
+  /// A row exists only once control of the installation was proved, so these are NOT NULL.
+  verifiedAt           DateTime
+  /// The GitHub user whose user-to-server token proved control (the installation was in that user's accessible list).
+  verifiedGithubUserId BigInt
+  /// How it was proved, e.g. `user-installations` (GET /user/installations).
+  proofMethod          String
   createdAt         DateTime @default(now())
 
   workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   installation GithubInstallation @relation(fields: [installationId], references: [installationId])
   connectedBy  User?              @relation("WorkspaceInstallationConnectedBy", fields: [connectedByUserId], references: [id], onDelete: SetNull)
+  /// Repositories served by this binding. The foreign key is composite and NO ACTION: unbind must null them first (`unbindInstallation`).
+  repositories Repository[]
 
   @@unique([workspaceId, installationId])
   @@index([workspaceId])
@@ -1696,7 +1707,7 @@ model GithubDelivery {
   @@index([receivedAt])
 }
 
-/// Short-lived install / OAuth state. GLOBAL: looked up by the hash of an unguessable value before any workspace is known; the row names the user and workspace it was issued to.
+/// Short-lived, single-use install / OAuth state, issued to one user for one workspace (ROOT). The state value is `<workspaceId>.<random>`; only its hash is stored.
 model GithubAppState {
   id          String    @id @default(cuid())
   stateHash   String    @unique
@@ -1707,5 +1718,8 @@ model GithubAppState {
   expiresAt   DateTime
   usedAt      DateTime?
 
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, expiresAt])
   @@index([expiresAt])
 }

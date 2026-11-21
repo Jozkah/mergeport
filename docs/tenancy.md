@@ -5,11 +5,11 @@ that workspace, and every query on tenant data names the workspace.
 
 ## Model classification
 
-79 models: 1 tenant anchor, 30 ROOT, 38 CHILD, 10 GLOBAL.
+79 models: 1 tenant anchor, 31 ROOT, 38 CHILD, 9 GLOBAL.
 
 **Tenant anchor.** `Workspace` is the tenant itself.
 
-**ROOT (30).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
+**ROOT (31).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
 starts with it (a unique key that starts with it counts). Every query on a ROOT model must name the workspace.
 
 | Model | Notes |
@@ -24,7 +24,8 @@ starts with it (a unique key that starts with it counts). Every query on a ROOT 
 | AiSuggestion, AiPendingAction | |
 | FederationPolicy, FederationLink, FederationGrant, FederationCache, FederationEvent | Linking instances (docs/federation.md). Policy is unique on `workspaceId`. A link and its cache are the linking person's only: every query names workspace, person and link. A grant is found by the sha256 of its code or token (the secret names the tenant; allowlisted `findUnique` lookups, like the callback's lookup of a pending link by its state and the signed-in person) and everything after that uses `grant.workspaceId`. The cache is never read by search, digests, AI or backup (a test greps for it). |
 | GitCache, DiscoveryCache | Primary key is (workspaceId, key). The git cache holds private repository content, and discovery lists come from one person's credential, so neither may be shared across tenants. |
-| WorkspaceInstallation | Which GitHub App installations a workspace uses (docs/github-app.md). Unique on (workspaceId, installationId). This row is the tenant record: access to an installation, and so to its repositories, exists only through it. `Repository.installationId` (nullable, indexed) names the installation that serves a repository; local `gh` and demo repositories stay null. |
+| WorkspaceInstallation | Which GitHub App installations a workspace uses (docs/github-app.md). Unique on (workspaceId, installationId). This row is the tenant record: access to an installation, and so to its repositories, exists only through it. A row exists only once control was proved: `verifiedAt`, `verifiedGithubUserId` (the GitHub user whose token proved it) and `proofMethod` (for example `user-installations`) are NOT NULL, and `connectedByUserId` (SET NULL) records who in Mergeport connected it. `Repository.installationId` (nullable, indexed) names the installation that serves a repository; local `gh` and demo repositories stay null. It is tied to the bindings by a composite foreign key `Repository (workspaceId, installationId)` to `WorkspaceInstallation (workspaceId, installationId)` (MATCH SIMPLE, so null is unchecked; NO ACTION, checked at the end of the statement so deleting a workspace still cascades through both tables). A binding cannot be deleted while a repository uses it: `unbindInstallation` nulls the repositories first. Only `src/lib/github/binding.ts` writes the column (`tests/github-app-bindings.test.ts` scans for it), and the sync entity upserts never touch it. |
+| GithubAppState | Short-lived, single-use install and OAuth state (hash only, user, kind, expiry, used time), issued to one user for one workspace: workspaceId with a cascading foreign key and an index that starts with it. The state value is `<workspaceId>.<random>`; the callback reads the workspace id from the front (untrusted), hashes the whole value and claims it with `claimAppState` (one conditional UPDATE on workspace, hash, `usedAt` null and `expiresAt` in the future, count must be 1), so concurrent callbacks have one winner and an expired or used state claims nothing. |
 | Job | `workspaceId` is nullable, see below. |
 
 **CHILD (38).** Scoped through a foreign key to a ROOT parent; no column. Through Repository: ProjectRepository, RepositoryGrant,
@@ -35,7 +36,7 @@ PlanEvent. Through Space: SyncEntity, OutboxOp, SyncConflict, HubRestore. Person
 NotificationPref, InboxState, SeenState, ReviewDraft, ViewedFile): owned by a person, and the work item or file ids inside them are
 cuids that only exist in one workspace.
 
-**GLOBAL (10), shared on purpose.**
+**GLOBAL (9), shared on purpose.**
 
 - `User`, `Session`, `Identity`, `MagicLink`: a person's account and how they sign in (see `docs/auth.md`). A user belongs to workspaces through `Member`. `Session.activeWorkspaceId` only chooses among the person's own memberships and is re-checked on every request.
 - `GithubOwner`: a public GitHub account (login, type, avatar) keyed by GitHub's immutable id. It holds nothing private and is the
@@ -46,12 +47,9 @@ cuids that only exist in one workspace.
 - `GithubInstallation`: one installation of the deployment's GitHub App on a GitHub account. The installation id is GitHub-global (one id, one
   account, however many workspaces use it), and the row holds only public account facts and state (login, type, repository selection,
   suspended and deleted times), no token and no key. Tenants reach it only through `WorkspaceInstallation`, the binding table, which is the
-  tenant record and is ROOT. Never read an installation's repositories or mint its token without first proving the workspace has the binding.
+  tenant record and is ROOT. Tokens are minted only for a `BoundInstallation` (`src/lib/github/bound-installation.ts`), which `loadBoundInstallation` issues only for a proved, non-suspended, non-deleted binding of the workspace. Never read an installation's repositories or mint its token without first proving the workspace has the binding.
 - `GithubDelivery`: webhook delivery ids already handled (replay protection), with the event name and installation id. The id is GitHub's
   and is unique across the deployment; the table holds no payload. Pruned by `receivedAt`.
-- `GithubAppState`: short-lived install and OAuth state rows (hash of an unguessable value, user, workspace, kind, expiry, used time). The
-  callback finds the row by `stateHash` before any workspace is known, so it cannot be workspace-scoped; the row itself names the user and workspace
-  it was issued to, and the later connect flow must check them against the signed-in viewer. Expired rows are pruned by `expiresAt`.
 - `RateLimitState`: GitHub's quota belongs to a credential or an IP, which every tenant behind it shares. The `source` key is the
   signed-in profile's budget; a hosted deployment with one credential per workspace must prefix it.
 

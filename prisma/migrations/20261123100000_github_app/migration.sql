@@ -1,5 +1,6 @@
 -- GitHub App foundation (docs/github-app.md). Four new tables and Repository.installationId.
--- GithubInstallation, GithubDelivery and GithubAppState are GLOBAL; WorkspaceInstallation is ROOT (workspaceId, cascading foreign key, index that starts with it).
+-- GithubInstallation and GithubDelivery are GLOBAL; WorkspaceInstallation and GithubAppState are ROOT (workspaceId, cascading foreign key, index that starts with it).
+-- Repository (workspaceId, installationId) is a composite foreign key to WorkspaceInstallation (MATCH SIMPLE: null is unchecked, NO ACTION).
 
 -- CreateEnum
 CREATE TYPE "InstallationAccountType" AS ENUM ('USER', 'ORGANIZATION');
@@ -31,6 +32,9 @@ CREATE TABLE "WorkspaceInstallation" (
     "workspaceId" TEXT NOT NULL,
     "installationId" BIGINT NOT NULL,
     "connectedByUserId" TEXT,
+    "verifiedAt" TIMESTAMP(3) NOT NULL,
+    "verifiedGithubUserId" BIGINT NOT NULL,
+    "proofMethod" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "WorkspaceInstallation_pkey" PRIMARY KEY ("id")
@@ -82,6 +86,9 @@ CREATE INDEX "GithubDelivery_receivedAt_idx" ON "GithubDelivery"("receivedAt");
 CREATE UNIQUE INDEX "GithubAppState_stateHash_key" ON "GithubAppState"("stateHash");
 
 -- CreateIndex
+CREATE INDEX "GithubAppState_workspaceId_expiresAt_idx" ON "GithubAppState"("workspaceId", "expiresAt");
+
+-- CreateIndex
 CREATE INDEX "GithubAppState_expiresAt_idx" ON "GithubAppState"("expiresAt");
 
 -- AddForeignKey
@@ -92,3 +99,9 @@ ALTER TABLE "WorkspaceInstallation" ADD CONSTRAINT "WorkspaceInstallation_instal
 
 -- AddForeignKey
 ALTER TABLE "WorkspaceInstallation" ADD CONSTRAINT "WorkspaceInstallation_connectedByUserId_fkey" FOREIGN KEY ("connectedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "GithubAppState" ADD CONSTRAINT "GithubAppState_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Repository" ADD CONSTRAINT "Repository_workspaceId_installationId_fkey" FOREIGN KEY ("workspaceId", "installationId") REFERENCES "WorkspaceInstallation"("workspaceId", "installationId") ON DELETE NO ACTION ON UPDATE NO ACTION;
