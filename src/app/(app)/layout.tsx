@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
 import { activeWorkspaces } from "@/lib/auth/workspaces";
 import { GithubConnectionBanner } from "@/components/shell/GithubConnectionBanner";
+import { HideOnPath } from "@/components/shell/HideOnPath";
 import { connectionState } from "@/lib/github/connection-state";
 import { can } from "@/lib/authz/roles";
 import { isHosted } from "@/lib/public-url";
@@ -145,9 +146,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Topbar aiQuick={aiQuick} workspaces={workspaces} accountSwitcher={hosted ? accountSwitcher : undefined} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} hosted={hosted} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "hosted" && githubState !== "ok" && (
-          <div className="px-4 pt-3 lg:px-6">
-            <GithubConnectionBanner state={githubState} manage={can(viewer, "manageGithub")} />
-          </div>
+          // The Settings > GitHub page explains the state itself and has the actions, so the banner would only repeat it there.
+          <HideOnPath path="/settings/github">
+            <div className="px-4 pt-3 lg:px-6">
+              <GithubConnectionBanner state={githubState} manage={can(viewer, "manageGithub")} />
+            </div>
+          </HideOnPath>
         )}
         {profile.kind === "mismatch" && (
           <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">

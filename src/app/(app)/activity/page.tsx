@@ -7,6 +7,7 @@ import { formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Avatar, EmptyState, Mono, PageHeader, Panel, Time } from "@/components/ui/primitives";
 import { Activity, Bell } from "@/components/ui/icons";
+import { ConnectReposEmpty, canConnectRepos } from "@/components/repos/ConnectRepos";
 import { markNotificationsReadAction } from "@/app/actions";
 
 export const metadata = { title: "Activity" };
@@ -20,7 +21,7 @@ export default async function ActivityPage() {
       <PageHeader title="Activity" subtitle="Recent changes in your repositories. Notifications stay in this app; nothing is emailed or posted." />
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <Panel title="Recent activity" icon={Activity} id="act">
-          {events.length === 0 ? <EmptyState icon={Activity} title="No activity yet" action={<Link href="/repositories/connect" className="btn btn-primary">Connect repositories</Link>}>Pull requests, issues and comments from your repositories show up here once they have synced.</EmptyState> : (
+          {events.length === 0 ? <ConnectReposEmpty canConnect={canConnectRepos(viewer)} title="No activity yet">Pull requests, issues and comments from your repositories show up here once they have synced.</ConnectReposEmpty> : (
             <ul className="fit-list scroll-region" style={{ "--fit-min": "520px" } as React.CSSProperties}>{events.map((a) => (
               <li key={a.id} className="flex items-start gap-2.5 border-b border-line px-4 py-3 text-[13px] last:border-b-0">
                 <Avatar login={a.actor ?? "?"} size={22} />

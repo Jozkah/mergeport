@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { isHosted } from "@/lib/public-url";
+import { requireViewer } from "@/lib/authz-page";
+import { ASK_ADMIN_TO_TRACK, canConnectRepos } from "@/components/repos/ConnectRepos";
 import { PageHeader, Panel } from "@/components/ui/primitives";
 import { BellRing, CircleHelp, FolderGit2, GitFork, Kanban, ListChecks, Route, Users } from "@/components/ui/icons";
 
@@ -52,10 +54,12 @@ const STEPS_HOSTED = [
   { icon: GitFork, title: "Watch forks", text: "Optional. Paste repositories to see what upstream has that you lack.", href: "/forks", cta: "Forks" },
 ];
 
-export default function Help() {
+export default async function Help() {
+  const { viewer } = await requireViewer();
   const hosted = isHosted();
   const WORDS = hosted ? WORDS_HOSTED : WORDS_LOCAL;
-  const STEPS = hosted ? STEPS_HOSTED : STEPS_LOCAL;
+  // On a hosted workspace only an administrator tracks repositories: everyone else gets the explanation, not a link to a page they cannot use.
+  const STEPS = (hosted ? STEPS_HOSTED : STEPS_LOCAL).map((s) => s.href === "/repositories/connect" && !canConnectRepos(viewer) ? { ...s, text: ASK_ADMIN_TO_TRACK, href: "/repositories", cta: "Repositories" } : s);
   return (
     <>
       <PageHeader title="Help" subtitle={hosted ? "Mergeport keeps your repositories, reviews, tasks and forks in one place for your workspace." : "Mergeport keeps your repositories, reviews, tasks and forks in one place. It runs on your computer and uses your own GitHub sign-in."} />

@@ -139,7 +139,9 @@ export function Banner({ tone = "info", title, children, action, dismissible = f
   const cls = tone === "error" ? "pill-blocked" : tone === "warn" ? "pill-waiting" : "banner-info"; // info is neutral: blue is reserved for "needs my review"
   const I = tone === "info" ? Info : CircleAlert;
   const role = tone === "error" ? "alert" : "status";
-  const className = cn("flex items-start gap-3 rounded-[10px] border px-3 py-2.5 text-[13px]", cls);
+  // With an action the row wraps below sm: the icon and text stay on the first line, the action drops to its own row under the text
+  // (indented to the text) and the dismiss X stays top-right. From sm up everything sits side by side.
+  const className = cn("flex items-start gap-3 rounded-[10px] border px-3 py-2.5 text-[13px]", !!action && "flex-wrap sm:flex-nowrap", cls);
   const style = { height: "auto", borderRadius: 10 };
   const body = (
     <>
@@ -148,7 +150,7 @@ export function Banner({ tone = "info", title, children, action, dismissible = f
         <p className="font-medium">{title}</p>
         {children && <div className="mt-0.5 text-[12.5px] opacity-90">{children}</div>}
       </div>
-      {action}
+      {action && <div data-banner-action className="order-last w-full pl-7 sm:order-none sm:w-auto sm:pl-0 max-sm:[&_.btn]:!h-10">{action}</div>}
     </>
   );
   if (dismissible) return <DismissibleBanner storageKey={storageKey} role={role} className={className} style={style} label={`Dismiss: ${title}`}>{body}</DismissibleBanner>;

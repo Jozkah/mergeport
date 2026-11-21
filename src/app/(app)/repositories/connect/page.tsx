@@ -76,7 +76,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
             {view.fetchedAt ? "Your GitHub account listed no repositories when last checked. Public repositories can be added by URL on the Repositories page." : view.state === "EMPTY" || view.state === "RETRYING" ? "Asking GitHub in the background. This page stays usable meanwhile." : "GitHub has not been reachable yet, so nothing is saved. This is not an empty account: use Check again when you are online."}
           </EmptyState>
         ) : (
-          <ActionForm action={trackSelectedAction} submitLabel="Track selected" pendingLabel="Tracking…" className="flex flex-col" success={{ link: { href: "/repositories", label: "Open Repositories" } }}>
+          <ActionForm action={trackSelectedAction} submitLabel="Track selected" pendingLabel="Tracking…" className="flex flex-col" success={{ link: { href: "/repositories", label: "Open repositories" } }}>
             <ul className="max-h-[60vh] overflow-y-auto">
               {repos.map((r) => {
                 const already = tracked.has(r.githubId.toString());

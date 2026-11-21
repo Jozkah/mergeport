@@ -64,8 +64,8 @@ export async function HostedConnect({ viewer }: { viewer: Viewer }) {
         {list.repos.length === 0 ? (
           <EmptyState icon={FolderGit2} title="No repositories listed">The GitHub App has no repository access yet. Add repositories to the installation on GitHub, then reload this page.</EmptyState>
         ) : (
-          <ActionForm action={trackInstallationReposAction} submitLabel="Track selected" pendingLabel="Tracking…" className="flex flex-col" success={{ link: { href: "/repositories", label: "Open Repositories" } }}>
-            <ul className="max-h-[60vh] overflow-y-auto">
+          <ActionForm action={trackInstallationReposAction} submitLabel="Track selected" pendingLabel="Tracking…" className="flex flex-col pb-4 [&>div]:px-4" success={{ link: { href: "/repositories", label: "Open repositories" } }}>
+            <ul className="max-h-[60vh] overflow-y-auto border-b border-line">
               {list.repos.map(({ meta, tracked }) => (
                 <li key={meta.githubId.toString()} className="border-b border-line last:border-b-0">
                   <label className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-[13px] hover:bg-faint has-[:disabled]:cursor-default has-[:disabled]:opacity-60">
