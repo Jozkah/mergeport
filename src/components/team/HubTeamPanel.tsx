@@ -111,7 +111,7 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
                           <input type="hidden" name="githubId" value={m.githubId} />
                           <Select name="role" aria-label={`Role for @${m.login}`} defaultValue={m.role} className="select !h-10 !w-32">{ROLE_OPTIONS}</Select>
                         </ActionForm>
-                        <Sheet title={`Remove @${m.login} from the team?`} description={REMOVE_MEMBER_WARNING(m.login)} trigger={<button type="button" className="btn btn-danger !h-10" aria-label={`Remove @${m.login}`}>Remove</button>}>
+                        <Sheet title={`Remove @${m.login} from the team?`} description={REMOVE_MEMBER_WARNING(m.login)} trigger={<button type="button" className="btn text-blocked !h-10" aria-label={`Remove @${m.login}`}>Remove</button>}>
                           <ActionForm action={hubRemoveMemberAction} submitLabel="Remove from the team" pendingLabel="Removing…" submitClassName="btn btn-danger !h-10" closeOnSuccess>
                             <input type="hidden" name="githubId" value={m.githubId} />
                           </ActionForm>
@@ -177,7 +177,7 @@ export function HubTeamPanel({ origin, status, overview, error, spaceMembers = n
                     <SpaceMembers members={spaceMembers?.find((x) => x.id === s.id)?.members} people={o.members} />
                     </div>
                     {o.canAdmin && (
-                      <Sheet title={`Delete “${s.name}”?`} description={DELETE_SPACE_WARNING} trigger={<button type="button" className="btn btn-danger !h-10"><Trash2 size={14} aria-hidden />Delete space</button>}>
+                      <Sheet title={`Delete “${s.name}”?`} description={DELETE_SPACE_WARNING} trigger={<button type="button" className="btn text-blocked !h-10"><Trash2 size={14} aria-hidden />Delete space</button>}>
                         <ActionForm action={hubDeleteSpaceAction} submitLabel="Delete space" pendingLabel="Deleting…" submitClassName="btn btn-danger !h-10">
                           <input type="hidden" name="spaceId" value={s.id} />
                           <input type="hidden" name="confirm" value="on" />

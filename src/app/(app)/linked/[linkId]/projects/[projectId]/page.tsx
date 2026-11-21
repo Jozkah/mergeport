@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { AutoRefresh } from "@/components/federation/AutoRefresh";
 import { BoardSkeleton } from "@/components/federation/LinkedBits";
 import { Banner, EmptyState, PageHeader, Panel, Segmented } from "@/components/ui/primitives";
+import { ScopeChip } from "@/components/ui/identity";
 import { CalendarDays, Globe } from "@/components/ui/icons";
 import { formatDateOnly, formatInstant } from "@/lib/format";
 import { liveCtx, type FedCtx } from "@/lib/federation/context";
@@ -38,10 +39,12 @@ async function ProjectBody({ ctx, viewer, linkId, projectId, peer, list }: { ctx
   const shown = board?.data ? board.data.columns.reduce((n, c) => n + c.items.length, 0) : 0;
   return (
     <>
-      <Banner tone="info" title={`Read-only view of ${peer}. Nothing is copied here.`}>
-        {board?.data ? <span className="wrap-any font-medium text-ink-2">{board.data.project.name}. </span> : null}
-        {r.fetchedAt ? <>Last updated <span className="tnum">{formatInstant(r.fetchedAt, viewer.timezone)}</span>{r.stale ? " (refreshing)" : ""}.</> : null}
-      </Banner>
+      {/* The project's own name is the page heading; one muted line says where it comes from (no second banner). */}
+      <PageHeader
+        title={board?.data ? board.data.project.name : "Linked project"}
+        subtitle={<>From <bdi>{peer}</bdi>. Nothing is copied here.{r.fetchedAt ? <> Last updated <span className="tnum">{formatInstant(r.fetchedAt, viewer.timezone)}</span>{r.stale ? " (refreshing)" : ""}.</> : null}</>}
+        actions={<ScopeChip scope="readonly" />}
+      />
       <StateBanner r={r} />
       {board?.data && board.data.columns.length === 0 && <EmptyState icon={Globe} title="No columns">This project has no board yet.</EmptyState>}
       {board?.data && board.data.columns.length > 0 && (
@@ -56,7 +59,7 @@ async function ProjectBody({ ctx, viewer, linkId, projectId, peer, list }: { ctx
                       {i.priority > 0 && <span className="tnum">P{i.priority}</span>}
                       {i.dueDate && <span className="inline-flex items-center gap-1 tnum"><CalendarDays size={12} aria-hidden />Due {formatDateOnly(new Date(`${i.dueDate}T00:00:00Z`))}</span>}
                       {i.assignee && <span className="break-all"><bdi>@{i.assignee}</bdi></span>}
-                      {i.labels.slice(0, 3).map((l) => <span key={l} className="chip" title={l}><span className="truncate">{l}</span></span>)}
+                      {i.labels.slice(0, 3).map((l) => <span key={l} className="pill pill-neutral max-w-[9rem]" title={l}><span className="truncate">{l}</span></span>)}
                       {i.labels.length > 3 && <span className="tnum" title={i.labels.slice(3).join(", ")}>+{i.labels.length - 3}</span>}
                     </div>
                   </li>
@@ -111,16 +114,9 @@ export default async function LinkedProject({ params, searchParams }: { params: 
   const base = `/linked/${encodeURIComponent(linkId)}/projects/${encodeURIComponent(projectId)}`;
   return (
     <>
-      <PageHeader
-        title="Linked project"
-        subtitle={`from ${peer} (read-only)`}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Segmented label="View" items={[{ href: base, label: "Board", active: !list }, { href: `${base}?view=list`, label: "List", active: list }]} />
-            <Link href="/linked" className="btn">All linked</Link>
-          </div>
-        }
-      />
+      <div className="mb-3 flex justify-end">
+        <Segmented label="View" items={[{ href: base, label: "Board", active: !list }, { href: `${base}?view=list`, label: "List", active: list }]} />
+      </div>
       <AutoRefresh seconds={90} />
       <div className="flex flex-col gap-4">
         <Suspense fallback={<BoardSkeleton />}>

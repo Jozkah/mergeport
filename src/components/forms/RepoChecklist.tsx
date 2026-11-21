@@ -15,7 +15,7 @@ export function RepoChecklist({ repos, name }: { repos: R[]; name: string }) {
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <label className="sr-only" htmlFor={`f-${name}`}>Filter repositories</label>
-        <input id={`f-${name}`} value={q} onChange={(e) => setQ(e.target.value)} className="input min-w-[160px] flex-1" placeholder="Filter repositories" />
+        <input id={`f-${name}`} value={q} onChange={(e) => setQ(e.target.value)} className="input min-w-[160px] flex-1" placeholder="Filter repositories…" autoComplete="off" spellCheck={false} />
         <button type="button" className="btn" onClick={() => setMany(shown.map((r) => r.id), true)}>Select shown</button>
         <button type="button" className="btn" onClick={() => setMany(shown.map((r) => r.id), false)}>Clear shown</button>
       </div>

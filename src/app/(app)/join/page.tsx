@@ -1,3 +1,4 @@
+import { SubmitButton } from "@/components/forms/SubmitButton";
 import { requireViewer } from "@/lib/authz-page";
 import { Banner, PageHeader, Panel } from "@/components/ui/primitives";
 import { CandidateCard } from "@/components/team/CandidateCard";
@@ -38,7 +39,7 @@ export default async function Join({ searchParams }: { searchParams: Promise<{ r
           {candidate ? <ul><CandidateCard c={candidate} /></ul> : !problem && (
             <form method="get" className="flex flex-wrap items-end gap-2">
               <div className="min-w-0 max-w-full"><label className="label" htmlFor="jr">Repository (owner/repo) or join link</label><input id="jr" name="repo" className="input w-full sm:!w-80" required spellCheck={false} autoCapitalize="none" autoComplete="off" placeholder="owner/mergeport-team-workspace" /></div>
-              <button className="btn">Review</button>
+              <SubmitButton className="btn" pendingLabel="Checking…">Review</SubmitButton>
             </form>
           )}
           <ul className="mt-4 list-disc space-y-1 pl-5 text-ink-3">

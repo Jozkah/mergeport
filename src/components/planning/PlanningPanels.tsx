@@ -37,7 +37,7 @@ export async function BoardsManager({ db, viewer, projectId, columns }: Common &
               <textarea id={`bc-${b.id}`} name="columns" className="textarea min-h-28 font-mono text-[12.5px]" defaultValue={(b.columns as { key: string; name?: string; wip?: number | null }[]).map((c) => [c.key, c.name ?? "", c.wip ?? ""].join(" | ")).join("\n")} spellCheck={false} />
               <p className="mt-1 text-[12px] text-ink-3">Available columns: {columns.map((c) => c.key).join(", ")}</p>
             </ActionForm>
-            <ActionForm action={deleteBoardAction} submitLabel="Delete board" submitClassName="btn btn-danger" className="mt-2"><input type="hidden" name="id" value={b.id} /></ActionForm>
+            <ActionForm action={deleteBoardAction} submitLabel="Delete board" submitClassName="btn text-blocked" className="mt-2"><input type="hidden" name="id" value={b.id} /></ActionForm>
           </details>
         ))}
         <ActionForm action={createBoardAction} submitLabel="Add board" className="grid items-end gap-3 md:grid-cols-[1fr_1fr_auto]" submitClassName="btn btn-primary">
@@ -112,7 +112,7 @@ export async function EpicsView({ db, viewer, projectId, cards }: Common & { car
                 {e.decisions && <p className="text-[12.5px] text-ink-3">Decisions: {e.decisions}</p>}
                 <div className="flex gap-2">
                   <ActionForm action={epicStatusAction} submitLabel={e.status === "DONE" ? "Reopen" : "Mark done"} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={e.id} /><input type="hidden" name="status" value={e.status === "DONE" ? "OPEN" : "DONE"} /></ActionForm>
-                  <ActionForm action={epicStatusAction} submitLabel="Delete epic" submitClassName="btn btn-danger"><input type="hidden" name="id" value={e.id} /><input type="hidden" name="delete" value="1" /></ActionForm>
+                  <ActionForm action={epicStatusAction} submitLabel="Delete epic" submitClassName="btn text-blocked"><input type="hidden" name="id" value={e.id} /><input type="hidden" name="delete" value="1" /></ActionForm>
                 </div>
               </li>
             ))}

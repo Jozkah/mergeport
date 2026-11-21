@@ -283,7 +283,7 @@ describe("hosted mode shows no desktop-only wording", () => {
     expect(t).toContain("Everyone in the workspace");
     expect(t).toContain("MY-SPACE-NAME");
     expect(t).not.toContain("HIDDEN-SPACE-NAME");
-    expect(t).toContain("Shared with the workspace");
+    expect(t).not.toContain("Shared with the workspace"); // one phrase for the state
     expect(t).not.toContain("Save sharing");
     // and the local app keeps its legacy Sharing section
     vi.stubEnv("MERGEPORT_PUBLIC_URL", "");

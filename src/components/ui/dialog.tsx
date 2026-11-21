@@ -12,11 +12,16 @@ export const useSheetClose = () => useContext(SheetCloseContext);
  * Accessible modal: named, focus-trapped, focus restored to the trigger on close, Escape closes.
  * CSS owns the open/close motion (opacity + transform); nothing waits on it before the user can act.
  */
-export function Sheet({ trigger, title, description, children, side = "center", initialFocus }: { trigger: ReactNode; title: string; description?: ReactNode; children: ReactNode; side?: "center" | "right"; /** CSS selector of the control that gets focus when it opens (a confirmation focuses Cancel); default is the first focusable. */ initialFocus?: string }) {
-  const [open, setOpen] = useState(false);
+export function Sheet({ trigger, title, description, children, side = "center", initialFocus, open: controlledOpen, onOpenChange }: { trigger?: ReactNode; title: string; description?: ReactNode; children: ReactNode; side?: "center" | "right"; /** CSS selector of the control that gets focus when it opens (a confirmation focuses Cancel); default is the first focusable. */ initialFocus?: string; /** Controlled use (opened by code, not by a trigger). */ open?: boolean; onOpenChange?: (open: boolean) => void }) {
+  const [own, setOwn] = useState(false);
+  const open = controlledOpen ?? own;
+  const setOpen = (v: boolean) => {
+    setOwn(v);
+    onOpenChange?.(v);
+  };
   return (
     <D.Root open={open} onOpenChange={setOpen}>
-      <D.Trigger asChild>{trigger}</D.Trigger>
+      {trigger ? <D.Trigger asChild>{trigger}</D.Trigger> : null}
       <D.Portal>
         <D.Overlay className="scrim fixed inset-0 z-40 bg-scrim" />
         <D.Content

@@ -13,6 +13,7 @@ import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/ToastProvider";
 import { Building2, GitFork, Globe, Lock, Search, Unplug, User, Users, X, Zap } from "@/components/ui/icons";
 import { ctx } from "@/lib/ctx";
+import { plainText } from "@/lib/inputs";
 
 export type RepoRow = {
   id: string;
@@ -119,7 +120,7 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
         <label className="relative ml-auto">
           <span className="sr-only">Search repositories</span>
           <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
-          <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} className="input !h-8 !w-60 !pl-8" placeholder="Search repositories" />
+          <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} className="input !h-8 !w-60 !pl-8" placeholder="Search repositories…" {...plainText} />
         </label>
       </div>
 
@@ -127,7 +128,7 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
         <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-line bg-canvas px-3 py-2 text-[12.5px]" role="region" aria-label="Selected repositories">
           <strong className="font-medium">{picked.size} selected</strong>
           <button type="button" className="btn !h-7 !px-2.5 !text-[12.5px]" aria-disabled={pending || undefined} aria-busy={pending} data-loading={pending} onClick={() => { if (!pending) refresh([...picked]); }}><PendingLabel mode={pending ? "pending" : "idle"} pending="Refreshing…" size={12}>Refresh</PendingLabel></button>
-          <button type="button" className="btn btn-danger !h-7 !px-2.5 !text-[12.5px]" disabled={pending} aria-busy={pending} onClick={() => setDialog({ kind: "untrack", ids: [...picked] })}>Stop tracking</button>
+          <button type="button" className="btn text-blocked !h-7 !px-2.5 !text-[12.5px]" disabled={pending} aria-busy={pending} onClick={() => setDialog({ kind: "untrack", ids: [...picked] })}>Stop tracking</button>
           <button type="button" className="ml-auto text-ink-3 hover:text-ink" onClick={() => setPicked(new Set())}>Clear</button>
         </div>
       )}

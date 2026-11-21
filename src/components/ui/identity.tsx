@@ -51,7 +51,8 @@ export function hostOf(origin: string): string {
  */
 export function Host({ origin, showScheme = false, className = "" }: { origin: string; showScheme?: boolean; className?: string }) {
   return (
-    <span className={`inline-block max-w-full truncate align-bottom font-mono ${className}`} title={origin}>
+    // Keyboard and touch cannot hover for the `title`: the span is focusable and the full origin is also read out.
+    <span className={`inline-block max-w-full truncate align-bottom font-mono ${className}`} title={origin} translate="no" tabIndex={0} aria-label={origin}>
       <bdi>{showScheme ? origin.replace(/\/$/, "") : hostOf(origin)}</bdi>
     </span>
   );

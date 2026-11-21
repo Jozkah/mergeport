@@ -22,6 +22,8 @@ export function DesktopNotifier() {
     };
     let after = read();
     const tick = async () => {
+      // A hidden tab does not poll; the cursor (`after`) stays put, so what it missed is shown when the tab is back.
+      if (document.visibilityState !== "visible") return;
       try {
         const res = await fetch(`/api/notifications/poll?after=${after}`, { cache: "no-store" });
         if (!res.ok || !live) return;

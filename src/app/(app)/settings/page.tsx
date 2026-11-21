@@ -95,7 +95,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   action={signOutEverywhereFormAction}
                   submitLabel="Sign out everywhere"
                   pendingLabel="Signing out…"
-                  trigger={<button type="button" className="btn btn-danger">Sign out everywhere</button>}
+                  trigger={<button type="button" className="btn text-blocked">Sign out everywhere</button>}
                 />
               </div>
             </div>

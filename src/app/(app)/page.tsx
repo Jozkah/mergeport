@@ -11,7 +11,7 @@ import { attentionFor } from "@/lib/services/request-cache";
 import { openedPerDay, overview, recentActivity, visibleForkMappings } from "@/lib/services/queries";
 import { milestoneProgress } from "@/lib/services/planning";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
-import { formatDateOnly, formatDuration, formatInstant, isoDate } from "@/lib/format";
+import { formatDateOnly, formatDuration, formatInstant } from "@/lib/format";
 import { Avatar, EmptyState, Mono, Panel, StatusPill, Time } from "@/components/ui/primitives";
 import { Activity, ArrowRight, BellRing, GitFork, Hourglass, Milestone, Newspaper, CircleAlert } from "@/components/ui/icons";
 import { itemHref } from "@/components/work/WorkTable";
@@ -104,7 +104,7 @@ export default async function Overview() {
         </div>
 
         <div className="flex min-w-0 flex-col gap-5">
-          <Panel title="Daily digest" icon={Newspaper} id="digest" actions={<Link href="/digest" className="btn">Open</Link>}>
+          <Panel title="Daily digest" icon={Newspaper} id="digest" actions={<Link href="/digest" className="btn">Open digest</Link>}>
             {!digest ? <EmptyState icon={Newspaper} title="No digest yet">{isHosted() ? "The first one is made by the daily run." : "The first one is made on a morning Mergeport is open."}</EmptyState> : (
               <Link href={`/digest?day=${digest.day}`} className="block px-4 py-3 text-[13px] transition-colors duration-[var(--duration-feedback)] hover:bg-faint">
                 <p className="flex items-center gap-2 font-medium">
@@ -142,7 +142,6 @@ export default async function Overview() {
           </Panel>
         </div>
       </div>
-      <span className="sr-only">{isoDate(now)}</span>
     </>
   );
 }

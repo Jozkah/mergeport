@@ -1,5 +1,6 @@
 "use client";
 
+import { plainText } from "@/lib/inputs";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BlobView, InlineComment } from "@/lib/services/git-view";
@@ -230,7 +231,7 @@ function FileTree({ files, isViewed, onJump }: { files: DiffFile[]; isViewed: (f
   };
   return (
     <div>
-      <input value={q} onChange={(e) => setQ(e.target.value)} className="input mb-2 !h-8" placeholder="Filter files" aria-label="Filter changed files" />
+      <input value={q} onChange={(e) => setQ(e.target.value)} className="input mb-2 !h-8" placeholder="Filter files…" {...plainText} aria-label="Filter changed files" />
       <ul>{nodes.map((n) => row(n, 0))}</ul>
     </div>
   );

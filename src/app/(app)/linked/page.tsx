@@ -7,7 +7,7 @@ import { ConfirmSheet } from "@/components/forms/ConfirmSheet";
 import { AutoRefresh } from "@/components/federation/AutoRefresh";
 import { LinkInstanceForm } from "@/components/federation/FederationForms";
 import { PeerSkeleton, StripResult } from "@/components/federation/LinkedBits";
-import { Host, ScopeChip } from "@/components/ui/identity";
+import { Host, RoleChip, ScopeChip } from "@/components/ui/identity";
 import { Banner, EmptyState, PageHeader, Panel } from "@/components/ui/primitives";
 import { ChevronRight, Globe, ShieldCheck } from "@/components/ui/icons";
 import { revokeGrantAction, unlinkAction } from "@/app/federation-actions";
@@ -19,6 +19,7 @@ import { canCreateLink, loadPolicy } from "@/lib/federation/policy";
 import { myGrants } from "@/lib/federation/provider";
 import type { ProjectDto } from "@/lib/federation/read-api";
 import type { Viewer } from "@/lib/authz/viewer";
+import type { Role } from "@/lib/authz/roles";
 import type { FedCtx } from "@/lib/federation/context";
 
 export const metadata = { title: "Linked instances" };
@@ -44,7 +45,7 @@ async function PeerBody({ ctx, viewer, linkId, peerWorkspaceName, peerRole }: { 
   return (
     <>
       <div className="border-b border-line px-4 py-2.5 text-[12.5px] text-ink-3">
-        {peerWorkspaceName ? <>Workspace <strong className="wrap-any text-ink-2"><bdi>{peerWorkspaceName}</bdi></strong>{peerRole ? <> as {peerRole.toLowerCase()}</> : null}. </> : null}
+        {peerWorkspaceName ? <>Workspace <strong className="wrap-any text-ink-2"><bdi>{peerWorkspaceName}</bdi></strong>{peerRole ? <> as <RoleChip role={peerRole as Role} /></> : null}. </> : null}
         {r.fetchedAt ? <>Last updated <span className="tnum">{formatInstant(r.fetchedAt, viewer.timezone)}</span>{r.stale ? " (refreshing)" : ""}.</> : <>Not loaded yet.</>}
       </div>
       {r.state !== "ok" && (
@@ -93,6 +94,21 @@ export default async function LinkedPage({ searchParams }: { searchParams: Promi
   const grants = await myGrants(db, viewer);
   if (!ctx && links.length === 0 && grants.length === 0) notFound();
   const canLink = ctx !== null && canCreateLink(viewer.role, policy) && policy.outboundMode !== "off" && policy.maxPeers > 0;
+  const linkPanel = (
+    <Panel title="Link an instance" icon={Globe} id="link-new">
+      <div className="p-4">
+        {canLink ? (
+          <LinkInstanceForm />
+        ) : ctx === null ? (
+          <p className="text-[13px] text-ink-3">Linking is switched off on this server.</p>
+        ) : (
+          <p className="text-[13px] text-ink-3">
+            {policy.outboundMode === "off" || policy.maxPeers === 0 ? "Linking to other instances is turned off for this workspace." : "Your role cannot link instances in this workspace."} An administrator can change this in Settings.
+          </p>
+        )}
+      </div>
+    </Panel>
+  );
   return (
     <>
       <PageHeader title="Linked instances" subtitle="Projects from other Mergeport instances you linked, read-only." help={<>Linking lets you look at another instance&apos;s projects from here. The other instance keeps the data and decides what you may see; nothing is copied into this one&apos;s search, digests, AI or backups, and nobody else here sees it. Unlink at any time.</>} />
@@ -113,7 +129,7 @@ export default async function LinkedPage({ searchParams }: { searchParams: Promi
                 action={unlinkAction}
                 submitLabel="Unlink"
                 pendingLabel="Unlinking…"
-                trigger={<button type="button" className="btn btn-danger">Unlink</button>}
+                trigger={<button type="button" className="btn text-blocked" aria-label={`Unlink ${l.peerOrigin.replace(/^https?:\/\//, "")}`}>Unlink</button>}
               >
                 <input type="hidden" name="linkId" value={l.id} />
               </ConfirmSheet>
@@ -124,21 +140,10 @@ export default async function LinkedPage({ searchParams }: { searchParams: Promi
             </Suspense>
           </Panel>
         ))}
+        {links.length === 0 && linkPanel}
         {links.length === 0 && !result && <EmptyState icon={Globe} title="Nothing linked yet">Link another Mergeport instance to see its projects here, read-only.</EmptyState>}
-        <Panel title="Link an instance" icon={Globe} id="link-new">
-          <div className="p-4">
-            {canLink ? (
-              <LinkInstanceForm />
-            ) : ctx === null ? (
-              <p className="text-[13px] text-ink-3">Linking is switched off on this server.</p>
-            ) : (
-              <p className="text-[13px] text-ink-3">
-                {policy.outboundMode === "off" || policy.maxPeers === 0 ? "Linking to other instances is turned off for this workspace." : "Your role cannot link instances in this workspace."} An administrator can change this in Settings.
-              </p>
-            )}
-          </div>
-        </Panel>
-        <Panel title="Apps with access to your data" icon={ShieldCheck} id="linked-apps" summary={`${grants.length}`}>
+        {links.length > 0 && linkPanel}
+        <Panel title="Apps with access to your data" icon={ShieldCheck} id="linked-apps" summary={`${grants.length} app${grants.length === 1 ? "" : "s"}`}>
           {grants.length === 0 ? (
             <p className="p-4 text-[13px] text-ink-3">No other instance can read your projects from this workspace.</p>
           ) : (
@@ -156,7 +161,7 @@ export default async function LinkedPage({ searchParams }: { searchParams: Promi
                     action={revokeGrantAction}
                     submitLabel="Revoke"
                     pendingLabel="Revoking…"
-                    trigger={<button type="button" className="btn btn-danger" aria-label={`Revoke access for ${g.clientOrigin}`}>Revoke</button>}
+                    trigger={<button type="button" className="btn text-blocked" aria-label={`Revoke access for ${g.clientOrigin}`}>Revoke</button>}
                   >
                     <input type="hidden" name="grantId" value={g.id} />
                   </ConfirmSheet>

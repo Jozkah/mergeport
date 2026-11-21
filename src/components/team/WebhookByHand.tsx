@@ -88,7 +88,7 @@ export function WebhookByHand({ teamName, hubOrigin, enabled }: { teamName: stri
           </>
         )}
         {enabled && (
-          <Sheet title="Turn off instant GitHub updates?" description="The server stops accepting events from GitHub. Everyone's apps go back to checking GitHub every 15 minutes. The GitHub App itself is not deleted." trigger={<button type="button" className="btn btn-danger !h-10 self-start"><Trash2 size={14} aria-hidden />Turn off</button>}>
+          <Sheet title="Turn off instant GitHub updates?" description="The server stops accepting events from GitHub. Everyone's apps go back to checking GitHub every 15 minutes. The GitHub App itself is not deleted." trigger={<button type="button" className="btn text-blocked !h-10 self-start"><Trash2 size={14} aria-hidden />Turn off</button>}>
             <ActionForm action={turnOffInstantUpdatesAction} submitLabel="Turn off" pendingLabel="Turning off…" submitClassName="btn btn-danger !h-10" closeOnSuccess>
               <p className="text-[13px] text-ink-3">Delete the App on GitHub too if you no longer need it.</p>
             </ActionForm>

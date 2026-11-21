@@ -31,7 +31,7 @@ export async function SubscriptionsPanel({ db, viewer, mappings }: { db: Db; vie
                 {viewer.isAdmin && (
                   <div className="flex gap-2">
                     <ActionForm action={subscriptionAction} submitLabel={s.muted ? "Unmute" : "Mute"} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={s.id} /><input type="hidden" name="op" value={s.muted ? "unmute" : "mute"} /></ActionForm>
-                    <ActionForm action={subscriptionAction} submitLabel="Delete" submitClassName="btn btn-danger"><input type="hidden" name="id" value={s.id} /><input type="hidden" name="op" value="delete" /></ActionForm>
+                    <ActionForm action={subscriptionAction} submitLabel="Delete" submitClassName="btn text-blocked"><input type="hidden" name="id" value={s.id} /><input type="hidden" name="op" value="delete" /></ActionForm>
                   </div>
                 )}
               </li>
@@ -98,7 +98,7 @@ export async function MappingTools({ db, viewer, mappingId, forkBranch, upstream
             {backports.map((b) => (
               <li key={b.id} className="flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-line p-2">
                 <div><p className="font-medium">#{b.upstreamNumber} → {b.targetBranch} <span className="font-normal text-ink-3">· {b.state === "done" ? "done" : "planned"}</span></p><p className="text-ink-3">{EVIDENCE[b.evidence] ?? b.evidence}{b.localSha ? ` · ${b.localSha.slice(0, 7)}` : ""}{b.note ? ` · ${b.note}` : ""}</p></div>
-                <ActionForm action={backportAction} submitLabel="Remove" submitClassName="btn btn-danger"><input type="hidden" name="op" value="delete" /><input type="hidden" name="id" value={b.id} /></ActionForm>
+                <ActionForm action={backportAction} submitLabel="Remove" submitClassName="btn text-blocked"><input type="hidden" name="op" value="delete" /><input type="hidden" name="id" value={b.id} /></ActionForm>
               </li>
             ))}
           </ul>

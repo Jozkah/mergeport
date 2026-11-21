@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 /**
@@ -12,13 +12,19 @@ import { useRouter } from "next/navigation";
 export function AutoRefresh({ seconds = 90 }: { seconds?: number }) {
   const router = useRouter();
   const last = useRef(0);
+  // A refresh that is still running is not stacked on: a slow peer would otherwise queue one request per tick.
+  const [pending, start] = useTransition();
+  const inflight = useRef(false);
+  useEffect(() => {
+    inflight.current = pending;
+  }, [pending]);
   useEffect(() => {
     const interval = seconds * 1000;
     last.current = Date.now();
     const refresh = () => {
-      if (document.visibilityState !== "visible" || navigator.onLine === false) return;
+      if (document.visibilityState !== "visible" || navigator.onLine === false || inflight.current) return;
       last.current = Date.now();
-      router.refresh();
+      start(() => router.refresh());
     };
     const t = setInterval(refresh, interval);
     const onVisible = () => {
@@ -29,6 +35,6 @@ export function AutoRefresh({ seconds = 90 }: { seconds?: number }) {
       clearInterval(t);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [router, seconds]);
+  }, [router, seconds, start]);
   return null;
 }

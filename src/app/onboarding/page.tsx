@@ -28,7 +28,7 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
       <form action={createWorkspaceAction} className="mt-4 flex flex-col gap-3">
         <label className="flex flex-col gap-1.5 text-[13px]">
           <span className="font-medium text-ink-2">Workspace name</span>
-          <input className="input" name="name" required maxLength={80} autoComplete="organization" placeholder="Acme engineering" defaultValue={typed} />
+          <input className="input input-lg" name="name" required maxLength={80} autoComplete="off" spellCheck={false} placeholder="Acme engineering" defaultValue={typed} />
         </label>
         <SubmitButton className={`btn btn-lg w-full ${hasInvites ? "" : "btn-primary"}`} pendingLabel="Creating…">Create workspace</SubmitButton>
       </form>

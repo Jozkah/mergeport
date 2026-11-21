@@ -55,7 +55,9 @@ describe("motion guards", () => {
   });
 
   it("lets only the board glide with GSAP, and only on the inner wrapper", () => {
-    const users = sources(root).filter((f) => /from "gsap"/.test(readFileSync(f, "utf8"))).map((f) => path.relative(root, f).replaceAll("\\", "/"));
+    // Any way of loading GSAP: the package, a subpath (gsap/ScrollTrigger), the React hook package, a require() or a dynamic import().
+    const GSAP = /(?:from\s*|import\s*\(\s*|require\s*\(\s*|import\s+)["'](?:gsap|@gsap\/react)(?:\/[^"']*)?["']/;
+    const users = sources(root).filter((f) => GSAP.test(readFileSync(f, "utf8"))).map((f) => path.relative(root, f).replaceAll("\\", "/"));
     expect(users).toEqual(["components/planning/Board.tsx"]);
     const board = readFileSync(path.join(root, "components", "planning", "Board.tsx"), "utf8");
     expect(board).toMatch(/gsap\.fromTo\(inner,/);

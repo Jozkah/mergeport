@@ -26,8 +26,10 @@ export function ConfirmSheet({
   children,
   submitDisabled,
   onDone,
+  open,
+  onOpenChange,
 }: {
-  trigger: ReactNode;
+  trigger?: ReactNode;
   title: string;
   /** What will happen, in plain words. Shown as the dialog description. Wrap any user-supplied name or address in <bdi> so it stays readable inside the sentence. */
   consequence: ReactNode;
@@ -38,9 +40,12 @@ export function ConfirmSheet({
   children?: ReactNode;
   submitDisabled?: boolean;
   onDone?: (r: ActionResult) => void;
+  /** Controlled use: the caller opens it (a Select that needs a confirmation before it saves). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <Sheet title={title} description={consequence} trigger={trigger} initialFocus="[data-cancel]">
+    <Sheet title={title} description={consequence} trigger={trigger} initialFocus="[data-cancel]" open={open} onOpenChange={onOpenChange}>
       <ActionForm action={action} submitLabel={submitLabel} pendingLabel={pendingLabel} submitClassName={danger ? "btn btn-danger" : "btn btn-primary"} closeOnSuccess secondary={<Cancel />} submitDisabled={submitDisabled} onDone={onDone}>
         {children}
       </ActionForm>

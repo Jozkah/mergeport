@@ -1,4 +1,5 @@
-import { Logo } from "@/components/ui/Logo";
+import { AuthShell } from "@/components/ui/AuthShell";
+import { SubmitButton } from "@/components/forms/SubmitButton";
 import { AccountSignIn } from "@/components/forms/AccountSignIn";
 import { isHosted } from "@/lib/public-url";
 import { env, isDemo } from "@/lib/env";
@@ -13,14 +14,14 @@ export const metadata = { title: "Sign in" };
 export const dynamic = "force-dynamic";
 
 const ERRORS: Record<string, string> = {
-  "gh-missing": "The GitHub CLI (gh) is not installed.",
-  "gh-login": "gh is not signed in to GitHub yet.",
+  "gh-missing": "The GitHub CLI (gh) is not installed. Install it from cli.github.com, then reload this page.",
+  "gh-login": "gh is not signed in to GitHub yet. Sign in with the button below, then try again.",
   "gh-error": "gh could not reach GitHub. Check your connection and try again.",
   mismatch: "gh is signed in as a different account than this profile belongs to. Switch with gh auth switch, or start Mergeport again to use that account's own profile.",
-  "demo-unseeded": "Demo data has not been seeded. Run npm run local:demo.",
-  "hub-not-invited": "That GitHub account is not invited to this server. Ask its owner to invite you.",
-  "hub-removed": "You were removed from that server. Ask its owner to invite you again.",
-  "hub-expired": "The sign-in code expired. Connect again.",
+  "demo-unseeded": "Demo data has not been seeded. Run npm run local:demo, then reload this page.",
+  "hub-not-invited": "That GitHub account is not invited to this server. Ask its owner to invite you, then connect again.",
+  "hub-removed": "You were removed from that server. Ask its owner to invite you again, then connect again.",
+  "hub-expired": "The sign-in code expired. Connect again below.",
 };
 
 export default async function SignIn({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string; next?: string; email?: string }> }) {
@@ -31,15 +32,31 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
   const st = demo ? null : await currentGhStatus(true);
   const launched = Boolean(env().MERGEPORT_LAUNCH_TOKEN);
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-[460px] flex-col justify-center gap-5 px-4 py-10">
-      <div className="flex items-center gap-2.5">
-        <Logo size={36} />
-        <span className="text-[18px] font-medium">Mergeport</span>
-        <span className="pill pill-unknown ml-auto">Runs on this computer</span>
-      </div>
-      <div className="panel">
-        <div className="panel-body p-5">
-          <h1 className="text-[20px] font-medium">Sign in with GitHub</h1>
+    <AuthShell
+      title="Sign in with GitHub"
+      badge={<span className="pill pill-neutral ml-auto">Runs on this computer</span>}
+      aside={
+        <>
+          {!demo && (
+            <div className="panel">
+              <div className="panel-head"><h2 className="text-[13px] font-medium text-ink-2">Connect to a server</h2></div>
+              <div className="panel-body p-4"><HubConnect /></div>
+            </div>
+          )}
+          {demo && (
+            <div className="panel">
+              <div className="panel-head"><h2 className="text-[13px] font-medium text-ink-2">Demo people (synthetic)</h2></div>
+              <form action="/api/local/demo" method="post" className="panel-body flex flex-col gap-2 p-3">
+                <SubmitButton name="as" value="admin" className="btn justify-start" pendingLabel="Signing in…">Owner · owner-demo (sees everything)</SubmitButton>
+                <SubmitButton name="as" value="alice" className="btn justify-start" pendingLabel="Signing in…">Member A · alice-demo (3 repositories)</SubmitButton>
+                <SubmitButton name="as" value="bram" className="btn justify-start" pendingLabel="Signing in…">Member B · bram-demo (2 repositories)</SubmitButton>
+              </form>
+            </div>
+          )}
+        </>
+      }
+    >
+      <>
           {sp.error && <div className="mt-4"><Banner tone="error" title="Could not sign you in">{ERRORS[sp.error] ?? "Something went wrong."}</Banner></div>}
 
           {demo && <p className="mt-2 text-[13px] text-ink-3">Demo mode uses synthetic data and never contacts GitHub.</p>}
@@ -73,30 +90,11 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
               {launched ? (
                 <p className="text-ink-3">Open Mergeport with the link the launcher opened (<span className="mono">npm run local</span>). That one-time link ties this browser to this process.</p>
               ) : (
-                <form action="/api/local/signin" method="post"><button className="btn btn-primary btn-lg w-full">Continue as @{st.identity.login}</button></form>
+                <form action="/api/local/signin" method="post"><SubmitButton className="btn btn-primary btn-lg w-full" pendingLabel="Signing in…">Continue as @{st.identity.login}</SubmitButton></form>
               )}
             </div>
           )}
-        </div>
-      </div>
-
-      {!demo && (
-        <div className="panel">
-          <div className="panel-head"><h2 className="text-[13px] font-medium text-ink-2">Connect to a server</h2></div>
-          <div className="panel-body p-4"><HubConnect /></div>
-        </div>
-      )}
-
-      {demo && (
-        <div className="panel">
-          <div className="panel-head"><h2 className="text-[13px] font-medium text-ink-2">Demo people (synthetic)</h2></div>
-          <form action="/api/local/demo" method="post" className="panel-body flex flex-col gap-2 p-3">
-            <button name="as" value="admin" className="btn justify-start">Owner · owner-demo (sees everything)</button>
-            <button name="as" value="alice" className="btn justify-start">Member A · alice-demo (3 repositories)</button>
-            <button name="as" value="bram" className="btn justify-start">Member B · bram-demo (2 repositories)</button>
-          </form>
-        </div>
-      )}
-    </main>
+      </>
+    </AuthShell>
   );
 }

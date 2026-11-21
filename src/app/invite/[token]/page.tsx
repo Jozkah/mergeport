@@ -32,7 +32,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
     );
   }
   const next = `/invite/${token}`;
-  const title = `Join ${inv.workspaceName}`;
+  const title = <>Join <bdi>{inv.workspaceName}</bdi></>;
   const lead = (
     <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-ink-3">
       <span>You were invited as</span> <RoleChip role={inv.role} />
@@ -86,7 +86,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
     // Signed in as the invited address, but the address was never confirmed: a link sent to it (or a verifying provider) confirms it.
     return (
       <AuthShell title="Confirm your email first">
-        <div className="mt-4"><Banner tone="warn" title={`Your address is not confirmed yet`}>You are signed in as <bdi className="break-all">{inv.email}</bdi>, but it has not been confirmed. Confirm it by signing in with a link, then come back to join {inv.workspaceName}.</Banner></div>
+        <div className="mt-4"><Banner tone="warn" title={`Your address is not confirmed yet`}>You are signed in as <bdi className="break-all">{inv.email}</bdi>, but it has not been confirmed. Confirm it by signing in with a link, then come back to join <bdi>{inv.workspaceName}</bdi>.</Banner></div>
         {signInForm}
         {oidc}
       </AuthShell>

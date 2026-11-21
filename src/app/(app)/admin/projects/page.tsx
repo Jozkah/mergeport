@@ -14,6 +14,7 @@ import { byOwnerFirst, byPersonalFirst } from "@/lib/domain/ordering";
 import { projectReviewerRefs } from "@/lib/services/project-reviewers";
 import { setProjectSpaceAction } from "@/app/team-actions";
 import { setProjectSpaceAclAction } from "@/app/workspace-actions";
+import { ProjectAccessForm } from "@/components/members/ProjectAccessForm";
 import { listMySpaces } from "@/lib/services/access-spaces";
 import { isHosted } from "@/lib/public-url";
 
@@ -41,7 +42,7 @@ export default async function Projects() {
     const all = (reviewerText.get(id) ?? "").split(", ").filter(Boolean);
     return all.length > 3 ? `${all.slice(0, 3).join(", ")} +${all.length - 3}` : all.join(", ");
   };
-  const lineOf = (p: (typeof projects)[number]) => `${p.repositories.length} repositories · ${p.members.length} people${reviewerShort(p.id) ? ` · reviewers: ${reviewerShort(p.id)}` : ""} · ${hosted ? (p.accessSpace?.kind === "RESTRICTED" ? `space: ${p.accessSpace.name}` : "Shared with the workspace") : p.spaceId ? "shared" : "only on this computer"}`;
+  const lineOf = (p: (typeof projects)[number]) => `${p.repositories.length} repositories · ${p.members.length} people${reviewerShort(p.id) ? ` · reviewers: ${reviewerShort(p.id)}` : ""} · ${hosted ? (p.accessSpace?.kind === "RESTRICTED" ? `space: ${p.accessSpace.name}` : "Everyone in the workspace") : p.spaceId ? "shared" : "only on this computer"}`;
   return (
     <>
       <PageHeader
@@ -51,7 +52,7 @@ export default async function Projects() {
         actions={
           <Sheet title="New project" trigger={<button className="btn btn-primary"><Plus size={14} aria-hidden /> New project</button>}>
             <ActionForm action={createProjectAction} submitLabel="Create project" closeOnSuccess>
-              <div className="flex flex-col gap-3"><div><label className="label" htmlFor="p-name">Name</label><input id="p-name" name="name" className="input" required /></div><div><label className="label" htmlFor="p-rev">Required reviewers (optional)</label><input id="p-rev" name="reviewers" className="input" placeholder="GitHubLogin, org/team-slug" /></div><div><label className="label" htmlFor="p-desc">Description</label><input id="p-desc" name="description" className="input" /></div>{canShareWithTeam && <fieldset><legend className="label">Sharing</legend><label className="flex min-h-10 items-center gap-2 text-[13px]"><input type="checkbox" name="share" value="1" />Share with everyone in the team</label><p className="max-w-[60ch] text-pretty text-[12px] text-ink-3">Everyone on the team will see its cards and tasks. Leave off to keep it on this computer.</p></fieldset>}</div>
+              <div className="flex flex-col gap-3"><div><label className="label" htmlFor="p-name">Name</label><input id="p-name" name="name" className="input" required /></div><div><label className="label" htmlFor="p-rev">Required reviewers (optional)</label><input id="p-rev" name="reviewers" className="input" placeholder="GitHubLogin, org/team-slug" /></div><div><label className="label" htmlFor="p-desc">Description</label><input id="p-desc" name="description" className="input" /></div>{canShareWithTeam && <fieldset><legend className="label">Sharing</legend><label className="check-row text-[13px]"><input type="checkbox" name="share" value="1" />Share with everyone in the team</label><p className="max-w-[60ch] text-pretty text-[12px] text-ink-3">Everyone on the team will see its cards and tasks. Leave off to keep it on this computer.</p></fieldset>}</div>
             </ActionForm>
           </Sheet>
         }
@@ -79,18 +80,19 @@ export default async function Projects() {
                     ) : (
                       <>
                         <ActionForm action={setProjectMembersAction} submitLabel="Save members" resetOnSuccess={false}>
-                  <input type="hidden" name="projectId" value={p.id} />
-                  <fieldset><legend className="label">People in this project</legend>
-                    {members.length === 0 ? <p className="text-[12.5px] text-ink-3"></p> : <ul className="flex flex-col gap-1.5 text-[13px]">{members.map((m) => <li key={m.id}><label className="flex items-center gap-2"><input type="checkbox" name="member" value={m.id} defaultChecked={p.members.some((x) => x.memberId === m.id)} />@{m.user.login}</label></li>)}</ul>}
-                  </fieldset>
-                  <p className="mt-2 text-[12px] text-ink-3">Members see internal tasks. Repository content still needs a repository grant.</p>
-                </ActionForm>
+                          <input type="hidden" name="projectId" value={p.id} />
+                          <fieldset>
+                            <legend className="label">People in this project</legend>
+                            <ul className="flex flex-col text-[13px]">{members.map((m) => <li key={m.id}><label className="check-row"><input type="checkbox" name="member" value={m.id} defaultChecked={p.members.some((x) => x.memberId === m.id)} />@{m.user.login}</label></li>)}</ul>
+                          </fieldset>
+                          <p className="mt-2 text-[12px] text-ink-3">Members see internal tasks. Repository content still needs a repository grant.</p>
+                        </ActionForm>
                         <p className="mt-2 text-[12px] text-ink-3">Need someone else? <Link className="underline" href={hosted ? "/settings/members" : "/team"}>{hosted ? "Invite people in Members" : "Invite people on Team"}</Link>.</p>
                       </>
                     )}
                   </div>
                 </Disclosure>
-                <Disclosure className="px-4" summary={<span className="font-medium">Required reviewers</span>} meta={<>({reviewerText.get(p.id) || "none"})</>}>
+                <Disclosure className="px-4" summary={<span className="font-medium">Required reviewers</span>} meta={<>({reviewerShort(p.id) || "none"})</>}>
                   <div className="mt-3"><ActionForm action={setProjectReviewersAction} submitLabel="Save reviewers" resetOnSuccess={false} className="max-w-md">
                   <input type="hidden" name="projectId" value={p.id} />
                   <label className="label" htmlFor={`rv-${p.id}`}>Required reviewers</label>
@@ -99,16 +101,10 @@ export default async function Projects() {
                 </ActionForm></div>
                 </Disclosure>
                 {hosted ? (
-                <Disclosure className="px-4" summary={<span className="font-medium">Access</span>} meta={<>({p.accessSpace?.kind === "RESTRICTED" ? p.accessSpace.name : "Everyone"})</>}>
-                  <div className="mt-3"><ActionForm action={setProjectSpaceAclAction} submitLabel="Save access" pendingLabel="Saving…" resetOnSuccess={false} requireDirty className="max-w-md">
-                    <input type="hidden" name="projectId" value={p.id} />
-                    <label className="label" htmlFor={`ac-${p.id}`}>Who can see this project</label>
-                    <Select id={`ac-${p.id}`} name="spaceId" defaultValue={p.accessSpaceId ?? ""} className="select">
-                      <option value="">Everyone in the workspace</option>
-                      {mySpaces.filter((sp) => sp.kind === "RESTRICTED").map((sp) => <option key={sp.id} value={sp.id}>{sp.name} (restricted)</option>)}
-                    </Select>
-                    <p className="mt-1 text-[12px] text-ink-3">A restricted space is seen only by the people listed in it, and you must be one of them to move a project into or out of it. Manage spaces in Members.</p>
-                  </ActionForm></div>
+                <Disclosure className="px-4" summary={<span className="font-medium">Access</span>} meta={<>({p.accessSpace?.kind === "RESTRICTED" ? p.accessSpace.name : "Everyone in the workspace"})</>}>
+                  <div className="mt-3">
+                    <ProjectAccessForm projectId={p.id} current={p.accessSpaceId ?? ""} spaces={mySpaces.filter((sp) => sp.kind === "RESTRICTED").map((sp) => ({ id: sp.id, name: sp.name }))} action={setProjectSpaceAclAction} />
+                  </div>
                 </Disclosure>
                 ) : (
                 <Disclosure className="px-4" summary={<span className="font-medium">Sharing</span>} meta={<>({p.spaceId ? "shared through a team space" : "only on this computer"})</>}>

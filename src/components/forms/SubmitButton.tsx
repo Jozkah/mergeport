@@ -25,6 +25,9 @@ export function SubmitButton({ children, pendingLabel = "Working…", className 
     let t: ReturnType<typeof setTimeout> | undefined;
     // React (function actions, onSubmit handlers) prevents default at the root, after this listener: look one tick later.
     const onSubmit = (e: Event) => {
+      // Several submit buttons share one form (demo people): only the one that was pressed goes busy.
+      const pressed = (e as SubmitEvent).submitter;
+      if (pressed && pressed !== mine.current) return;
       t = setTimeout(() => {
         if (!e.defaultPrevented) setNavigating(true);
       }, 0);

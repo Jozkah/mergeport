@@ -98,7 +98,7 @@ export default async function Rules() {
                     <p className="mt-1 text-[13px]">{r.reason}</p>
                     <p className="mt-1 text-[12.5px] text-ink-3">{r.semantics === "ALL" ? "All of" : "Any of"}: {(r.reviewers as unknown as Reviewer[]).map((x) => `${x.ref}${x.kind === "TEAM" ? " (team)" : x.kind === "EXTERNAL_ROLE" ? " (external role)" : ""}`).join(", ")}{asStrings(r.labels).length ? <> · when labelled <Mono>{asStrings(r.labels).join(", ")}</Mono></> : " · any labels"}</p>
                   </div>
-                  <ActionForm action={deleteRuleAction} submitLabel="Delete" submitClassName="btn btn-danger"><input type="hidden" name="id" value={r.id} /></ActionForm>
+                  <ActionForm action={deleteRuleAction} submitLabel="Delete" submitClassName="btn text-blocked"><input type="hidden" name="id" value={r.id} /></ActionForm>
                 </li>
               ))}
             </ul>
@@ -117,7 +117,7 @@ export default async function Rules() {
                   </div>
                   <div className="flex gap-2">
                     <ActionForm action={toggleWaitingRuleAction} submitLabel={r.enabled ? "Turn off" : "Turn on"} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={r.id} /></ActionForm>
-                    <ActionForm action={deleteWaitingRuleAction} submitLabel="Delete" submitClassName="btn btn-danger"><input type="hidden" name="id" value={r.id} /></ActionForm>
+                    <ActionForm action={deleteWaitingRuleAction} submitLabel="Delete" submitClassName="btn text-blocked"><input type="hidden" name="id" value={r.id} /></ActionForm>
                   </div>
                 </li>
               ))}

@@ -191,7 +191,7 @@ export default async function SyncPage() {
                     <span><Mono>{sp.repoName}</Mono> · {quarantined.filter((q) => q.spaceId === spaceId).length} edit(s)</span>
                     <span className="flex gap-2">
                       <ActionForm action={releaseQuarantineAction} submitLabel="Try sending again" submitAriaLabel={`Try sending the edits for ${sp.repoName} again`} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="spaceId" value={spaceId} /><input type="hidden" name="action" value="retry" /></ActionForm>
-                      <ActionForm action={releaseQuarantineAction} submitLabel="Discard" submitAriaLabel={`Discard the unsent edits for ${sp.repoName}`} submitClassName="btn btn-danger" resetOnSuccess={false}><input type="hidden" name="spaceId" value={spaceId} /><input type="hidden" name="action" value="discard" /></ActionForm>
+                      <ActionForm action={releaseQuarantineAction} submitLabel="Discard" submitAriaLabel={`Discard the unsent edits for ${sp.repoName}`} submitClassName="btn text-blocked" resetOnSuccess={false}><input type="hidden" name="spaceId" value={spaceId} /><input type="hidden" name="action" value="discard" /></ActionForm>
                     </span>
                   </div>
                 );

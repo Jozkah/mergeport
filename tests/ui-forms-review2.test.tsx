@@ -119,6 +119,12 @@ describe("Select (review round 2)", () => {
     expect(trigger.textContent).not.toContain("Everyone");
   });
 
+  it("lists options that come inside a Fragment (a shared options constant)", () => {
+    const OPTS = (<><option value="a">Alpha</option><option value="b">Beta</option></>);
+    render(<Select name="s" defaultValue="b" aria-label="X">{OPTS}</Select>);
+    expect(screen.getByRole("combobox").textContent).toContain("Beta");
+  });
+
   it("keeps width utilities on its wrapper and the proxy input anchored over the trigger", () => {
     const { container } = render(<form><Select name="s" required defaultValue="" aria-label="X" className="select w-32 !h-10"><option value="">Choose…</option><option value="a">A</option></Select></form>);
     const wrap = container.querySelector("form > span")!;

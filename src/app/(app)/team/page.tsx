@@ -153,7 +153,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
           <summary className="cursor-pointer font-medium">Stop using this team on this computer</summary>
           <div className="mt-2 flex flex-col gap-2">
             <p className="text-ink-3">Returns to personal mode and makes shared repositories and projects local again. Boards, cards and rules stay. Nothing changes on GitHub: repositories, invitations and collaborators remain until you remove them there.</p>
-            <ActionForm action={leaveTeamAction} submitLabel="Stop using this team" submitClassName="btn btn-danger" resetOnSuccess={false}>
+            <ActionForm action={leaveTeamAction} submitLabel="Stop using this team" submitClassName="btn text-blocked" resetOnSuccess={false}>
               <label className="flex items-start gap-2"><input type="checkbox" name="confirm" required className="mt-0.5" /> I understand this computer will stop syncing with this team.</label>
             </ActionForm>
           </div>
@@ -207,7 +207,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                             {statuses.payload.map((i: InvitationStatus) => (
                               <li key={i.username} className="flex items-center justify-between gap-2">
                                 <span>@{i.username} <SimplePill tone={i.state === "accepted" ? "ok" : i.state === "pending" ? "waiting" : "blocked"}>{i.state}</SimplePill></span>
-                                <ActionForm action={revokeAccessAction} submitLabel={i.state === "accepted" ? "Remove access" : "Cancel"} submitClassName="btn btn-danger !h-7" className="[&>div]:!mt-0"><input type="hidden" name="spaceId" value={s.id} /><input type="hidden" name="username" value={i.username} /></ActionForm>
+                                <ActionForm action={revokeAccessAction} submitLabel={i.state === "accepted" ? "Remove access" : "Cancel"} submitClassName="btn text-blocked !h-7" className="[&>div]:!mt-0"><input type="hidden" name="spaceId" value={s.id} /><input type="hidden" name="username" value={i.username} /></ActionForm>
                               </li>
                             ))}
                           </ul>

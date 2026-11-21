@@ -1,7 +1,8 @@
 import { ActionForm } from "@/components/forms/ActionForm";
 import { ConfirmSheet } from "@/components/forms/ConfirmSheet";
 import { Select } from "@/components/ui/Select";
-import { Banner, EmptyState, Panel } from "@/components/ui/primitives";
+import { EmptyState, Panel } from "@/components/ui/primitives";
+import { AutoCheckbox } from "@/components/forms/AutoCheckbox";
 import { RoleChip, ScopeChip } from "@/components/ui/identity";
 import { Lock, Mail, ShieldCheck, Users } from "@/components/ui/icons";
 import {
@@ -43,12 +44,12 @@ export function MembersPanel({ viewer, members, invitations }: { viewer: Viewer;
       <ActiveMembers members={rows} />
       {removed.length > 0 && (
         <div className="border-t border-line p-4">
-          <h3 className="text-[13px] font-medium">Removed (<span className="tnum">{removed.length}</span>)</h3>
+          <h3 className="subhead">Removed (<span className="tnum">{removed.length}</span>)</h3>
           <RemovedMembers members={removed.map((m) => ({ id: m.id, name: label(m) }))} />
         </div>
       )}
       <div className="border-t border-line p-4">
-        <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-medium"><Mail size={14} aria-hidden /> Invite by email</h3>
+        <h3 className="subhead mb-2 flex items-center gap-1.5"><Mail size={14} aria-hidden /> Invite by email</h3>
         <ActionForm action={inviteMemberAction} submitLabel="Send invitation" pendingLabel="Sending…" className="flex flex-wrap items-end gap-3" layout="inline" submitClassName="btn btn-primary">
           <div className="min-w-0 max-sm:basis-full"><label className="label" htmlFor="invite-email">Email address</label><input id="invite-email" name="email" type="email" required maxLength={254} className="input w-full sm:w-64" placeholder="alice@example.com" autoComplete="off" autoCapitalize="none" spellCheck={false} /></div>
           <div><label className="label" htmlFor="invite-role">Role</label><Select id="invite-role" name="role" defaultValue="MEMBER" className="select w-32">{ROLE_OPTIONS}</Select></div>
@@ -85,7 +86,7 @@ export function LeavePanel({ role }: { role: Role }) {
           <p className="mt-2 text-ink-3">The owner cannot leave. Transfer ownership to an admin first.</p>
         ) : (
           <div className="mt-3">
-            <ConfirmSheet title="Leave this workspace?" consequence={LEAVE_WARNING} action={leaveWorkspaceAction} submitLabel="Leave workspace" pendingLabel="Leaving…" trigger={<button type="button" className="btn btn-danger">Leave workspace</button>}>
+            <ConfirmSheet title="Leave this workspace?" consequence={LEAVE_WARNING} action={leaveWorkspaceAction} submitLabel="Leave workspace" pendingLabel="Leaving…" trigger={<button type="button" className="btn text-blocked">Leave workspace</button>}>
               <input type="hidden" name="leave" value="1" />
             </ConfirmSheet>
           </div>
@@ -107,25 +108,26 @@ export function SpacesPanel({ spaces, members, projects }: { spaces: SpaceSummar
       {restricted.length === 0 ? (
         <EmptyState icon={Lock} title="No restricted spaces">Projects live in the common space until you move them into a restricted one.</EmptyState>
       ) : (
-        <ul>
+        <ul style={{ "--row-gap": "0px" } as React.CSSProperties}>
           {restricted.map((s) => (
             <li key={s.id} className="border-b border-line p-4 last:border-b-0">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="flex min-w-0 flex-wrap items-center gap-2 font-medium"><span className="wrap-any"><bdi>{s.name}</bdi></span><ScopeChip scope="restricted" /><span className="tnum text-[12.5px] font-normal text-ink-3">{s.projectCount} project{s.projectCount === 1 ? "" : "s"}</span></p>
-                <ConfirmSheet title={`Delete “${s.name}”?`} consequence="Its members lose the space. A space that still holds projects cannot be deleted." action={deleteAccessSpaceAction} submitLabel="Delete space" pendingLabel="Deleting…" trigger={<button type="button" className="btn btn-danger">Delete space</button>}>
+                <ConfirmSheet title={`Delete “${s.name}”?`} consequence="Its members lose the space. A space that still holds projects cannot be deleted." action={deleteAccessSpaceAction} submitLabel="Delete space" pendingLabel="Deleting…" trigger={<button type="button" className="btn text-blocked">Delete space</button>}>
                   <input type="hidden" name="spaceId" value={s.id} />
                 </ConfirmSheet>
               </div>
               {s.members.length === 0 ? <p className="mt-2 text-[12.5px] text-ink-3">No members yet.</p> : (
-                <ul className="mt-2" aria-label={`Members of ${s.name}`}>
+                <ul className="mt-2" style={{ "--row-gap": "0px" } as React.CSSProperties} aria-label={`Members of ${s.name}`}>
                   {s.members.map((m) => (
                     <li key={m.memberId} className="flex flex-wrap items-center justify-between gap-2 py-1 text-[13px]">
                       <span className="min-w-0 break-all"><bdi>{m.email ?? `@${m.login}`}</bdi></span>
                       <span className="flex flex-wrap items-center gap-2">
-                        <ActionForm action={setSpaceMemberAction} submitLabel="Save" pendingLabel="Saving…" resetOnSuccess={false} submitAriaLabel={`Save access for ${m.email ?? m.login}`} className="flex flex-wrap items-center gap-2" layout="inline">
+                        {/* Toggling saves: no per-row Save button. */}
+                        <ActionForm action={setSpaceMemberAction} submitLabel="Save" pendingLabel="Saving…" resetOnSuccess={false} hideSubmit className="flex flex-wrap items-center gap-2" layout="inline">
                           <input type="hidden" name="spaceId" value={s.id} />
                           <input type="hidden" name="memberId" value={m.memberId} />
-                          <label className="flex min-h-10 items-center gap-2 text-ink-3"><input type="checkbox" name="canWrite" defaultChecked={m.canWrite} /> can edit</label>
+                          <label className="check-row text-ink-3"><AutoCheckbox name="canWrite" defaultChecked={m.canWrite} aria-label={`Can edit: ${m.email ?? m.login}`} /> can edit</label>
                         </ActionForm>
                         <ConfirmSheet
                           title={`Remove ${m.email ?? `@${m.login}`} from ${s.name}?`}
@@ -150,23 +152,22 @@ export function SpacesPanel({ spaces, members, projects }: { spaces: SpaceSummar
                     <option value="">Choose…</option>
                     {active.filter((m) => !s.members.some((x) => x.memberId === m.id)).map((m) => <option key={m.id} value={m.id}>{label(m)}</option>)}
                   </Select></div>
-                <label className="flex min-h-10 items-center gap-2 text-[13px] text-ink-3"><input type="checkbox" name="canWrite" defaultChecked /> can edit</label>
+                <label className="check-row text-[13px] text-ink-3"><input type="checkbox" name="canWrite" defaultChecked /> can edit</label>
               </ActionForm>
             </li>
           ))}
         </ul>
       )}
       <div className="border-t border-line p-4">
-        <p className="mb-2 text-[12.5px] font-medium">New restricted space</p>
+        <h3 className="subhead mb-2">New restricted space</h3>
         <ActionForm action={createAccessSpaceAction} submitLabel="Create space" pendingLabel="Creating…" className="flex flex-wrap items-end gap-3" layout="inline">
           <div><label className="label" htmlFor="space-name">Name</label><input id="space-name" name="name" className="input w-full sm:w-64" required maxLength={60} /></div>
         </ActionForm>
       </div>
       {projects.length > 0 && (
         <div className="border-t border-line p-4">
-          <p className="mb-2 text-[12.5px] font-medium">Move a project</p>
+          <h3 className="subhead mb-2">Move a project</h3>
           <MoveProjectForm projects={projects} spaces={restricted.filter((s) => s.isMember).map((s) => ({ id: s.id, name: s.name }))} />
-          <div className="mt-3"><Banner tone="info" title="Moving out of a restricted space shows the project to everyone">Check who is in the space first. People outside a restricted space cannot see its projects, cards or search results.</Banner></div>
         </div>
       )}
     </Panel>

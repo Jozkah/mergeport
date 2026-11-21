@@ -5,10 +5,8 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { approveActionAction, rejectActionAction } from "@/app/ai-actions";
 import { EmptyState } from "@/components/ui/primitives";
+import { FOLD_MS } from "@/lib/motion";
 import { ShieldCheck } from "@/components/ui/icons";
-
-/** A little longer than the row-leave animation (--duration-fast, 250 ms). */
-const FOLD_MS = 320;
 
 export type PendingRow = { id: string; summary: string; detail: string; href: string; createdAt: string; error?: string | null };
 

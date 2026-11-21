@@ -123,6 +123,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <TooltipProvider>
     <ToastProvider>
+    {/* First stop for the keyboard: past the sidebar and top bar, straight to the page. */}
+    <a href="#main" className="btn btn-primary sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:left-3 focus-visible:top-3 focus-visible:z-[80]">Skip to content</a>
     <div className="mx-auto flex min-h-dvh max-w-[3200px]">
       <LiveRefresh />
       <GlowManager />

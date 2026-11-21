@@ -241,6 +241,7 @@ export function Board({ columns, initial, compact = false }: { columns: Col[]; i
       const next = measure();
       const reducedNow = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const landed: HTMLElement[] = [];
+      const glide = seconds("--duration-fast", 0.25); // one read of the token for the whole pass, not one per card
       host.querySelectorAll<HTMLElement>("[data-flip-id]").forEach((li) => {
         const id = li.dataset.flipId as string;
         const pos = next.get(id)!;
@@ -259,7 +260,7 @@ export function Board({ columns, initial, compact = false }: { columns: Col[]; i
           landed.push(inner);
           return;
         }
-        gsap.fromTo(inner, { x: dx, y: dy }, { x: 0, y: 0, duration: seconds("--duration-fast", 0.25), ease: SMOOTH_OUT_GSAP, overwrite: "auto", clearProps: "transform" });
+        gsap.fromTo(inner, { x: dx, y: dy }, { x: 0, y: 0, duration: glide, ease: SMOOTH_OUT_GSAP, overwrite: "auto", clearProps: "transform" });
       });
       // Restart the outline on every landed card with ONE forced reflow (remove all, read once, add all), not one per card.
       if (landed.length) {

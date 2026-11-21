@@ -1,3 +1,4 @@
+import { plainText } from "@/lib/inputs";
 import { TemplateButton } from "@/components/tasks/TemplatePanels";
 import { OpenCardLink } from "@/components/planning/TaskDrawer";
 import Link from "next/link";
@@ -71,7 +72,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
           {scope !== "mine" && <input type="hidden" name="scope" value={scope} />}
           {project && <input type="hidden" name="project" value={project.id} />}
           {status !== "open" && <input type="hidden" name="status" value={status} />}
-          <input name="q" defaultValue={sp.q ?? ""} className="input !w-56" placeholder="Search tasks" aria-label="Search tasks" />
+          <input name="q" defaultValue={sp.q ?? ""} className="input !w-56" placeholder="Search tasks…" {...plainText} aria-label="Search tasks" />
         </form>
       </div>
       {sp.label && <p className="mb-2 text-[12.5px] text-ink-3">Label: <LabelChip name={sp.label} color="888888" /> <Link className="link" href={href({ label: undefined })}>clear</Link></p>}

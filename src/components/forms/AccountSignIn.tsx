@@ -7,7 +7,7 @@ import { safeReturnTo } from "@/lib/http";
 import { RedirectLink, SubmitButton } from "./SubmitButton";
 
 const ERRORS: Record<string, string> = {
-  "email-invalid": "That does not look like an email address.",
+  "email-invalid": "That does not look like an email address. Check it and try again.",
   "mail-unconfigured": "Email sign-in is not set up on this server. Ask its administrator to configure outgoing mail.",
   "mail-failed": "The email could not be sent right now. Try again in a minute.",
   "link-invalid": "That sign-in link has expired or was already used. Ask for a new one.",
@@ -17,7 +17,7 @@ const ERRORS: Record<string, string> = {
   "oidc-state": "The sign-in could not be verified. Start again.",
   "oidc-nonce": "The sign-in could not be verified. Start again.",
   "oidc-exchange": "The provider did not confirm your sign-in. Start again.",
-  "oidc-provider-error": "The provider declined the sign-in.",
+  "oidc-provider-error": "The provider declined the sign-in. Try again, or use email.",
   "oidc-claims": "The provider did not identify you. Try another way to sign in.",
 };
 
@@ -45,7 +45,7 @@ export function AccountSignIn({ error, sent, next, email }: { error?: string; se
           <input type="hidden" name="next" value={dest} />
           <label className="flex flex-col gap-1.5 text-[13px]">
             <span className="font-medium text-ink-2">Email</span>
-            <input className="input" name="email" type="email" required maxLength={254} autoComplete="email" autoCapitalize="none" spellCheck={false} placeholder="you@example.com" defaultValue={typed} />
+            <input className="input input-lg" name="email" type="email" required maxLength={254} autoComplete="email" autoCapitalize="none" spellCheck={false} placeholder="you@example.com" defaultValue={typed} autoFocus={!!error} aria-invalid={error === "email-invalid" || undefined} />
           </label>
           <SubmitButton className="btn btn-primary btn-lg w-full" pendingLabel="Sending…">Email me a sign-in link</SubmitButton>
         </form>

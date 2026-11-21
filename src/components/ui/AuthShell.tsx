@@ -17,7 +17,7 @@ export function AuthShell({ title, children, aside, badge }: { title?: ReactNode
       </div>
       <div className="panel">
         <div className="panel-body p-5">
-          {title ? <h1 className="wrap-any text-[20px] font-medium">{title}</h1> : null}
+          {title ? <h1 className="wrap-any text-[20px] font-medium [text-wrap:balance]">{title}</h1> : null}
           {children}
         </div>
       </div>

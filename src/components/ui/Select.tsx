@@ -1,7 +1,7 @@
 "use client";
 
 import * as S from "@radix-ui/react-select";
-import { Children, isValidElement, useEffect, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode } from "react";
+import { Children, Fragment, isValidElement, useEffect, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { Check, ChevronDown } from "@/components/ui/icons";
 import { Glide } from "@/components/ui/Glide";
@@ -24,15 +24,18 @@ function collect(children: ReactNode): Group[] {
     loose = [];
   };
   const option = (el: ReactElement<{ value?: string | number; children?: ReactNode; disabled?: boolean }>): Opt => ({ value: String(el.props.value ?? textOf(el.props.children)), label: el.props.children, disabled: el.props.disabled });
-  Children.forEach(children, (c) => {
-    if (!isValidElement(c)) return;
-    const el = c as ReactElement<{ value?: string | number; label?: string; children?: ReactNode; disabled?: boolean }>;
-    if (el.type === "optgroup") {
-      flush();
-      groups.push({ label: el.props.label, options: Children.toArray(el.props.children).filter(isValidElement).map((o) => option(o as never)) });
-    } else if (el.type === "option") loose.push(option(el as never));
-    else if (el.type && typeof el.type !== "string") Children.forEach((el.props as { children?: ReactNode }).children, () => {}); // fragments are flattened by React.Children
-  });
+  // React.Children does not look inside a Fragment (a shared `<>…</>` list of options), so it is walked here.
+  const walk = (nodes: ReactNode) =>
+    Children.forEach(nodes, (c) => {
+      if (!isValidElement(c)) return;
+      const el = c as ReactElement<{ value?: string | number; label?: string; children?: ReactNode; disabled?: boolean }>;
+      if (el.type === Fragment) walk(el.props.children);
+      else if (el.type === "optgroup") {
+        flush();
+        groups.push({ label: el.props.label, options: Children.toArray(el.props.children).filter(isValidElement).map((o) => option(o as never)) });
+      } else if (el.type === "option") loose.push(option(el as never));
+    });
+  walk(children);
   flush();
   return groups;
 }
@@ -57,8 +60,8 @@ export function Select({ children, className, id, name, defaultValue, value, onC
   defaultValue?: string | number;
   value?: string | number;
   onChange?: (e: ChangeEvent<HTMLSelectElement>) => void;
-  /** Submit the closest form as soon as a different option is chosen (no separate Save button). */
-  autoSubmit?: boolean;
+  /** Submit the closest form as soon as a different option is chosen (no separate Save button). A function decides per change (return false to hold the submit, e.g. while a confirmation is open). */
+  autoSubmit?: boolean | ((next: string, prev: string) => boolean);
   /** An empty choice blocks the form (the browser names the missing field) and is announced as required. */
   required?: boolean;
   disabled?: boolean;
@@ -108,7 +111,7 @@ export function Select({ children, className, id, name, defaultValue, value, onC
         onChange?.({ target: { value: dec(v), name: name ?? "" }, currentTarget: { value: dec(v), name: name ?? "" } } as ChangeEvent<HTMLSelectElement>);
         // The hidden input is not a native control the browser edits, so tell the form (dirty tracking, "clear the result on edit") it changed.
         if (changed) field.current?.dispatchEvent(new Event("input", { bubbles: true }));
-        if (autoSubmit && changed) field.current?.form?.requestSubmit();
+        if (autoSubmit && changed && (typeof autoSubmit !== "function" || autoSubmit(dec(v), current))) field.current?.form?.requestSubmit();
       }}
     >
       <S.Trigger id={id} aria-label={ariaLabel} aria-busy={ariaBusy} aria-invalid={ariaInvalid || undefined} aria-required={required || undefined} className={`${inside} flex items-center justify-between gap-2 text-left aria-[invalid=true]:border-blocked`}>
