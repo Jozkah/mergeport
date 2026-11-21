@@ -169,6 +169,7 @@ model Workspace {
   gitCache      GitCache[]
   discoveryCache DiscoveryCache[]
   jobs          Job[]
+  installations WorkspaceInstallation[]
   federationPolicy FederationPolicy?
   federationLinks  FederationLink[]
   federationGrants FederationGrant[]
@@ -196,6 +197,7 @@ model User {
   devices       Device[]
   savedFilters  SavedFilter[]
   notifications Notification[]
+  connectedInstallations WorkspaceInstallation[] @relation("WorkspaceInstallationConnectedBy")
   federationLinks  FederationLink[]
   federationGrants FederationGrant[]
 }
@@ -302,6 +304,8 @@ model Repository {
   statusDetail   String?
   isDemo         Boolean        @default(false)
   spaceId        String? // coordination space that declares (shares) this repository; null = local only
+  /// GitHub App installation that grants access to this repository; null for local `gh` and demo repositories.
+  installationId BigInt?
   lastSyncedAt   DateTime?
   syncError      String?
   rateLimited    Boolean        @default(false)
@@ -323,6 +327,7 @@ model Repository {
 
   @@unique([workspaceId, githubId])
   @@index([workspaceId, trackingStatus])
+  @@index([installationId])
 }
 
 
@@ -1635,4 +1640,72 @@ model FederationEvent {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, createdAt])
+}
+
+enum InstallationAccountType {
+  USER
+  ORGANIZATION
+}
+
+enum InstallationRepositorySelection {
+  ALL
+  SELECTED
+}
+
+/// One installation of the deployment's GitHub App on a GitHub account. GLOBAL: the installation id is GitHub-global; the tenant record is WorkspaceInstallation.
+model GithubInstallation {
+  installationId      BigInt                          @id
+  accountGithubId     BigInt
+  accountLogin        String
+  accountType         InstallationAccountType
+  repositorySelection InstallationRepositorySelection @default(SELECTED)
+  suspendedAt         DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime                        @default(now())
+  updatedAt           DateTime                        @updatedAt
+
+  workspaces WorkspaceInstallation[]
+
+  @@index([accountGithubId])
+}
+
+/// Which workspaces use which installation (the tenant-side record of a connected GitHub account).
+model WorkspaceInstallation {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  installationId    BigInt
+  connectedByUserId String?
+  createdAt         DateTime @default(now())
+
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  installation GithubInstallation @relation(fields: [installationId], references: [installationId])
+  connectedBy  User?              @relation("WorkspaceInstallationConnectedBy", fields: [connectedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, installationId])
+  @@index([workspaceId])
+  @@index([installationId])
+}
+
+/// Webhook delivery ids already handled (replay protection). GLOBAL; pruned by receivedAt. Never holds a payload.
+model GithubDelivery {
+  deliveryId     String   @id
+  installationId BigInt?
+  event          String
+  receivedAt     DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
+/// Short-lived install / OAuth state. GLOBAL: looked up by the hash of an unguessable value before any workspace is known; the row names the user and workspace it was issued to.
+model GithubAppState {
+  id          String    @id @default(cuid())
+  stateHash   String    @unique
+  userId      String
+  workspaceId String
+  kind        String
+  nonceHash   String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+
+  @@index([expiresAt])
 }
