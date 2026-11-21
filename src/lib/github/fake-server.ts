@@ -33,6 +33,15 @@ export class FakeGitHubServer {
   private app: { appId: string; publicKeyPem: string } | null = null;
   private instTokens = new Map<string, { installationId: number; expiresAt: number }>();
   private userTokens = new Map<string, string>();
+  private oauthCodes = new Map<string, { login: string; redirectUri: string; challenge: string | null; used: boolean }>();
+  private oauthClient: { clientId: string; clientSecret: string } | null = null;
+  /** Test helper: every OAuth code exchange that reached the fake (the secret is not recorded), and the user tokens revoked so far. */
+  oauthExchanges: { code: string; redirectUri: string; verifier: string | null; ok: boolean }[] = [];
+  revokedUserTokens: string[] = [];
+  /** Simulates an App without the permission to read organization memberships: GET /user/memberships/orgs/:org answers 403. */
+  forbidOrgMemberships = false;
+  /** Whether GET /user/installations also lists suspended installations (live GitHub behaviour is unverified). */
+  listSuspendedForUsers = false;
   offline = false;
   rateLimitedUntil: number | null = null;
   private nextId = 1000;
@@ -316,7 +325,17 @@ export class FakeGitHubServer {
     this.installations.set(inst.id, inst);
     return inst;
   }
-  /** A user-to-server token for `login` (what the OAuth flow of a later task will hold). */
+  /** Sets the App's OAuth client credentials that POST /login/oauth/access_token checks. */
+  setOAuthClient(clientId: string, clientSecret: string) {
+    this.oauthClient = { clientId, clientSecret };
+  }
+  /** What GitHub does after the person authorizes on github.com: a single-use code for `login`, bound to a redirect_uri and (optionally) a PKCE challenge. */
+  issueOAuthCode(login: string, o: { redirectUri: string; codeChallenge?: string }): string {
+    const code = randomBytes(10).toString("hex");
+    this.oauthCodes.set(code, { login, redirectUri: o.redirectUri, challenge: o.codeChallenge ?? null, used: false });
+    return code;
+  }
+  /** A user-to-server token for `login`. */
   issueUserToken(login: string): string {
     const t = `ghu_${randomBytes(18).toString("hex")}`;
     this.userTokens.set(t, login);
@@ -343,7 +362,13 @@ export class FakeGitHubServer {
       }
       const auth = new Headers(init.headers).get("authorization") ?? "";
       const bearer = /^Bearer (.+)$/i.exec(auth)?.[1];
-      return this.appRoute(method, url, bearer);
+      let body: any;
+      try {
+        body = init.body ? JSON.parse(String(init.body)) : undefined;
+      } catch {
+        body = undefined;
+      }
+      return this.appRoute(method, url, bearer, { body, basic: /^Basic (.+)$/i.exec(auth)?.[1] });
     }) as typeof fetch;
   }
 
@@ -390,9 +415,19 @@ export class FakeGitHubServer {
     return json(200, { total_count: items.length, [key]: slice.map(render) }, page * per < items.length ? { link: `<${next.href}>; rel="next"` } : {});
   }
 
-  private appRoute(method: string, url: URL, bearer: string | undefined): Response {
+  private appRoute(method: string, url: URL, bearer: string | undefined, extra: { body?: any; basic?: string } = {}): Response {
     const path = url.pathname;
     let m: RegExpExecArray | null;
+    // github.com (not the API): the OAuth code exchange.
+    if (url.host === "github.com" && method === "POST" && path === "/login/oauth/access_token") return this.exchange(extra.body);
+    if (method === "DELETE" && (m = /^\/applications\/([^/]+)\/token$/.exec(path))) {
+      const [id, secret] = Buffer.from(extra.basic ?? "", "base64").toString("utf8").split(":");
+      if (!this.oauthClient || id !== this.oauthClient.clientId || secret !== this.oauthClient.clientSecret || decodeURIComponent(m[1]) !== id) return json(401, { message: "Bad credentials" });
+      const t = String(extra.body?.access_token ?? "");
+      if (!this.userTokens.delete(t)) return json(404, { message: "Not Found" });
+      this.revokedUserTokens.push(t);
+      return json(204, null);
+    }
     if (method === "POST" && (m = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(path))) {
       const err = this.checkAppJwt(bearer);
       if (err) return err;
@@ -419,15 +454,46 @@ export class FakeGitHubServer {
       return this.page(this.instRepos(i), url, "repositories", (r) => this.repoJson(r, r.owner));
     }
     const me = bearer ? this.userTokens.get(bearer) : undefined;
+    if (method === "GET" && path === "/user") {
+      const u = me ? this.users.get(me) : undefined;
+      return me && u ? json(200, { id: u.id, login: u.login, type: "User" }) : json(401, { message: "Bad credentials" });
+    }
+    if (method === "GET" && (m = /^\/user\/memberships\/orgs\/([^/]+)$/.exec(path))) {
+      if (!me) return json(401, { message: "Bad credentials" });
+      if (this.forbidOrgMemberships) return json(403, { message: "Resource not accessible by integration" });
+      const org = this.orgs.get(decodeURIComponent(m[1]));
+      if (!org || !org.members.has(me)) return json(404, { message: "Not Found" });
+      return json(200, { state: "active", role: org.owners.has(me) ? "admin" : "member", organization: { login: org.login, id: org.id } });
+    }
     if (path === "/user/installations" || /^\/user\/installations\/\d+\/repositories$/.test(path)) {
       if (!me) return json(401, { message: "Bad credentials" });
-      const mine = (i: FakeInstallation) => !i.suspended && (i.accountLogin === me || !!this.orgs.get(i.accountLogin)?.members.has(me));
+      const mine = (i: FakeInstallation) => (this.listSuspendedForUsers || !i.suspended) && (i.accountLogin === me || !!this.orgs.get(i.accountLogin)?.members.has(me));
       if (path === "/user/installations") return this.page([...this.installations.values()].filter(mine).sort((a, b) => a.id - b.id), url, "installations", (i) => this.instJson(i));
       const i = this.installations.get(Number(/\/(\d+)\//.exec(path)![1]));
       if (!i || !mine(i)) return json(404, { message: "Not Found" });
       return this.page(this.instRepos(i).filter((r) => this.canRead(r, me)), url, "repositories", (r) => this.repoJson(r, me));
     }
     return json(404, { message: "Not Found" });
+  }
+
+  /** POST github.com/login/oauth/access_token. Like GitHub, a refusal is a 200 with an `error` field. Checks client id and secret, single use, redirect_uri and PKCE (S256). */
+  private exchange(b: any): Response {
+    const record = (ok: boolean) => this.oauthExchanges.push({ code: String(b?.code ?? ""), redirectUri: String(b?.redirect_uri ?? ""), verifier: typeof b?.code_verifier === "string" ? b.code_verifier : null, ok });
+    const refuse = (error: string) => {
+      record(false);
+      return json(200, { error });
+    };
+    if (!this.oauthClient || b?.client_id !== this.oauthClient.clientId || b?.client_secret !== this.oauthClient.clientSecret) return refuse("incorrect_client_credentials");
+    const c = this.oauthCodes.get(String(b?.code ?? ""));
+    if (!c || c.used) return refuse("bad_verification_code");
+    c.used = true;
+    if (c.redirectUri !== b.redirect_uri) return refuse("redirect_uri_mismatch");
+    if (c.challenge !== null) {
+      const v = typeof b.code_verifier === "string" ? b.code_verifier : "";
+      if (!v || createHash("sha256").update(v).digest("base64url") !== c.challenge) return refuse("bad_verification_code");
+    }
+    record(true);
+    return json(200, { access_token: this.issueUserToken(c.login), token_type: "bearer", scope: "" });
   }
 
   private putObj(r: FakeRepo, o: Obj): string {

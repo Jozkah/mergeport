@@ -8,7 +8,7 @@
 export const ROLES = ["OWNER", "ADMIN", "MEMBER", "READER"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const ACTIONS = ["read", "write", "manageMembers", "manageSpaces", "changeRoles", "transferOwnership", "deleteWorkspace", "leaveWorkspace"] as const;
+export const ACTIONS = ["read", "write", "manageMembers", "manageSpaces", "manageGithub", "changeRoles", "transferOwnership", "deleteWorkspace", "leaveWorkspace"] as const;
 export type Action = (typeof ACTIONS)[number];
 
 /** Who is asking. A viewer without `status` is taken as ACTIVE (Viewer objects only exist for active members). */
@@ -32,7 +32,7 @@ const notOwner = (r: Resource) => r.targetRole !== "OWNER" && r.newRole !== "OWN
  * POLICY[action][role]. A function rule decides from the resource; `true` is unconditional.
  *  - READER reads and may leave; nothing else.
  *  - MEMBER writes where the space allows it.
- *  - ADMIN manages members (READER, MEMBER, ADMIN, never the OWNER, never to OWNER) and spaces. ADMIN writes like MEMBER.
+ *  - ADMIN manages members (READER, MEMBER, ADMIN, never the OWNER, never to OWNER), spaces and the GitHub connection (manageGithub). ADMIN writes like MEMBER.
  *  - OWNER does all of that plus transferring ownership (to an ACTIVE ADMIN) and deleting the workspace. The OWNER cannot leave.
  */
 export const POLICY: Record<Action, Record<Role, Rule>> = {
@@ -45,6 +45,7 @@ export const POLICY: Record<Action, Record<Role, Rule>> = {
   },
   manageMembers: { OWNER: notOwner, ADMIN: notOwner, MEMBER: false, READER: false },
   manageSpaces: { OWNER: true, ADMIN: true, MEMBER: false, READER: false },
+  manageGithub: { OWNER: true, ADMIN: true, MEMBER: false, READER: false },
   changeRoles: { OWNER: notOwner, ADMIN: notOwner, MEMBER: false, READER: false },
   transferOwnership: {
     OWNER: (r) => (r.targetRole === undefined && r.targetActive === undefined) || (r.targetRole === "ADMIN" && r.targetActive === true),

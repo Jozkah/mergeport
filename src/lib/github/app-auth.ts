@@ -194,7 +194,7 @@ export async function mintInstallationToken(installation: BoundInstallation, opt
 }
 
 /** Reads at most MAX_BODY_BYTES; larger is an error. Streams when it can so an endless body is cut off early. */
-async function readCapped(res: Response): Promise<string> {
+export async function readCapped(res: Response): Promise<string> {
   const declared = Number(res.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) throw new GithubAppError("unavailable", "GitHub returned an oversize response.", res.status);
   if (!res.body) {

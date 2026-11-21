@@ -2,7 +2,9 @@ import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
 import { activeWorkspaces } from "@/lib/auth/workspaces";
-import { Banner } from "@/components/ui/primitives";
+import { GithubConnectionBanner } from "@/components/shell/GithubConnectionBanner";
+import { connectionState } from "@/lib/github/connection-state";
+import { can } from "@/lib/authz/roles";
 import { isHosted } from "@/lib/public-url";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { readScope, scopeKey } from "@/lib/scope";
@@ -73,6 +75,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   };
   const last = lastSync._max.lastSyncedAt;
   const profile = await checkProfile(); // last known answer; refreshed in the background, never waits on gh
+  const githubState = profile.kind === "hosted" ? await connectionState(db, viewer.workspaceId) : "ok";
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   const [spaceCount, conflictRows, restoreRows, quarantined, pendingOps, offlineSpaces] = await Promise.all([
     db.space.count({ where: { workspaceId: viewer.workspaceId } }),
@@ -141,11 +144,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
           <Topbar aiQuick={aiQuick} workspaces={workspaces} accountSwitcher={hosted ? accountSwitcher : undefined} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} hosted={hosted} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
-        {profile.kind === "hosted" && (
+        {profile.kind === "hosted" && githubState !== "ok" && (
           <div className="px-4 pt-3 lg:px-6">
-            <Banner tone="warn" dismissible storageKey="github-not-connected" title="GitHub is not connected yet">
-              Repository sync and GitHub actions are off. Your workspace data is still here.
-            </Banner>
+            <GithubConnectionBanner state={githubState} manage={can(viewer, "manageGithub")} />
           </div>
         )}
         {profile.kind === "mismatch" && (

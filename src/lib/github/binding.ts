@@ -1,10 +1,12 @@
 import type { Db } from "@/lib/db";
+import { audit } from "@/lib/services/audit";
 import { makeBoundInstallation, type BoundInstallation } from "./bound-installation";
 
 /**
- * The only file that writes `Repository.installationId` or issues a `BoundInstallation` (tests/github-app-bindings.test.ts enforces both).
- * The database backs this up: `Repository (workspaceId, installationId)` is a composite foreign key to `WorkspaceInstallation`, so a
- * repository can never name an installation its workspace has not bound.
+ * The only file that writes `Repository.installationId`, writes or deletes a `WorkspaceInstallation`, or issues a `BoundInstallation`
+ * (tests/github-app-bindings.test.ts enforces the first and the last). The database backs this up: `Repository (workspaceId,
+ * installationId)` is a composite foreign key to `WorkspaceInstallation`, so a repository can never name an installation its
+ * workspace has not bound.
  */
 
 /**
@@ -30,12 +32,83 @@ export async function setRepositoryInstallation(db: Db, workspaceId: string, rep
 
 /**
  * Removes the workspace's binding. Repositories that name the installation are detached first (the foreign key does not allow
- * deleting a binding that repositories still reference), in one transaction.
+ * deleting a binding that repositories still reference), in one transaction with the audit record. Planning data is never touched.
  */
-export async function unbindInstallation(db: Db, workspaceId: string, installationId: bigint): Promise<boolean> {
+export async function unbindInstallation(db: Db, workspaceId: string, installationId: bigint, actorUserId: string | null = null): Promise<boolean> {
   return db.$transaction(async (tx) => {
-    await tx.repository.updateMany({ where: { workspaceId, installationId }, data: { installationId: null } });
+    const detached = await tx.repository.updateMany({ where: { workspaceId, installationId }, data: { installationId: null } });
     const r = await tx.workspaceInstallation.deleteMany({ where: { workspaceId, installationId } });
+    if (r.count === 1) await audit(tx, { workspaceId, userId: actorUserId }, "github.disconnect", { type: "GithubInstallation", id: String(installationId) }, { repositoriesDetached: detached.count });
     return r.count === 1;
   });
+}
+
+/** What GitHub says about an installation (`GET /app/installations/:id`, signed with the app JWT). Public account facts only. */
+export type InstallationFacts = {
+  installationId: bigint;
+  accountGithubId: bigint;
+  accountLogin: string;
+  accountType: "USER" | "ORGANIZATION";
+  repositorySelection: "ALL" | "SELECTED";
+  suspendedAt: Date | null;
+};
+
+/** How control was proved: the GitHub user whose user-to-server token did it, and the method (for example `user-installations:org-admin`). */
+export type InstallationProof = { githubUserId: bigint; method: string };
+
+/**
+ * The ONLY writer of a binding. Stores the installation's public facts (global row), creates the workspace's binding with its proof
+ * and writes the audit record, in one transaction. Callers must have verified the proof already; this function does not talk to GitHub.
+ * The same workspace and installation again is idempotent: the facts and the proof are refreshed, the original connector is kept, and
+ * the audit record says so. A deleted mark is cleared (GitHub just answered for this installation); a suspended time follows GitHub.
+ */
+export async function bindInstallation(
+  db: Db,
+  input: { workspaceId: string; connectedByUserId: string; facts: InstallationFacts; proof: InstallationProof; now?: Date },
+): Promise<{ created: boolean }> {
+  const { workspaceId, connectedByUserId, facts, proof } = input;
+  const now = input.now ?? new Date();
+  return db.$transaction(async (tx) => {
+    const data = { accountGithubId: facts.accountGithubId, accountLogin: facts.accountLogin, accountType: facts.accountType, repositorySelection: facts.repositorySelection, suspendedAt: facts.suspendedAt, deletedAt: null };
+    await tx.githubInstallation.upsert({ where: { installationId: facts.installationId }, create: { installationId: facts.installationId, ...data }, update: data });
+    const existing = await tx.workspaceInstallation.findFirst({ where: { workspaceId, installationId: facts.installationId }, select: { id: true } });
+    if (existing) await tx.workspaceInstallation.updateMany({ where: { id: existing.id, workspaceId }, data: { verifiedAt: now, verifiedGithubUserId: proof.githubUserId, proofMethod: proof.method } });
+    else await tx.workspaceInstallation.create({ data: { workspaceId, installationId: facts.installationId, connectedByUserId, verifiedAt: now, verifiedGithubUserId: proof.githubUserId, proofMethod: proof.method } });
+    await audit(tx, { workspaceId, userId: connectedByUserId }, "github.connect", { type: "GithubInstallation", id: String(facts.installationId) }, { account: facts.accountLogin, accountType: facts.accountType, proof: proof.method, again: Boolean(existing) });
+    return { created: !existing };
+  });
+}
+
+/**
+ * Refreshes the global facts of an installation from a fresh GitHub answer ("Check again"). Never creates a binding: callers have
+ * already checked that the workspace has one.
+ */
+export async function refreshInstallationFacts(db: Db, facts: InstallationFacts): Promise<void> {
+  await db.githubInstallation.updateMany({
+    where: { installationId: facts.installationId },
+    data: { accountGithubId: facts.accountGithubId, accountLogin: facts.accountLogin, accountType: facts.accountType, repositorySelection: facts.repositorySelection, suspendedAt: facts.suspendedAt, deletedAt: null },
+  });
+}
+
+/** GitHub said the installation is gone (404) or suspended (403): remember it so the page shows it and no token is requested for it. */
+export async function markInstallationLoss(db: Db, installationId: bigint, kind: "gone" | "suspended", now = new Date()): Promise<void> {
+  await db.githubInstallation.updateMany({
+    where: { installationId, ...(kind === "gone" ? { deletedAt: null } : { suspendedAt: null }) },
+    data: kind === "gone" ? { deletedAt: now } : { suspendedAt: now },
+  });
+}
+
+export type InstallationStatus = "active" | "suspended" | "removed";
+
+/** The workspace's bindings with the installation's facts, newest first, for the settings page. */
+export async function listWorkspaceInstallations(db: Db, workspaceId: string) {
+  const rows = await db.workspaceInstallation.findMany({ where: { workspaceId }, include: { installation: true }, orderBy: [{ createdAt: "desc" }, { id: "asc" }] });
+  return rows.map((r) => ({
+    installationId: r.installationId,
+    accountLogin: r.installation.accountLogin,
+    accountType: r.installation.accountType,
+    repositorySelection: r.installation.repositorySelection,
+    status: (r.installation.deletedAt ? "removed" : r.installation.suspendedAt ? "suspended" : "active") as InstallationStatus,
+    connectedAt: r.createdAt,
+  }));
 }

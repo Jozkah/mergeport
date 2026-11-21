@@ -9,6 +9,7 @@ const EXPECT: Record<Action, Record<Role, boolean>> = {
   write: { OWNER: true, ADMIN: true, MEMBER: true, READER: false },
   manageMembers: { OWNER: true, ADMIN: true, MEMBER: false, READER: false },
   manageSpaces: { OWNER: true, ADMIN: true, MEMBER: false, READER: false },
+  manageGithub: { OWNER: true, ADMIN: true, MEMBER: false, READER: false },
   changeRoles: { OWNER: true, ADMIN: true, MEMBER: false, READER: false },
   transferOwnership: { OWNER: true, ADMIN: false, MEMBER: false, READER: false },
   deleteWorkspace: { OWNER: true, ADMIN: false, MEMBER: false, READER: false },

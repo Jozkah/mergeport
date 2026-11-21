@@ -20,6 +20,7 @@ became OWNER; a workspace with no ACTIVE ADMIN gives it to its oldest ACTIVE mem
 | touch the OWNER (remove, demote, change role) | no | no | no | no |
 | hand out OWNER (invite as OWNER, role change to OWNER) | no | no | no | no |
 | create and delete spaces, edit space membership, move projects between spaces | yes | yes | no | no |
+| connect and disconnect the GitHub App installation (`manageGithub`) | yes | yes | no | no |
 | transfer ownership (to an ACTIVE ADMIN) | yes | no | no | no |
 | delete the workspace (policy only; no UI yet) | yes | no | no | no |
 | leave the workspace | no (transfer first) | yes | yes | yes |

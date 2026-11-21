@@ -18,7 +18,8 @@ import { watchView } from "@/lib/local/repo-watch";
 import { WATCH_MAX_REPOS_LIMIT, WATCH_MAX_REPOS_MIN, WATCH_MAX_SECONDS, WATCH_MIN_SECONDS } from "@/lib/local/watch-format";
 import { planAutoSetup } from "@/lib/services/auto-setup";
 import { db } from "@/lib/db";
-import { Bell, Globe, Newspaper, Users, Wand2 } from "@/components/ui/icons";
+import { Bell, Building2, Globe, Newspaper, Users, Wand2 } from "@/components/ui/icons";
+import { listWorkspaceInstallations } from "@/lib/github/binding";
 import { isHosted } from "@/lib/public-url";
 import { federationState } from "@/lib/federation/config";
 import Link from "next/link";
@@ -47,6 +48,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   // Counts for the panel summaries (hosted only: these panels do not exist locally).
   const memberCount = hosted ? await db.member.count({ where: { workspaceId: viewer.workspaceId, status: "ACTIVE" } }) : 0;
   const linkCount = hosted && viewer.isAdmin ? await db.federationLink.count({ where: { workspaceId: viewer.workspaceId, status: "ACTIVE" } }) : 0;
+  const ghInstalls = hosted && !isDemo() ? await listWorkspaceInstallations(db, viewer.workspaceId) : [];
+  const ghActive = ghInstalls.filter((i) => i.status === "active").length;
   const poll = (await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } }))?.pollSeconds ?? 30;
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
@@ -73,6 +76,15 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <p className="flex flex-wrap items-center gap-2">Your role: <RoleChip role={viewer.role} /></p>
               <p className="mt-2">{viewer.isAdmin ? "Invite people by email, change roles and control who sees which space." : "You can leave the workspace from the members page."}</p>
               <Link href="/settings/members" className="btn mt-3">Open members</Link>
+            </div>
+          </Panel>
+        )}
+        {hosted && !isDemo() && (
+          <Panel title={<>GitHub (<span className="tnum">{ghActive}</span>)</>} icon={Building2} id="github" summary={ghInstalls.length === 0 ? "Not connected" : `${ghActive} of ${ghInstalls.length} active`}>
+            <div className="p-4 text-[13px]">
+              <p>{ghInstalls.length === 0 ? "GitHub is not connected, so repository sync and GitHub actions are off." : <><span className="tnum">{ghActive}</span> of <span className="tnum">{ghInstalls.length}</span> connected GitHub account{ghInstalls.length === 1 ? " is" : "s are"} active.</>}</p>
+              <p className="mt-2 text-ink-3">{viewer.isAdmin ? "Connect a GitHub account, or disconnect one. You prove on GitHub that you control it." : "Only the owner and administrators can connect or disconnect GitHub."}</p>
+              <Link href="/settings/github" className="btn mt-3">{viewer.isAdmin ? "Open GitHub settings" : "See status"}</Link>
             </div>
           </Panel>
         )}
