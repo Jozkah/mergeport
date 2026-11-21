@@ -1,4 +1,6 @@
 import { createElement } from "react";
+import { TooltipProvider } from "@/components/ui/Tooltip";
+import { DesktopOnly } from "@/components/ui/DesktopOnly";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestPrisma } from "./pg";
@@ -193,6 +195,9 @@ function text(el: unknown): string {
   return out.join(" ");
 }
 
+/** Components that render other components (the desktop-only page) are rendered to HTML, so their own text is seen. */
+const markup = (el: unknown) => renderToStaticMarkup(createElement(TooltipProvider, null, el as never));
+
 describe("hosted mode shows no desktop-only wording", () => {
   async function signedIn() {
     vi.stubEnv("MERGEPORT_PUBLIC_URL", ORIGIN);
@@ -215,8 +220,8 @@ describe("hosted mode shows no desktop-only wording", () => {
     digest: () => import("@/app/(app)/digest/page").then((m) => m.default({ searchParams: Promise.resolve({}) } as never)),
     settings: () => import("@/app/(app)/settings/page").then((m) => m.default({ searchParams: Promise.resolve({}) })),
     "settings/members": () => import("@/app/(app)/settings/members/page").then((m) => m.default()),
-    "desktop-only (team)": () => import("@/app/(app)/team/page").then((m) => m.default({ searchParams: Promise.resolve({}) } as never)),
-    "desktop-only (branches)": () => import("@/app/(app)/branches/page").then((m) => m.default({ searchParams: Promise.resolve({}) })),
+    "desktop-only (team)": () => import("@/app/(app)/team/page").then(async () => text(await DesktopOnly())),
+    "desktop-only (branches)": () => import("@/app/(app)/branches/page").then(async () => text(await DesktopOnly())),
   });
 
   it("none of the banned phrases appears on the key pages", async () => {
@@ -232,20 +237,20 @@ describe("hosted mode shows no desktop-only wording", () => {
   it("the desktop-only pages say so and point back, instead of a 404", async () => {
     await signedIn();
     for (const path of ["team", "branches"]) {
-      const t = text(await (await import(`@/app/(app)/${path}/page`)).default({ searchParams: Promise.resolve({}) })).toLowerCase();
-      expect(t, path).toContain("this page is for the desktop app");
+      const el = (await (await import(`@/app/(app)/${path}/page`)).default({ searchParams: Promise.resolve({}) })) as { type: unknown };
+      expect(el.type, path).toBe(DesktopOnly); // the page IS the explanation, not a 404
+      expect(text(DesktopOnly()).toLowerCase(), path).toContain("this page is for the desktop app");
     }
   });
 
   // Components that hold wording of their own are rendered with the hosted flag, so a local-only sentence cannot slip back in.
   it("the settings and shell components carry no desktop-only wording when hosted", async () => {
-    const [{ NotificationSettings }, { AiSettingsPanel }, { BackupPanel }, { DigestActions }, { SyncBadge }, { DesktopOnly }] = await Promise.all([
+    const [{ NotificationSettings }, { AiSettingsPanel }, { BackupPanel }, { DigestActions }, { SyncBadge }] = await Promise.all([
       import("@/components/settings/NotificationSettings"),
       import("@/components/settings/AiSettingsPanel"),
       import("@/components/settings/BackupPanel"),
       import("@/components/digest/DigestActions"),
       import("@/components/sync/SyncBadge"),
-      import("@/components/ui/DesktopOnly"),
     ]);
     const prefs = { kinds: {}, quiet: { enabled: false, from: "22:00", to: "07:00" }, digest: { enabled: true, hour: 8 } } as never;
     const states = ["synced", "pending", "syncing", "reconnecting", "offline", "conflict", "revoked", "signin", "rate-limited", "schema", "read-only"] as const;
@@ -253,8 +258,8 @@ describe("hosted mode shows no desktop-only wording", () => {
       renderToStaticMarkup(createElement(AiSettingsPanel, { baseUrl: "", hasKey: true, model: null, autopilot: "suggest", hosted: true })),
       renderToStaticMarkup(createElement(BackupPanel, { hosted: true })),
       renderToStaticMarkup(createElement(DigestActions, { day: "2026-01-01", read: false, hosted: true })),
-      ...states.map((s) => renderToStaticMarkup(createElement(SyncBadge, { state: s, hosted: true }))),
-      renderToStaticMarkup(createElement(DesktopOnly)),
+      ...states.map((s) => markup(createElement(SyncBadge, { state: s, hosted: true }))),
+      text(DesktopOnly()),
     ];
     try {
       html.push(renderToStaticMarkup(createElement(NotificationSettings, { initial: prefs, hosted: true })));

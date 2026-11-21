@@ -28,6 +28,7 @@ type Allow = { file: string; fn: string; reason: string };
 const ALLOW: Allow[] = [
   { file: "src/app/account-actions.ts", fn: "createWorkspaceAction", reason: "Identity level: a person with no workspace yet creates their first one. There is no workspace role to check." },
   { file: "src/app/account-actions.ts", fn: "signOutEverywhereAction", reason: "Ends the caller's own sessions; touches no workspace data." },
+  { file: "src/app/account-actions.ts", fn: "signOutEverywhereFormAction", reason: "The Settings sheet's form action: it only calls signOutEverywhereAction (own sessions, no workspace data)." },
   { file: "src/app/account-actions.ts", fn: "switchWorkspaceAction", reason: "Chooses among the caller's own ACTIVE memberships; selectWorkspace re-checks membership." },
   { file: "src/app/invite/actions.ts", fn: "acceptInviteAction", reason: "The caller is not a member yet; acceptInvitation checks the token and the verified address." },
   { file: "src/app/invite/actions.ts", fn: "acceptPendingInviteAction", reason: "Same as acceptInviteAction: the caller is not a member yet; the invitation is listed to their verified address and accepted by id under the same checks." },
