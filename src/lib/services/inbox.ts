@@ -17,8 +17,9 @@ export type InboxEntry = { item: DerivedItem["item"]; derived: DerivedItem; reas
 
 const SUBJECT = "work-item";
 
-export function itemVersion(d: DerivedItem, login: string): string {
-  const me = login.toLowerCase();
+/** `login` is the viewer's GitHub login (Viewer.githubLogin); null for someone without a linked account, who has no review requests of their own. */
+export function itemVersion(d: DerivedItem, login: string | null): string {
+  const me = (login ?? "\u0000no-github-login").toLowerCase();
   const others = d.item.comments.filter((c) => c.authorLogin?.toLowerCase() !== me);
   const lastOther = others.reduce((m, c) => Math.max(m, c.updatedAtGh.getTime(), c.createdAtGh.getTime()), 0);
   const myRequest = d.item.reviewRequests.filter((r) => !r.removedAt && r.kind === "USER" && r.reviewerRef.toLowerCase() === me).reduce((m, r) => Math.max(m, r.requestedAt.getTime()), 0);
@@ -38,7 +39,7 @@ export async function inbox(db: Db, v: Viewer, opts: { now?: Date; status?: Inbo
 
   const all: InboxEntry[] = [];
   for (const { d, reasons } of byId.values()) {
-    const version = itemVersion(d, v.login);
+    const version = itemVersion(d, v.githubLogin);
     const s = states.get(d.item.id);
     const done = !!s && s.doneVersion === version;
     const snoozed = !done && !!s?.snoozeUntil && s.snoozeUntil > now && s.snoozeVersion === version;

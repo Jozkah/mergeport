@@ -1,4 +1,4 @@
-import { isExternal, type ActorStatus, type ReviewDerivation, type ReviewInput, type Reviewer } from "./review";
+import { NO_GITHUB_LOGIN, isExternal, type ActorStatus, type ReviewDerivation, type ReviewInput, type Reviewer } from "./review";
 import { labelsMatch } from "./rules";
 
 /**
@@ -55,7 +55,8 @@ const key = (r: Reviewer) => `${r.kind}:${r.kind === "EXTERNAL_ROLE" ? r.ref : r
  * their own pull request). The viewer is never "someone else", so rules naming the viewer add nothing to the others' queues.
  * Blocked and changes-requested states keep their priority; only an otherwise unknown or approved item takes the waiting status.
  */
-export function applyWaitingRules(d: ReviewDerivation, input: ReviewInput, matched: WaitingRuleRow[], viewerLogin: string): ReviewDerivation {
+export function applyWaitingRules(d: ReviewDerivation, input: ReviewInput, matched: WaitingRuleRow[], viewerLoginOrNull: string | null): ReviewDerivation {
+  const viewerLogin = viewerLoginOrNull ?? NO_GITHUB_LOGIN;
   if (matched.length === 0 || input.state !== "OPEN") return d;
   const have = new Set(d.actors.map((a) => key(a.actor)));
   const added: ActorStatus[] = [];

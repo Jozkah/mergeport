@@ -16,10 +16,19 @@ App on their GitHub account or organisation; Mergeport then acts through short-l
 | Connect flow: Settings > GitHub, the start actions, the callback route (`/api/github/app/callback`), proof of control, disconnect, "Check again" | Implemented (not yet run against live GitHub, see "Needs a live check") |
 | Loss detection when a token cannot be minted (`installation-health.ts`: `withInstallationHealth`, `noteInstallationError`) | Implemented; wrapping the factory's token provider with it is the next task |
 | Webhook route (`/api/github/webhook`) | Later task |
-| Rewiring the GitHub port, factory and handlers to installation tokens | Later task |
-| User OAuth for signing in, identity linking, visibility rules | Later task |
+| Read-only data access: `portForSync` / `portForDiscovery` use the repository's (workspace's) installation token; `GET /installation/repositories` listing and admin tracking on "Connect repositories"; sync, reconcile and budgets per installation; private repositories visible by grant only | Implemented (this phase) |
+| Writes to GitHub (`portForWrite`) | Off: "GitHub writes are not enabled yet" |
+| User OAuth and identity linking (`Viewer.githubLogin` stays null for email users until then) | Later task |
 
-Connecting a workspace changes only the binding. Repositories keep working as before until the factory is rewired.
+A workspace with a proved binding syncs through its installation; one without stays on "GitHub is not connected yet". Setting the variables
+below only validates at startup; what a workspace can read still depends on its bindings.
+
+### Reading through an installation
+
+`Repository.installationId` (set only by `src/lib/github/binding.ts`, when an administrator tracks a repository from "Connect repositories") decides
+which installation reads a repository. Budgets are `installation:<id>`, the ETag cache is partitioned under `inst:<id>:`, and an uninstalled or
+suspended App is recorded by `markInstallationState` and finishes jobs without retry. The token sees everything the installation can access;
+who in the workspace sees a private repository is Mergeport's decision (docs/roles.md, `repoWhere`).
 
 ## Register the App (operator, once per deployment)
 

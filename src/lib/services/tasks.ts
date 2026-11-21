@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
-import { assertProjectWritable, requireProject, type Viewer } from "@/lib/authz/viewer";
+import { assertProjectWritable, repoWhere, requireProject, type Viewer } from "@/lib/authz/viewer";
 import { positionBetween } from "@/lib/domain/planning";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { audit } from "./audit";
@@ -104,7 +104,8 @@ export async function assigneeCandidates(db: Db, v: Viewer, projectId: string): 
     add(t.assigneeLogin);
     add(t.authorLogin);
   }
-  const repoIds = (await db.projectRepository.findMany({ where: { projectId: project.id }, select: { repositoryId: true } })).map((r) => r.repositoryId);
+  // Only repositories this person can see: a project may link a private repository they have no grant on, and its authors are not theirs to learn.
+  const repoIds = (await db.projectRepository.findMany({ where: { projectId: project.id, repository: repoWhere(v) }, select: { repositoryId: true } })).map((r) => r.repositoryId);
   if (repoIds.length) {
     for (const w of await db.workItem.findMany({ where: { repositoryId: { in: repoIds }, state: "OPEN" }, select: { authorLogin: true, assignees: true }, take: 400 })) {
       add(w.authorLogin);

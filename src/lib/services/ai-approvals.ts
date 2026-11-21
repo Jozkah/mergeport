@@ -73,14 +73,19 @@ export async function propose(db: Db, v: Viewer, input: { kind: ActionKind; item
 const detailOf = (kind: string, p: Record<string, unknown>) => (kind === "request-review" ? `Reviewers: ${(p.users as string[]).map((u) => `@${u}`).join(", ")}` : String(p.body ?? "") || "(no text)");
 
 export async function listPending(db: Db, v: Viewer, now = new Date()): Promise<Pending[]> {
-  const rows = await db.aiPendingAction.findMany({ where: { workspaceId: v.workspaceId, state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } }, orderBy: { createdAt: "desc" }, take: 30 });
-  const items = await db.workItem.findMany({ where: { id: { in: rows.map((r) => r.workItemId) } }, select: { id: true, type: true } });
+  const candidates = await db.aiPendingAction.findMany({ where: { workspaceId: v.workspaceId, state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } }, orderBy: { createdAt: "desc" }, take: 200 });
+  // A request names a pull request or issue; only the ones this person may see are listed (its summary and text are repository content).
+  const items = await db.workItem.findMany({ where: { id: { in: candidates.map((r) => r.workItemId) }, ...viaRepo(v) }, select: { id: true, type: true } });
   const type = new Map(items.map((i) => [i.id, i.type]));
+  const rows = candidates.filter((r) => type.has(r.workItemId)).slice(0, 30);
   return rows.map((r) => ({ id: r.id, kind: r.kind as ActionKind, summary: r.summary, detail: detailOf(r.kind, r.payload as Record<string, unknown>), href: `/${type.get(r.workItemId) === "ISSUE" ? "issues" : "pull-requests"}/${r.workItemId}`, createdAt: r.createdAt, error: r.result && r.result.startsWith("Not sent") ? r.result : null }));
 }
 
 export async function pendingCount(db: Db, v: Viewer, now = new Date()): Promise<number> {
-  return db.aiPendingAction.count({ where: { workspaceId: v.workspaceId, state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } } });
+  const rows = await db.aiPendingAction.findMany({ where: { workspaceId: v.workspaceId, state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } }, select: { workItemId: true }, take: 200 });
+  if (rows.length === 0) return 0;
+  const visible = new Set((await db.workItem.findMany({ where: { id: { in: rows.map((r) => r.workItemId) }, ...viaRepo(v) }, select: { id: true } })).map((i) => i.id));
+  return rows.filter((r) => visible.has(r.workItemId)).length;
 }
 
 /** Performs one approved request as the signed-in person. It is claimed first, so a double click cannot send it twice. */

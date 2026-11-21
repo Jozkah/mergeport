@@ -3,6 +3,7 @@ import { isHosted } from "@/lib/public-url";
 import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
+import { repoWhere } from "@/lib/authz/viewer";
 import { isDemo } from "@/lib/env";
 import { getEngine, getTeamService } from "@/lib/local/runtime";
 import { syncCenter } from "@/lib/services/sync-center";
@@ -35,7 +36,7 @@ export default async function SyncPage() {
   // A job still marked RUNNING by a process that died is not work in progress; it is reclaimed on a timer.
   const bootAt = processStartedAt();
   const own = { isDemo: false, trackingStatus: { not: "REMOVED" as const } };
-  const sourceRepos = await db.repository.findMany({ where: { workspaceId: viewer.workspaceId, ...own }, select: { id: true, fullName: true, trackingStatus: true, rateLimited: true, syncError: true, statusDetail: true, lastSyncedAt: true }, orderBy: { fullName: "asc" } });
+  const sourceRepos = await db.repository.findMany({ where: { AND: [repoWhere(viewer), own] }, select: { id: true, fullName: true, trackingStatus: true, rateLimited: true, syncError: true, statusDetail: true, lastSyncedAt: true }, orderBy: { fullName: "asc" } });
   const [running, queued] = await Promise.all([db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "RUNNING", lockedAt: { gte: bootAt } } }), db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "QUEUED" } })]);
   const source = deriveSourceStatus({
     tracked: sourceRepos.length, running, queued,

@@ -1,7 +1,9 @@
 import { db } from "@/lib/db";
 import { canSpend } from "@/lib/domain/sync";
-import { portForSync } from "@/lib/github/factory";
+import { installationBudgetKey, portForSync } from "@/lib/github/factory";
+import { GithubNotConnectedError } from "@/lib/github/hosted";
 import { GithubError } from "@/lib/github/port";
+import { workspaceGithubStatus } from "@/lib/github/status";
 import type { Handler, JobRow } from "@/lib/jobs";
 import { UPDATE_JOB, maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
 import { isHosted } from "@/lib/public-url";
@@ -19,8 +21,19 @@ export const RECONCILE_EVERY_MS = 15 * 60_000;
 export const DIGEST_EVERY_MS = 10 * 60_000;
 export const AI_AUTOPILOT_EVERY_MS = 30 * 60_000;
 
-export async function guardSourceBudget() {
-  const rl = await db.rateLimitState.findUnique({ where: { key: SOURCE_BUDGET_KEY } });
+/**
+ * The rate-limit budget a repository's jobs spend from. The local app has one credential and one budget ("source"). A hosted
+ * repository spends from its INSTALLATION's budget (`installation:<id>`): GitHub's quota belongs to the installation token, which
+ * every workspace using that installation shares, and one installation running dry must not stall the others.
+ */
+export async function sourceBudgetKeyFor(repositoryId: string): Promise<string> {
+  if (!isHosted()) return SOURCE_BUDGET_KEY;
+  const repo = await db.repository.findUnique({ where: { id: repositoryId }, select: { installationId: true } });
+  return repo?.installationId != null ? installationBudgetKey(repo.installationId) : SOURCE_BUDGET_KEY;
+}
+
+export async function guardSourceBudget(key: string = SOURCE_BUDGET_KEY) {
+  const rl = await db.rateLimitState.findUnique({ where: { key } });
   const state = rl ? { remaining: rl.remaining, limit: rl.limit, resetAt: rl.resetAt } : null;
   if (!canSpend(state, 10, 25)) {
     const secs = Math.max(30, Math.ceil((state!.resetAt.getTime() - Date.now()) / 1000));
@@ -28,9 +41,9 @@ export async function guardSourceBudget() {
   }
 }
 
-async function recordRate(rate: { remaining: number; limit: number; resetAt: Date } | null) {
+async function recordRate(rate: { remaining: number; limit: number; resetAt: Date } | null, key: string = SOURCE_BUDGET_KEY) {
   if (!rate) return;
-  await db.rateLimitState.upsert({ where: { key: SOURCE_BUDGET_KEY }, create: { key: SOURCE_BUDGET_KEY, ...rate }, update: { ...rate } });
+  await db.rateLimitState.upsert({ where: { key }, create: { key, ...rate }, update: { ...rate } });
 }
 
 /**
@@ -53,13 +66,14 @@ export async function forEachWorkspace(d: typeof db, label: string, fn: (workspa
 
 const rawHandlers: Record<string, Handler> = {
   "sync.repository": (async (p: { repositoryId: string; full?: boolean }, job: JobRow) => {
-    await guardSourceBudget();
+    const budget = await sourceBudgetKeyFor(p.repositoryId);
+    await guardSourceBudget(budget);
     const port = await portForSync(db, p.repositoryId);
     if (!port) return;
     try {
       await syncRepository(db, port, p.repositoryId, { full: p.full });
     } finally {
-      await recordRate(port.lastRate());
+      await recordRate(port.lastRate(), budget);
     }
     // The data of this repository changed: redraw the open pages (also right for the Refresh button).
     (await import("@/lib/local/runtime")).notifyChange("pulled");
@@ -68,22 +82,31 @@ const rawHandlers: Record<string, Handler> = {
     for (const m of maps) await enqueue(db, { type: "sync.fork", payload: { mappingId: m.id }, dedupeKey: `fork:${m.id}`, workspaceId: job.workspaceId });
   }) as Handler,
   "sync.item": (async (p: { repositoryId: string; number: number }) => {
-    await guardSourceBudget();
+    const budget = await sourceBudgetKeyFor(p.repositoryId);
+    await guardSourceBudget(budget);
     const port = await portForSync(db, p.repositoryId);
-    if (port) await syncItem(db, port, p.repositoryId, p.number);
+    if (port) {
+      try {
+        await syncItem(db, port, p.repositoryId, p.number);
+      } finally {
+        await recordRate(port.lastRate(), budget);
+      }
+    }
   }) as Handler,
   "sync.fork": (async (p: { mappingId: string }) => {
     const m = await db.forkMapping.findUnique({ where: { id: p.mappingId } });
     if (!m) return;
-    await guardSourceBudget();
+    const budget = await sourceBudgetKeyFor(m.forkRepoId);
+    await guardSourceBudget(budget);
     const port = await portForSync(db, m.forkRepoId);
     if (port) {
       try {
         await syncFork(db, port, p.mappingId); // a rate limit is rethrown here, so the job backs off until the reset
       } finally {
-        await recordRate(port.lastRate());
+        await recordRate(port.lastRate(), budget);
       }
     }
+    if (isHosted()) return; // the auto-update (clone and push) and the release watch stay off for hosted workspaces
     await maybeRequestUpdate(db, p.mappingId); // opt-in upstream auto-update, when the fork is now known to be behind
     await maybeRequestReleaseCheck(db, p.mappingId); // opt-in release watch (its own 15-minute cap), whether or not the fork is behind
   }) as Handler,
@@ -107,6 +130,13 @@ const rawHandlers: Record<string, Handler> = {
   "reconcile.all": (async () => {
     const { enqueue } = await import("@/lib/jobs");
     await forEachWorkspace(db, "reconcile.all", async (workspaceId) => {
+      if (isHosted()) {
+        // Only workspaces with a usable GitHub connection, and only repositories served by an installation. Others have nothing to reconcile.
+        if (!(await workspaceGithubStatus(db, workspaceId)).bound) return;
+        const served = await db.repository.findMany({ where: { workspaceId, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false, installationId: { not: null } }, select: { id: true } });
+        for (const r of served) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}`, workspaceId });
+        return;
+      }
       const repos = await db.repository.findMany({ where: { workspaceId, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
       for (const r of repos) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}`, workspaceId });
       // A fork that is NOT behind never reaches an update request, so release watches are asked for here as well (each capped to one check per ~15 minutes).
@@ -131,12 +161,26 @@ const rawHandlers: Record<string, Handler> = {
 };
 
 /**
- * Jobs that reach GitHub with the server's own credential. A hosted deployment has none per workspace yet, so these finish at once
- * as no-ops (the job is DONE, not failed and retried) until the GitHub App phase. digest.daily and ai.autopilot never touch GitHub and
- * keep running.
+ * Jobs that reach GitHub. Hosted, there is no server credential to use: the source-sync jobs (sync.repository, sync.item, sync.fork)
+ * and reconcile.all run through the repository's own installation (portForSync). A repository without a usable connection has
+ * nothing to do, so its job finishes as a no-op (DONE, not failed and retried: a connection that went away is recorded once, and a
+ * retry would only repeat it). A rate limit still fails the job so it backs off until the reset. The upstream auto-update (clone and
+ * push) and the release watch stay off for hosted workspaces. digest.daily and ai.autopilot never touch GitHub and keep running.
  */
-const GITHUB_BOUND_JOBS = new Set(["sync.repository", "sync.item", "sync.fork", UPDATE_JOB, RELEASES_JOB, "reconcile.all"]);
+const HOSTED_SOURCE_JOBS = new Set(["sync.repository", "sync.item", "sync.fork", "reconcile.all"]);
+const HOSTED_OFF_JOBS = new Set([UPDATE_JOB, RELEASES_JOB]);
+const hostedAware = (h: Handler): Handler =>
+  (async (...a: Parameters<Handler>) => {
+    try {
+      return await h(...a);
+    } catch (e) {
+      if (e instanceof GithubNotConnectedError) return; // no usable connection for this repository: nothing to do, nothing to retry
+      throw e;
+    }
+  }) as Handler;
 const skipWhenHosted = (h: Handler): Handler => ((...a: Parameters<Handler>) => (isHosted() ? Promise.resolve() : h(...a))) as Handler;
-export const handlers: Record<string, Handler> = Object.fromEntries(Object.entries(rawHandlers).map(([k, h]) => [k, GITHUB_BOUND_JOBS.has(k) ? skipWhenHosted(h) : h]));
+export const handlers: Record<string, Handler> = Object.fromEntries(
+  Object.entries(rawHandlers).map(([k, h]) => [k, HOSTED_OFF_JOBS.has(k) ? skipWhenHosted(h) : HOSTED_SOURCE_JOBS.has(k) ? hostedAware(h) : h]),
+);
 
 export { setStatus };

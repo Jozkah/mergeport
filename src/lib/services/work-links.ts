@@ -1,5 +1,5 @@
 import type { Db } from "@/lib/db";
-import { requireWorkItem, type Viewer } from "@/lib/authz/viewer";
+import { repoWhere, requireWorkItem, type Viewer } from "@/lib/authz/viewer";
 import { worktreesOnBranch, type LinkedWorktree } from "@/lib/domain/worktree-links";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { requireProjectWrite } from "@/lib/authz/viewer";
@@ -42,7 +42,7 @@ export async function linksForTask(db: Db, v: Viewer, taskId: string): Promise<W
   const t = await loadTask(db, v, taskId);
   const linked = t.workItemId ? await db.workItem.findUnique({ where: { id: t.workItemId }, select: { headRef: true, repositoryId: true, type: true } }) : null;
   const branch = t.branchRef ?? (linked?.type === "PULL_REQUEST" ? linked.headRef : null);
-  const repos = await db.repository.findMany({ where: { workspaceId: v.workspaceId, projects: { some: { projectId: t.projectId } }, ...(linked ? { id: linked.repositoryId } : {}) }, select: { id: true, fullName: true } });
+  const repos = await db.repository.findMany({ where: { AND: [repoWhere(v), { projects: { some: { projectId: t.projectId } }, ...(linked ? { id: linked.repositoryId } : {}) }] }, select: { id: true, fullName: true } });
   return across(db, v, repos, branch);
 }
 

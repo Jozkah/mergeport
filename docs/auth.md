@@ -150,19 +150,23 @@ An OWNER or ADMIN invites an address from Settings > Members (`/settings/members
   (set by the browser, not by page script); cross-site, same-site, none and absent are refused.
 - Audit: `invitation.created/resent/revoked/accepted`.
 
-## Hosted: no GitHub yet (fail-closed list)
+## Hosted: GitHub access (fail-closed list, and the one open door)
 
-The server's `gh` login belongs to whoever installed it, not to a workspace. Until the GitHub App phase gives each workspace its own
-connection, a hosted deployment never uses it. `GithubNotConnectedError` ("GitHub is not connected for this workspace (arrives with the
-GitHub App phase).") is thrown, or the path returns nothing, at:
+The server's `gh` login belongs to whoever installed it, not to a workspace, so a hosted deployment never uses it. The only way a hosted
+workspace reaches GitHub is its own GitHub App installation (docs/github-app.md, docs/tenancy.md "Hosted GitHub access"), read-only.
+`GithubNotConnectedError` ("GitHub is not connected yet...") is thrown, or the path returns nothing, at:
 
 - the gh process runner itself (`exec.ts`: no process is ever spawned), `currentGhStatus`, `credentialHelper`, `assertActiveAccount`, the sign-in "start gh login" action;
-- the profile runner and `profileFetch` (both transports), `ghPort`, `portForSync`, `portForWrite`, `portForDiscovery` (so discovery, tracking, the watchlist action, work-item writes and the repository watcher);
+- the profile runner and `profileFetch` (both transports) and `ghPort`;
+- `portForSync` and `portForDiscovery` for a repository or workspace WITHOUT a usable binding (with one they return the installation-backed port);
 - remote git (`clone`, `fetch`, `push`) in the updater's git writer;
 - `localActor()` returns null, so no sync engine or team service is built; `checkProfile()` answers `hosted` (never asks gh, never shows the server owner's login);
-- scheduler: `sync.repository`, `sync.item`, `sync.fork`, `upstream.update`, release checks and `reconcile.all` finish as no-ops (job DONE, not failed or retried); the coordination lane only schedules the local-only digest and AI jobs.
+- scheduler: `upstream.update` and release checks finish as no-ops (job DONE, not failed or retried); `sync.repository`, `sync.item`, `sync.fork` and
+  `reconcile.all` run for repositories with a binding and finish as no-ops for the rest; the coordination lane schedules `reconcile.all` (every
+  15 minutes) once any workspace is connected, plus the local-only digest and AI jobs.
 
-Server actions report the message instead of "something went wrong", and the app shows it in a banner. No GitHub App integration exists yet.
+`portForWrite` throws `GithubWritesDisabledError` ("GitHub writes are not enabled yet"): the App holds read permissions only, and the UI shows
+that as a disabled state instead of an error toast. Server actions report both messages instead of "something went wrong".
 
 ## Security checklist
 

@@ -17,7 +17,7 @@ async function load(db: Db, v: Viewer, workItemId: string) {
 
 export async function sinceLastLooked(db: Db, v: Viewer, workItemId: string): Promise<{ changes: Change[]; seenAt: Date | null }> {
   const item = await load(db, v, workItemId);
-  const cur = takeSnapshot(item, v.login);
+  const cur = takeSnapshot(item, v.githubLogin);
   const key = { userId_workItemId: { userId: v.userId, workItemId } };
   const prev = await db.seenState.findUnique({ where: key });
   if (!prev) {
@@ -29,6 +29,6 @@ export async function sinceLastLooked(db: Db, v: Viewer, workItemId: string): Pr
 
 export async function markSeen(db: Db, v: Viewer, workItemId: string) {
   const item = await load(db, v, workItemId);
-  const snapshot = takeSnapshot(item, v.login) as never;
+  const snapshot = takeSnapshot(item, v.githubLogin) as never;
   await db.seenState.upsert({ where: { userId_workItemId: { userId: v.userId, workItemId } }, create: { userId: v.userId, workItemId, snapshot }, update: { snapshot, seenAt: new Date() } });
 }

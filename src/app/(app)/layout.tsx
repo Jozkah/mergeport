@@ -6,6 +6,7 @@ import { GithubConnectionBanner } from "@/components/shell/GithubConnectionBanne
 import { connectionState } from "@/lib/github/connection-state";
 import { can } from "@/lib/authz/roles";
 import { isHosted } from "@/lib/public-url";
+import { workspaceGithubStatus } from "@/lib/github/status";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { readScope, scopeKey } from "@/lib/scope";
 import { Suspense } from "react";
@@ -101,13 +102,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const bootAt = processStartedAt();
   const own = { isDemo: false, trackingStatus: { not: "REMOVED" as const } };
   const [tracked, running, queued, refused, rateLimited, failed, neverSynced] = await Promise.all([
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own] } }),
     db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "RUNNING", lockedAt: { gte: bootAt } } }),
     db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "QUEUED" } }),
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, trackingStatus: "DISCONNECTED" } }),
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, rateLimited: true } }),
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, trackingStatus: "ACTIVE", rateLimited: false, syncError: { not: null } } }),
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, lastSyncedAt: null } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own], trackingStatus: "DISCONNECTED" } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own], rateLimited: true } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own], trackingStatus: "ACTIVE", rateLimited: false, syncError: { not: null } } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own], lastSyncedAt: null } }),
   ]);
   const source = deriveSourceStatus({ tracked, running, queued, refused, rateLimited, failed, neverSynced });
   const candidates: { state: SyncStateName; pending: number; conflicts: number; detail?: string; scope?: "source" }[] = [];
@@ -117,6 +118,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Switching needs the launcher's control channel; without it (plain dev server) the label is static, and demo shows nothing.
   const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
   const hosted = isHosted();
+  // One shared answer to "is this workspace connected to GitHub": the not-connected notice shows only until a binding exists.
+  const ghStatus = hosted ? await workspaceGithubStatus(db, viewer.workspaceId) : null;
   const mine = hosted ? await activeWorkspaces(db, user.id) : [];
   const accountSwitcher = mine.length > 1 ? { workspaces: mine, active: viewer.workspaceId } : null;
   const wsList = isDemo() || hosted ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId?.toString() ?? "");

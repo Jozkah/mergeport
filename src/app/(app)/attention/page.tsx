@@ -12,7 +12,7 @@ import { attentionFor } from "@/lib/services/request-cache";
 import { planningWhere, type DerivedItem } from "@/lib/services/queries";
 import { formatDuration, formatInstant } from "@/lib/format";
 import { listTasks } from "@/lib/services/tasks";
-import { EmptyState, Mono, PageHeader, Panel, Segmented, StatusPill, Time, Avatar } from "@/components/ui/primitives";
+import { Banner, EmptyState, Mono, PageHeader, Panel, Segmented, StatusPill, Time, Avatar } from "@/components/ui/primitives";
 import { BellRing, Hourglass, ListChecks } from "@/components/ui/icons";
 import { RepoChip } from "@/components/ui/RepoChip";
 import { StageList } from "@/components/review/StageList";
@@ -108,6 +108,7 @@ export default async function Attention({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="My attention" subtitle="Who is expected to act, and since when." />
+      {viewer.githubLogin === null && <div className="mb-4"><Banner tone="info" title="Link GitHub to see your reviews">Reviews and pull requests are matched to a GitHub account, and yours is not linked yet. Team queues still show.</Banner></div>}
       <AiShortcuts show={await aiEnabled(db, viewer.workspaceId)}><AiTool tool="focus" label="Where should I start?" hint="The AI reads these queues and tells you what to do first." /></AiShortcuts>
       <ScopeNote scope={scope} />
       <ViewBar scope="attention" views={await listViews(db, viewer, "attention")} />

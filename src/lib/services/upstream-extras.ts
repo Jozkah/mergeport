@@ -22,7 +22,7 @@ export type SubscriptionRow = Subscription & { mappingName: string | null };
 
 export async function listSubscriptions(db: Db, v: Viewer): Promise<SubscriptionRow[]> {
   const rows = await db.upstreamSubscription.findMany({ where: { workspaceId: v.workspaceId }, orderBy: { name: "asc" } });
-  const maps = await db.forkMapping.findMany({ where: { id: { in: rows.flatMap((r) => (r.mappingId ? [r.mappingId] : [])) } }, include: { upstream: true } });
+  const maps = await db.forkMapping.findMany({ where: { id: { in: rows.flatMap((r) => (r.mappingId ? [r.mappingId] : [])) }, fork: repoWhere(v), upstream: repoWhere(v) }, include: { upstream: true } }); // a hidden upstream is not named
   const name = new Map(maps.map((m) => [m.id, m.upstream.fullName]));
   return rows.map((r) => ({ id: r.id, name: r.name, criteria: cleanCriteria(r.criteria), muted: r.muted, mappingId: r.mappingId, mappingName: r.mappingId ? (name.get(r.mappingId) ?? null) : null }));
 }

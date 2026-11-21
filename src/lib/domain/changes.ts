@@ -20,8 +20,9 @@ export type Change = { kind: "comments" | "commits" | "checks" | "review" | "sta
 type CommentLike = { kind: string; authorLogin: string | null; createdAtGh: Date; reviewState: string | null };
 type ItemLike = { state: string; headSha: string | null; checksState: string; mergeable: string; title: string; comments: CommentLike[] };
 
-export function takeSnapshot(item: ItemLike, viewerLogin: string): Snapshot {
-  const me = viewerLogin.toLowerCase();
+/** `viewerLogin` is the viewer's GitHub login; without a linked account (null) every comment counts as someone else's. */
+export function takeSnapshot(item: ItemLike, viewerLogin: string | null): Snapshot {
+  const me = (viewerLogin ?? "\u0000no-github-login").toLowerCase();
   const talk = item.comments.filter((c) => (c.kind === "ISSUE_COMMENT" || c.kind === "REVIEW_COMMENT") && c.authorLogin?.toLowerCase() !== me);
   const reviews: Record<string, string> = {};
   for (const c of [...item.comments].filter((c) => c.kind === "REVIEW" && c.authorLogin && c.reviewState).sort((a, b) => a.createdAtGh.getTime() - b.createdAtGh.getTime())) {

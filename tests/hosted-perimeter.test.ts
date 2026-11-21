@@ -155,7 +155,8 @@ describe("hosted fail-closed: nothing reaches the server's own GitHub credential
     const { ghPort, portForDiscovery, portForSync, portForWrite } = await import("@/lib/github/factory");
     expect(() => ghPort(db())).toThrow(GithubNotConnectedError);
     await expect(portForDiscovery(db(), { id: "1", login: "x" })).rejects.toThrow(NOT_CONNECTED);
-    await expect(portForWrite(db(), { id: "1", login: "x" }, { isDemo: false })).rejects.toThrow(NOT_CONNECTED);
+    // Behaviour change of the GitHub App phase: hosted workspaces read through their installation, and writes are off for everyone (not "not connected").
+    await expect(portForWrite(db(), { id: "1", login: "x" }, { isDemo: false })).rejects.toThrow(/GitHub writes are not enabled yet/);
     const ws = await db().workspace.create({ data: { name: "W" } });
     const owner = await db().githubOwner.create({ data: { githubId: 5n, login: "o" } });
     const repo = await db().repository.create({ data: { workspaceId: ws.id, githubId: 9n, ownerId: owner.id, name: "r", fullName: "o/r", htmlUrl: "https://github.com/o/r", visibility: "PRIVATE", defaultBranch: "main" } });

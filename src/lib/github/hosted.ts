@@ -15,6 +15,17 @@ export class GithubNotConnectedError extends Error {
   }
 }
 
+/** Hosted workspaces read GitHub through the App's installation (read-only permissions); nothing writes to GitHub yet. */
+export const GITHUB_WRITES_DISABLED = "GitHub writes are not enabled yet";
+
+export class GithubWritesDisabledError extends Error {
+  readonly code = "github-writes-disabled";
+  constructor() {
+    super(GITHUB_WRITES_DISABLED);
+    this.name = "GithubWritesDisabledError";
+  }
+}
+
 /** Throws GithubNotConnectedError on a hosted deployment. Call before anything that would reach for the local gh credential. */
 export function assertGithubAvailable(): void {
   if (isHosted()) throw new GithubNotConnectedError();

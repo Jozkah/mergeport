@@ -28,7 +28,7 @@ async function loadRuleContext(db: Db, v: Viewer) {
   const [rules, waitingRules, members, projectLinks] = await Promise.all([
     db.reviewRule.findMany({ where: { workspaceId: v.workspaceId } }),
     db.waitingRule.findMany({ where: { workspaceId: v.workspaceId, enabled: true } }),
-    db.member.findMany({ where: { workspaceId: v.workspaceId, status: "ACTIVE" }, include: { user: { select: { login: true } } } }),
+    db.member.findMany({ where: { workspaceId: v.workspaceId, status: "ACTIVE" }, include: { user: { select: { login: true, githubId: true } } } }),
     db.projectRepository.findMany({ where: { project: { workspaceId: v.workspaceId } } }),
   ]);
   const ruleRows: RuleRow[] = rules.map((r) => ({
@@ -43,7 +43,7 @@ async function loadRuleContext(db: Db, v: Viewer) {
     reason: r.reason,
     enabled: r.enabled,
   }));
-  const internalLogins = new Set(members.map((m) => m.user.login.toLowerCase()));
+  const internalLogins = new Set(members.filter((m) => m.user.githubId !== null).map((m) => m.user.login.toLowerCase())); // GitHub logins only: an email user's mailbox name is not one
   const projectsByRepo = new Map<string, string[]>();
   for (const l of projectLinks) (projectsByRepo.get(l.repositoryId) ?? projectsByRepo.set(l.repositoryId, []).get(l.repositoryId)!).push(l.projectId);
   const waitingRows: WaitingRuleRow[] = waitingRules.map((r) => ({
@@ -122,7 +122,8 @@ function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<type
     now,
   };
   const matched = matchingWaitingRules(rc.waitingRows, { repositoryId: row.repositoryId, ownerLogin: row.repository.owner.login, projectIds: rc.projectsByRepo.get(row.repositoryId) ?? [], labels, authorLogin: row.authorLogin, type: row.type, draft: row.draft });
-  const derivation = applyWaitingRules(deriveReview(input, v.login), input, matched, v.login);
+  // GitHub identity only: for an email user `login` is the mailbox name and must never match a GitHub user of the same name.
+  const derivation = applyWaitingRules(deriveReview(input, v.githubLogin), input, matched, v.githubLogin);
   const stages = deriveStages({ derivation, input, matched, manual: row.waiting.map((w) => ({ stage: w.stage, reviewerKind: w.reviewerKind, reviewerRef: w.reviewerRef, reason: w.reason, startedAt: w.startedAt, status: w.status, source: w.source })), now });
   return { item: row, derivation, ruleConflict: res.kind === "conflict" ? res.message : null, manualWaiting, stages, dependencyBlockers: input.blockedByDependencies ?? 0 };
 }

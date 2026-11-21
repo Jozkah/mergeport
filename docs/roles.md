@@ -33,6 +33,17 @@ role string or an unknown action gets nothing.
 - `Viewer.role` is read from the `Member` row on every request (`loadViewer`); `isAdmin` is OWNER or ADMIN, kept for existing checks.
 - `requireAdmin`, `requireRepo(..., "manageWork" | "review")`, `capabilitiesFor`, `assertProjectWritable` and `requireProjectWrite` keep their
   signatures and now go through `can()`. A READER fails every repository write capability even with grant flags set.
+- **Repository visibility (`repoWhere`)** is one rule, and Mergeport (not GitHub's token) decides it. A hosted GitHub App installation token
+  reads every repository the installation can access, so private code is protected here: OWNER and ADMIN see every tracked repository of
+  the workspace; a MEMBER or READER sees a repository only through an explicit, unrevoked `RepositoryGrant`. Public or private does not
+  widen it (a member needs a grant for a public repository too). Lists, counts, search, queues, inbox, digest, AI context, notifications,
+  activity, planning, the federation read API, the CLI and every id route (page or API: a hidden item is "not found", never "forbidden")
+  all go through `repoWhere` / `viaRepo` / `requireRepo`; `tests/github-hosted-visibility.test.ts` walks them. Tracking a repository from
+  an installation is an administrator action and grants nobody anything.
+- **GitHub identity is not the sign-in name.** `Viewer.githubLogin` is the person's GitHub login, or null without a linked GitHub account
+  (`login` is the mailbox local part for an email user). Review queues, the inbox, the digest, review-request notifications and AI context
+  match GitHub data on `githubLogin` only, so an email user named "alice" never inherits the GitHub user "alice"'s reviews. People
+  without a linked account see "Link GitHub to see your reviews" on those pages. The link flow itself is a later task.
 - **Mutating server actions** start with `requireWriter()` (signed in, role may write) or `requireAdminViewer()`. Actions that only
   change the caller's own preferences (timezone, notification and digest settings, inbox state, saved filters, working scope) use
   `requireViewer()` and are listed with a reason in `tests/mutation-guard.test.ts`, which also fails on any exported action in a
