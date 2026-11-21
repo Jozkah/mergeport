@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { unsafeBoundInstallationForTests as bound } from "@/lib/github/bound-installation";
 import { mintInstallationToken, resetInstallationTokenCache } from "@/lib/github/app-auth";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 
@@ -31,7 +32,7 @@ beforeAll(async () => {
 
 describe("fake GitHub: GitHub App routes", () => {
   it("lists the installation and its repositories with an installation token, paginated", async () => {
-    const { token } = await mintInstallationToken(inst, { config: { appId: "777", privateKeyPem: app.privateKeyPem, webhookSecret: "", clientId: "", clientSecret: "", slug: "x" }, fetch: f });
+    const { token } = await mintInstallationToken(bound(inst), { config: { appId: "777", privateKeyPem: app.privateKeyPem, webhookSecret: "", clientId: "", clientSecret: "", slug: "x" }, fetch: f });
     const p1 = await get("/installation/repositories?per_page=3&page=1", token);
     const b1 = await p1.json();
     expect(b1.total_count).toBe(4);
@@ -52,7 +53,7 @@ describe("fake GitHub: GitHub App routes", () => {
     const i = short.addInstallation("u").id;
     short.installationTokenTtlMs = 1000;
     const sf = short.appFetch();
-    const tok = (await mintInstallationToken(i, { config: { appId: "5", privateKeyPem: a.privateKeyPem, webhookSecret: "", clientId: "", clientSecret: "", slug: "x" }, fetch: sf, now: () => now })).token;
+    const tok = (await mintInstallationToken(bound(i), { config: { appId: "5", privateKeyPem: a.privateKeyPem, webhookSecret: "", clientId: "", clientSecret: "", slug: "x" }, fetch: sf, now: () => now })).token;
     expect((await sf(`${B}/installation/repositories`, { headers: { authorization: `Bearer ${tok}` } })).status).toBe(200);
     now += 2000;
     expect((await sf(`${B}/installation/repositories`, { headers: { authorization: `Bearer ${tok}` } })).status).toBe(401);

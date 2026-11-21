@@ -72,7 +72,8 @@ export function readGithubAppEnv(env: EnvLike = process.env): GithubAppEnv {
   const problems: string[] = [];
 
   const appId = val(env, "MERGEPORT_GITHUB_APP_ID");
-  const webhookSecret = val(env, "MERGEPORT_GITHUB_APP_WEBHOOK_SECRET");
+  const webhookRaw = env.MERGEPORT_GITHUB_APP_WEBHOOK_SECRET ?? "";
+  const webhookSecret = webhookRaw.trim() === "" ? "" : webhookRaw; // never trimmed: the HMAC key is exactly what GitHub was given
   const clientId = val(env, "MERGEPORT_GITHUB_APP_CLIENT_ID");
   const clientSecret = val(env, "MERGEPORT_GITHUB_APP_CLIENT_SECRET");
   const slug = val(env, "MERGEPORT_GITHUB_APP_SLUG");
@@ -104,6 +105,7 @@ export function readGithubAppEnv(env: EnvLike = process.env): GithubAppEnv {
   }
 
   if (!webhookSecret) problems.push("MERGEPORT_GITHUB_APP_WEBHOOK_SECRET is required when any GitHub App variable is set.");
+  else if (webhookSecret !== webhookSecret.trim()) problems.push("MERGEPORT_GITHUB_APP_WEBHOOK_SECRET has leading or trailing whitespace; remove it (the secret is used exactly as written, so it must match GitHub's byte for byte).");
   else if (webhookSecret.length < MIN_WEBHOOK_SECRET) problems.push(`MERGEPORT_GITHUB_APP_WEBHOOK_SECRET must be at least ${MIN_WEBHOOK_SECRET} characters.`);
 
   if (!clientId) problems.push("MERGEPORT_GITHUB_APP_CLIENT_ID is required when any GitHub App variable is set.");
@@ -129,7 +131,20 @@ export function githubAppConfigured(env: EnvLike = process.env): boolean {
   return readGithubAppEnv(env).config !== null;
 }
 
-/** The validated configuration, or null when the App is not (fully) configured. */
-export function githubAppConfig(env: EnvLike = process.env): GithubAppConfig | null {
-  return readGithubAppEnv(env).config;
+let memo: { config: GithubAppConfig | null } | null = null;
+
+/**
+ * The validated configuration, or null when the App is not (fully) configured. Called with no argument it reads the process
+ * environment ONCE and remembers the answer (the key file is read and parsed once, so changing the key needs a restart);
+ * an explicit `env` is always parsed fresh.
+ */
+export function githubAppConfig(env?: EnvLike): GithubAppConfig | null {
+  if (env) return readGithubAppEnv(env).config;
+  if (!memo) memo = { config: readGithubAppEnv(process.env).config };
+  return memo.config;
+}
+
+/** Test hook: forget the remembered process configuration. */
+export function resetGithubAppConfigCache(): void {
+  memo = null;
 }

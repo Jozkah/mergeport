@@ -1,5 +1,6 @@
 import { createPrivateKey, sign, type KeyObject } from "node:crypto";
 import { githubAppConfig, type EnvLike, type GithubAppConfig } from "./app-config";
+import { isBoundInstallation, type BoundInstallation } from "./bound-installation";
 
 /**
  * GitHub App authentication: the app JWT and installation access tokens.
@@ -12,15 +13,17 @@ import { githubAppConfig, type EnvLike, type GithubAppConfig } from "./app-confi
 export const GITHUB_API_BASE = "https://api.github.com";
 
 /**
- * The API base. `MERGEPORT_GITHUB_API_BASE` (tests, a local fake) is honoured ONLY outside production, so a production deployment can
- * never be pointed at another host by its environment.
+ * The API base. `MERGEPORT_GITHUB_API_BASE` (tests, a local fake) is honoured ONLY when NODE_ENV is `test` or `development`, so a
+ * production deployment (or one with NODE_ENV unset) can never be pointed at another host by its environment. It must be https, or
+ * http on a loopback name. A hosted deployment refuses to start with it set (hosted-config).
  */
 export function githubApiBase(env: EnvLike = process.env): string {
   const o = (env.MERGEPORT_GITHUB_API_BASE ?? "").trim();
-  if (o && env.NODE_ENV !== "production") {
+  if (o && (env.NODE_ENV === "test" || env.NODE_ENV === "development")) {
     try {
       const u = new URL(o);
-      if (u.protocol === "https:" || u.protocol === "http:") return o.replace(/\/+$/, "");
+      const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
+      if (u.protocol === "https:" || (u.protocol === "http:" && loopback)) return o.replace(/\/+$/, "");
     } catch {
       // fall through to the constant
     }
@@ -97,9 +100,12 @@ export function signAppJwt(config: Pick<GithubAppConfig, "appId" | "privateKeyPe
 
 export type InstallationToken = { token: string; /** epoch ms */ expiresAt: number };
 
-/** What the rest of the app depends on, so tests inject a fake instead of GitHub. */
+/**
+ * What the rest of the app depends on, so tests inject a fake instead of GitHub. It takes a BoundInstallation (a binding the workspace
+ * proved), never a bare id.
+ */
 export interface InstallationTokenProvider {
-  getToken(installationId: bigint | number | string): Promise<InstallationToken>;
+  getToken(installation: BoundInstallation): Promise<InstallationToken>;
 }
 
 export type MintOptions = {
@@ -108,14 +114,20 @@ export type MintOptions = {
   fetch?: typeof fetch;
   now?: () => number;
   env?: EnvLike;
-  /** Overrides the API base (tests); the environment override is separately restricted to non-production. */
+  /** Overrides the API base (tests); the environment override is separately restricted to test and development. */
   apiBase?: string;
+  /** Deadline for the whole request including the body (default 10 s). */
+  timeoutMs?: number;
 };
 
 /** Refresh when less than this remains. */
 export const REFRESH_WITHIN_MS = 10 * 60_000;
 /** How long "gone" and "suspended" answers are remembered. */
 export const NEGATIVE_TTL_MS = 60_000;
+/** Hard cap on each cache (oldest entries are evicted first) and on the response body we are willing to read. */
+export const CACHE_MAX_ENTRIES = 5000;
+export const MAX_BODY_BYTES = 1_000_000;
+export const REQUEST_TIMEOUT_MS = 10_000;
 
 type Neg = { until: number; make: () => GithubAppError };
 const tokens = new Map<string, InstallationToken>();
@@ -129,15 +141,25 @@ export function resetInstallationTokenCache(): void {
   negatives.clear();
 }
 
-const idString = (id: bigint | number | string): string => {
-  const s = String(id);
-  if (!/^[1-9]\d{0,18}$/.test(s)) throw new AppMisconfiguredError("Invalid installation id.");
-  return s;
-};
+/** Test hook: how many entries each cache holds. */
+export const installationTokenCacheSizes = () => ({ tokens: tokens.size, negatives: negatives.size, inflight: inflight.size });
 
-/** A usable installation access token (cached, refreshed 10 minutes before expiry, one request shared by concurrent callers). */
-export async function mintInstallationToken(installationId: bigint | number | string, opts: MintOptions = {}): Promise<InstallationToken> {
-  const id = idString(installationId);
+/** Insert with a sweep of expired entries and a hard cap (oldest first). Re-inserting moves an entry to the newest position. */
+function remember<V>(map: Map<string, V>, key: string, value: V, expired: (v: V) => boolean): void {
+  for (const [k, v] of map) if (expired(v)) map.delete(k);
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > CACHE_MAX_ENTRIES) map.delete(map.keys().next().value as string);
+}
+
+/**
+ * A usable installation access token (cached, refreshed 10 minutes before expiry, one request shared by concurrent callers).
+ * Only a BoundInstallation is accepted: one the workspace proved it controls, loaded by `loadBoundInstallation`. A forged object
+ * is refused at run time as well as by the type.
+ */
+export async function mintInstallationToken(installation: BoundInstallation, opts: MintOptions = {}): Promise<InstallationToken> {
+  if (!isBoundInstallation(installation)) throw new AppMisconfiguredError("An installation token needs a verified workspace binding.");
+  const id = String(installation.installationId);
   const now = (opts.now ?? Date.now)();
 
   const neg = negatives.get(id);
@@ -154,11 +176,11 @@ export async function mintInstallationToken(installationId: bigint | number | st
   const p = (async () => {
     try {
       const fresh = await requestToken(id, opts, now);
-      tokens.set(id, fresh);
+      remember(tokens, id, fresh, (v) => v.expiresAt <= now);
       return fresh;
     } catch (e) {
-      if (e instanceof InstallationGoneError) negatives.set(id, { until: now + NEGATIVE_TTL_MS, make: () => new InstallationGoneError(e.status) });
-      else if (e instanceof InstallationSuspendedError) negatives.set(id, { until: now + NEGATIVE_TTL_MS, make: () => new InstallationSuspendedError(e.status) });
+      if (e instanceof InstallationGoneError) remember(negatives, id, { until: now + NEGATIVE_TTL_MS, make: () => new InstallationGoneError(e.status) }, (v) => v.until <= now);
+      else if (e instanceof InstallationSuspendedError) remember(negatives, id, { until: now + NEGATIVE_TTL_MS, make: () => new InstallationSuspendedError(e.status) }, (v) => v.until <= now);
       if (e instanceof InstallationGoneError || e instanceof InstallationSuspendedError) tokens.delete(id);
       // A still-valid token beats an error from a transient failure of the refresh.
       if (hit && hit.expiresAt - now > 60_000 && e instanceof GithubAppError && (e.code === "unavailable" || e.code === "rate_limited")) return hit;
@@ -171,50 +193,110 @@ export async function mintInstallationToken(installationId: bigint | number | st
   return p;
 }
 
+/** Reads at most MAX_BODY_BYTES; larger is an error. Streams when it can so an endless body is cut off early. */
+async function readCapped(res: Response): Promise<string> {
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) throw new GithubAppError("unavailable", "GitHub returned an oversize response.", res.status);
+  if (!res.body) {
+    const t = await res.text();
+    if (t.length > MAX_BODY_BYTES) throw new GithubAppError("unavailable", "GitHub returned an oversize response.", res.status);
+    return t;
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      void reader.cancel().catch(() => {});
+      throw new GithubAppError("unavailable", "GitHub returned an oversize response.", res.status);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+const unavailable = (m: string, status?: number) => new GithubAppError("unavailable", m, status);
+
 async function requestToken(id: string, opts: MintOptions, now: number): Promise<InstallationToken> {
-  const config = opts.config === undefined ? githubAppConfig(opts.env ?? process.env) : opts.config;
+  const config = opts.config === undefined ? githubAppConfig(opts.env) : opts.config;
   if (!config) throw new AppMisconfiguredError("The GitHub App is not configured.");
   const jwt = signAppJwt(config, now);
   const base = (opts.apiBase ?? githubApiBase(opts.env ?? process.env)).replace(/\/+$/, "");
-  let res: Response;
-  try {
-    res = await (opts.fetch ?? fetch)(`${base}/app/installations/${id}/access_tokens`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${jwt}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "mergeport" },
-      redirect: "error",
-    });
-  } catch {
-    throw new GithubAppError("unavailable", "GitHub could not be reached.");
-  }
-  if (res.status === 201 || res.status === 200) {
-    let body: unknown;
+
+  // One deadline covers connecting, headers and the body. The abort signal is passed on, and the race below also settles when a
+  // fetch ignores the signal, so a hung request can never stall the callers waiting on the shared in-flight promise.
+  const ms = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const ac = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      ac.abort();
+      reject(unavailable("GitHub did not answer in time."));
+    }, ms);
+  });
+  const work = (async (): Promise<{ status: number; headers: Headers; text: string }> => {
+    let res: Response;
     try {
-      body = await res.json();
+      res = await (opts.fetch ?? fetch)(`${base}/app/installations/${id}/access_tokens`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${jwt}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "mergeport" },
+        redirect: "error",
+        signal: ac.signal,
+      });
     } catch {
-      throw new GithubAppError("unavailable", "GitHub returned an unreadable token response.", res.status);
+      throw unavailable("GitHub could not be reached.");
     }
-    const b = body as { token?: unknown; expires_at?: unknown };
+    try {
+      return { status: res.status, headers: res.headers, text: await readCapped(res) };
+    } catch (e) {
+      if (e instanceof GithubAppError) throw e;
+      throw unavailable("GitHub returned an unreadable response.", res.status);
+    }
+  })();
+  work.catch(() => {}); // when the deadline wins, a late failure of `work` is not an unhandled rejection
+  let out: { status: number; headers: Headers; text: string };
+  try {
+    out = await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const parse = (): { token?: unknown; expires_at?: unknown; message?: unknown } | null => {
+    try {
+      const j = JSON.parse(out.text);
+      return j && typeof j === "object" ? j : null;
+    } catch {
+      return null;
+    }
+  };
+  if (out.status === 201 || out.status === 200) {
+    const b = parse();
+    if (!b) throw unavailable("GitHub returned an unreadable token response.", out.status);
     const expiresAt = typeof b.expires_at === "string" ? Date.parse(b.expires_at) : NaN;
-    if (typeof b.token !== "string" || !b.token || !Number.isFinite(expiresAt)) throw new GithubAppError("unavailable", "GitHub returned an invalid token response.", res.status);
+    if (typeof b.token !== "string" || !b.token || !Number.isFinite(expiresAt)) throw unavailable("GitHub returned an invalid token response.", out.status);
     return { token: b.token, expiresAt };
   }
-  const message = await res.json().then((j: { message?: unknown }) => (typeof j?.message === "string" ? j.message : ""), () => "");
-  if (res.status === 404) throw new InstallationGoneError();
-  if (res.status === 401) throw new AppMisconfiguredError("GitHub rejected the GitHub App credentials.", 401);
-  if (res.status === 429 || (res.status === 403 && (res.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(message)))) {
-    const ra = Number(res.headers.get("retry-after"));
-    const reset = Number(res.headers.get("x-ratelimit-reset"));
+  const bm = parse()?.message;
+  const message = typeof bm === "string" ? bm : "";
+  if (out.status === 404) throw new InstallationGoneError();
+  if (out.status === 401) throw new AppMisconfiguredError("GitHub rejected the GitHub App credentials.", 401);
+  if (out.status === 429 || (out.status === 403 && (out.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(message)))) {
+    const ra = Number(out.headers.get("retry-after"));
+    const reset = Number(out.headers.get("x-ratelimit-reset"));
     const wait = Number.isFinite(ra) && ra > 0 ? ra * 1000 : Number.isFinite(reset) && reset > 0 ? Math.max(0, reset * 1000 - now) : null;
-    throw new RateLimitedError(wait, res.status);
+    throw new RateLimitedError(wait, out.status);
   }
-  if (res.status === 403) {
+  if (out.status === 403) {
     if (/suspend/i.test(message)) throw new InstallationSuspendedError();
     throw new AppMisconfiguredError("GitHub refused the GitHub App request.", 403);
   }
-  throw new GithubAppError("unavailable", `GitHub answered ${res.status} to the token request.`, res.status);
+  throw unavailable(`GitHub answered ${out.status} to the token request.`, out.status);
 }
 
 /** A provider over `mintInstallationToken`, for dependency injection. */
 export function createInstallationTokenProvider(opts: MintOptions = {}): InstallationTokenProvider {
-  return { getToken: (id) => mintInstallationToken(id, opts) };
+  return { getToken: (installation) => mintInstallationToken(installation, opts) };
 }

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { hostedConfigProblems } from "@/lib/auth/hosted-config";
-import { githubAppConfig, githubAppConfigProblems, githubAppConfigured, readGithubAppEnv } from "@/lib/github/app-config";
+import { githubAppConfig, githubAppConfigProblems, githubAppConfigured, readGithubAppEnv, resetGithubAppConfigCache } from "@/lib/github/app-config";
 
 const pair = (opts: { type: "rsa"; bits: number } | { type: "ec" }) =>
   opts.type === "rsa"
@@ -92,6 +92,39 @@ describe("GitHub App configuration", () => {
     expect(githubAppConfigProblems(full({ MERGEPORT_GITHUB_APP_CLIENT_ID: "x" })).join()).toContain("CLIENT_ID");
   });
 
+  it("does not trim the webhook secret: surrounding whitespace is a problem, and the value is kept exact", () => {
+    const secret = "whsec_0123456789abcdef0123";
+    for (const bad of [` ${secret}`, `${secret}\n`, `${secret}\t`]) {
+      const p = githubAppConfigProblems(full({ MERGEPORT_GITHUB_APP_WEBHOOK_SECRET: bad })).join("\n");
+      expect(p).toContain("WEBHOOK_SECRET has leading or trailing whitespace");
+      expect(p).not.toContain("whsec_");
+    }
+    expect(githubAppConfig(full())?.webhookSecret).toBe(secret);
+    expect(githubAppConfigProblems(full({ MERGEPORT_GITHUB_APP_WEBHOOK_SECRET: "  " })).join()).toContain("WEBHOOK_SECRET is required");
+  });
+
+  it("remembers the process configuration (the key file is read once) until reset", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ghapp-memo-"));
+    const saved = { ...process.env };
+    try {
+      const f = path.join(dir, "k.pem");
+      fs.writeFileSync(f, pem);
+      for (const [k, v] of Object.entries(full({ MERGEPORT_GITHUB_APP_PRIVATE_KEY: undefined, MERGEPORT_GITHUB_APP_PRIVATE_KEY_FILE: f }))) if (v !== undefined) process.env[k] = v;
+      resetGithubAppConfigCache();
+      const a = githubAppConfig();
+      expect(a?.privateKeyPem).toBe(pem);
+      fs.rmSync(f); // gone from disk: the remembered answer still stands
+      expect(githubAppConfig()).toBe(a);
+      resetGithubAppConfigCache();
+      expect(githubAppConfig()).toBeNull();
+    } finally {
+      for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+      Object.assign(process.env, saved);
+      resetGithubAppConfigCache();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("never puts a secret value in a message, even for invalid values", () => {
     const secrets = ["super-secret-webhook-value-1", "tiny", "also-too-short-secret", pem.split("\n")[1], "p@ss word"];
     const env = full({
@@ -127,6 +160,16 @@ describe("GitHub App configuration", () => {
       expect(hostedConfigProblems().join()).toContain("MERGEPORT_GITHUB_APP_PRIVATE_KEY");
       for (const [k, v] of Object.entries(full())) vi.stubEnv(k, v as string);
       expect(hostedConfigProblems()).toEqual([]);
+    });
+
+    it("refuses a hosted start with MERGEPORT_GITHUB_API_BASE set, and ignores it when not hosted", () => {
+      clear();
+      vi.stubEnv("MERGEPORT_GITHUB_API_BASE", "http://127.0.0.1:9999");
+      expect(hostedConfigProblems()).toEqual([]); // not hosted
+      hosted();
+      const p = hostedConfigProblems().join("\n");
+      expect(p).toContain("MERGEPORT_GITHUB_API_BASE");
+      expect(p).not.toContain("9999");
     });
   });
 });

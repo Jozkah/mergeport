@@ -20,6 +20,7 @@ export function hostedConfigProblems(): string[] {
   }
   const hops = process.env.MERGEPORT_TRUSTED_PROXY_HOPS;
   if (hops !== undefined && hops !== "" && !/^(?:[1-9]|10)$/.test(hops)) problems.push("MERGEPORT_TRUSTED_PROXY_HOPS must be a whole number from 1 to 10.");
+  if ((process.env.MERGEPORT_GITHUB_API_BASE ?? "").trim() !== "") problems.push("MERGEPORT_GITHUB_API_BASE is for tests and local development only and is refused on a hosted deployment: unset it.");
   problems.push(...githubAppConfigProblems());
   return problems;
 }

@@ -8,7 +8,8 @@ App on their GitHub account or organisation; Mergeport then acts through short-l
 
 | Part | Status |
 | --- | --- |
-| Schema: `GithubInstallation`, `WorkspaceInstallation`, `GithubDelivery`, `GithubAppState`, `Repository.installationId` | Implemented (migration `20261123100000_github_app`) |
+| Binding and state helpers (`src/lib/github/binding.ts`, `app-state.ts`): load a proved binding, set or clear `Repository.installationId`, unbind, single-use state claim | Implemented (not called by any route yet) |
+| Schema: `GithubInstallation`, `WorkspaceInstallation` (with proof columns), `GithubDelivery`, `GithubAppState`, `Repository.installationId` with a composite foreign key to the binding | Implemented (migration `20261123100000_github_app`) |
 | Environment parsing and validation (`src/lib/github/app-config.ts`), wired into the hosted startup check | Implemented |
 | App JWT and installation tokens with in-memory cache (`src/lib/github/app-auth.ts`) | Implemented |
 | Fake GitHub for tests: app routes in `src/lib/github/fake-server.ts` | Implemented |
@@ -45,11 +46,11 @@ accept the change; this document and the manifest list are updated together.
 | `MERGEPORT_GITHUB_APP_ID` | Numeric App ID. |
 | `MERGEPORT_GITHUB_APP_PRIVATE_KEY` | The PEM private key. Newlines may be written as `\n` so it fits on one line; surrounding quotes are removed. RSA, at least 2048 bits. |
 | `MERGEPORT_GITHUB_APP_PRIVATE_KEY_FILE` | Path to a PEM file instead of the variable above. Set exactly one of the two. Preferred where a secrets file mount is available. |
-| `MERGEPORT_GITHUB_APP_WEBHOOK_SECRET` | The webhook secret; at least 16 characters. |
+| `MERGEPORT_GITHUB_APP_WEBHOOK_SECRET` | The webhook secret; at least 16 characters. Used exactly as written: leading or trailing whitespace (a stray newline from a secrets file) is a startup problem, not silently trimmed. |
 | `MERGEPORT_GITHUB_APP_CLIENT_ID` | The App's client ID. |
 | `MERGEPORT_GITHUB_APP_CLIENT_SECRET` | The App's client secret; at least 20 characters. |
 | `MERGEPORT_GITHUB_APP_SLUG` | The App's URL name: lowercase letters, digits, hyphens, at most 39 characters. |
-| `MERGEPORT_GITHUB_API_BASE` | Tests and local development only: replaces `https://api.github.com`. **Ignored when `NODE_ENV=production`.** |
+| `MERGEPORT_GITHUB_API_BASE` | Tests and local development only: replaces `https://api.github.com`. Honoured only when `NODE_ENV` is `test` or `development`, and only for https or http on a loopback name. **A hosted deployment refuses to start with it set.** |
 
 Rules:
 
@@ -63,8 +64,15 @@ Rules:
 - The private key and installation tokens are never stored in the database and never logged. The key lives in the environment (or the file
   you point at); tokens live only in a per-process memory cache.
 - The app JWT is RS256, `iat` = now minus 60 s, `exp` = `iat` + 9 minutes (GitHub allows at most 10 minutes), `iss` = App ID.
+- The configuration (including the key file) is read once per process and remembered; any change, including a rotated key, needs a restart.
+- A token is minted only for a `BoundInstallation`: a workspace's binding with proof (`WorkspaceInstallation.verifiedAt`, `verifiedGithubUserId`,
+  `proofMethod`), loaded by `loadBoundInstallation` for an installation that is neither suspended nor deleted. A bare installation id from a webhook or
+  a callback cannot reach GitHub; a forged object is refused at run time.
 - Installation tokens are cached per installation id, refreshed when less than 10 minutes of their one hour remain, and one request is shared by
   concurrent callers. "Uninstalled" (404) and "suspended" (403) answers are remembered for 60 seconds so a gone installation is not hammered.
+  Both caches sweep expired entries on insert and hold at most 5000 entries (oldest evicted first).
+- The token request has a 10 second deadline that also covers reading the body (a hung request fails with `unavailable` and the next caller starts a
+  fresh one), and a response body over 1 MB is refused.
 - Errors are typed (`InstallationGoneError`, `InstallationSuspendedError`, `RateLimitedError`, `AppMisconfiguredError`) with fixed messages;
   GitHub's response text is never copied into them.
 - Rotating the private key: generate a new one in the App settings, deploy it, then delete the old one. Running processes pick it up on restart.
