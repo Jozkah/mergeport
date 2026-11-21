@@ -8,7 +8,8 @@ import { createTaskAction } from "@/app/task-actions";
 type P = { id: string; name: string };
 
 /** New-task dialog. The assignee list is everyone known in any of the projects; anyone else can be typed. */
-export function NewTask({ projects, peopleByProject, me, defaultProjectId, defaultAssignee }: { projects: P[]; peopleByProject: Record<string, string[]>; me: string; defaultProjectId: string; defaultAssignee?: string }) {
+export function NewTask({ projects, peopleByProject, me, defaultProjectId, defaultAssignee, issueRepos = {} }: { projects: P[]; peopleByProject: Record<string, string[]>; me: string; defaultProjectId: string; defaultAssignee?: string; issueRepos?: Record<string, { id: string; fullName: string }[]> }) {
+  const issueGroups = projects.filter((p) => (issueRepos[p.id]?.length ?? 0) > 0);
   const first = defaultProjectId in peopleByProject ? defaultProjectId : projects[0]?.id;
   const people = [...new Map([me, ...Object.values(peopleByProject).flat()].map((l) => [l.toLowerCase(), l])).values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   return (
@@ -24,6 +25,20 @@ export function NewTask({ projects, peopleByProject, me, defaultProjectId, defau
           <div><label className="label" htmlFor="nt-title">Title</label><input id="nt-title" name="title" className="input" required maxLength={200} autoFocus /></div>
           <div><label className="label" htmlFor="nt-desc">Description</label><textarea id="nt-desc" name="description" className="input min-h-24" rows={4} placeholder="What needs to happen, and how will we know it is done?" /></div>
           <TaskFields people={people}me={me} values={{ assignee: defaultAssignee }} />
+          {issueGroups.length > 0 && (
+            <div>
+              <label className="label" htmlFor="nt-issue">Also create a GitHub issue</label>
+              <Select id="nt-issue" name="issueRepo" className="select" defaultValue="">
+                <option value="">No, keep it in Mergeport only</option>
+                {issueGroups.map((p) => (
+                  <optgroup key={p.id} label={issueGroups.length > 1 ? p.name : "Create it in"}>
+                    {issueRepos[p.id].map((r) => <option key={`${p.id}:${r.id}`} value={r.id}>{r.fullName}</option>)}
+                  </optgroup>
+                ))}
+              </Select>
+              <p className="mt-1 text-[12px] text-ink-3">Creates one issue on GitHub as you, in a repository of the task's project. The task stays on the board and follows the issue. Pick a repository of the project you chose above.</p>
+            </div>
+          )}
         </div>
       </ActionForm>
     </Sheet>

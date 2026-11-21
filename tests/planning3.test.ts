@@ -3,7 +3,7 @@ import { FakeGithub } from "@/lib/github/fake";
 import { assignEpic, assignIteration, applySuggestion, closeIteration, createBoard, createEpic, createIteration, deleteBoard, deleteEpic, listBoards, listEpics, releaseReadiness, setAutomation, setShipped, suggestedMoves, updateBoard } from "@/lib/services/planning-ext";
 import { addDependency, blockedByCount, listDependencies, moveCard, removeDependency } from "@/lib/services/planning";
 import { dependencyGraph, deliveryAnalytics } from "@/lib/services/planning-insight";
-import { createTaskFromTemplate, previewPromotion, promoteTask } from "@/lib/services/task-promotion";
+import { createTaskFromTemplate, issueDestinationsByProject, previewPromotion, promoteTask, promotionDestinations } from "@/lib/services/task-promotion";
 import { getTask, updateTask } from "@/lib/services/tasks";
 import { attention } from "@/lib/services/queries";
 import { freshSeed, leaks } from "./helpers";
@@ -275,6 +275,20 @@ describe("task templates and promotion to a GitHub issue", () => {
     expect((await getTask(db, admin, t.id)).checklist.length).toBe(5); // identity, checklist and history survive
     await expect(promoteTask(db, admin, t.id, repo.id, fake)).rejects.toThrow(/already follows/);
     expect(fake.writes).toHaveLength(1);
+  });
+
+  it("lists, per project, exactly the repositories promotionDestinations allows (New task dialog)", async () => {
+    const { db, admin, a, ids } = S;
+    const projectIds = [ids.projects.atlas.id];
+    const byProject = await issueDestinationsByProject(db, admin, projectIds);
+    const t = await createTaskFromTemplate(db, admin, { projectId: ids.projects.atlas.id, template: "bug", title: "dest" });
+    const same = await promotionDestinations(db, admin, t.id);
+    expect((byProject[ids.projects.atlas.id] ?? []).map((r) => r.fullName).sort()).toEqual(same.map((r) => r.fullName).sort());
+    expect(await issueDestinationsByProject(db, admin, [])).toEqual({});
+    const ta = await createTaskFromTemplate(db, a, { projectId: ids.projects.atlas.id, template: "bug", title: "dest-a" });
+    const sameA = await promotionDestinations(db, a, ta.id);
+    const forA = await issueDestinationsByProject(db, a, projectIds);
+    expect((forA[ids.projects.atlas.id] ?? []).map((r) => r.fullName).sort()).toEqual(sameA.map((r) => r.fullName).sort());
   });
 
   it("refuses a destination the person cannot manage", async () => {

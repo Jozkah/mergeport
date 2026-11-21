@@ -42,6 +42,19 @@ export async function promotionDestinations(db: Db, v: Viewer, taskId: string) {
   return repos;
 }
 
+/** For the New task dialog: per project, the repositories this person may create an issue in (same rule as promotionDestinations). */
+export async function issueDestinationsByProject(db: Db, v: Viewer, projectIds: string[]): Promise<Record<string, { id: string; fullName: string }[]>> {
+  const out: Record<string, { id: string; fullName: string }[]> = {};
+  if (!projectIds.length) return out;
+  const repos = await db.repository.findMany({
+    where: { AND: [repoWhere(v), { projects: { some: { projectId: { in: projectIds } } } }, { trackingStatus: "ACTIVE" }, ...(v.isAdmin ? [] : [{ grants: { some: { memberId: v.memberId, revokedAt: null, canManageWork: true } } }])] },
+    select: { id: true, fullName: true, projects: { where: { projectId: { in: projectIds } }, select: { projectId: true } } },
+    orderBy: { fullName: "asc" },
+  });
+  for (const r of repos) for (const p of r.projects) (out[p.projectId] ??= []).push({ id: r.id, fullName: r.fullName });
+  return out;
+}
+
 /** What would be sent, shown before anything is written. Nothing is created by previewing. */
 export async function previewPromotion(db: Db, v: Viewer, taskId: string, repositoryId: string): Promise<PromotionPreview> {
   const t = await loadTask(db, v, taskId);
