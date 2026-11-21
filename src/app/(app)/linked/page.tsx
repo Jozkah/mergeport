@@ -152,7 +152,7 @@ export default async function LinkedPage({ searchParams }: { searchParams: Promi
                   <ScopeChip scope="readonly" />
                   <ConfirmSheet
                     title="Revoke this access?"
-                    consequence={`${g.clientOrigin.replace(/^https?:\/\//, "")} can no longer read your projects from this workspace. It stops working now.`}
+                    consequence={<><bdi className="wrap-any">{g.clientOrigin.replace(/^https?:\/\//, "")}</bdi> can no longer read your projects from this workspace. It stops working now.</>}
                     action={revokeGrantAction}
                     submitLabel="Revoke"
                     pendingLabel="Revoking…"

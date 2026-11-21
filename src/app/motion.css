@@ -45,6 +45,8 @@
   --rotate-ring: 14deg; /* bell swing (Flint "ring") */
   --blur-small: 2px;
   --blur-medium: 3px;
+  --rotate-swap: 60deg; /* theme icon turning in and out */
+  --scale-swap: 0.6; /* ...and the size it grows from */
   /* Back-compat aliases used by older rules */
   --ease-out-expo: var(--ease-smooth-out);
   --dur-fast: var(--duration-feedback);
@@ -63,6 +65,8 @@
     --scale-tiny: 1;
     --scale-pop: 1;
     --rotate-ring: 0deg;
+    --rotate-swap: 0deg;
+    --scale-swap: 1;
     --blur-small: 0px;
     --blur-medium: 0px;
     --duration-quick: 100ms;
@@ -181,7 +185,7 @@
 }
 @keyframes card-leave {
   from { opacity: 1; grid-template-rows: 1fr; margin-bottom: 0; }
-  to { opacity: 0; grid-template-rows: 0fr; margin-bottom: -8px; } /* -8px cancels the list's flex gap so no space is left behind */
+  to { opacity: 0; grid-template-rows: 0fr; margin-bottom: calc(var(--row-gap, 8px) * -1); } /* cancels the list's gap so no space is left behind */
 }
 
 .skeleton {
@@ -232,6 +236,9 @@ details[open] > summary > .chevron {
   transform: rotate(180deg);
 }
 
+/* A <details> body (Disclosure) rises in once when it is opened by the person; one that rendered open (defaultOpen) does not move. */
+details[open]:not([data-initial-open]) > .disc-body { animation: rise-in-small var(--duration-fast) var(--ease-smooth-out); }
+
 /* ---------- Segmented pill ---------- */
 .seg { position: relative; }
 .seg-ind {
@@ -277,17 +284,16 @@ details[open] > summary > .chevron {
   animation: check-draw var(--duration-very-slow) var(--ease-smooth-out) var(--duration-micro) backwards;
 }
 .num-in { display: inline-block; animation: number-in var(--duration-fast) var(--ease-in-out); }
-.empty-in { animation: fade-in var(--duration-quick) var(--ease-out); }
 /* The workspace-switch overlay appears with the modal open duration (a fade, so nothing travels). */
 .overlay-in { animation: fade-in var(--duration-fast) var(--ease-out); }
 
 /* ---------- Sync state ---------- */
 .sync-pill {
-  transition: background-color var(--duration-fast) ease, border-color var(--duration-fast) ease, color var(--duration-fast) ease;
+  transition: background-color var(--duration-fast) var(--ease-smooth-out), border-color var(--duration-fast) var(--ease-smooth-out), color var(--duration-fast) var(--ease-smooth-out);
 }
 .sync-pill .sync-label {
   display: inline-block;
-  transition: opacity var(--duration-quick) ease, filter var(--duration-quick) ease;
+  transition: opacity var(--duration-quick) var(--ease-in-out), filter var(--duration-quick) var(--ease-in-out);
 }
 .sync-pill[data-swapping="true"] .sync-label { opacity: 0; filter: blur(var(--blur-small)); }
 /* One ring when the state turns into something that needs a person (conflict, revoked, offline, rate limit). */
@@ -323,13 +329,13 @@ details[open] > summary > .chevron {
 }
 /* The icon is chosen by the theme attribute the server rendered (and the OS for "system"), so it is right on first paint.
    Light shows the moon (what a click switches to); dark shows the sun. */
-.theme-toggle .theme-icon-sun { opacity: 0; transform: rotate(-60deg) scale(0.6); filter: blur(var(--blur-small)); }
+.theme-toggle .theme-icon-sun { opacity: 0; transform: rotate(calc(var(--rotate-swap) * -1)) scale(var(--scale-swap)); filter: blur(var(--blur-small)); }
 .theme-toggle .theme-icon-moon { opacity: 1; transform: none; filter: none; }
 :root[data-theme="dark"] .theme-toggle .theme-icon-sun { opacity: 1; transform: none; filter: none; }
-:root[data-theme="dark"] .theme-toggle .theme-icon-moon { opacity: 0; transform: rotate(60deg) scale(0.6); filter: blur(var(--blur-small)); }
+:root[data-theme="dark"] .theme-toggle .theme-icon-moon { opacity: 0; transform: rotate(var(--rotate-swap)) scale(var(--scale-swap)); filter: blur(var(--blur-small)); }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) .theme-toggle .theme-icon-sun { opacity: 1; transform: none; filter: none; }
-  :root:not([data-theme]) .theme-toggle .theme-icon-moon { opacity: 0; transform: rotate(60deg) scale(0.6); filter: blur(var(--blur-small)); }
+  :root:not([data-theme]) .theme-toggle .theme-icon-moon { opacity: 0; transform: rotate(var(--rotate-swap)) scale(var(--scale-swap)); filter: blur(var(--blur-small)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .theme-toggle .theme-icon-sun,

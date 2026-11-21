@@ -129,7 +129,7 @@ export function SpacesPanel({ spaces, members, projects }: { spaces: SpaceSummar
                         </ActionForm>
                         <ConfirmSheet
                           title={`Remove ${m.email ?? `@${m.login}`} from ${s.name}?`}
-                          consequence={`They can no longer see ${s.name} or its projects. They stay in the workspace.`}
+                          consequence={<>They can no longer see <bdi>{s.name}</bdi> or its projects. They stay in the workspace.</>}
                           action={removeSpaceMemberAction}
                           submitLabel="Remove"
                           pendingLabel="Removing…"

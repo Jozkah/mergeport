@@ -188,6 +188,36 @@ export function ActionForm({
   }
 
   const mode = holding ? "hold" : pending ? "pending" : "idle";
+  // A region that changes role in the same render it gains text is often not announced, so status and alert are permanent.
+  // An inline row has no room for a reserved line: its success is a toast, and only an error makes it grow.
+  const lead = secondary ? "" : "ml-2";
+  const messages = (
+    <>
+      <p role="status" aria-live="polite" className={`${lead} text-[12.5px] ${lead ? "empty:ml-0" : ""} ${inline ? "" : "min-h-5"}`}>
+        {pending && slow && <span className="text-ink-3">Still working. This is taking longer than usual; your input is kept.</span>}
+        {/* A neutral outcome (data.neutral) is information, not a success and not a failure: plain text colour, no check. */}
+        {!inline && !busy && msgVisible && result?.ok && result.data?.neutral === true && (
+          <span key={seq} className="result-in text-ink-2">{result.message}</span>
+        )}
+        {!inline && !busy && msgVisible && result?.ok && result.data?.neutral !== true && (
+          <span key={seq} className="result-in inline-flex items-center gap-1 text-ok">
+            <svg className="check-draw shrink-0" width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M20 6 9 17l-5-5" pathLength={1} />
+            </svg>
+            {result.message ?? "Saved"}
+          </span>
+        )}
+      </p>
+      <p id={alertId} role="alert" className={`text-[12.5px] ${lead ? "[&:not(:empty)]:ml-2" : ""} ${inline ? "" : "min-h-5"}`}>
+        {msgVisible && result && !result.ok && (
+          <span key={seq} className="result-in inline-flex items-start gap-1 text-blocked">
+            <CircleAlert size={14} aria-hidden className="mt-0.5 shrink-0" /> {result.error}
+          </span>
+        )}
+      </p>
+      {submitDisabledReason ? <span id={reasonId} className="sr-only">{submitDisabledReason}</span> : null}
+    </>
+  );
   return (
     <form
       ref={ref}
@@ -200,13 +230,16 @@ export function ActionForm({
       aria-busy={busy}
     >
       {children}
-      <div ref={row} className={`${inline ? "" : "mt-3 "}flex flex-wrap items-center`} onAnimationEnd={(e) => { if (e.target === e.currentTarget) e.currentTarget.classList.remove("shake"); }}>
+      {/* With a `secondary` (Cancel) the buttons are their own group: primary rightmost from sm up, primary first (on top) on a phone,
+          and the status lines sit under them. Without one, status lines follow the button in the same row. */}
+      <div ref={row} className={`${inline ? "" : "mt-3 "}${secondary ? "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" : "flex flex-wrap items-center"}`} onAnimationEnd={(e) => { if (e.target === e.currentTarget) e.currentTarget.classList.remove("shake"); }}>
+        {secondary ? <span className="contents [&>*]:w-full sm:[&>*]:w-auto">{secondary}</span> : null}
         {hideSubmit ? (
           busy ? <LoaderCircle size={14} aria-hidden className="animate-spin text-ink-3 motion-reduce:animate-none" /> : null
         ) : (
           <button
             type="submit"
-            className={submitClassName}
+            className={`${submitClassName}${secondary ? " w-full sm:w-auto" : ""}`}
             // `disabled` only for "cannot be sent yet"; while busy the button stays focusable (aria-disabled) so the keyboard is not dropped to the page.
             disabled={submitDisabled || (requireDirty && !dirty)}
             aria-disabled={busy || undefined}
@@ -219,33 +252,9 @@ export function ActionForm({
             <PendingLabel mode={mode} pending={pendingLabel} hold={keepBusyOnDone || onDone ? "Redirecting…" : undefined}>{submitLabel}</PendingLabel>
           </button>
         )}
-        {secondary ? <span className="ml-2 inline-flex flex-wrap items-center gap-2">{secondary}</span> : null}
-        {/* A region that changes role in the same render it gains text is often not announced, so status and alert are permanent.
-            An inline row has no room for a reserved line: its success is a toast, and only an error makes it grow. */}
-        <p role="status" aria-live="polite" className={`ml-2 text-[12.5px] empty:ml-0 ${inline ? "" : "min-h-5"}`}>
-          {pending && slow && <span className="text-ink-3">Still working. This is taking longer than usual; your input is kept.</span>}
-          {/* A neutral outcome (data.neutral) is information, not a success and not a failure: plain text colour, no check. */}
-          {!inline && !busy && msgVisible && result?.ok && result.data?.neutral === true && (
-            <span key={seq} className="result-in text-ink-2">{result.message}</span>
-          )}
-          {!inline && !busy && msgVisible && result?.ok && result.data?.neutral !== true && (
-            <span key={seq} className="result-in inline-flex items-center gap-1 text-ok">
-              <svg className="check-draw shrink-0" width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M20 6 9 17l-5-5" pathLength={1} />
-              </svg>
-              {result.message ?? "Saved"}
-            </span>
-          )}
-        </p>
-        <p id={alertId} role="alert" className={`text-[12.5px] [&:not(:empty)]:ml-2 ${inline ? "" : "min-h-5"}`}>
-          {msgVisible && result && !result.ok && (
-            <span key={seq} className="result-in inline-flex items-start gap-1 text-blocked">
-              <CircleAlert size={14} aria-hidden className="mt-0.5 shrink-0" /> {result.error}
-            </span>
-          )}
-        </p>
-        {submitDisabledReason ? <span id={reasonId} className="sr-only">{submitDisabledReason}</span> : null}
+        {secondary ? null : messages}
       </div>
+      {secondary ? <div className="mt-1 flex flex-wrap items-center">{messages}</div> : null}
       {result?.ok && success?.copy && result.data?.[success.copy.field] ? (
         <div className="mt-2"><CopyField absolute={success.copy.absolute} label={success.copy.label} value={String(result.data[success.copy.field])} hint={success.copy.hint} /></div>
       ) : null}

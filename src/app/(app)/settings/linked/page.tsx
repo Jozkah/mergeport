@@ -102,7 +102,7 @@ export default async function LinkedSettings() {
                     </div>
                     <ConfirmSheet
                       title="Revoke this access?"
-                      consequence={`${g.who} can no longer see this workspace from ${g.clientOrigin}. It stops working now.`}
+                      consequence={<><bdi>{g.who}</bdi> can no longer see this workspace from <bdi className="wrap-any">{g.clientOrigin}</bdi>. It stops working now.</>}
                       action={revokeGrantAction}
                       submitLabel="Revoke"
                       pendingLabel="Revoking…"
@@ -120,7 +120,7 @@ export default async function LinkedSettings() {
                     <ConfirmSheet
                       key={o}
                       title={`Revoke ${n} grant${n === 1 ? "" : "s"} from ${o.replace(/^https?:\/\//, "")}?`}
-                      consequence={`Everyone who linked this workspace from ${o} loses access now. They can link again if the policy allows it.`}
+                      consequence={<>Everyone who linked this workspace from <bdi className="wrap-any">{o}</bdi> loses access now. They can link again if the policy allows it.</>}
                       action={revokeAllFromOriginAction}
                       submitLabel={`Revoke ${n} grant${n === 1 ? "" : "s"}`}
                       pendingLabel="Revoking…"
@@ -149,7 +149,7 @@ export default async function LinkedSettings() {
                   {l.lastError && <SimplePill tone="blocked" icon={CircleAlert}>Last request failed</SimplePill>}
                   <ConfirmSheet
                     title={`Unlink ${l.peerOrigin.replace(/^https?:\/\//, "")}?`}
-                    consequence={`${l.who} stops seeing that instance's projects here. Nothing is deleted there.`}
+                    consequence={<><bdi>{l.who}</bdi> stops seeing that instance's projects here. Nothing is deleted there.</>}
                     action={unlinkAction}
                     submitLabel="Unlink"
                     pendingLabel="Unlinking…"

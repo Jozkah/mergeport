@@ -1,21 +1,34 @@
 "use client";
 
-import { useState, useTransition, type FormEvent } from "react";
+import { useEffect, useState, useTransition, type FormEvent } from "react";
 import { ActionForm } from "@/components/forms/ActionForm";
-import { CircleAlert, LoaderCircle } from "@/components/ui/icons";
+import { CircleAlert } from "@/components/ui/icons";
+import { PendingLabel } from "@/components/ui/PendingLabel";
 import { Select } from "@/components/ui/Select";
 import type { ActionResult } from "@/lib/action-result";
 import { approveFederationAction, denyFederationAction, startLinkAction } from "@/app/federation-actions";
 
+/** The address the action asked to go to, when it is a plain http(s) one; any other scheme or a relative address is never opened. */
+function redirectOf(r: ActionResult): string | null {
+  const to = r.ok ? r.data?.redirect : null;
+  return typeof to === "string" && /^https?:\/\//i.test(to) ? to : null;
+}
+
 /** The action answered with an address in `data.redirect` (the other instance, or this one's callback): go there with a plain navigation. */
 function go(r: ActionResult) {
-  const to = r.ok ? r.data?.redirect : null;
-  if (typeof to === "string" && /^https?:\/\//.test(to)) window.location.assign(to);
+  const to = redirectOf(r);
+  if (to) window.location.assign(to);
+}
+
+/** A success that carries no usable address would leave the button on "Redirecting…" for good: say so instead. */
+function checked(r: ActionResult, field?: string): ActionResult {
+  if (r.ok && !redirectOf(r)) return { ok: false, error: "The other instance answered with an address that cannot be opened. Nothing was shared. Check the address and try again.", field };
+  return r;
 }
 
 export function LinkInstanceForm() {
   return (
-    <ActionForm action={startLinkAction} submitLabel="Link instance" pendingLabel="Contacting…" resetOnSuccess={false} onDone={(r) => { go(r); return r.ok; }} className="max-w-md">
+    <ActionForm action={async (fd) => checked(await startLinkAction(fd), "address")} submitLabel="Link instance" pendingLabel="Contacting…" resetOnSuccess={false} onDone={(r) => { go(r); return r.ok; }} className="max-w-md">
       <label className="label" htmlFor="peer-address">Address of the other Mergeport instance</label>
       <input id="peer-address" name="address" type="text" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://mergeport.example.com" required maxLength={300} className="input" aria-describedby="peer-address-help" />
       <p id="peer-address-help" className="mt-1 text-[12px] text-ink-3 text-pretty">You will sign in there and approve read-only access. Nothing is copied here: that instance keeps the data.</p>
@@ -51,6 +64,11 @@ export function ConsentForms({ fields, workspaces }: { fields: Fields; workspace
   const [holding, setHolding] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   const busy = pending || holding;
+  useEffect(() => {
+    if (!holding) return;
+    const t = setTimeout(() => setHolding(false), 10_000);
+    return () => clearTimeout(t);
+  }, [holding]);
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -67,22 +85,17 @@ export function ConsentForms({ fields, workspaces }: { fields: Fields; workspace
       } catch {
         r = { ok: false, error: "Could not reach the server. Check your connection and try again.", retryable: true };
       }
+      r = checked(r);
       setResult(r);
       if (r.ok) {
-        setHolding(true); // stay disabled until the browser leaves this page
+        setHolding(true); // stay busy until the browser leaves this page (let go after a while if it never does)
         go(r);
       }
     });
   }
 
   const label = (kind: "approve" | "deny", idle: string, doing: string) => (
-    <>
-      {busy && chosen === kind ? <LoaderCircle size={14} aria-hidden className="shrink-0 animate-spin motion-reduce:animate-none" /> : null}
-      <span className="inline-grid text-center">
-        <span className={`col-start-1 row-start-1 ${busy && chosen === kind ? "invisible" : ""}`}>{idle}</span>
-        <span className={`col-start-1 row-start-1 ${busy && chosen === kind ? "" : "invisible"}`} aria-hidden={!(busy && chosen === kind)}>{holding ? "Redirecting…" : doing}</span>
-      </span>
-    </>
+    <PendingLabel mode={busy && chosen === kind ? (holding ? "hold" : "pending") : "idle"} pending={doing} hold="Redirecting…">{idle}</PendingLabel>
   );
 
   return (
@@ -91,17 +104,18 @@ export function ConsentForms({ fields, workspaces }: { fields: Fields; workspace
       {workspaces.length > 1 && (
         <div className="mb-4">
           <label className="label" htmlFor="consent-ws">Workspace to share</label>
-          <Select id="consent-ws" name="workspaceId" defaultValue={workspaces[0].id} required>
+          <Select id="consent-ws" name="workspaceId" defaultValue={workspaces[0].id} required disabled={busy}>
             {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
           </Select>
         </div>
       )}
-      <div className="flex flex-col gap-2 sm:flex-row-reverse">
-        <button type="submit" name="intent" value="approve" className="btn btn-primary btn-lg w-full sm:flex-1" disabled={busy} data-loading={busy && chosen === "approve"}>
-          {label("approve", "Approve read-only access", "Approving…")}
-        </button>
-        <button type="submit" name="intent" value="deny" className="btn btn-lg w-full sm:flex-1" disabled={busy} data-loading={busy && chosen === "deny"}>
+      {/* Primary on top on a phone, rightmost from sm up. aria-disabled (not disabled) keeps keyboard focus on the pressed button. */}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <button type="submit" name="intent" value="deny" className="btn btn-lg w-full sm:w-auto sm:min-w-32" aria-disabled={busy || undefined} data-loading={busy && chosen === "deny"} onClick={(e) => { if (busy) e.preventDefault(); }}>
           {label("deny", "Deny", "Denying…")}
+        </button>
+        <button type="submit" name="intent" value="approve" className="btn btn-primary btn-lg w-full sm:w-auto sm:min-w-48" aria-disabled={busy || undefined} data-loading={busy && chosen === "approve"} onClick={(e) => { if (busy) e.preventDefault(); }}>
+          {label("approve", "Approve read-only access", "Approving…")}
         </button>
       </div>
       <p role="status" aria-live="polite" className="mt-2 min-h-5 text-[12.5px]">

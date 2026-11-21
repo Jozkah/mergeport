@@ -146,7 +146,7 @@ export function PendingInvitations({ invitations }: { invitations: InvitationVie
               </ActionForm>
               <ConfirmSheet
                 title="Withdraw this invitation?"
-                consequence={`${i.email} can no longer join with it. You can send a new one later.`}
+                consequence={<><bdi>{i.email}</bdi> can no longer join with it. You can send a new one later.</>}
                 action={revokeInvitationAction}
                 submitLabel="Withdraw"
                 pendingLabel="Withdrawing…"
@@ -228,7 +228,7 @@ export function TransferForm({ admins }: { admins: { id: string; name: string }[
       <div className="mt-3">
         <ConfirmSheet
           title={`Make ${target} the owner?`}
-          consequence={`${target} becomes the owner of this workspace and you become an admin. Only the new owner can move ownership again.`}
+          consequence={<><bdi>{target}</bdi> becomes the owner of this workspace and you become an admin. Only the new owner can move ownership again.</>}
           action={transferOwnershipAction}
           submitLabel="Transfer ownership"
           pendingLabel="Transferring…"

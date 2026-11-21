@@ -7,7 +7,7 @@ import { ActionForm } from "./ActionForm";
 
 function Cancel() {
   const close = useSheetClose();
-  return <button type="button" className="btn" onClick={() => close?.()}>Cancel</button>;
+  return <button type="button" className="btn" data-cancel onClick={() => close?.()}>Cancel</button>;
 }
 
 /**
@@ -29,8 +29,8 @@ export function ConfirmSheet({
 }: {
   trigger: ReactNode;
   title: string;
-  /** What will happen, in plain words. Shown as the dialog description. */
-  consequence: string;
+  /** What will happen, in plain words. Shown as the dialog description. Wrap any user-supplied name or address in <bdi> so it stays readable inside the sentence. */
+  consequence: ReactNode;
   action: (fd: FormData) => Promise<ActionResult>;
   submitLabel: string;
   pendingLabel?: string;
@@ -40,7 +40,7 @@ export function ConfirmSheet({
   onDone?: (r: ActionResult) => void;
 }) {
   return (
-    <Sheet title={title} description={consequence} trigger={trigger}>
+    <Sheet title={title} description={consequence} trigger={trigger} initialFocus="[data-cancel]">
       <ActionForm action={action} submitLabel={submitLabel} pendingLabel={pendingLabel} submitClassName={danger ? "btn btn-danger" : "btn btn-primary"} closeOnSuccess secondary={<Cancel />} submitDisabled={submitDisabled} onDone={onDone}>
         {children}
       </ActionForm>

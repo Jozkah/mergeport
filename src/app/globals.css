@@ -189,6 +189,21 @@ html {
   background: var(--color-canvas);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* An anchor or a focused field is never hidden under the sticky top bar. */
+  scroll-padding-top: 72px;
+}
+/* No 300 ms double-tap delay or zoom on controls, and no grey flash on tap: pressed state is drawn by the controls themselves. */
+a,
+button,
+summary,
+label,
+input,
+select,
+textarea,
+[role="button"],
+[role="combobox"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -411,7 +426,7 @@ table.data tbody tr:hover {
   box-shadow: var(--shadow-hair);
   transition-property: background-color, border-color, color, opacity, scale;
   transition-duration: var(--dur-fast);
-  transition-timing-function: ease;
+  transition-timing-function: var(--ease-smooth-out);
 }
 .btn::after {
   content: "";
@@ -436,7 +451,8 @@ table.data tbody tr:hover {
   color: var(--color-ink-invert);
   box-shadow: none;
 }
-.btn-primary:hover:not(:disabled):not([aria-disabled="true"]) {
+.btn-primary:hover:not(:disabled):not([aria-disabled="true"]),
+.btn-primary:active:not(:disabled):not([aria-disabled="true"]) {
   background: var(--color-primary-hover);
 }
 .btn-danger {
@@ -459,11 +475,56 @@ table.data tbody tr:hover {
 .btn-lg {
   height: 40px;
 }
+/* Text fields on the sign-in, invitation and onboarding screens: the same 40 px as .btn-lg. */
+.input-lg {
+  height: 40px;
+}
+/* Hit areas: the visible control stays small, an invisible halo brings it to 40 px (neighbours are spaced so halos do not overlap). */
+.select,
+.sync-pill {
+  position: relative;
+}
+.select::after {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+.sync-pill::after {
+  content: "";
+  position: absolute;
+  inset: -9px -4px;
+}
+/* A heading inside a form or a panel body (a sub-section), one style everywhere. */
+.subhead {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-2);
+}
+/* A checkbox or radio with its label: the whole row is the hit area. */
+.check-row {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+/* Neutral information (not the blue "needs my review" state). */
+.banner-info {
+  color: var(--color-ink-2);
+  background: var(--color-subtle);
+  border-color: var(--color-line);
+}
 .wrap-any {
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
 @media (pointer: coarse) {
+  .input-lg {
+    height: 44px;
+  }
+  .check-row {
+    min-height: 44px;
+  }
   .btn,
   .input,
   .select,
@@ -715,6 +776,7 @@ select.select optgroup {
 
 /* Long lists and boards scroll inside their own region instead of making the page endless. */
 .scroll-region {
+  overscroll-behavior: contain;
   max-height: calc(100dvh - 14rem);
   min-height: min(20rem, 100%);
   overflow-y: auto;

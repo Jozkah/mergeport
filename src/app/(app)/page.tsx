@@ -3,6 +3,7 @@ import { AiTool } from "@/components/ai/AiTool";
 import { aiEnabled } from "@/lib/services/ai";
 import { readScope, scopeKey } from "@/lib/scope";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { isHosted } from "@/lib/public-url";
 import { requireViewer } from "@/lib/authz-page";
 import { db } from "@/lib/db";
@@ -61,7 +62,7 @@ export default async function Overview() {
         <AiTool tool="focus" label="What should I do first?" />
       </AiShortcuts>
 
-      <GettingStarted steps={steps} />
+      <GettingStarted steps={steps} dismissed={(await cookies()).get("mp-gs")?.value === "1"} />
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Metric href="/attention?queue=needs-me" title="Needs my review" icon={BellRing} value={o.needsMyReview} note="Pull requests expecting you" tone="needs" />

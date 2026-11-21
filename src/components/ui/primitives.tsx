@@ -39,15 +39,15 @@ export function Panel({ title, icon: I, actions, children, className, bodyClassN
 }
 
 /**
- * The subtitle is one line at every width (ellipsis; a string subtitle keeps its full text in `title`). Longer explanation
+ * The subtitle clamps to two lines (a string subtitle keeps its full text in `title`). Longer explanation
  * goes in `help`: a closed "About this page" disclosure (native <details>, so it works without JavaScript).
  */
 export function PageHeader({ title, subtitle, actions, help }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; help?: ReactNode }) {
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
       <div className="min-w-0 max-w-full">
-        <h1 className="flex items-center gap-3 text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink"><SectionTile /><span className="min-w-0">{title}</span></h1>
-        {subtitle && <p className="mt-1 max-w-[70ch] truncate text-[13px] text-ink-3" title={typeof subtitle === "string" ? subtitle : undefined}>{subtitle}</p>}
+        <h1 className="wrap-any flex items-center gap-3 text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink [text-wrap:balance]"><SectionTile /><span className="min-w-0">{title}</span></h1>
+        {subtitle && <p className="mt-1 line-clamp-2 max-w-[70ch] text-[13px] text-ink-3" title={typeof subtitle === "string" ? subtitle : undefined}>{subtitle}</p>}
         {help && (
           <details className="group mt-0.5 max-w-[70ch]">
             <summary className="-ml-1 inline-flex h-10 cursor-pointer list-none items-center gap-1.5 rounded-[6px] px-1 text-[12.5px] text-ink-3 transition-colors duration-[var(--duration-feedback)] hover:text-ink [&::-webkit-details-marker]:hidden">
@@ -136,7 +136,7 @@ export function EmptyState({ icon: I, title, children, action }: { icon?: Icon; 
  * `dismissible` adds a close button; with a `storageKey` the dismissal is remembered on this device (see DismissibleBanner).
  */
 export function Banner({ tone = "info", title, children, action, dismissible = false, storageKey }: { tone?: "info" | "warn" | "error"; title: string; children?: ReactNode; action?: ReactNode; dismissible?: boolean; storageKey?: string }) {
-  const cls = tone === "error" ? "pill-blocked" : tone === "warn" ? "pill-waiting" : "pill-needs";
+  const cls = tone === "error" ? "pill-blocked" : tone === "warn" ? "pill-waiting" : "banner-info"; // info is neutral: blue is reserved for "needs my review"
   const I = tone === "info" ? Info : CircleAlert;
   const role = tone === "error" ? "alert" : "status";
   const className = cn("flex items-start gap-3 rounded-[10px] border px-3 py-2.5 text-[13px]", cls);

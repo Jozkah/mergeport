@@ -69,11 +69,11 @@ export function SyncBadge({ state: given, pending = 0, conflicts = 0, detail, hr
   const sm = META[shown];
   const SI = sm.icon;
   const count = shown === "pending" && pending ? ` (${pending})` : shown === "conflict" && conflicts ? ` (${conflicts})` : "";
-  const common = { className: `pill sync-pill ${sm.cls}`, "data-state": state, "data-swapping": swapping ? "true" : undefined, "data-attn": attn ? "true" : undefined };
+  const common = { className: `pill sync-pill shrink-0 ${sm.cls}`, "data-state": state, "data-swapping": swapping ? "true" : undefined, "data-attn": attn ? "true" : undefined };
   // Changes are announced once, by SyncAnnouncer; the label itself is not a live region. The help text stays readable at all times.
   const body = (
     <>
-      <SI size={12} aria-hidden className={shown === "syncing" || shown === "reconnecting" ? "animate-spin" : undefined} />
+      <SI size={12} aria-hidden className={shown === "syncing" || shown === "reconnecting" ? "animate-spin motion-reduce:animate-none" : undefined} />
       <span className="sync-label">{sm.label}{count}</span>
       <span className="sr-only">{scope === "source" ? (detail ?? m.help) : `${m.help}${detail ? " " + detail : ""}`}</span>
     </>
