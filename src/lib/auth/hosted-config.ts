@@ -1,3 +1,4 @@
+import { githubAppConfigProblems } from "@/lib/github/app-config";
 import { isHosted } from "@/lib/public-url";
 
 /**
@@ -19,6 +20,7 @@ export function hostedConfigProblems(): string[] {
   }
   const hops = process.env.MERGEPORT_TRUSTED_PROXY_HOPS;
   if (hops !== undefined && hops !== "" && !/^(?:[1-9]|10)$/.test(hops)) problems.push("MERGEPORT_TRUSTED_PROXY_HOPS must be a whole number from 1 to 10.");
+  problems.push(...githubAppConfigProblems());
   return problems;
 }
 
