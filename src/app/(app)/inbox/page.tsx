@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { inbox, type InboxStatus } from "@/lib/services/inbox";
 import { formatInstant, formatInstantDated, relativeTime } from "@/lib/format";
-import { EmptyState, PageHeader, Panel, Segmented, StatusPill, Avatar, Time } from "@/components/ui/primitives";
+import { Banner, EmptyState, PageHeader, Panel, Segmented, StatusPill, Avatar, Time } from "@/components/ui/primitives";
 import { RepoChip } from "@/components/ui/RepoChip";
 import { Inbox } from "@/components/ui/icons";
 import { itemHref } from "@/components/work/WorkTable";
@@ -31,6 +31,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         subtitle="Pull requests waiting on you. Done clears it for you only."
         actions={<ReadAllButton disabled={unread === 0} />}
       />
+      {viewer.githubLogin === null && <div className="mb-4"><Banner tone="info" title="Link GitHub to see your reviews">Review requests are matched to a GitHub account, and yours is not linked yet.</Banner></div>}
       <div className="mb-4">
         <Segmented label="Inbox views" items={TABS.map((t) => ({ href: `/inbox?tab=${t.key}`, label: t.label, active: t.key === tab, count: counts[t.key] }))} />
       </div>
@@ -42,7 +43,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         ) : (
           <ul className="divide-y divide-line">
             {entries.map((e) => {
-              const me = viewer.login.toLowerCase();
+              const me = (viewer.githubLogin ?? "").toLowerCase();
               const requested = e.item.reviewRequests.filter((r) => !r.removedAt && r.kind === "USER" && r.reviewerRef.toLowerCase() === me).reduce((m, r) => Math.max(m, r.requestedAt.getTime()), 0);
               const at = (d: Date) => <Time value={d} formatted={formatInstantDated(d, viewer.timezone, now)} />;
               return (

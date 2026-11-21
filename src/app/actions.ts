@@ -18,6 +18,7 @@ import { addDependency, assertSameAudience, createCard, moveCard, requestManualR
 import { mapLocalRoot, scanWorktrees, unmapLocalRoot } from "@/lib/services/worktrees";
 import { audit } from "@/lib/services/audit";
 import { portForDiscovery, publicPort } from "@/lib/github/factory";
+import { trackInstallationRepos } from "@/lib/services/installation-repos";
 import { applyWatchlist } from "@/lib/services/watchlist";
 import { readCached } from "@/lib/local/discovery";
 import type { Discovery } from "@/lib/github/port";
@@ -69,6 +70,22 @@ export async function trackSelectedAction(fd: FormData): Promise<ActionResult> {
     notifyChange("state");
     revalidatePath("/repositories");
     return { ok: true, message: `${found.length} repositor${found.length === 1 ? "y is" : "ies are"} tracked on this computer. Nothing was shared.` };
+  });
+}
+
+/**
+ * Hosted: tracks repositories the workspace's own GitHub connection can access. Administrators only: the connection sees every
+ * repository of the installation, so choosing which ones enter the workspace is an administrator's decision. Nobody gains access
+ * to a tracked repository by this alone (people see repositories through grants).
+ */
+export async function trackInstallationReposAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireAdminViewer();
+    const rows = await trackInstallationRepos(db, viewer, strs(fd, "repo"));
+    for (const r of rows) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id, full: true }, dedupeKey: `sync:${r.id}`, workspaceId: viewer.workspaceId });
+    notifyChange("state");
+    revalidatePath("/repositories");
+    return { ok: true, message: `${rows.length} repositor${rows.length === 1 ? "y is" : "ies are"} tracked. The first sync is queued.` };
   });
 }
 
@@ -453,7 +470,7 @@ export async function mapForkAction(fd: FormData): Promise<ActionResult> {
 export async function watchlistAction(input: { text: string }): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireAdminViewer();
-    const port = await portForDiscovery(db, { id: (viewer.githubId ?? 0n).toString(), login: viewer.login });
+    const port = await portForDiscovery(db, { id: (viewer.githubId ?? 0n).toString(), login: viewer.login }, { workspaceId: viewer.workspaceId });
     const results = await applyWatchlist(db, viewer, port, String(input.text ?? ""));
     revalidatePath("/forks");
     revalidatePath("/repositories");

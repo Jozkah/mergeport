@@ -1,5 +1,6 @@
 import type { Db } from "@/lib/db";
 import { makeBoundInstallation, type BoundInstallation } from "./bound-installation";
+// markInstallationState and listBoundInstallations below are also the connect flow's; there is one copy of each.
 
 /**
  * The only file that writes `Repository.installationId` or issues a `BoundInstallation` (tests/github-app-bindings.test.ts enforces both).
@@ -38,4 +39,23 @@ export async function unbindInstallation(db: Db, workspaceId: string, installati
     const r = await tx.workspaceInstallation.deleteMany({ where: { workspaceId, installationId } });
     return r.count === 1;
   });
+}
+
+/**
+ * Every usable binding of the workspace (proved, installation neither suspended nor deleted), oldest first. The only way to get a
+ * `BoundInstallation` for "all of this workspace's installations" (the connect page lists the repositories of each).
+ */
+export async function listBoundInstallations(db: Db, workspaceId: string): Promise<BoundInstallation[]> {
+  const rows = await db.workspaceInstallation.findMany({ where: { workspaceId }, include: { installation: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+  return rows.filter((r) => r.verifiedAt && !r.installation.suspendedAt && !r.installation.deletedAt).map((r) => makeBoundInstallation(r.installationId, r.workspaceId));
+}
+
+/**
+ * Records what GitHub told us about an installation: uninstalled ("deleted"), suspended, or usable again ("active"). The row is global
+ * (one installation, however many workspaces bound it), so every workspace sees the new state at once. Nothing else changes: bindings
+ * and tracked repositories stay, and work again if the installation does.
+ */
+export async function markInstallationState(db: Db, installationId: bigint, state: "active" | "suspended" | "deleted", now = new Date()): Promise<boolean> {
+  const data = state === "active" ? { suspendedAt: null, deletedAt: null } : state === "suspended" ? { suspendedAt: now } : { deletedAt: now };
+  return (await db.githubInstallation.updateMany({ where: { installationId }, data })).count === 1;
 }

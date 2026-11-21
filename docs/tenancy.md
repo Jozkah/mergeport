@@ -41,9 +41,11 @@ cuids that only exist in one workspace.
 - `User`, `Session`, `Identity`, `MagicLink`: a person's account and how they sign in (see `docs/auth.md`). A user belongs to workspaces through `Member`. `Session.activeWorkspaceId` only chooses among the person's own memberships and is re-checked on every request.
 - `GithubOwner`: a public GitHub account (login, type, avatar) keyed by GitHub's immutable id. It holds nothing private and is the
   same for every tenant.
-- `PublicCacheEntry`: ETag cache of GitHub API answers, keyed by request. A 304 is only given to a caller GitHub has authorised, so
-  sharing it saves rate limit without sharing access. Caveat: `ghPort` also writes answers fetched with a person's credential;
-  before hosted workspaces use their own credentials, partition the key by credential or use it for the public port only.
+- `PublicCacheEntry`: ETag cache of GitHub API answers, keyed by request. The unprefixed keys are the shared cache and hold only
+  answers any caller may see: the public port, and the local app's own single credential (`ghPort`, not used on a hosted deployment).
+  Everything fetched with an installation token is stored under the prefix `inst:<installationId>:` (`dbCache(db, installationCachePrefix(id))`), so
+  a private body can never be answered to a request made with another credential (tests/github-budget-cache.test.ts). A workspace
+  never reads another workspace's data through it: the cache is only read by server-side sync, which stores into the workspace's own rows.
 - `GithubInstallation`: one installation of the deployment's GitHub App on a GitHub account. The installation id is GitHub-global (one id, one
   account, however many workspaces use it), and the row holds only public account facts and state (login, type, repository selection,
   suspended and deleted times), no token and no key. Tenants reach it only through `WorkspaceInstallation`, the binding table, which is the
@@ -51,7 +53,19 @@ cuids that only exist in one workspace.
 - `GithubDelivery`: webhook delivery ids already handled (replay protection), with the event name and installation id. The id is GitHub's
   and is unique across the deployment; the table holds no payload. Pruned by `receivedAt`.
 - `RateLimitState`: GitHub's quota belongs to a credential or an IP, which every tenant behind it shares. The `source` key is the
-  signed-in profile's budget; a hosted deployment with one credential per workspace must prefix it.
+  local app's single credential. A hosted repository's jobs spend from `installation:<id>` (`sourceBudgetKeyFor`), the quota of its
+  installation token: workspaces sharing one installation share that budget, and one installation running dry never stalls another.
+
+## Hosted GitHub access
+
+A hosted repository is read with its installation's token, resolved in one place (`portForSync` in `src/lib/github/factory.ts`):
+`Repository.installationId` -> `loadBoundInstallation(db, repository.workspaceId, installationId)` (the only path to a token: proved, not
+suspended, not deleted) -> `mintInstallationToken` -> `OctokitPort`. No binding gives the typed `GithubNotConnectedError`, which jobs treat as
+"nothing to do" (DONE, no retry). An uninstalled or suspended installation is recorded on the global `GithubInstallation` row
+(`markInstallationState`), so every workspace using it reads as not connected at once. Two workspaces sharing an installation each hold their
+own `Repository` rows (unique on workspace and GitHub id), so each sees only what it tracked; and what a MEMBER sees of those rows is
+`repoWhere` (docs/roles.md), never the token's reach. `workspaceGithubStatus(db, workspaceId)` (`src/lib/github/status.ts`) is the one answer to
+"is this workspace connected" (`configured`, `bound`, `suspended`). Writes are not enabled: `portForWrite` throws "GitHub writes are not enabled yet".
 
 ## Jobs
 
@@ -121,7 +135,7 @@ Known blind spots of this regex scan (no type information):
 - The credential vault key (`keyFileFor`) is one file per install, shared by every workspace's `HubSession` and `AiSettings` cipher.
   A hosted deployment needs a key per workspace or a KMS.
 - `SavedFilter` is per person, not per workspace, and its shared-view sync lists the profile's first user.
-- `PublicCacheEntry` and `RateLimitState` keys are not partitioned by credential (see above).
+- Local-app `ghPort` answers still use the unprefixed `PublicCacheEntry` keys and the `source` budget (one credential per profile; not used hosted).
 - The hub link (`src/lib/hub`), discovery caches and the in-process scheduler serve one workspace per process.
 - Deleting a workspace cascades through every ROOT model. `PlanningItem.columnId` and `createdById` became
   `NO ACTION DEFERRABLE INITIALLY DEFERRED` so the cascade can remove cards, columns and members in one statement.

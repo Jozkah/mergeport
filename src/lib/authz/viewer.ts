@@ -16,6 +16,12 @@ export type Viewer = {
   login: string;
   /** Null for people who signed in with email or OIDC and have not linked a GitHub account. */
   githubId: bigint | null;
+  /**
+   * The person's GitHub login, or null without a linked GitHub account. `login` is NOT that: for an email user it is the mailbox
+   * local part, and "alice@x" must never inherit the reviews, requests or authored work of the GitHub user "alice". Everything that
+   * matches a person against GitHub data (review queues, inbox, digest, review requests) uses this field.
+   */
+  githubLogin: string | null;
   timezone: string;
   /** The workspace role (docs/roles.md). Read the policy through can(); do not compare strings in new code. */
   role: Role;
@@ -51,13 +57,21 @@ export async function loadViewer(db: Db, userId: string, workspaceId?: string | 
     workspaceId: m.workspaceId,
     login: m.user.login,
     githubId: m.user.githubId,
+    githubLogin: m.user.githubId !== null ? m.user.login : null,
     timezone: m.user.timezone,
     role: m.role,
     isAdmin: isAdminRole(m.role),
   };
 }
 
-/** Filter for repositories this viewer may see. Use it in every query that touches repo-owned data. */
+/**
+ * Filter for repositories this viewer may see. Use it in every query that touches repo-owned data.
+ *
+ * The rule, in one place (a hosted installation token sees everything the installation can access, so what a person may see is
+ * decided here, never by GitHub's token): OWNER and ADMIN see every tracked repository of the workspace; everyone else (MEMBER,
+ * READER) sees a repository only through an explicit, unrevoked RepositoryGrant. Visibility does not widen that: a public repository
+ * is not visible to a member without a grant either, and a private one never is. Untracked (REMOVED) repositories are visible to nobody.
+ */
 export function repoWhere(v: Viewer): Prisma.RepositoryWhereInput {
   const base: Prisma.RepositoryWhereInput = { workspaceId: v.workspaceId, trackingStatus: { not: "REMOVED" } };
   if (v.isAdmin) return base;

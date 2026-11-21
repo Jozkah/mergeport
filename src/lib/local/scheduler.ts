@@ -79,7 +79,11 @@ export async function paceReconcile(mode: "active" | "idle", now: number, starte
 export async function coordinate(now = Date.now()): Promise<number> {
   if (isDemo()) return 0;
   if (isHosted()) {
-    // No GitHub connection per workspace yet: no profile check, no coordination tick, no discovery, no reconcile. Local-only recurring jobs still run.
+    // No server gh login to check, no coordination tick, no discovery, no repository watcher: hosted workspaces reach GitHub only through
+    // their own installation. `reconcile.all` is paced (every 15 minutes, no idle mode: nobody's tab decides it) as soon as ANY workspace
+    // has a usable connection; its handler fans out per workspace and does nothing for one without. Local-only recurring jobs always run.
+    const connected = await db.workspaceInstallation.count({ where: { installation: { suspendedAt: null, deletedAt: null } } });
+    if (connected > 0) await paceReconcile("active", now, g.__mpScheduler?.startedAt ?? now);
     await ensureRecurring(db, { type: "digest.daily", key: "digest", intervalMs: DIGEST_EVERY_MS });
     await ensureRecurring(db, { type: "ai.autopilot", key: "ai-autopilot", intervalMs: AI_AUTOPILOT_EVERY_MS });
     await reclaimStuck(db);

@@ -16,6 +16,8 @@ type FakeRepo = {
   pulls?: Map<number, { number: number; state: "open" | "closed"; head: string; base: string; title: string; body: string }>;
   /** Releases as GitHub's REST lists them, newest first. */
   releases?: { id: number; tag_name: string; name: string | null; html_url: string; published_at: string | null; draft: boolean; prerelease: boolean; body: string | null }[];
+  /** Issues and pull requests (see `addWork`); read with installation tokens. */
+  work?: { id: number; number: number; kind: "issue" | "pr"; title: string; author: string; state: "open" | "closed"; updatedAt: string; headSha: string; reviews?: { id: number; user: string; state: string }[]; requested?: string[]; comments?: { id: number; user: string; body: string }[] }[];
 };
 
 export type FakeInstallation = { id: number; accountLogin: string; accountId: number; accountType: "User" | "Organization"; selection: "all" | "selected"; repos: Set<string>; suspended: boolean };
@@ -341,9 +343,13 @@ export class FakeGitHubServer {
       if (this.rateLimitedUntil && this.rateLimitedUntil > this.clock()) {
         return json(403, { message: "API rate limit exceeded" }, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(this.rateLimitedUntil / 1000)) });
       }
-      const auth = new Headers(init.headers).get("authorization") ?? "";
-      const bearer = /^Bearer (.+)$/i.exec(auth)?.[1];
-      return this.appRoute(method, url, bearer);
+      const headers = new Headers(init.headers);
+      const auth = headers.get("authorization") ?? "";
+      // GitHub accepts both schemes; Octokit sends `token <t>` for installation tokens and `Bearer <jwt>` for the app JWT.
+      const bearer = /^(?:Bearer|token) (.+)$/i.exec(auth)?.[1];
+      const inst = bearer ? this.instTokens.get(bearer) : undefined;
+      if (inst) this.calls.push(`inst:${inst.installationId} ${label}`);
+      return this.appRoute(method, url, bearer, headers);
     }) as typeof fetch;
   }
 
@@ -390,9 +396,74 @@ export class FakeGitHubServer {
     return json(200, { total_count: items.length, [key]: slice.map(render) }, page * per < items.length ? { link: `<${next.href}>; rel="next"` } : {});
   }
 
-  private appRoute(method: string, url: URL, bearer: string | undefined): Response {
+  // ---------- issues and pull requests, as an installation sees them ----------
+  /** Test helper: an issue or pull request in a fake repository (what `GET /repos/{o}/{r}/issues` lists). */
+  addWork(owner: string, name: string, w: { number: number; kind?: "issue" | "pr"; title: string; author?: string; state?: "open" | "closed"; updatedAt?: string; headSha?: string; reviews?: { id: number; user: string; state: string }[]; requested?: string[]; comments?: { id: number; user: string; body: string }[] }): void {
+    const r = this.repo(owner, name);
+    if (!r) throw new Error(`unknown repository ${owner}/${name}`);
+    (r.work ??= []).push({ ...w, kind: w.kind ?? "issue", author: w.author ?? owner, state: w.state ?? "open", updatedAt: w.updatedAt ?? new Date(this.clock()).toISOString(), id: this.nextId++, headSha: w.headSha ?? sha1(`${name}#${w.number}`) });
+  }
+
+  private userJson(login: string) {
+    return { id: (this.users.get(login) ?? this.orgs.get(login))?.id ?? 1, login, avatar_url: null };
+  }
+
+  private workJson(r: FakeRepo, w: NonNullable<FakeRepo["work"]>[number]) {
+    const base = {
+      id: w.id, number: w.number, title: w.title, body: null, state: w.state, user: this.userJson(w.author), labels: [], assignees: [], milestone: null,
+      html_url: `https://github.com/${r.owner}/${r.name}/${w.kind === "pr" ? "pull" : "issues"}/${w.number}`, created_at: w.updatedAt, updated_at: w.updatedAt, closed_at: w.state === "closed" ? w.updatedAt : null, draft: false,
+    };
+    return w.kind === "pr" ? { ...base, pull_request: { merged_at: null }, merged: false, merged_at: null, head: { sha: w.headSha, ref: `feature-${w.number}` }, base: { ref: r.defaultBranch }, mergeable: true, additions: 1, deletions: 0, changed_files: 1 } : base;
+  }
+
+  /** Reads of one repository with an installation token: only repositories the installation can access exist. ETags make an unchanged list answer 304, as GitHub does. */
+  private installationRepoRoute(i: FakeInstallation, method: string, url: URL, headers: Headers): Response {
+    const m = /^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/.exec(url.pathname);
+    const r = m ? this.repo(decodeURIComponent(m[1]), decodeURIComponent(m[2])) : undefined;
+    if (!m || !r || !this.instRepos(i).includes(r)) return json(404, { message: "Not Found" });
+    if (method !== "GET") return json(403, { message: "Resource not accessible by integration" }); // the App holds read permissions only
+    const sub = m[3] ?? "";
+    const work = r.work ?? [];
+    const cacheable = (body: unknown, headers2: Record<string, string> = {}) => {
+      const etag = `W/"${sha1(JSON.stringify(body))}"`;
+      if (headers.get("if-none-match") === etag) return json(304, null, { etag });
+      return json(200, body, { etag, ...headers2 });
+    };
+    let n: RegExpExecArray | null;
+    if (sub === "") return cacheable(this.repoJson(r, i.accountLogin));
+    if (sub === "/issues") {
+      const per = Math.min(100, Number(url.searchParams.get("per_page") ?? 30));
+      const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+      const since = url.searchParams.get("since");
+      const all = work.filter((w) => !since || w.updatedAt >= since).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+      const next = new URL(url.href);
+      next.searchParams.set("page", String(page + 1));
+      return cacheable(all.slice((page - 1) * per, page * per).map((w) => this.workJson(r, w)), page * per < all.length ? { link: `<${next.href}>; rel="next"` } : {});
+    }
+    if ((n = /^\/(?:issues|pulls)\/(\d+)$/.exec(sub))) {
+      const w = work.find((x) => x.number === Number(n![1]) && (sub.startsWith("/pulls") ? x.kind === "pr" : true));
+      return w ? cacheable(this.workJson(r, w)) : json(404, { message: "Not Found" });
+    }
+    if ((n = /^\/pulls\/(\d+)\/reviews$/.exec(sub))) return cacheable((work.find((x) => x.number === Number(n![1]))?.reviews ?? []).map((v) => ({ id: v.id, user: this.userJson(v.user), state: v.state, body: "", commit_id: null, submitted_at: new Date(this.clock()).toISOString() })));
+    if ((n = /^\/(?:issues|pulls)\/(\d+)\/comments$/.exec(sub))) return cacheable(sub.startsWith("/issues") ? (work.find((x) => x.number === Number(n![1]))?.comments ?? []).map((c) => ({ id: c.id, user: this.userJson(c.user), body: c.body, created_at: new Date(this.clock()).toISOString(), updated_at: new Date(this.clock()).toISOString() })) : []);
+    if ((n = /^\/pulls\/(\d+)\/requested_reviewers$/.exec(sub))) return cacheable({ users: (work.find((x) => x.number === Number(n![1]))?.requested ?? []).map((u) => this.userJson(u)), teams: [] });
+    if (/^\/commits\/[^/]+\/check-runs$/.test(sub)) return cacheable({ total_count: 0, check_runs: [] });
+    if (/^\/commits\/[^/]+\/status$/.test(sub)) return cacheable({ state: "pending", total_count: 0, statuses: [] });
+    if (sub === "/branches") return cacheable([{ name: r.defaultBranch, commit: { sha: this.head(r) ?? sha1(`${r.name}@head`) } }]);
+    return json(404, { message: "Not Found" });
+  }
+
+  private appRoute(method: string, url: URL, bearer: string | undefined, headers: Headers = new Headers()): Response {
     const path = url.pathname;
     let m: RegExpExecArray | null;
+    if (path.startsWith("/repos/")) {
+      const t = bearer ? this.instTokens.get(bearer) : undefined;
+      if (!t || t.expiresAt <= this.clock()) return json(401, { message: "Bad credentials" });
+      const i = this.installations.get(t.installationId);
+      if (!i) return json(401, { message: "Bad credentials" });
+      if (i.suspended) return json(403, { message: "This installation has been suspended" });
+      return this.installationRepoRoute(i, method, url, headers);
+    }
     if (method === "POST" && (m = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(path))) {
       const err = this.checkAppJwt(bearer);
       if (err) return err;

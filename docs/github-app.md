@@ -15,11 +15,19 @@ App on their GitHub account or organisation; Mergeport then acts through short-l
 | Fake GitHub for tests: app routes in `src/lib/github/fake-server.ts` | Implemented |
 | Install / connect flow and the callback route | Later task |
 | Webhook route (`/api/github/webhook`) | Later task |
-| Rewiring the GitHub port, factory and handlers to installation tokens | Later task |
-| User OAuth, identity linking, visibility rules | Later task |
+| Read-only data access: `portForSync` / `portForDiscovery` use the repository's (workspace's) installation token; `GET /installation/repositories` listing and admin tracking on "Connect repositories"; sync, reconcile and budgets per installation; private repositories visible by grant only | Implemented (this phase) |
+| Writes to GitHub (`portForWrite`) | Off: "GitHub writes are not enabled yet" |
+| User OAuth and identity linking (`Viewer.githubLogin` stays null for email users until then) | Later task |
 
-Nothing in the running app calls the new code yet, so setting the variables below changes nothing visible today except startup
-validation.
+A workspace with a proved binding syncs through its installation; one without stays on "GitHub is not connected yet". Setting the variables
+below only validates at startup; what a workspace can read still depends on its bindings.
+
+### Reading through an installation
+
+`Repository.installationId` (set only by `src/lib/github/binding.ts`, when an administrator tracks a repository from "Connect repositories") decides
+which installation reads a repository. Budgets are `installation:<id>`, the ETag cache is partitioned under `inst:<id>:`, and an uninstalled or
+suspended App is recorded by `markInstallationState` and finishes jobs without retry. The token sees everything the installation can access;
+who in the workspace sees a private repository is Mergeport's decision (docs/roles.md, `repoWhere`).
 
 ## Register the App (operator, once per deployment)
 

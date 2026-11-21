@@ -1,5 +1,5 @@
 import type { Db } from "@/lib/db";
-import { loadViewer, projectWhere, type Viewer } from "@/lib/authz/viewer";
+import { loadViewer, projectWhere, repoWhere, type Viewer } from "@/lib/authz/viewer";
 import { ValidationError } from "@/lib/errors";
 import type { Vault } from "@/lib/hub/session-vault";
 import { todayIn } from "@/lib/domain/planning";
@@ -32,7 +32,8 @@ export type Snapshot = { text: string; refs: Map<string, Ref>; projects: { id: s
 const kindOf = (ref: string): Kind | null => (ref[0] === "R" ? "review" : ref[0] === "C" ? "changes" : ref[0] === "B" ? "blocked" : null);
 
 /** Whether a pull request is the person's business: they wrote it, are assigned, or were asked to review. Everything else in a tracked repository is only watched. */
-export function involvesMe(d: DerivedItem, login: string): boolean {
+export function involvesMe(d: DerivedItem, login: string | null): boolean {
+  if (!login) return false;
   const i = d.item;
   return sameLogin(i.authorLogin, login) || i.assigneeLogins.includes(indexNeedle(login)) || i.reviewRequests.some((r) => !r.removedAt && r.kind !== "EXTERNAL_ROLE" && sameLogin(r.reviewerRef, login));
 }
@@ -59,8 +60,8 @@ export async function buildSnapshot(db: Db, v: Viewer, now = new Date()): Promis
   };
   // Only what involves the person is listed as work. Mergeport also tracks repositories the person merely watches: their blocked or
   // waiting pull requests are counted at the end and are never the person's to act on.
-  const mine = (items: DerivedItem[]) => items.filter((d) => involvesMe(d, v.login));
-  const yours = (d: DerivedItem) => (sameLogin(d.item.authorLogin, v.login) ? " (yours)" : "");
+  const mine = (items: DerivedItem[]) => items.filter((d) => involvesMe(d, v.githubLogin));
+  const yours = (d: DerivedItem) => (sameLogin(d.item.authorLogin, v.githubLogin) ? " (yours)" : "");
   section("Waiting for your review (a review was requested from you)", "R", att.needsMyReview, "review", 8);
   section("Your pull requests with changes requested", "C", att.changesRequested, "changes", 6);
   const blocked = mine(att.blocked);
@@ -72,9 +73,9 @@ export async function buildSnapshot(db: Db, v: Viewer, now = new Date()): Promis
       out.push(line(key, d, yours(d)));
     });
   }
-  const waiting = att.waitingExternal.filter((d) => sameLogin(d.item.authorLogin, v.login));
+  const waiting = att.waitingExternal.filter((d) => sameLogin(d.item.authorLogin, v.githubLogin));
   if (waiting.length) out.push("", `Your own pull requests waiting on other people (${waiting.length}): ${waiting.slice(0, 5).map((d) => `${d.item.repository.fullName}#${d.item.number}`).join(", ")}`);
-  const watched = att.blocked.filter((d) => !involvesMe(d, v.login)).length + att.waitingExternal.filter((d) => !sameLogin(d.item.authorLogin, v.login) && !involvesMe(d, v.login)).length;
+  const watched = att.blocked.filter((d) => !involvesMe(d, v.githubLogin)).length + att.waitingExternal.filter((d) => !sameLogin(d.item.authorLogin, v.githubLogin) && !involvesMe(d, v.githubLogin)).length;
   if (watched) out.push("", `Not yours: ${watched} other pull request${watched === 1 ? " is" : "s are"} blocked or waiting in repositories you only watch. They are listed on purpose only as a count; the person is not responsible for them.`);
 
   const today = todayIn(v.timezone, now);
@@ -85,7 +86,7 @@ export async function buildSnapshot(db: Db, v: Viewer, now = new Date()): Promis
       out.push(`- "${t.title.slice(0, 80)}" in ${t.project.name}, ${t.column.name}, ${priorityName(t.priority).toLowerCase()}${due ? `, due ${due}${due < today ? " (OVERDUE)" : ""}` : ""}`);
     }
   }
-  const broken = await db.repository.findMany({ where: { workspaceId: v.workspaceId, trackingStatus: "ACTIVE", syncError: { not: null } }, select: { fullName: true, syncError: true }, take: 4 });
+  const broken = await db.repository.findMany({ where: { AND: [repoWhere(v), { trackingStatus: "ACTIVE", syncError: { not: null } }] }, select: { fullName: true, syncError: true }, take: 4 });
   if (broken.length) out.push("", `Repositories that failed to sync: ${broken.map((r) => r.fullName).join(", ")}`);
   if (out.length === 1) out.push("", "Nothing needs attention right now.");
   return { text: out.join("\n"), refs, projects: projects.map((p) => ({ id: p.id, name: p.name })) };

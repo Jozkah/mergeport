@@ -1,6 +1,8 @@
 import { byOwnerFirst } from "@/lib/domain/ordering";
 import Link from "next/link";
 import { db } from "@/lib/db";
+import { isHosted } from "@/lib/public-url";
+import { HostedConnect } from "@/components/repos/HostedConnect";
 import { requireViewer } from "@/lib/authz-page";
 import { KEY_REPOS, cached, refreshing } from "@/lib/local/discovery-jobs";
 import { ActionForm } from "@/components/forms/ActionForm";
@@ -29,6 +31,8 @@ type Tab = (typeof TABS)[number][0];
 
 export default async function Connect({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
   const { viewer } = await requireViewer();
+  // Hosted: the list comes from this workspace's own GitHub connection (installation), not from a person's gh login.
+  if (isHosted()) return <HostedConnect viewer={viewer} />;
   const { show } = await searchParams;
   const tab: Tab = TABS.some(([k]) => k === show) ? (show as Tab) : "all";
   const view = await cached.repos(viewer.workspaceId);

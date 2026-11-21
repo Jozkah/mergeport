@@ -4,6 +4,7 @@ import { requireViewer } from "@/lib/auth/current";
 import { activeWorkspaces } from "@/lib/auth/workspaces";
 import { Banner } from "@/components/ui/primitives";
 import { isHosted } from "@/lib/public-url";
+import { workspaceGithubStatus } from "@/lib/github/status";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
 import { readScope, scopeKey } from "@/lib/scope";
 import { Suspense } from "react";
@@ -98,13 +99,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const bootAt = processStartedAt();
   const own = { isDemo: false, trackingStatus: { not: "REMOVED" as const } };
   const [tracked, running, queued, refused, rateLimited, failed, neverSynced] = await Promise.all([
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own] } }),
     db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "RUNNING", lockedAt: { gte: bootAt } } }),
     db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "QUEUED" } }),
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, trackingStatus: "DISCONNECTED" } }),
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, rateLimited: true } }),
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, trackingStatus: "ACTIVE", rateLimited: false, syncError: { not: null } } }),
-    db.repository.count({ where: { workspaceId: viewer.workspaceId, ...own, lastSyncedAt: null } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own], trackingStatus: "DISCONNECTED" } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own], rateLimited: true } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own], trackingStatus: "ACTIVE", rateLimited: false, syncError: { not: null } } }),
+    db.repository.count({ where: { AND: [repoWhere(viewer), own], lastSyncedAt: null } }),
   ]);
   const source = deriveSourceStatus({ tracked, running, queued, refused, rateLimited, failed, neverSynced });
   const candidates: { state: SyncStateName; pending: number; conflicts: number; detail?: string; scope?: "source" }[] = [];
@@ -114,6 +115,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Switching needs the launcher's control channel; without it (plain dev server) the label is static, and demo shows nothing.
   const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
   const hosted = isHosted();
+  // One shared answer to "is this workspace connected to GitHub": the not-connected notice shows only until a binding exists.
+  const ghStatus = hosted ? await workspaceGithubStatus(db, viewer.workspaceId) : null;
   const mine = hosted ? await activeWorkspaces(db, user.id) : [];
   const accountSwitcher = mine.length > 1 ? { workspaces: mine, active: viewer.workspaceId } : null;
   const wsList = isDemo() || hosted ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId?.toString() ?? "");
@@ -141,7 +144,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
           <Topbar aiQuick={aiQuick} workspaces={workspaces} accountSwitcher={hosted ? accountSwitcher : undefined} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} hosted={hosted} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
-        {profile.kind === "hosted" && (
+        {profile.kind === "hosted" && ghStatus && !ghStatus.bound && (
           <div className="px-4 pt-3 lg:px-6">
             <Banner tone="warn" dismissible storageKey="github-not-connected" title="GitHub is not connected yet">
               Repository sync and GitHub actions are off. Your workspace data is still here.

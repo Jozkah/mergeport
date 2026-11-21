@@ -167,7 +167,7 @@ describe("buildDigest", () => {
     expect(JSON.stringify(d)).not.toContain("legacy-disconnected"); // a disconnected repository she has no grant on
     expect(titles(d.done)).not.toContain("Upstream #101 brought to release"); // a mapping needs BOTH sides visible
     // The administrator sees all repositories, so the same rows appear for them.
-    const admin = await buildDigest(S.db, { ...S.admin, login: "alice-demo" }, { now: NOW });
+    const admin = await buildDigest(S.db, { ...S.admin, login: "alice-demo", githubLogin: "alice-demo" }, { now: NOW });
     expect(titles(admin.done)).toContain("HIDDEN-MERGED");
     expect(JSON.stringify(admin)).toContain("legacy-disconnected");
     const owner = await buildDigest(S.db, S.admin, { now: NOW });
