@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
+import { ensureCommonSpace } from "@/lib/services/access-spaces";
 import { createColumnsForProject } from "@/lib/services/planning";
 import { indexList } from "@/lib/domain/text-index";
 
@@ -15,17 +16,17 @@ const H = 3600_000;
 const D = 24 * H;
 
 export async function truncateAll(db: Db) {
-  const all = await db.$queryRawUnsafe<{ name: string }[]>("SELECT name FROM sqlite_master WHERE type = 'table'");
-  const rows = all.filter((r) => !r.name.startsWith("sqlite_") && !r.name.startsWith("_")); // keep migration bookkeeping
-  await db.$executeRawUnsafe("PRAGMA foreign_keys = OFF");
-  for (const r of rows) await db.$executeRawUnsafe(`DELETE FROM "${r.name}"`);
-  await db.$executeRawUnsafe("PRAGMA foreign_keys = ON");
+  const all = await db.$queryRawUnsafe<{ tablename: string }[]>("SELECT tablename FROM pg_tables WHERE schemaname = current_schema()");
+  const rows = all.filter((r) => !r.tablename.startsWith("_")); // keep migration bookkeeping (_prisma_migrations)
+  if (!rows.length) return;
+  await db.$executeRawUnsafe(`TRUNCATE TABLE ${rows.map((r) => `"${r.tablename}"`).join(", ")} CASCADE`);
 }
 
 export async function seedDemo(db: Db, base = new Date()) {
   const at = (offsetMs: number) => new Date(base.getTime() + offsetMs);
 
   const ws = await db.workspace.create({ data: { name: "Demo workspace (synthetic data)" } });
+  await ensureCommonSpace(db, ws.id);
 
   const mkUser = (githubId: number, login: string, name: string) => db.user.create({ data: { githubId: BigInt(githubId), login, name, isDemo: true, avatarUrl: null } });
   const [uAdmin, uA, uB, uExt] = await Promise.all([
@@ -34,8 +35,8 @@ export async function seedDemo(db: Db, base = new Date()) {
     mkUser(1003, "bram-demo", "Bram Demo"),
     mkUser(1004, "maintainer-demo", "Mina Maintainer"), // NOT a dashboard member
   ]);
-  const mkMember = (userId: string, role: "ADMIN" | "MEMBER") => db.member.create({ data: { workspaceId: ws.id, userId, role } });
-  const mAdmin = await mkMember(uAdmin.id, "ADMIN");
+  const mkMember = (userId: string, role: "OWNER" | "MEMBER") => db.member.create({ data: { workspaceId: ws.id, userId, role } });
+  const mAdmin = await mkMember(uAdmin.id, "OWNER");
   const mA = await mkMember(uA.id, "MEMBER");
   const mB = await mkMember(uB.id, "MEMBER");
 

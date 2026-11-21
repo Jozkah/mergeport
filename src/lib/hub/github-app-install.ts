@@ -1,4 +1,5 @@
 import type { Db } from "@/lib/db";
+import { firstWorkspace } from "@/lib/local/profile";
 import { GitHubRest } from "@/lib/github/rest";
 import { profileFetch } from "@/lib/local/profile-runner";
 import { COVERAGE_KEY, HUB_COVERAGE_KEY, HUB_WEBHOOKS_KEY, installUrl } from "@/lib/hub/webhook-panel";
@@ -108,26 +109,29 @@ export async function addTrackedRepositories(rest: GitHubRest, appSlug: string, 
   return { ...base, state: "checked", covered: tracked.filter((t) => coveredIds.has(t.githubId)).map((t) => t.githubId), added, failed };
 }
 
+/** The workspace the profile's coverage caches belong to (a profile has one). */
+const wsId = async (db: Db, workspaceId?: string) => workspaceId ?? (await firstWorkspace(db)).id; // omitted: the profile's only workspace (fails closed when there are several)
+
 /** The last result, kept in the profile's local database so pages show it without asking GitHub. */
 export { COVERAGE_KEY };
 export type StoredCoverage = { appSlug: string; checkedAt: string; covered: string[] };
 
-export async function saveCoverage(db: Db, c: StoredCoverage): Promise<void> {
+export async function saveCoverage(db: Db, c: StoredCoverage, workspaceId?: string): Promise<void> {
   const data = { payload: toJson(c), fetchedAt: new Date(c.checkedAt), state: "FRESH", error: null, attempts: 0, nextRetryAt: null };
-  await db.discoveryCache.upsert({ where: { key: COVERAGE_KEY }, create: { key: COVERAGE_KEY, ...data }, update: data });
+  await db.discoveryCache.upsert({ where: { workspaceId_key: { workspaceId: await wsId(db, workspaceId), key: COVERAGE_KEY } }, create: { workspaceId: await wsId(db, workspaceId), key: COVERAGE_KEY, ...data }, update: data });
 }
 
-export async function clearCoverage(db: Db): Promise<void> {
-  await db.discoveryCache.deleteMany({ where: { key: COVERAGE_KEY } });
+export async function clearCoverage(db: Db, workspaceId?: string): Promise<void> {
+  await db.discoveryCache.deleteMany({ where: { workspaceId: await wsId(db, workspaceId), key: COVERAGE_KEY } });
 }
 
 /**
  * GitHub ids (decimal) of repositories the App was last seen to cover. `appSlug` is the hub's CURRENT App: empty when it is
  * unknown (webhooks off) or differs from the slug stored with the result, so a replaced App never leaves stale badges.
  */
-export async function readCoverage(db: Db, appSlug: string | null): Promise<Set<string>> {
+export async function readCoverage(db: Db, appSlug: string | null, workspaceId?: string): Promise<Set<string>> {
   if (!appSlug) return new Set();
-  const row = await db.discoveryCache.findUnique({ where: { key: COVERAGE_KEY } });
+  const row = await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(db, workspaceId), key: COVERAGE_KEY } } });
   if (!row || row.payload === null) return new Set();
   const c = fromJson<StoredCoverage>(row.payload);
   if (c.appSlug !== appSlug) return new Set();
@@ -137,19 +141,19 @@ export async function readCoverage(db: Db, appSlug: string | null): Promise<Set<
 export type HubCoverage = { ids: string[]; at: string };
 
 /** Saves the covered ids the hub reported (replacing the previous set). */
-export async function saveHubCoverage(db: Db, ids: string[], at = new Date()): Promise<void> {
+export async function saveHubCoverage(db: Db, ids: string[], at = new Date(), workspaceId?: string): Promise<void> {
   const data = { payload: toJson({ ids, at: at.toISOString() } satisfies HubCoverage), fetchedAt: at, state: "FRESH", error: null, attempts: 0, nextRetryAt: null };
-  await db.discoveryCache.upsert({ where: { key: HUB_COVERAGE_KEY }, create: { key: HUB_COVERAGE_KEY, ...data }, update: data });
+  await db.discoveryCache.upsert({ where: { workspaceId_key: { workspaceId: await wsId(db, workspaceId), key: HUB_COVERAGE_KEY } }, create: { workspaceId: await wsId(db, workspaceId), key: HUB_COVERAGE_KEY, ...data }, update: data });
 }
 
-export async function clearHubCoverage(db: Db): Promise<void> {
-  await db.discoveryCache.deleteMany({ where: { key: HUB_COVERAGE_KEY } });
+export async function clearHubCoverage(db: Db, workspaceId?: string): Promise<void> {
+  await db.discoveryCache.deleteMany({ where: { workspaceId: await wsId(db, workspaceId), key: HUB_COVERAGE_KEY } });
 }
 
 /** GitHub ids (decimal) the hub last reported as covered. Unlike `readCoverage` it is not bound to an App slug: the hub only reports what its own App sees. */
-export async function readHubCoverage(db: Db): Promise<Set<string>> {
+export async function readHubCoverage(db: Db, workspaceId?: string): Promise<Set<string>> {
   try {
-    const row = await db.discoveryCache.findUnique({ where: { key: HUB_COVERAGE_KEY } });
+    const row = await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(db, workspaceId), key: HUB_COVERAGE_KEY } } });
     if (!row || row.payload === null) return new Set();
     const c = fromJson<Partial<HubCoverage>>(row.payload);
     return new Set(Array.isArray(c?.ids) ? c.ids.filter((x): x is string => typeof x === "string") : []);
@@ -159,24 +163,24 @@ export async function readHubCoverage(db: Db): Promise<Set<string>> {
 }
 
 /** Covered by either source: what the hub saw, or the last "Add my tracked repositories" result for the current App. */
-export async function readAllCoverage(db: Db, appSlug: string | null): Promise<Set<string>> {
-  const [byApi, byHub] = await Promise.all([readCoverage(db, appSlug), readHubCoverage(db)]);
+export async function readAllCoverage(db: Db, appSlug: string | null, workspaceId?: string): Promise<Set<string>> {
+  const [byApi, byHub] = await Promise.all([readCoverage(db, appSlug, workspaceId), readHubCoverage(db, workspaceId)]);
   return new Set([...byApi, ...byHub]);
 }
 
 /** Remembers whether the hub's webhooks are enabled (from `me()`), so local code can tell "covered" from "instant" without asking the hub. */
-export async function saveHubWebhooks(db: Db, enabled: boolean, at = new Date()): Promise<void> {
+export async function saveHubWebhooks(db: Db, enabled: boolean, at = new Date(), workspaceId?: string): Promise<void> {
   const data = { payload: toJson({ enabled, at: at.toISOString() }), fetchedAt: at, state: "FRESH", error: null, attempts: 0, nextRetryAt: null };
-  await db.discoveryCache.upsert({ where: { key: HUB_WEBHOOKS_KEY }, create: { key: HUB_WEBHOOKS_KEY, ...data }, update: data });
+  await db.discoveryCache.upsert({ where: { workspaceId_key: { workspaceId: await wsId(db, workspaceId), key: HUB_WEBHOOKS_KEY } }, create: { workspaceId: await wsId(db, workspaceId), key: HUB_WEBHOOKS_KEY, ...data }, update: data });
 }
 
-export async function clearHubWebhooks(db: Db): Promise<void> {
-  await db.discoveryCache.deleteMany({ where: { key: HUB_WEBHOOKS_KEY } });
+export async function clearHubWebhooks(db: Db, workspaceId?: string): Promise<void> {
+  await db.discoveryCache.deleteMany({ where: { workspaceId: await wsId(db, workspaceId), key: HUB_WEBHOOKS_KEY } });
 }
 
 /** True only when `me()` last said the hub's webhooks are enabled. Unknown means false. Throws on a database error. */
-export async function readHubWebhooksEnabled(db: Db): Promise<boolean> {
-  const row = await db.discoveryCache.findUnique({ where: { key: HUB_WEBHOOKS_KEY } });
+export async function readHubWebhooksEnabled(db: Db, workspaceId?: string): Promise<boolean> {
+  const row = await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(db, workspaceId), key: HUB_WEBHOOKS_KEY } } });
   if (!row || row.payload === null) return false;
   return fromJson<{ enabled?: boolean }>(row.payload)?.enabled === true;
 }

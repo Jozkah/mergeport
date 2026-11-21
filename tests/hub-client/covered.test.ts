@@ -1,3 +1,4 @@
+import { wsId } from "../helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HubLink, type SocketLike } from "@/lib/hub/link";
 import { HUB_COVERAGE_KEY } from "@/lib/hub/webhook-panel";
@@ -95,7 +96,7 @@ describe("the live link: covered", () => {
     hub.setCovered(["42", "999"]); // 999 is not watched: the hub never reports it
     start();
     await vi.waitFor(() => expect(states).toBe(1));
-    const row = await c.db.discoveryCache.findUnique({ where: { key: HUB_COVERAGE_KEY } });
+    const row = await c.db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(c.db), key: HUB_COVERAGE_KEY } } });
     const saved = row?.payload as unknown as { ids: string[]; at: string };
     expect(saved.ids).toEqual(["42"]);
     expect(Number.isNaN(Date.parse(saved.at))).toBe(false);

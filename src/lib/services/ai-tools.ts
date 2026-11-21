@@ -36,7 +36,7 @@ export function digestFacts(p: DigestPayload): string {
 }
 
 async function digestFor(db: Db, v: Viewer, day?: string) {
-  const d = day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? await getDigest(db, v.userId, day) : await latestDigest(db, v);
+  const d = day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? await getDigest(db, v, day) : await latestDigest(db, v);
   if (!d) throw new ValidationError("There is no digest yet. The first one is made on a day Mergeport is open after the digest hour.");
   return d;
 }

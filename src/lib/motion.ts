@@ -37,6 +37,9 @@ export function token(name: string, fallback: number): number {
   return raw.endsWith("ms") ? n / 1000 : n;
 }
 
+/** A little longer than the row-leave animation (--duration-fast, 250 ms): how long a folding row is kept before it is removed. */
+export const FOLD_MS = 320;
+
 /** Seconds, for GSAP. */
 export const seconds = (name: string, fallback: number) => token(name, fallback);
 

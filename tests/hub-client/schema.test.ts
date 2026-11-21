@@ -1,11 +1,15 @@
+import { wsId } from "../helpers";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestPrisma } from "../pg";
 
-const db = createPrisma(path.resolve(".data", `hub-client-schema-${process.pid}.db`));
+const db = createTestPrisma(path.resolve(".data", `hub-client-schema-${process.pid}.db`));
 afterAll(() => db.$disconnect());
+beforeAll(async () => {
+  base = { ...base, workspaceId: await wsId(db) };
+});
 
-const base = { remoteId: "r", teamRemoteId: "t", kind: "COMMON" as const, name: "n" };
+let base = { workspaceId: "", remoteId: "r", teamRemoteId: "t", kind: "COMMON" as const, name: "n" };
 
 describe("hub client schema", () => {
   it("creates a GitHub space with defaults", async () => {
@@ -26,14 +30,14 @@ describe("hub client schema", () => {
   });
 
   it("defaults TeamConfig to GITHUB without hubOrigin", async () => {
-    const t = await db.teamConfig.create({ data: {} });
+    const t = await db.teamConfig.create({ data: { workspaceId: base.workspaceId } });
     expect(t.backend).toBe("GITHUB");
     expect(t.hubOrigin).toBeNull();
   });
 
   it("round-trips a HubSession cipher", async () => {
-    await db.hubSession.create({ data: { origin: "https://hub.example", cipher: "v1.abc.def.ghi", githubId: 42n, login: "alice" } });
-    const s = await db.hubSession.findUniqueOrThrow({ where: { id: "session" } });
+    await db.hubSession.create({ data: { workspaceId: base.workspaceId, origin: "https://hub.example", cipher: "v1.abc.def.ghi", githubId: 42n, login: "alice" } });
+    const s = await db.hubSession.findUniqueOrThrow({ where: { workspaceId: base.workspaceId } });
     expect(s.cipher).toBe("v1.abc.def.ghi");
     expect(s.githubId).toBe(42n);
   });

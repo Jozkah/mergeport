@@ -11,7 +11,7 @@ const subscribe = () => () => {};
  * Per-event controls, quiet hours and optional desktop pop-ups. Preferences stay on this computer. With a tab open the browser shows the
  * pop-up; with none, the running app shows a Windows notification (services/toasts.ts). If Mergeport itself is not running, nothing can be delivered.
  */
-export function NotificationSettings({ initial }: { initial: Prefs }) {
+export function NotificationSettings({ initial, hosted = false }: { initial: Prefs; hosted?: boolean }) {
   const [prefs, setPrefs] = useState<Prefs>(initial);
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
@@ -61,7 +61,7 @@ export function NotificationSettings({ initial }: { initial: Prefs }) {
         ) : (
           <button type="button" className="btn" onClick={() => void Notification.requestPermission().then(setAsked)}>Allow desktop notifications</button>
         )}
-        <p className="text-[12px] text-ink-3">Pop-ups also appear with no browser tab open, as long as Mergeport itself is running in the background (it can start when you sign in to Windows).</p>
+        <p className="text-[12px] text-ink-3">{hosted ? "Pop-ups appear while a Mergeport tab is open in this browser." : "Pop-ups also appear with no browser tab open, as long as Mergeport itself is running in the background (it can start when you sign in to Windows)."}</p>
       </div>
 
       <div className="flex items-center gap-3">

@@ -8,12 +8,15 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
+/// Exactly one OWNER per workspace (partial unique index Member_one_owner). READER is read-only. See docs/roles.md.
 enum MemberRole {
+  OWNER
   ADMIN
   MEMBER
+  READER
 }
 
 enum MemberStatus {
@@ -141,6 +144,7 @@ model Workspace {
   name      String
   createdAt DateTime @default(now())
 
+  sessions      Session[] @relation("SessionActiveWorkspace")
   members       Member[]
   projects      Project[]
   repositories  Repository[]
@@ -149,23 +153,54 @@ model Workspace {
   milestones    DashboardMilestone[]
   audit         AuditLog[]
   notifications Notification[]
+  waitingRecords WaitingRecord[]
+  reviewerAvailability ReviewerAvailability[]
+  labelMaps     LabelMap[]
+  upstreamSubscriptions UpstreamSubscription[]
+  spaces        Space[]
+  invitations   Invitation[]
+  accessSpaces  AccessSpace[]
+  teamConfig    TeamConfig?
+  hubSession    HubSession?
+  aiSettings    AiSettings?
+  aiSuggestions AiSuggestion[]
+  aiPendingActions AiPendingAction[]
+  dailyDigests  DailyDigest[]
+  gitCache      GitCache[]
+  discoveryCache DiscoveryCache[]
+  jobs          Job[]
+  installations WorkspaceInstallation[]
+  githubAppStates GithubAppState[]
+  federationPolicy FederationPolicy?
+  federationLinks  FederationLink[]
+  federationGrants FederationGrant[]
+  federationCache  FederationCache[]
+  federationEvents FederationEvent[]
 }
 
 model User {
   id        String   @id @default(cuid())
-  githubId  BigInt   @unique
+  githubId  BigInt?  @unique // null for people who signed in with email or OIDC and have not linked GitHub
   login     String
   name      String?
   avatarUrl String?
   timezone  String   @default("UTC")
   isDemo    Boolean  @default(false)
   createdAt DateTime @default(now())
+  /// Always stored lowercased. Null for legacy GitHub users. Unique when present (Postgres allows many NULLs).
+  email           String?   @unique
+  /// Set when the person proved they own `email` (magic link opened, or an OIDC provider asserted email_verified).
+  emailVerifiedAt DateTime?
 
+  identities    Identity[]
   members       Member[]
   sessions      Session[]
   devices       Device[]
   savedFilters  SavedFilter[]
   notifications Notification[]
+  connectedInstallations WorkspaceInstallation[] @relation("WorkspaceInstallationConnectedBy")
+  federationLinks  FederationLink[]
+  federationGrants FederationGrant[]
 }
 
 model Session {
@@ -175,10 +210,45 @@ model Session {
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
+  /// The workspace this login works in. Checked against an ACTIVE membership on every request; null means "pick the default".
+  activeWorkspaceId String?
+
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeWorkspace Workspace? @relation("SessionActiveWorkspace", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([activeWorkspaceId])
+}
+
+/// How a person proves who they are. provider: 'email' | 'github' | 'oidc:<name>'; subject: the lowercased email, GitHub id or OIDC `sub`.
+model Identity {
+  id        String   @id @default(cuid())
+  userId    String
+  provider  String
+  subject   String
+  email     String?
+  createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([provider, subject])
   @@index([userId])
+}
+
+/// One emailed sign-in link. Only the SHA-256 of the token is stored. Single use (consumedAt), 15 minutes.
+model MagicLink {
+  id              String    @id @default(cuid())
+  emailLowercased String
+  tokenHash       String    @unique
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  ipHash          String?
+  /// SHA-256 of the random value kept in the requesting browser's cookie. The link only works in that browser (login CSRF, mail scanners).
+  browserHash     String?
+
+  @@index([emailLowercased, createdAt])
+  @@index([expiresAt])
 }
 
 model Member {
@@ -196,6 +266,8 @@ model Member {
   projects        ProjectMember[]
   planningCreated PlanningItem[]      @relation("PlanningCreatedBy")
   ownedMilestones DashboardMilestone[]
+  invitationsSent Invitation[]
+  accessSpaces    AccessSpaceMember[]
 
   @@unique([workspaceId, userId])
 }
@@ -233,6 +305,8 @@ model Repository {
   statusDetail   String?
   isDemo         Boolean        @default(false)
   spaceId        String? // coordination space that declares (shares) this repository; null = local only
+  /// GitHub App installation that grants access to this repository; null for local `gh` and demo repositories.
+  installationId BigInt?
   lastSyncedAt   DateTime?
   syncError      String?
   rateLimited    Boolean        @default(false)
@@ -240,6 +314,8 @@ model Repository {
 
   workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   owner       GithubOwner        @relation(fields: [ownerId], references: [id])
+  /// Binding that serves this repository. MATCH SIMPLE: a null installationId is unchecked. NO ACTION is checked at the end of the statement, so deleting a workspace (which cascades to both tables) still works.
+  installation WorkspaceInstallation? @relation(fields: [workspaceId, installationId], references: [workspaceId, installationId], onDelete: NoAction, onUpdate: NoAction)
   projects    ProjectRepository[]
   grants      RepositoryGrant[]
   workItems   WorkItem[]
@@ -254,6 +330,7 @@ model Repository {
 
   @@unique([workspaceId, githubId])
   @@index([workspaceId, trackingStatus])
+  @@index([installationId])
 }
 
 
@@ -264,11 +341,14 @@ model Project {
   slug        String
   description String?
   spaceId     String? // null = local only
+  /// The access-control space this project lives in (who may see and write it). Null = the workspace's COMMON space.
+  accessSpaceId String?
   /// off | suggest. Suggestions never move anything by themselves and never write to GitHub.
   automation  String   @default("off")
   createdAt   DateTime @default(now())
 
   workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  accessSpace  AccessSpace?        @relation(fields: [accessSpaceId], references: [id], onDelete: SetNull)
   boards       PlanBoard[]
   epics        Epic[]
   iterations   Iteration[]
@@ -282,6 +362,57 @@ model Project {
   waitingRules WaitingRule[]
 
   @@unique([workspaceId, slug])
+  @@index([accessSpaceId])
+}
+
+/// Who sees and writes a group of projects. Separate from Space (the GitHub/hub sync space, scheduled for removal).
+/// COMMON: every active member reads it; one per workspace (partial unique index). RESTRICTED: only AccessSpaceMember rows.
+model AccessSpace {
+  id          String    @id @default(cuid())
+  workspaceId String
+  kind        SpaceKind
+  name        String
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members   AccessSpaceMember[]
+  projects  Project[]
+
+  @@index([workspaceId])
+}
+
+model AccessSpaceMember {
+  spaceId  String
+  memberId String
+  canWrite Boolean @default(false)
+
+  space  AccessSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  member Member      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([spaceId, memberId])
+  @@index([memberId])
+}
+
+/// An email invitation to join a workspace. The token is only stored as its SHA-256. At most one pending (not accepted, not revoked)
+/// row per (workspaceId, emailLowercased): partial unique index Invitation_pending_key. The role is never OWNER (CHECK constraint).
+model Invitation {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  emailLowercased   String
+  role              MemberRole
+  invitedByMemberId String?
+  tokenHash         String    @unique
+  expiresAt         DateTime
+  acceptedAt        DateTime?
+  revokedAt         DateTime?
+  /// Set when the last attempt to mail the invitation failed (cleared by a successful send); the members page then offers Resend.
+  sendFailedAt      DateTime?
+  createdAt         DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy Member?   @relation(fields: [invitedByMemberId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
 }
 
 model ProjectRepository {
@@ -481,6 +612,7 @@ model WaitingRecord {
   clearedById    String?
   clearReason    String?
 
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   workItem     WorkItem?     @relation(fields: [workItemId], references: [id], onDelete: Cascade)
   planningItem PlanningItem? @relation(fields: [planningItemId], references: [id], onDelete: Cascade)
 
@@ -528,10 +660,10 @@ model PlanningItem {
   updatedAt    DateTime @updatedAt
 
   project   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  column    PlanningColumn       @relation(fields: [columnId], references: [id])
+  column    PlanningColumn       @relation(fields: [columnId], references: [id], onDelete: NoAction)
   workItem  WorkItem?            @relation(fields: [workItemId], references: [id], onDelete: SetNull)
   milestone DashboardMilestone?  @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
-  createdBy Member               @relation("PlanningCreatedBy", fields: [createdById], references: [id])
+  createdBy Member               @relation("PlanningCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
   blocks    PlanningLink[]       @relation("LinkFrom")
   blockedBy PlanningLink[]       @relation("LinkTo")
   waiting   WaitingRecord[]
@@ -547,12 +679,16 @@ model PlanningItem {
 /// Immutable GitHub answers keyed by commit (diffs, file contents, commit lists), so reopening a pull request or a file costs
 /// nothing. Safe to delete at any time; it is rebuilt on demand and pruned by age and size.
 model GitCache {
-  key        String   @id
+  workspaceId String
+  key        String
   payload    Json
   bytes      Int
   createdAt  DateTime @default(now())
   accessedAt DateTime @default(now())
 
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, key])
   @@index([accessedAt])
 }
 
@@ -620,6 +756,8 @@ model DashboardMilestone {
   owner     Member?             @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   items     PlanningItem[]
   repoLinks MilestoneRepoLink[]
+
+  @@index([workspaceId])
 }
 
 model MilestoneRepoLink {
@@ -837,6 +975,7 @@ model Notification {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt])
+  @@index([workspaceId, userId])
 }
 
 model AuditLog {
@@ -856,6 +995,8 @@ model AuditLog {
 
 model Job {
   id          String    @id @default(cuid())
+  /// Null only for system-wide jobs that serve no single tenant (see docs/tenancy.md); every per-workspace job carries it.
+  workspaceId String?
   type        String
   payload     Json
   dedupeKey   String?   @unique
@@ -870,7 +1011,10 @@ model Job {
   createdAt   DateTime  @default(now())
   finishedAt  DateTime?
 
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
   @@index([status, runAt])
+  @@index([workspaceId])
 }
 
 
@@ -888,7 +1032,8 @@ model PublicCacheEntry {
 /// Last known result of a network discovery (repositories, invitations, space candidates), so pages render from local
 /// state. `fetchedAt` is the last SUCCESSFUL fetch and stays put while later attempts fail.
 model DiscoveryCache {
-  key         String    @id // "repos" | "invitations" | "candidates" | "inv-status:<spaceId>"
+  workspaceId String
+  key         String // "repos" | "invitations" | "candidates" | "inv-status:<spaceId>"
   payload     Json?
   fetchedAt   DateTime?
   state       String    @default("EMPTY") // EMPTY | FRESH | RETRYING | OFFLINE | AUTH | RATE_LIMITED | ERROR
@@ -896,6 +1041,10 @@ model DiscoveryCache {
   attempts    Int       @default(0)
   nextRetryAt DateTime?
   updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, key])
 }
 
 model RateLimitState {
@@ -949,6 +1098,7 @@ enum TeamBackend {
 /// A coordination space = one private GitHub repository with exactly one audience (its collaborators).
 model Space {
   id             String      @id @default(cuid())
+  workspaceId    String
   remoteId       String // spaceId from the manifest
   teamRemoteId   String
   kind           SpaceKind
@@ -988,12 +1138,13 @@ model Space {
   /// a bounded number of times; entries marked `gaveUp` are only kept as a visible note until the entity changes again.
   hubDeferred    Json?
 
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   restores  HubRestore[]
   entities  SyncEntity[]
   outbox    OutboxOp[]
   conflicts SyncConflict[]
 
-  @@unique([backend, repoOwner, repoName, hubSpaceId])
+  @@unique([workspaceId, backend, repoOwner, repoName, hubSpaceId])
 }
 
 /// What we last agreed on with the remote for one entity file: enables 3-way merges.
@@ -1072,7 +1223,8 @@ model HubRestore {
 }
 
 model TeamConfig {
-  id            String   @id @default("team")
+  id            String   @id @default(cuid())
+  workspaceId   String   @unique
   mode          TeamMode @default(PERSONAL)
   teamRemoteId  String?
   name          String?
@@ -1087,17 +1239,22 @@ model TeamConfig {
   backend       TeamBackend @default(GITHUB)
   hubOrigin     String?
   updatedAt     DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 /// The one hub login of this client; `cipher` is the encrypted hub session token.
 model HubSession {
-  id        String   @id @default("session")
+  id        String   @id @default(cuid())
+  workspaceId String @unique
   origin    String
   cipher    String
   githubId  BigInt
   login     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 /// Personal inbox state per item. Never synchronised: what you have read, finished or snoozed is yours alone.
@@ -1135,6 +1292,8 @@ model ReviewerAvailability {
   backupLogin      String?
   note             String?
   createdAt        DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, login])
 }
@@ -1253,6 +1412,8 @@ model LabelMap {
   repoKey     String   @default("")
   createdAt   DateTime @default(now())
 
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
   @@unique([workspaceId, spelling, repoKey])
 }
 
@@ -1265,6 +1426,10 @@ model UpstreamSubscription {
   criteria    Json
   muted       Boolean  @default(false)
   createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 /// An explicit record that an upstream change is being (or was) brought to a branch. Evidence is kept apart from the person's decision.
@@ -1291,20 +1456,24 @@ model BackportRecord {
 /// One generated daily digest per person and local day (day = the day reported, the previous local day). Built from this computer's own data, personal, never synchronised.
 model DailyDigest {
   id          String    @id @default(cuid())
+  workspaceId String
   userId      String
   day         String // YYYY-MM-DD in the person's time zone
   payload     Json
   generatedAt DateTime  @default(now())
   readAt      DateTime?
 
-  @@unique([userId, day])
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId, day])
 }
 
 /// The OpenAI-compatible endpoint used to draft tasks from plain text. One row per profile, never synchronised.
 /// `cipher` is the API key encrypted with the profile's vault key (see hub/session-vault.ts). `model` is whatever the endpoint
 /// currently offers; it is chosen from the endpoint's own model list and can change at any time.
 model AiSettings {
-  id        String   @id @default("ai")
+  id        String   @id @default(cuid())
+  workspaceId String @unique
   baseUrl   String
   cipher    String?
   model     String?
@@ -1316,12 +1485,15 @@ model AiSettings {
   lastRunDay String?
   lastSummary String?
   updatedAt DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 /// A task the AI thinks you should have, from the daily review or "Analyze my workspace". Nothing becomes a task until it is accepted
 /// (or the autopilot level is "create" and the case is a clear one). `sourceKey` names the thing it is about, so it is not suggested twice.
 model AiSuggestion {
   id        String    @id @default(cuid())
+  workspaceId String
   sourceKey String
   title     String
   reason    String
@@ -1332,7 +1504,9 @@ model AiSuggestion {
   createdAt DateTime  @default(now())
   decidedAt DateTime?
 
-  @@index([state, createdAt])
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, state, createdAt])
   @@index([sourceKey])
 }
 
@@ -1340,6 +1514,7 @@ model AiSuggestion {
 /// approves it in Mergeport, which then performs it as themselves. Local, never synchronised.
 model AiPendingAction {
   id         String    @id @default(cuid())
+  workspaceId String
   /// comment | request-review | review
   kind       String
   workItemId String
@@ -1351,5 +1526,200 @@ model AiPendingAction {
   createdAt  DateTime  @default(now())
   decidedAt  DateTime?
 
-  @@index([state, createdAt])
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, state, createdAt])
+}
+
+// ---------- Federation (docs/federation.md) ----------
+// Every instance is both a consumer (a user links another instance and views its data read-only) and a provider (it owns data and
+// issues revocable read-only grants). Nothing here stores a secret in clear: provider tokens and codes are sha256 hashes, consumer
+// tokens are AES-256-GCM under MERGEPORT_ENCRYPTION_KEY.
+
+/// Per-workspace linking policy, always inside the operator ceiling (MERGEPORT_FEDERATION). No row = everything off.
+model FederationPolicy {
+  id              String   @id @default(cuid())
+  workspaceId     String   @unique
+  /// off | allowlist | any
+  outboundMode    String   @default("off")
+  inboundMode     String   @default("off")
+  /// Normalised origins used by the outbound and inbound "allowlist" modes.
+  allowlist       String[] @default([])
+  /// ADMIN (owner and admins) or MEMBER (members too). READER never links.
+  whoCanLink      String   @default("ADMIN")
+  maxLinksPerUser Int      @default(5)
+  /// Distinct peer instances a workspace may be linked to (0 = none, 1 = a single linked instance).
+  maxPeers        Int      @default(5)
+  updatedAt       DateTime @updatedAt
+  updatedByUserId String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+/// Consumer side: one user's link from this workspace to a peer instance. Visible only to `userId`.
+model FederationLink {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  userId            String
+  peerOrigin        String
+  /// AES-256-GCM of the peer's access token. Null while PENDING and after unlinking.
+  tokenEnc          String?
+  /// PENDING (waiting for the callback) | ACTIVE | REVOKED (unlinked here, revoked by the peer, or refused)
+  status            String    @default("PENDING")
+  /// sha256 of the OAuth state of a PENDING link (one use), and the encrypted PKCE verifier. Both cleared at the callback.
+  stateHash         String?   @unique
+  verifierEnc       String?
+  pendingExpiresAt  DateTime?
+  peerWorkspaceName String?
+  peerRole          String?
+  lastError         String?
+  createdAt         DateTime  @default(now())
+  lastUsedAt        DateTime?
+  revokedAt         DateTime?
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cache     FederationCache[]
+
+  @@index([workspaceId, userId])
+}
+
+/// Provider side: what a user approved for one client instance. Starts as an authorization code, becomes a token on exchange.
+model FederationGrant {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  userId            String
+  clientOrigin      String
+  scope             String    @default("read")
+  codeHash          String?   @unique
+  codeExpiresAt     DateTime?
+  codeUsedAt        DateTime?
+  codeChallenge     String?
+  redirectUri       String?
+  /// sha256 of the opaque access token. Null until the code is exchanged.
+  tokenHash         String?   @unique
+  expiresAt         DateTime?
+  absoluteExpiresAt DateTime?
+  createdAt         DateTime  @default(now())
+  lastUsedAt        DateTime?
+  revokedAt         DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId])
+  @@index([workspaceId, clientOrigin])
+}
+
+/// Consumer side: the last answer from a peer for one request key, for one link only (read it only through the link's user).
+model FederationCache {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  linkId      String
+  key         String
+  etag        String?
+  bodyJson    Json
+  fetchedAt   DateTime
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  link      FederationLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, linkId, key])
+}
+
+/// Audit trail of federation decisions. Never holds a token, a code or a verifier.
+model FederationEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  kind        String
+  peerOrigin  String?
+  linkId      String?
+  grantId     String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+enum InstallationAccountType {
+  USER
+  ORGANIZATION
+}
+
+enum InstallationRepositorySelection {
+  ALL
+  SELECTED
+}
+
+/// One installation of the deployment's GitHub App on a GitHub account. GLOBAL: the installation id is GitHub-global; the tenant record is WorkspaceInstallation.
+model GithubInstallation {
+  installationId      BigInt                          @id
+  accountGithubId     BigInt
+  accountLogin        String
+  accountType         InstallationAccountType
+  repositorySelection InstallationRepositorySelection @default(SELECTED)
+  suspendedAt         DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime                        @default(now())
+  updatedAt           DateTime                        @updatedAt
+
+  workspaces WorkspaceInstallation[]
+
+  @@index([accountGithubId])
+}
+
+/// Which workspaces use which installation (the tenant-side record of a connected GitHub account).
+model WorkspaceInstallation {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  installationId    BigInt
+  connectedByUserId String?
+  /// A row exists only once control of the installation was proved, so these are NOT NULL.
+  verifiedAt           DateTime
+  /// The GitHub user whose user-to-server token proved control (the installation was in that user's accessible list).
+  verifiedGithubUserId BigInt
+  /// How it was proved, e.g. `user-installations` (GET /user/installations).
+  proofMethod          String
+  createdAt         DateTime @default(now())
+
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  installation GithubInstallation @relation(fields: [installationId], references: [installationId])
+  connectedBy  User?              @relation("WorkspaceInstallationConnectedBy", fields: [connectedByUserId], references: [id], onDelete: SetNull)
+  /// Repositories served by this binding. The foreign key is composite and NO ACTION: unbind must null them first (`unbindInstallation`).
+  repositories Repository[]
+
+  @@unique([workspaceId, installationId])
+  @@index([workspaceId])
+  @@index([installationId])
+}
+
+/// Webhook delivery ids already handled (replay protection). GLOBAL; pruned by receivedAt. Never holds a payload.
+model GithubDelivery {
+  deliveryId     String   @id
+  installationId BigInt?
+  event          String
+  receivedAt     DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
+/// Short-lived, single-use install / OAuth state, issued to one user for one workspace (ROOT). The state value is `<workspaceId>.<random>`; only its hash is stored.
+model GithubAppState {
+  id          String    @id @default(cuid())
+  stateHash   String    @unique
+  userId      String
+  workspaceId String
+  kind        String
+  nonceHash   String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, expiresAt])
+  @@index([expiresAt])
 }

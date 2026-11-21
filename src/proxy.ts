@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { buildCsp, newNonce } from "@/lib/csp";
+import { isHosted, isPublicHost } from "@/lib/public-url";
 
 /**
  * Local-only guard, run before every request.
@@ -10,6 +11,7 @@ import { buildCsp, newNonce } from "@/lib/csp";
  *  - state-changing requests whose Origin / Sec-Fetch-Site is not this same origin (blocks cross-site forms and fetches).
  * Pages additionally require the session cookie that only the launcher-opened browser receives.
  */
+const FEDERATION_S2S = new Set(["/api/federation/v1/token", "/api/federation/v1/revoke"]);
 const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
 
 /**
@@ -25,14 +27,29 @@ export function cacheControlFor(pathname: string): string {
 
 export function proxy(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
-  if (!LOOPBACK.test(host)) return new NextResponse("Forbidden host", { status: 403 });
+  // Local app: loopback names only. Hosted (MERGEPORT_PUBLIC_URL): ONLY the public host. A reverse proxy can forward a client's own
+  // "Host: 127.0.0.1" header, so loopback names are no proof of a local caller there; only the launcher's readiness probe keeps them.
+  if (isHosted()) {
+    const probe = req.nextUrl.pathname === "/api/local/ready" && LOOPBACK.test(host);
+    if (!isPublicHost(host) && !probe) return new NextResponse("Forbidden host", { status: 403 });
+    // The local app's routes do not exist here, except sign-out and the launcher's own readiness probe (loopback only, checked above).
+    const p = req.nextUrl.pathname;
+    if (p.startsWith("/api/local/") && p !== "/api/local/signout" && !(p === "/api/local/ready" && probe)) return new NextResponse("Not found", { status: 404 });
+  } else if (!LOOPBACK.test(host)) return new NextResponse("Forbidden host", { status: 403 });
 
   const method = req.method.toUpperCase();
-  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+  // Federation's server-to-server POSTs (another instance, no browser, no cookies) carry no Origin and no Sec-Fetch-Site. They are
+  // authorised by a PKCE code or a bearer token, never by a cookie, so the cross-site rule has nothing to protect there.
+  const serverToServer = isHosted() && FEDERATION_S2S.has(req.nextUrl.pathname);
+  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !serverToServer) {
     const origin = req.headers.get("origin");
     const site = req.headers.get("sec-fetch-site");
     let ok = false;
-    if (origin) {
+    if (origin === "null") {
+      // A form posted from a page with Referrer-Policy: no-referrer, or from a sandboxed frame, carries "Origin: null". Only the browser-set
+      // Sec-Fetch-Site (page script cannot forge it) can tell a same-origin post from a cross-site one.
+      ok = site === "same-origin";
+    } else if (origin) {
       try {
         ok = new URL(origin).host === host;
       } catch {
@@ -47,6 +64,7 @@ export function proxy(req: NextRequest) {
   requestHeaders.set("Content-Security-Policy", csp);
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   res.headers.set("Content-Security-Policy", csp);
+  res.headers.set("X-Frame-Options", "DENY"); // same rule as CSP frame-ancestors 'none' for browsers that only know the old header: the approval page must not be framed
   res.headers.set("Cache-Control", cacheControlFor(req.nextUrl.pathname));
   return res;
 }

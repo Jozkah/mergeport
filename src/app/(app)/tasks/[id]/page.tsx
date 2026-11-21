@@ -7,12 +7,15 @@ import { assigneeCandidates, getTask } from "@/lib/services/tasks";
 import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { formatDateOnly, formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
+import { ConfirmSheet } from "@/components/forms/ConfirmSheet";
+import { Disclosure } from "@/components/ui/Disclosure";
 import { Select } from "@/components/ui/Select";
 import { Avatar, LabelChip, PageHeader, Panel, Time } from "@/components/ui/primitives";
 import { ArrowLeft, ExternalLink, ListChecks, MessageSquare, Pencil, Trash2 } from "@/components/ui/icons";
 import { Checklist } from "@/components/tasks/Checklist";
 import { WorktreePanel } from "@/components/work/WorktreePanel";
 import { linksForTask } from "@/lib/services/work-links";
+import { isHosted } from "@/lib/public-url";
 import { taskBranchAction } from "@/app/phase4-actions";
 import type { ActionResult } from "@/lib/action-result";
 import { PromotePanel } from "@/components/tasks/TemplatePanels";
@@ -41,7 +44,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const labels = task.labels as string[];
   const canDelete = !task.workItemId && (viewer.isAdmin || task.authorLogin?.toLowerCase() === viewer.login.toLowerCase() || task.createdById === viewer.memberId);
   const dueValue = task.dueDate ? task.dueDate.toISOString().slice(0, 10) : "";
-  const worktreeLinks = await linksForTask(db, viewer, task.id);
+  // Hosted: there is no "this computer", so no worktree panel and no branch-to-folder field.
+  const hosted = isHosted();
+  const worktreeLinks = hosted ? null : await linksForTask(db, viewer, task.id);
 
   /** One Save for the whole Details form: the task fields first, then the branch, each through its own unchanged action. */
   async function saveDetailsAction(fd: FormData): Promise<ActionResult> {
@@ -66,7 +71,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         }
       />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem] lg:grid-rows-[auto_1fr] lg:items-start">
         <div className="flex min-w-0 flex-col gap-5">
           <Panel title="Description" icon={Pencil} actions={null}>
             <div className="p-4 text-[13.5px]">
@@ -78,8 +83,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                 </p>
               )}
               {!linked && (
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-[12.5px] text-ink-2">Edit title and description</summary>
+                <Disclosure className="mt-3" summary="Edit title and description">
                   <ActionForm action={updateTaskAction} submitLabel="Save" pendingLabel="Saving…" resetOnSuccess={false} className="mt-3">
                     <input type="hidden" name="id" value={task.id} />
                     <div className="flex flex-col gap-3">
@@ -87,7 +91,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                       <div><label className="label" htmlFor="e-desc">Description</label><textarea id="e-desc" name="description" className="input min-h-28" rows={5} defaultValue={task.description ?? ""} /></div>
                     </div>
                   </ActionForm>
-                </details>
+                </Disclosure>
               )}
             </div>
           </Panel>
@@ -95,54 +99,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
           <Panel title={`Checklist${checklist.length ? ` (${checklist.filter((c) => c.done).length}/${checklist.length})` : ""}`} icon={ListChecks}>
             <Checklist taskId={task.id} items={checklist.map((c) => ({ id: c.id, text: c.text, done: c.done, doneByLogin: c.doneByLogin }))} />
           </Panel>
-
-          <Panel title={`Discussion${comments.some((c) => c.kind === "COMMENT") ? ` (${comments.filter((c) => c.kind === "COMMENT").length})` : ""}`} icon={MessageSquare}>
-            <ol className="flex flex-col">
-              {comments.map((c) =>
-                c.kind === "EVENT" ? (
-                  <li key={c.id} className="flex items-center gap-2 border-b border-line px-4 py-2 text-[12.5px] text-ink-3 last:border-b-0">
-                    <Avatar login={c.authorLogin} size={16} />
-                    <span><strong className="font-medium text-ink-2">@{c.authorLogin}</strong> {c.body} · <Time value={c.createdAt} formatted={formatInstant(c.createdAt, viewer.timezone)} /></span>
-                  </li>
-                ) : (
-                  <li key={c.id} className="flex gap-3 border-b border-line px-4 py-3 last:border-b-0">
-                    <Avatar login={c.authorLogin} size={28} />
-                    <div className="min-w-0 flex-1 text-[13.5px]">
-                      <p className="text-[12.5px] text-ink-3"><strong className="font-medium text-ink">@{c.authorLogin}</strong> · <Time value={c.createdAt} formatted={formatInstant(c.createdAt, viewer.timezone)} />{c.editedAt ? " · edited" : ""}</p>
-                      <p className="mt-1 whitespace-pre-wrap break-words text-ink-2">{c.body}</p>
-                      {(c.authorLogin.toLowerCase() === viewer.login.toLowerCase() || viewer.isAdmin) && (
-                        <div className="mt-2 flex flex-wrap items-start gap-3 text-[12px]">
-                          {c.authorLogin.toLowerCase() === viewer.login.toLowerCase() && (
-                            <details>
-                              <summary className="cursor-pointer text-ink-3 hover:text-ink">Edit</summary>
-                              <ActionForm action={editCommentAction} submitLabel="Save" pendingLabel="Saving…" resetOnSuccess={false} className="mt-2">
-                                <input type="hidden" name="commentId" value={c.id} />
-                                <textarea name="body" className="input min-h-20" rows={3} defaultValue={c.body} required aria-label="Edit comment" />
-                              </ActionForm>
-                            </details>
-                          )}
-                          <ActionForm action={deleteCommentAction} submitLabel="Delete" pendingLabel="Deleting…" submitClassName="text-ink-3 hover:text-blocked" resetOnSuccess={false}>
-                            <input type="hidden" name="commentId" value={c.id} /><input type="hidden" name="id" value={task.id} />
-                          </ActionForm>
-                        </div>
-                      )}
-                    </div>
-                  </li>
-                ),
-              )}
-            </ol>
-            <div className="border-t border-line p-4">
-              <ActionForm action={addCommentAction} submitLabel="Comment" pendingLabel="Posting…">
-                <input type="hidden" name="id" value={task.id} />
-                <label className="label" htmlFor="c-body">Add a comment</label>
-                <textarea id="c-body" name="body" className="input min-h-24" rows={3} required maxLength={8000} placeholder="Write a comment. Everyone who can see this task can read it." />
-              </ActionForm>
-            </div>
-          </Panel>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-5">
-          <WorktreePanel links={worktreeLinks} tz={viewer.timezone} repositoryId={full.workItem?.repositoryId ?? ""} note="Set the branch in Details to match this task to a folder on your computer." defaultOpen={worktreeLinks.mapped} summary={!worktreeLinks.branch ? "No branch set" : worktreeLinks.mapped ? undefined : "Repository not mapped"} />
+        <aside className="flex min-w-0 flex-col gap-5 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+          {worktreeLinks && <WorktreePanel links={worktreeLinks} tz={viewer.timezone} repositoryId={full.workItem?.repositoryId ?? ""} note="Set the branch in Details to match this task to a folder on your computer." defaultOpen={worktreeLinks.mapped} summary={!worktreeLinks.branch ? "No branch set" : worktreeLinks.mapped ? undefined : "Repository not mapped"} />}
           <PromotePanel db={db} viewer={viewer} taskId={task.id} linked={!!task.workItemId} promoteTo={promote} />
           <Panel title="Details">
             <ActionForm action={saveDetailsAction} submitLabel="Save changes" pendingLabel="Saving…" resetOnSuccess={false} className="p-4">
@@ -170,23 +130,78 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                   <Select id="s-status" name="status" className="select" defaultValue={task.column.key}>{columns.map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}</Select></div>
                 {openItems > 0 && <label className="flex items-start gap-2 text-[12.5px] text-ink-2"><input type="checkbox" name="tickOpen" className="mt-0.5" /> <span>If I move this to Done, also check the {openItems} open checklist item{openItems === 1 ? "" : "s"}.</span></label>}
                 <TaskFields people={people} me={viewer.login} values={{ assignee: task.assigneeLogin ?? "", priority: task.priority, due: dueValue, labels: labels.join(", ") }} />
-                <div><label className="label" htmlFor="tb-branch">Branch</label>
+                {!hosted && <div><label className="label" htmlFor="tb-branch">Branch</label>
                   <input id="tb-branch" name="branch" className="input font-mono" defaultValue={task.branchRef ?? ""} placeholder="fix-login" aria-describedby="tb-branch-help" />
-                  <p id="tb-branch-help" className="mt-1 text-[12px] text-ink-3">Shared with your team. Folder paths never are.</p></div>
+                  <p id="tb-branch-help" className="mt-1 text-[12px] text-ink-3">Shared with your team. Folder paths never are.</p></div>}
               </div>
             </ActionForm>
           </Panel>
 
           {canDelete && (
-            <details className="rounded-[10px] border border-line p-3 text-[13px]">
-              <summary className="cursor-pointer text-ink-2"><Trash2 size={13} className="mr-1 inline" aria-hidden />Delete this task</summary>
-              <ActionForm action={deleteTaskAction} submitLabel="Delete task" pendingLabel="Deleting…" submitClassName="btn" className="mt-3" resetOnSuccess={false}>
-                <input type="hidden" name="id" value={task.id} />
-                <p className="mb-2 text-ink-3">The task, its discussion and its history are removed for everyone in the team. This cannot be undone.</p>
-              </ActionForm>
-            </details>
+            <ConfirmSheet
+              title="Delete this task?"
+              consequence={`The task, its discussion and its history are removed for everyone in the ${hosted ? "workspace" : "team"}. This cannot be undone.`}
+              action={deleteTaskAction}
+              submitLabel="Delete task"
+              pendingLabel="Deleting…"
+              trigger={<button type="button" className="btn btn-quiet min-h-10 self-start text-blocked"><Trash2 size={14} aria-hidden /> Delete this task</button>}
+            >
+              <input type="hidden" name="id" value={task.id} />
+            </ConfirmSheet>
           )}
         </aside>
+
+        <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+          <Panel title={`Discussion${comments.some((c) => c.kind === "COMMENT") ? ` (${comments.filter((c) => c.kind === "COMMENT").length})` : ""}`} icon={MessageSquare}>
+            <ol className="flex flex-col">
+              {comments.map((c) =>
+                c.kind === "EVENT" ? (
+                  <li key={c.id} className="flex items-center gap-2 border-b border-line px-4 py-2 text-[12.5px] text-ink-3 last:border-b-0">
+                    <Avatar login={c.authorLogin} size={16} />
+                    <span><strong className="font-medium text-ink-2">@{c.authorLogin}</strong> {c.body} · <Time value={c.createdAt} formatted={formatInstant(c.createdAt, viewer.timezone)} /></span>
+                  </li>
+                ) : (
+                  <li key={c.id} className="flex gap-3 border-b border-line px-4 py-3 last:border-b-0">
+                    <Avatar login={c.authorLogin} size={28} />
+                    <div className="min-w-0 flex-1 text-[13.5px]">
+                      <p className="text-[12.5px] text-ink-3"><strong className="font-medium text-ink">@{c.authorLogin}</strong> · <Time value={c.createdAt} formatted={formatInstant(c.createdAt, viewer.timezone)} />{c.editedAt ? " · edited" : ""}</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-ink-2">{c.body}</p>
+                      {(c.authorLogin.toLowerCase() === viewer.login.toLowerCase() || viewer.isAdmin) && (
+                        <div className="mt-2 flex flex-wrap items-start gap-3 text-[12px]">
+                          {c.authorLogin.toLowerCase() === viewer.login.toLowerCase() && (
+                            <Disclosure summary="Edit">
+                              <ActionForm action={editCommentAction} submitLabel="Save" pendingLabel="Saving…" resetOnSuccess={false} className="mt-2">
+                                <input type="hidden" name="commentId" value={c.id} />
+                                <textarea name="body" className="input min-h-20" rows={3} defaultValue={c.body} required aria-label="Edit comment" />
+                              </ActionForm>
+                            </Disclosure>
+                          )}
+                          <ConfirmSheet
+                            title="Delete this comment?"
+                            consequence="The comment is removed for everyone who can see this task. This cannot be undone."
+                            action={deleteCommentAction}
+                            submitLabel="Delete comment"
+                            pendingLabel="Deleting…"
+                            trigger={<button type="button" className="btn btn-quiet min-h-10 text-blocked">Delete</button>}
+                          >
+                            <input type="hidden" name="commentId" value={c.id} /><input type="hidden" name="id" value={task.id} />
+                          </ConfirmSheet>
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ),
+              )}
+            </ol>
+            <div className="border-t border-line p-4">
+              <ActionForm action={addCommentAction} submitLabel="Comment" pendingLabel="Posting…">
+                <input type="hidden" name="id" value={task.id} />
+                <label className="label" htmlFor="c-body">Add a comment</label>
+                <textarea id="c-body" name="body" className="input min-h-24" rows={3} required maxLength={8000} placeholder="Write a comment. Everyone who can see this task can read it." />
+              </ActionForm>
+            </div>
+          </Panel>
+        </div>
       </div>
     </>
   );

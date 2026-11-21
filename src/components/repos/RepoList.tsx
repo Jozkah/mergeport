@@ -8,10 +8,12 @@ import { refreshRepositoryAction, untrackRepositoryAction } from "@/app/actions"
 import { shareRepositoryAction, unshareRepositoryAction } from "@/app/team-actions";
 import { ActionMenu } from "@/components/ui/ActionMenu";
 import { Avatar } from "@/components/ui/Avatar";
+import { PendingLabel } from "@/components/ui/PendingLabel";
 import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/ToastProvider";
 import { Building2, GitFork, Globe, Lock, Search, Unplug, User, Users, X, Zap } from "@/components/ui/icons";
 import { ctx } from "@/lib/ctx";
+import { plainText } from "@/lib/inputs";
 
 export type RepoRow = {
   id: string;
@@ -56,7 +58,7 @@ const fd = (o: Record<string, string>) => {
  * One calm line per repository: who it belongs to, whether it is healthy, who it is shared with, and one button. Everything else
  * (refresh, share, stop tracking, open on GitHub) is in the row's menu, and the choices that matter get a short confirmation.
  */
-export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceOpt[] }) {
+export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; writable: SpaceOpt[]; hosted?: boolean }) {
   const router = useRouter();
   const { show } = useToast();
   const [q, setQ] = useState("");
@@ -64,7 +66,7 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
   const [limit, setLimit] = useState(PAGE);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<{ kind: "share" | "untrack"; ids: string[] } | null>(null);
-  const [, start] = useTransition();
+  const [pending, start] = useTransition();
 
   const counts = useMemo(
     () => ({
@@ -118,15 +120,15 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
         <label className="relative ml-auto">
           <span className="sr-only">Search repositories</span>
           <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
-          <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} className="input !h-8 !w-60 !pl-8" placeholder="Search repositories" />
+          <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} className="input !h-8 !w-60 !pl-8" placeholder="Search repositories…" {...plainText} />
         </label>
       </div>
 
       {picked.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-line bg-canvas px-3 py-2 text-[12.5px]" role="region" aria-label="Selected repositories">
           <strong className="font-medium">{picked.size} selected</strong>
-          <button type="button" className="btn !h-7 !px-2.5 !text-[12.5px]" onClick={() => refresh([...picked])}>Refresh</button>
-          <button type="button" className="btn btn-danger !h-7 !px-2.5 !text-[12.5px]" onClick={() => setDialog({ kind: "untrack", ids: [...picked] })}>Stop tracking</button>
+          <button type="button" className="btn !h-7 !px-2.5 !text-[12.5px]" aria-disabled={pending || undefined} aria-busy={pending} data-loading={pending} onClick={() => { if (!pending) refresh([...picked]); }}><PendingLabel mode={pending ? "pending" : "idle"} pending="Refreshing…" size={12}>Refresh</PendingLabel></button>
+          <button type="button" className="btn text-blocked !h-7 !px-2.5 !text-[12.5px]" disabled={pending} aria-busy={pending} onClick={() => setDialog({ kind: "untrack", ids: [...picked] })}>Stop tracking</button>
           <button type="button" className="ml-auto text-ink-3 hover:text-ink" onClick={() => setPicked(new Set())}>Clear</button>
         </div>
       )}
@@ -172,7 +174,7 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
                 </p>
               </div>
               {anyShared && <div className="hidden w-48 shrink-0 text-[12.5px] lg:block">
-                {r.spaceId ? <span className="inline-flex items-center gap-1.5 text-ink-2"><Users size={13} aria-hidden className="text-ink-3" /><span className="truncate">{r.spaceName ?? "a team space"}</span></span> : <span className="text-ink-3">Only on this computer</span>}
+                {r.spaceId ? <span className="inline-flex items-center gap-1.5 text-ink-2"><Users size={13} aria-hidden className="text-ink-3" /><span className="truncate">{r.spaceName ?? "a team space"}</span></span> : <span className="text-ink-3">{hosted ? "Shared with the workspace" : "Only on this computer"}</span>}
               </div>}
               <div className="hidden w-40 shrink-0 text-[12.5px] xl:block">
                 {r.projects.length === 0 ? <span className="text-ink-3">No project</span> : <span className="flex flex-wrap gap-1">{r.projects.slice(0, 2).map((p) => <span key={p} className="rounded-full border border-line px-2 py-0.5 text-[11.5px]">{p}</span>)}{r.projects.length > 2 && <span className="text-ink-3">+{r.projects.length - 2}</span>}</span>}
@@ -195,10 +197,10 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
           ))}
         </ul>
       )}
-      {!anyShared && visible.length > 0 && <p className="text-[12px] text-ink-3">All repositories are only on this computer.</p>}
+      {!anyShared && !hosted && visible.length > 0 && <p className="text-[12px] text-ink-3">All repositories are only on this computer.</p>}
       {visible.length > shown.length && <button type="button" className="btn self-start" onClick={() => setLimit((l) => l + PAGE)}>Show {Math.min(PAGE, visible.length - shown.length)} more <span className="text-ink-3">of {visible.length - shown.length} left</span></button>}
 
-      <Dialog open={dialog?.kind === "untrack"} onClose={() => setDialog(null)} title={dialog && dialog.ids.length > 1 ? `Stop tracking ${dialog.ids.length} repositories?` : "Stop tracking this repository?"} description="Stopping tracking removes it from the dashboard on this computer only. Nothing is deleted or changed on GitHub, and you can connect it again later.">
+      <Dialog open={dialog?.kind === "untrack"} onClose={() => setDialog(null)} title={dialog && dialog.ids.length > 1 ? `Stop tracking ${dialog.ids.length} repositories?` : "Stop tracking this repository?"} description={`Stopping tracking removes it from the dashboard ${hosted ? "of this workspace" : "on this computer"} only. Nothing is deleted or changed on GitHub, and you can connect it again later.`}>
         <button type="button" className="btn btn-danger" onClick={() => { const ids = dialog!.ids; setDialog(null); run(ids.length === 1 ? "Removed from tracking." : `${ids.length} repositories removed from tracking.`, ids.map((id) => untrackRepositoryAction(fd({ repositoryId: id })) as Promise<{ ok: boolean; error?: string }>)); }}>Stop tracking</button>
       </Dialog>
       <ShareDialog open={dialog?.kind === "share"} id={dialog?.ids[0]} name={rows.find((r) => r.id === dialog?.ids[0])?.fullName ?? ""} spaces={writable} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); show("ok", msg); router.refresh(); }} onError={(m) => show("error", m)} />
@@ -256,8 +258,12 @@ function ShareDialog({ open, id, name, spaces, onClose, onDone, onError }: { ope
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || !chosen || !id}
+              disabled={!chosen || !id}
+              aria-disabled={busy || undefined}
+              aria-busy={busy}
+              data-loading={busy}
               onClick={async () => {
+                if (busy) return;
                 setBusy(true);
                 const r = await shareRepositoryAction(fd({ repositoryId: id!, spaceId: chosen, confirm: "on" }));
                 setBusy(false);
@@ -265,7 +271,7 @@ function ShareDialog({ open, id, name, spaces, onClose, onDone, onError }: { ope
                 else onError(r.error);
               }}
             >
-              {busy ? "Sharing…" : "Share"}
+              <PendingLabel mode={busy ? "pending" : "idle"} pending="Sharing…">Share</PendingLabel>
             </button>
           </div>
         </D.Content>

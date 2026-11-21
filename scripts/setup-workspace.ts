@@ -4,6 +4,7 @@
  *   MERGEPORT_DB=<profile db> node --import tsx scripts/setup-workspace.ts [--clones <folder>]
  */
 import path from "node:path";
+import "dotenv/config";
 import { createPrisma } from "../src/lib/db";
 import { loadViewer } from "../src/lib/authz/viewer";
 import { setPrefs } from "../src/lib/services/notification-prefs";
@@ -16,7 +17,7 @@ if (!file) throw new Error("Set MERGEPORT_DB to the profile database");
 const clones = process.argv.includes("--clones") ? process.argv[process.argv.indexOf("--clones") + 1] : path.dirname(process.cwd());
 
 async function main() {
-  const db = createPrisma(path.resolve(file!), { migrate: false });
+  const db = createPrisma();
   const user = await db.user.findFirstOrThrow({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
   const v = (await loadViewer(db, user.id))!;
   const did: string[] = [];
@@ -46,7 +47,7 @@ async function main() {
   for (const [scope, name, query] of views) await step(`saved view "${name}"`, () => saveView(db, v, { scope, name, query }));
 
   // Only the project that is not shared with anyone: its board and automation settings stay on this computer.
-  const mine = await db.project.findFirst({ where: { name: "Mine", spaceId: null } });
+  const mine = await db.project.findFirst({ where: { workspaceId: v.workspaceId, name: "Mine", spaceId: null } });
   if (mine) {
     await step('board "Delivery" on Mine', () => createBoard(db, v, { projectId: mine.id, template: "delivery", density: "compact" }));
     await step('board "Maintenance" on Mine', () => createBoard(db, v, { projectId: mine.id, template: "maintenance", groupBy: "repository", density: "compact" }));

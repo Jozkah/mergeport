@@ -1,3 +1,4 @@
+import { firstWorkspace } from "@/lib/local/profile";
 import { db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
 import { currentGhStatus } from "@/lib/local/identity";
@@ -17,21 +18,21 @@ export const KEY_CANDIDATES = "candidates";
 export const keyInvitationStatus = (spaceId: string) => `inv-status:${spaceId}`;
 const PER_CALL_MS = 20_000;
 
-async function teamFor(signal: AbortSignal) {
+async function teamFor(signal: AbortSignal, workspaceId?: string) {
   const actor = await localActor();
   if (!actor) throw new Error("No GitHub profile");
-  return new TeamService(db, profileFetch(db, { signal, timeoutMs: PER_CALL_MS }), actor, await getEngine());
+  return new TeamService(db, profileFetch(db, { signal, timeoutMs: PER_CALL_MS }), actor, await getEngine(workspaceId), undefined, workspaceId);
 }
 
 /** A team service whose every GitHub call is cancelled (and its `gh` process killed) after `ms`. For the rare call a person is waiting on. */
-export async function teamWithDeadline(ms: number) {
-  return teamFor(AbortSignal.timeout(ms));
+export async function teamWithDeadline(ms: number, workspaceId?: string) {
+  return teamFor(AbortSignal.timeout(ms), workspaceId);
 }
 
 /** Starts a background refresh for a key. Returns at once; never throws; a second call while one is running shares it. */
-export function startDiscovery(key: string, demoLogin?: string): void {
+export function startDiscovery(key: string, demoLogin?: string, workspaceId?: string): void {
   if (isDemo() && key !== KEY_REPOS) return; // demo mode has no GitHub: only the synthetic repository list exists
-  const opts = { onChange: notifyChange };
+  const opts = { onChange: notifyChange, workspaceId };
   if (key === KEY_REPOS) {
     void refreshInBackground<Discovery>(db, key, async (signal) => {
       const actor = isDemo() ? { id: 0n, login: demoLogin ?? "owner-demo" } : await localActor();
@@ -45,7 +46,7 @@ export function startDiscovery(key: string, demoLogin?: string): void {
   } else if (key.startsWith("inv-status:")) {
     const spaceId = key.slice("inv-status:".length);
     void refreshInBackground<InvitationStatus[]>(db, key, async (signal) => {
-      const space = await db.space.findUnique({ where: { id: spaceId } });
+      const space = await db.space.findUnique({ where: { id: spaceId, workspaceId: (await firstWorkspace(db)).id } });
       if (!space) return [];
       return (await teamFor(signal)).invitationStatuses(space);
     }, opts);
@@ -53,10 +54,10 @@ export function startDiscovery(key: string, demoLogin?: string): void {
 }
 
 export const cached = {
-  repos: () => readCached<Discovery>(db, KEY_REPOS),
-  invitations: () => readCached<InvitationRow[]>(db, KEY_INVITATIONS),
-  candidates: () => readCached<SpaceCandidate[]>(db, KEY_CANDIDATES),
-  invitationStatus: (spaceId: string) => readCached<InvitationStatus[]>(db, keyInvitationStatus(spaceId)),
+  repos: (workspaceId: string) => readCached<Discovery>(db, KEY_REPOS, new Date(), undefined, workspaceId),
+  invitations: (workspaceId: string) => readCached<InvitationRow[]>(db, KEY_INVITATIONS, new Date(), undefined, workspaceId),
+  candidates: (workspaceId: string) => readCached<SpaceCandidate[]>(db, KEY_CANDIDATES, new Date(), undefined, workspaceId),
+  invitationStatus: (workspaceId: string, spaceId: string) => readCached<InvitationStatus[]>(db, keyInvitationStatus(spaceId), new Date(), undefined, workspaceId),
 };
 export type { CachedView };
 export const refreshing = (key: string) => isRefreshing(db, key);

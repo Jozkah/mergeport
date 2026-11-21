@@ -7,7 +7,8 @@
  * - opens your browser on a one-time launch link that binds that browser to this process.
  * No database server, Docker, tunnel or inbound network access is needed.
  */
-import { spawn, execFile } from "node:child_process";
+import "dotenv/config";
+import { spawn, execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -34,6 +35,8 @@ const port = Number(args[args.indexOf("--port") + 1]) || Number(process.env.MERG
 const host = process.env.MERGEPORT_HOST ?? "github.com";
 
 async function main() {
+  // Schema changes come from the Prisma CLI, not from the app: apply pending migrations to DATABASE_URL first.
+  execFileSync(process.execPath, [path.resolve("node_modules", "prisma", "build", "index.js"), "migrate", "deploy"], { stdio: "inherit" });
   const home = mergeportHome(process.env.MERGEPORT_HOME);
   let dbFile: string;
   let startBackend: Backend = "github";
@@ -41,7 +44,7 @@ async function main() {
   if (demo) {
     dbFile = path.join(home, "demo", "mergeport-demo.db");
     fs.mkdirSync(path.dirname(dbFile), { recursive: true });
-    const db = createPrisma(dbFile);
+    const db = createPrisma();
     if ((await db.user.count()) === 0) await seedDemo(db);
     await db.$disconnect();
     console.log("Demo mode: synthetic data, no GitHub access.");
@@ -65,7 +68,7 @@ async function main() {
       }
       dbFile = saved[0].dbFile;
       signedInId = BigInt(saved[0].id);
-      createPrisma(dbFile); // applies migrations
+      createPrisma();
       console.log(`GitHub is unreachable (${st.message}). Opening the saved profile for @${saved[0].login} (id ${saved[0].id}) from this computer: ${dbFile}\nData is shown as last saved. Nothing is sent to GitHub until the account is verified again.`);
     } else {
       signedInId = st.identity.id;
@@ -73,7 +76,7 @@ async function main() {
       dbFile = prof.dbFile;
       startBackend = prof.backend;
       fs.mkdirSync(path.dirname(dbFile), { recursive: true });
-      createPrisma(dbFile); // applies migrations
+      createPrisma();
       console.log(`Signed in to ${host} as ${st.identity.login} (id ${st.identity.id}). Profile: ${dbFile}`);
     }
   }
@@ -108,7 +111,7 @@ async function main() {
   const openContext = async (base: string) => {
     const file = activeDbFile(profileDirOf(base), path.basename(base));
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const migrated = createPrisma(file); // applies migrations to this context's database
+    const migrated = createPrisma();
     if (demo && (await migrated.user.count()) === 0) await seedDemo(migrated);
     await migrated.$disconnect();
     if (file !== base) console.log(`Opening context database: ${file}`);

@@ -18,6 +18,8 @@ import type { CardView } from "@/lib/services/planning-view";
 import { OpenCardLink } from "@/components/planning/TaskDrawer";
 import { WipBadge } from "@/components/planning/WipBadge";
 
+gsap.registerPlugin(useGSAP); // once per module, as the GSAP React docs ask (the hook also works unregistered, but this is the documented form)
+
 type Col = { id: string; key: string; name: string; /** Work-in-progress limit and the count across every lane (advice: flagged, never enforced). */ wip?: number | null; total?: number };
 
 function CardBody({ c, move, handle, compact }: { c: CardView; move?: React.ReactNode; handle?: React.ReactNode; compact?: boolean }) {
@@ -122,6 +124,7 @@ export function Board({ columns, initial, compact = false }: { columns: Col[]; i
   const rects = useRef(new Map<string, { x: number; y: number }>());
   const columnOf = useRef(new Map<string, string>());
   const pointerOwns = useRef(false);
+  const ownTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const dragging = useRef(false);
   const refocus = useRef<string | null>(null);
   const [active, setActive] = useState<CardView | null>(null);
@@ -165,7 +168,11 @@ export function Board({ columns, initial, compact = false }: { columns: Col[]; i
     if (card.columnKey === toKey && target.findIndex((c) => c.position > card.position) === -1 && index === null) return;
     inflight.current.add(id);
     setOwnIds((s) => new Set(s).add(id));
-    setTimeout(() => setOwnIds((s) => { const n = new Set(s); n.delete(id); return n; }), 4000);
+    const t = setTimeout(() => {
+      ownTimers.current.delete(t);
+      setOwnIds((s) => { const n = new Set(s); n.delete(id); return n; });
+    }, 4000);
+    ownTimers.current.add(t);
     setCards(before.map((c) => (c.id === id ? { ...c, columnKey: toKey, position } : c)));
     start(async () => {
       const r = await moveCardAction({ itemId: id, toColumnKey: toKey, beforePosition: target[at - 1]?.position ?? null, afterPosition: target[at]?.position ?? null, expectedVersion: card.version }).catch(
@@ -233,6 +240,8 @@ export function Board({ columns, initial, compact = false }: { columns: Col[]; i
       }
       const next = measure();
       const reducedNow = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const landed: HTMLElement[] = [];
+      const glide = seconds("--duration-fast", 0.25); // one read of the token for the whole pass, not one per card
       host.querySelectorAll<HTMLElement>("[data-flip-id]").forEach((li) => {
         const id = li.dataset.flipId as string;
         const pos = next.get(id)!;
@@ -248,17 +257,30 @@ export function Board({ columns, initial, compact = false }: { columns: Col[]; i
         if (reducedNow) {
           // No glide: only a card that really changed column (and was not moved by this person) gets the one-off outline.
           if (!changedColumn || ownIds.has(id)) return;
-          inner.classList.remove("card-landed");
-          void inner.offsetWidth;
-          inner.classList.add("card-landed");
+          landed.push(inner);
           return;
         }
-        gsap.fromTo(inner, { x: dx, y: dy }, { x: 0, y: 0, duration: seconds("--duration-fast", 0.25), ease: SMOOTH_OUT_GSAP, overwrite: "auto", clearProps: "transform" });
+        gsap.fromTo(inner, { x: dx, y: dy }, { x: 0, y: 0, duration: glide, ease: SMOOTH_OUT_GSAP, overwrite: "auto", clearProps: "transform" });
       });
+      // Restart the outline on every landed card with ONE forced reflow (remove all, read once, add all), not one per card.
+      if (landed.length) {
+        landed.forEach((el) => el.classList.remove("card-landed"));
+        void host.offsetWidth;
+        landed.forEach((el) => el.classList.add("card-landed"));
+      }
       rects.current = next;
     },
     { dependencies: [layoutKey], scope: root, revertOnUpdate: false },
   );
+
+  // The 4 s "this was my own move" timers must not outlive the board.
+  useEffect(() => {
+    const timers = ownTimers.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    };
+  }, []);
 
   // The effects end on their own; clear them so a later, unrelated render never replays them. Cards below a collapsed
   // ghost have moved by then, so measure again first: the next glide must start from where they really are.

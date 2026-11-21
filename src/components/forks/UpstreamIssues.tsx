@@ -83,7 +83,7 @@ export function UpstreamIssues({ rows: initial, canEdit }: { rows: IssueRow[]; c
         <label className="relative ml-auto">
           <span className="sr-only">Search issues</span>
           <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
-          <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} className="input !h-8 !w-56 !pl-8" placeholder="Search issues" />
+          <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} className="input !h-8 !w-56 !pl-8" placeholder="Search issues…" autoComplete="off" spellCheck={false} />
         </label>
       </div>
 

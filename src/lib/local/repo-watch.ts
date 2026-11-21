@@ -1,3 +1,4 @@
+import { firstWorkspace } from "@/lib/local/profile";
 import type { Db } from "@/lib/db";
 import { db as appDb } from "@/lib/db";
 import { isDemo } from "@/lib/env";
@@ -62,9 +63,10 @@ export async function coveredIds(db: Db, backend?: string): Promise<Set<string> 
   try {
     if (!isHubBackend(backend ?? (await currentBackend()))) return new Set();
     if (!(await readHubWebhooksEnabled(db))) return new Set();
-    const legacy = await db.discoveryCache.findUnique({ where: { key: COVERAGE_KEY } });
+    const workspaceId = (await firstWorkspace(db)).id;
+    const legacy = await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId, key: COVERAGE_KEY } } });
     const slug = legacy?.payload ? (fromJson<{ appSlug?: string }>(legacy.payload)?.appSlug ?? null) : null;
-    await db.discoveryCache.findUnique({ where: { key: HUB_COVERAGE_KEY } }); // readAllCoverage swallows read errors; this one must not
+    await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId, key: HUB_COVERAGE_KEY } } }); // readAllCoverage swallows read errors; this one must not
     return await readAllCoverage(db, slug);
   } catch {
     return null;
@@ -74,7 +76,7 @@ export async function coveredIds(db: Db, backend?: string): Promise<Set<string> 
 /** Every active, real, uncovered repository, the least recently synced first. */
 export async function watchEligible(db: Db, covered: Set<string>): Promise<WatchTarget[]> {
   const rows = await db.repository.findMany({
-    where: { trackingStatus: "ACTIVE", isDemo: false },
+    where: { workspaceId: (await firstWorkspace(db)).id, trackingStatus: "ACTIVE", isDemo: false },
     select: { id: true, githubId: true, fullName: true, lastSyncedAt: true },
     orderBy: [{ lastSyncedAt: "asc" }, { fullName: "asc" }],
   });
@@ -118,7 +120,7 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
     })(),
     refresh: (id) => requestRepositoryRefresh(over.db, id, { full: false }),
     refreshPending: async (id) => {
-      const job = await over.db.job.findFirst({ where: { type: "sync.repository", dedupeKey: `sync:${id}`, status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
+      const job = await over.db.job.findFirst({ where: { workspaceId: (await firstWorkspace(over.db)).id, type: "sync.repository", dedupeKey: `sync:${id}`, status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
       return job !== null;
     },
     settings: () => readWatchSettings(over.db),

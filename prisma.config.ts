@@ -1,10 +1,10 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
-// Used by `prisma migrate dev` / `generate` only. At runtime the app opens each profile's own SQLite file through the
-// better-sqlite3 driver adapter and applies the SQL migrations itself (src/lib/db/migrate.ts).
+// DATABASE_URL (Postgres) is required by migrate commands. Runtime and start scripts apply migrations with `prisma migrate deploy`.
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: { path: "prisma/migrations", seed: "tsx prisma/seed.ts" },
-  datasource: { url: process.env.DATABASE_URL ?? "file:./.data/dev.db" },
+  // No fallback URL: migrate commands need DATABASE_URL (they fail with Prisma's own message when it is missing); `prisma generate` does not.
+  ...(process.env.DATABASE_URL ? { datasource: { url: process.env.DATABASE_URL } } : {}),
 });

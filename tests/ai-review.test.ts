@@ -67,14 +67,14 @@ describe("suggestions", () => {
     const c1 = await saveSuggestions(db, admin, [draft(1, "review", projectId), draft(2, "blocked", projectId)], "suggest");
     expect(c1).toEqual({ created: 0, suggested: 2, skipped: 0 });
     expect(await saveSuggestions(db, admin, [draft(1, "review", projectId)], "suggest")).toEqual({ created: 0, suggested: 0, skipped: 1 });
-    const list = await listSuggestions(db);
+    const list = await listSuggestions(db, S.admin);
     expect(list).toHaveLength(2);
     const before = (await listTasks(db, admin, { status: "all" })).length;
     expect(await acceptSuggestions(db, admin, [list[0].id])).toBe(1);
     expect(await acceptSuggestions(db, admin, [list[0].id])).toBe(0); // already decided
     expect((await listTasks(db, admin, { status: "all" })).length).toBe(before + 1);
-    expect(await dismissSuggestions(db, [list[1].id])).toBe(1);
-    expect(await listSuggestions(db)).toHaveLength(0);
+    expect(await dismissSuggestions(db, S.admin, [list[1].id])).toBe(1);
+    expect(await listSuggestions(db, S.admin)).toHaveLength(0);
     // a dismissed one is not suggested again for two weeks
     expect((await saveSuggestions(db, admin, [draft(2, "blocked", projectId)], "suggest")).skipped).toBe(1);
   });
@@ -105,11 +105,11 @@ describe("the review itself and the daily autopilot", () => {
 
   it("does nothing while off, without a profile user, or without a key", async () => {
     const { db } = S;
-    expect(await runAutopilot(db, vault)).toBe("off");
-    await saveAiSettings(db, vault, { baseUrl: "https://ai.example.com/v1", apiKey: "k", autopilot: "suggest" });
-    const r = await runAutopilot(db, vault, { f: answer("{}") });
+    expect(await runAutopilot(db, S.admin.workspaceId, vault)).toBe("off");
+    await saveAiSettings(db, S.admin.workspaceId, vault, { baseUrl: "https://ai.example.com/v1", apiKey: "k", autopilot: "suggest" });
+    const r = await runAutopilot(db, S.admin.workspaceId, vault, { f: answer("{}") });
     expect(["no-profile", "done", "not-yet", "error"]).toContain(r); // the seeded users are demo users, so no profile user is found
-    await saveAiSettings(db, vault, { baseUrl: "https://ai.example.com/v1", clearKey: true, autopilot: "suggest" });
-    expect(await runAutopilot(db, vault)).toBe("no-config");
+    await saveAiSettings(db, S.admin.workspaceId, vault, { baseUrl: "https://ai.example.com/v1", clearKey: true, autopilot: "suggest" });
+    expect(await runAutopilot(db, S.admin.workspaceId, vault)).toBe("no-config");
   });
 });

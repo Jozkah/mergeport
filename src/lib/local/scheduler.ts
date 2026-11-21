@@ -1,7 +1,9 @@
 import { db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
+import { isHosted } from "@/lib/public-url";
 import { ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs";
 import { checkProfile } from "@/lib/local/identity";
+import { firstWorkspace } from "@/lib/local/profile";
 import { pollMode } from "@/lib/local/activity";
 import { AI_AUTOPILOT_EVERY_MS, DIGEST_EVERY_MS, RECONCILE_EVERY_MS, handlers } from "@/lib/local/handlers";
 import { startRepoWatch, stopRepoWatch } from "@/lib/local/repo-watch";
@@ -76,6 +78,17 @@ export async function paceReconcile(mode: "active" | "idle", now: number, starte
 /** Coordination lane: quick work only. It never waits on the job queue. */
 export async function coordinate(now = Date.now()): Promise<number> {
   if (isDemo()) return 0;
+  if (isHosted()) {
+    // No server gh login to check, no coordination tick, no discovery, no repository watcher: hosted workspaces reach GitHub only through
+    // their own installation. `reconcile.all` is paced (every 15 minutes, no idle mode: nobody's tab decides it) as soon as ANY workspace
+    // has a usable connection; its handler fans out per workspace and does nothing for one without. Local-only recurring jobs always run.
+    const connected = await db.workspaceInstallation.count({ where: { installation: { suspendedAt: null, deletedAt: null } } });
+    if (connected > 0) await paceReconcile("active", now, g.__mpScheduler?.startedAt ?? now);
+    await ensureRecurring(db, { type: "digest.daily", key: "digest", intervalMs: DIGEST_EVERY_MS });
+    await ensureRecurring(db, { type: "ai.autopilot", key: "ai-autopilot", intervalMs: AI_AUTOPILOT_EVERY_MS });
+    await reclaimStuck(db);
+    return 0;
+  }
   const profile = await checkProfile();
   // Every call is bound to this profile's own account (bound.ts), so another account being selected in gh does not stop sync and
   // cannot be used by it. With no profile there is nothing to sync.
@@ -88,7 +101,7 @@ export async function coordinate(now = Date.now()): Promise<number> {
     if (g.__mpScheduler) g.__mpScheduler.lastTick = now;
   }
   // Windows notifications while no tab is open (a no-op elsewhere). A failure here must never stop the sync below.
-  if (process.platform === "win32") await dispatchToasts(db, { active: mode === "active", show: showWindowsToast, baseUrl: `http://127.0.0.1:${process.env.MERGEPORT_PORT ?? 3000}` }).catch((e) => console.error("toasts failed:", e instanceof Error ? e.message : e));
+  if (process.platform === "win32") await dispatchToasts(db, (await firstWorkspace(db)).id, { active: mode === "active", show: showWindowsToast, baseUrl: `http://127.0.0.1:${process.env.MERGEPORT_PORT ?? 3000}` }).catch((e) => console.error("toasts failed:", e instanceof Error ? e.message : e));
   await tickDiscovery(); // retries of cached GitHub lists that are due; bounded, deduplicated, never awaited on a page
   await paceReconcile(mode, now, g.__mpScheduler?.startedAt ?? now);
   await ensureRecurring(db, { type: "digest.daily", key: "digest", intervalMs: DIGEST_EVERY_MS }); // due at once on the first tick after start: that is the catch-up
@@ -144,14 +157,31 @@ export async function runJobsNow(): Promise<void> {
   await runJobLane(s);
 }
 
-export function startLocalScheduler(intervalMs = 5000) {
+/**
+ * Graceful stop for the standalone worker: no new ticks, wait (bounded) for the lanes to finish the job they are on, then cancel
+ * background refreshes and kill any gh process still running.
+ */
+export async function stopLocalScheduler(waitMs = 30_000): Promise<void> {
+  const s = g.__mpScheduler;
+  if (s) clearInterval(s.timer);
+  const end = Date.now() + waitMs;
+  while (s && (s.busy || s.coordBusy) && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+  shutdownDiscovery();
+  stopRepoWatch();
+  g.__mpScheduler = undefined;
+}
+
+/** `ownSignals: false` leaves SIGINT/SIGTERM to the caller (the standalone worker, which stops gracefully instead of killing gh at once). */
+export function startLocalScheduler(intervalMs = 5000, opts: { ownSignals?: boolean } = {}) {
   if (g.__mpScheduler) return;
   void recoverDiscovery().catch(() => {}); // an attempt a crash interrupted must not stay "retrying" for ever
   void recoverUpdateRuns(db).catch(() => {}); // likewise an auto-update run the last process never finished
   // Shutdown: cancel background refreshes and kill any gh process still running, so none outlives the app.
   process.once("exit", shutdownDiscovery);
-  process.once("SIGTERM", shutdownDiscovery);
-  process.once("SIGINT", shutdownDiscovery);
+  if (opts.ownSignals !== false) {
+    process.once("SIGTERM", shutdownDiscovery);
+    process.once("SIGINT", shutdownDiscovery);
+  }
   process.once("exit", stopRepoWatch);
   startRepoWatch(); // auto-sync of repositories without webhooks; idle unless a tab is open
   const state: State = { busy: false, coordBusy: false, lastTick: 0, startedAt: Date.now(), timer: undefined as unknown as ReturnType<typeof setInterval> };

@@ -1,3 +1,4 @@
+import { firstWorkspace } from "@/lib/local/profile";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { GhAbortedError, GhTimeoutError, IdentityError } from "@/lib/github/exec";
@@ -41,8 +42,8 @@ export const toJson = <T>(v: T): Prisma.InputJsonValue => JSON.parse(JSON.string
 export const fromJson = <T>(v: unknown): T =>
   JSON.parse(JSON.stringify(v), (_k, x) => (x && typeof x === "object" && BIG in x ? BigInt((x as Record<string, string>)[BIG]) : x)) as T;
 
-export async function readCached<T>(db: Db, key: string, now = new Date(), staleAfterMs = STALE_AFTER_MS): Promise<CachedView<T>> {
-  const row = await db.discoveryCache.findUnique({ where: { key } });
+export async function readCached<T>(db: Db, key: string, now = new Date(), staleAfterMs = STALE_AFTER_MS, workspaceId?: string): Promise<CachedView<T>> {
+  const row = await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: workspaceId ?? (await firstWorkspace(db)).id, key } } });
   if (!row) return { payload: null, fetchedAt: null, state: "EMPTY", error: null, attempts: 0, nextRetryAt: null, stale: true };
   return {
     payload: row.payload === null ? null : fromJson<T>(row.payload),
@@ -88,6 +89,8 @@ export type RefreshOptions = {
   now?: () => Date;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   onChange?: () => void;
+  /** The workspace the list belongs to. Omitted: the profile's only workspace (fails closed when there are several). */
+  workspaceId?: string;
 };
 
 const abortableSleep = (ms: number, signal: AbortSignal) =>
@@ -112,7 +115,8 @@ export function refreshInBackground<T>(db: Db, key: string, load: (signal: Abort
   const write = async (data: { state: DiscoveryState; error?: string | null; attempts: number; nextRetryAt?: Date | null; payload?: Prisma.InputJsonValue; fetchedAt?: Date }) => {
     const base = { state: data.state, error: data.error ?? null, attempts: data.attempts, nextRetryAt: data.nextRetryAt ?? null };
     const withPayload = data.payload !== undefined ? { ...base, payload: data.payload, fetchedAt: data.fetchedAt ?? now() } : base;
-    await db.discoveryCache.upsert({ where: { key }, create: { key, ...withPayload }, update: withPayload });
+    const workspaceId = o.workspaceId ?? (await firstWorkspace(db)).id;
+    await db.discoveryCache.upsert({ where: { workspaceId_key: { workspaceId, key } }, create: { workspaceId, key, ...withPayload }, update: withPayload });
     o.onChange?.();
   };
 
@@ -166,12 +170,12 @@ export async function recoverInterrupted(db: Db, now = new Date()): Promise<numb
  * the account verifies again they must not keep showing the old error: the scheduler re-asks them once, at most per minute.
  */
 export async function authKeysToRecheck(db: Db, now = new Date()): Promise<string[]> {
-  const rows = await db.discoveryCache.findMany({ where: { state: "AUTH", updatedAt: { lte: new Date(now.getTime() - 60_000) } }, select: { key: true } });
+  const rows = await db.discoveryCache.findMany({ where: { workspaceId: (await firstWorkspace(db)).id, state: "AUTH", updatedAt: { lte: new Date(now.getTime() - 60_000) } }, select: { key: true } });
   return rows.map((r) => r.key).filter((k) => !isRefreshing(db, k));
 }
 
 /** Keys whose retry time has come (offline, errors; rate limits wait for their reset). Used by the scheduler. */
 export async function dueKeys(db: Db, now = new Date()): Promise<string[]> {
-  const rows = await db.discoveryCache.findMany({ where: { state: { in: ["OFFLINE", "ERROR", "RATE_LIMITED"] }, nextRetryAt: { lte: now } }, select: { key: true } });
+  const rows = await db.discoveryCache.findMany({ where: { workspaceId: (await firstWorkspace(db)).id, state: { in: ["OFFLINE", "ERROR", "RATE_LIMITED"] }, nextRetryAt: { lte: now } }, select: { key: true } });
   return rows.map((r) => r.key).filter((k) => !isRefreshing(db, k));
 }

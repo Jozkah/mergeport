@@ -2,25 +2,42 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { loadViewer, type Viewer } from "@/lib/authz/viewer";
+import { WORKSPACE_COOKIE, resolveActiveWorkspaceId } from "@/lib/authz/active-workspace";
+import { loadViewer, requireWrite, type Viewer } from "@/lib/authz/viewer";
 import { SESSION_COOKIE, findSession } from "./session";
 
 /** Per-request identity. Memoized for one render only; never across requests. */
 export const getAuth = cache(async () => {
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  const s = await findSession(db, token);
+  const jar = await cookies();
+  const s = await findSession(db, jar.get(SESSION_COOKIE)?.value);
   if (!s) return null;
-  const viewer = await loadViewer(db, s.userId);
+  // The active workspace: the person's only membership, else the one this session was bound to (switcher), else the mp_ws cookie
+  // (older sessions), else the oldest. Each candidate is only a choice among memberships the person still has.
+  const workspaceId = await resolveActiveWorkspaceId(db, { id: s.userId }, s.activeWorkspaceId ?? jar.get(WORKSPACE_COOKIE)?.value);
+  const viewer = workspaceId ? await loadViewer(db, s.userId, workspaceId) : null;
   return { user: s.user, session: s, viewer };
 });
 
 export async function requireViewer(): Promise<{ user: NonNullable<Awaited<ReturnType<typeof getAuth>>>["user"]; viewer: Viewer; csrf: string }> {
   const a = await getAuth();
-  if (!a || !a.viewer) redirect("/sign-in");
+  if (!a) redirect("/sign-in");
+  // Signed in but in no workspace (a first email or OIDC login): create one.
+  if (!a.viewer) redirect("/onboarding");
   return { user: a.user, viewer: a.viewer, csrf: a.session.csrfToken };
 }
 
-/** Administrator = GitHub says this account administers the team's common space (or it is a personal profile). */
+/**
+ * The guard for every mutating server action: a signed-in viewer whose role may write (not READER). Throws ForbiddenError, which
+ * `run()` turns into a message. Actions that only touch the caller's own preferences use requireViewer and are listed, with a reason,
+ * in tests/mutation-guard.test.ts.
+ */
+export async function requireWriter() {
+  const a = await requireViewer();
+  requireWrite(a.viewer);
+  return a;
+}
+
+/** Administrator = OWNER or ADMIN of the active workspace. Non-administrators get the same 404 as a missing page. */
 export async function requireAdminViewer() {
   const a = await requireViewer();
   if (!a.viewer.isAdmin) notFound(); // non-admins get the same 404 as a missing page

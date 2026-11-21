@@ -2,6 +2,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { env } from "@/lib/env";
+import { GithubNotConnectedError } from "@/lib/github/hosted";
+import { isHosted } from "@/lib/public-url";
 
 /**
  * Running the GitHub CLI as a subprocess, safely.
@@ -130,6 +132,7 @@ function childEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
 
 function run(file: string, prefix: string[], args: string[], opts: GhRunOpts): Promise<GhResult> {
   return new Promise((resolve, reject) => {
+    if (isHosted()) return reject(new GithubNotConnectedError()); // never start the server's own gh for a hosted request
     if (needsShell(file)) return reject(new GhMissingError(`${file} is a .cmd/.bat shim, which cannot be run safely without a shell. Point MERGEPORT_GH_CMD at gh.exe.`));
     if (opts.signal?.aborted) return reject(new GhAbortedError());
     const timeoutMs = opts.timeoutMs ?? 30_000;

@@ -21,7 +21,7 @@ afterAll(() => {
 
 let n = 0;
 async function ctxFor(s: Awaited<ReturnType<typeof setupMapping>>): Promise<Ctx> {
-  const space = await db.space.create({ data: { remoteId: `pin${n}`, teamRemoteId: "t", kind: "COMMON", name: "team", repoOwner: "acme", repoName: `pin-${n++}` } });
+  const space = await db.space.create({ data: { workspaceId: s.workspace.id, remoteId: `pin${n}`, teamRemoteId: "t", kind: "COMMON", name: "team", repoOwner: "acme", repoName: `pin-${n++}` } });
   return { workspaceId: s.workspace.id, localMemberId: s.member.id, space, commonSpaceId: space.id };
 }
 
@@ -142,9 +142,9 @@ describe("sync entity hardening", () => {
     const def = entityDef("availability")!;
     // Device A wrote its row with a random id (as the settings page does); device B's entity arrives with its own random id.
     await db.reviewerAvailability.create({ data: { id: "rowFromDeviceA", workspaceId: s.workspace.id, login: "alice", note: "A" } });
-    expect((await def.list(db, { commonSpaceId: ctx.space.id })).map((l) => l.id)).toEqual(["avail-alice"]);
+    expect((await def.list(db, { commonSpaceId: ctx.space.id, workspaceId: ctx.workspaceId })).map((l) => l.id)).toEqual(["avail-alice"]);
     await def.apply(db, ctx, "rowFromDeviceB", { login: "alice", from: null, until: null, backup: null, note: "B" }, 1);
-    expect((await def.list(db, { commonSpaceId: ctx.space.id })).map((l) => l.id)).toEqual(["avail-alice"]);
+    expect((await def.list(db, { commonSpaceId: ctx.space.id, workspaceId: ctx.workspaceId })).map((l) => l.id)).toEqual(["avail-alice"]);
     // Each side retiring the other's old id must not delete the person's availability.
     await def.apply(db, ctx, "rowFromDeviceA", null, 2);
     await def.apply(db, ctx, "rowFromDeviceB", null, 2);

@@ -107,7 +107,12 @@ export function effectiveReview(reviews: ReviewEvent[], login: string): ReviewEv
   return last;
 }
 
-export function deriveReview(input: ReviewInput, viewerLogin: string): ReviewDerivation {
+/** Stands in for a viewer without a linked GitHub account: matches no login, not even the empty one of an item without an author. */
+export const NO_GITHUB_LOGIN = "\u0000no-github-login";
+
+/** `viewerLogin` is the viewer's GITHUB login (Viewer.githubLogin); null (no linked account) puts nothing in anyone's "needs my review" or "changes requested" queue. */
+export function deriveReview(input: ReviewInput, viewerLoginOrNull: string | null): ReviewDerivation {
+  const viewerLogin = viewerLoginOrNull ?? NO_GITHUB_LOGIN;
   const empty: ReviewDerivation = {
     applicable: false,
     satisfied: false,

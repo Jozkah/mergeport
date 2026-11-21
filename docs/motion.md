@@ -49,7 +49,21 @@ Trigger, behaviour and tokens per interaction. "Keyboard" is what a keyboard use
 | 10 | Form validation, submission, success, failure | submitting any `ActionForm` | Pending: button disabled + spinner. Success: check mark draws (stroke) and the message rises. Failure: message rises, the row shakes once (6–8 px, 320 ms). Messages are static, readable text | very-slow check, micro×4 shake, fast rise | no shake or draw; message appears with a short fade | status and alert regions are permanent, so announcements do not depend on mounting; focus is never moved by feedback | `ActionForm.tsx` |
 | 11 | Toast appearance, stacking, dismissal, focus | board moves, errors, sync changes | Newest rises 12 px with a 3 px blur; older ones step back (6 px, scale .96 per level); at most 3 visible, the oldest leaves with its exit; a repeated message within 1.5 s is merged. Confirmations leave after 4 s, errors stay | medium in, quick out | fade only; stack offsets collapse because they come from tokens | Escape dismisses the newest (not when a dialog or tooltip already used the key); timers pause while the stack is hovered or focused; every toast has a labelled dismiss button; two permanent live regions announce (polite/alert); toasts never take focus | `ToastProvider.tsx` |
 | 12 | Theme changes | Light/Dark toggle or Settings | The page cross-fades once through a View Transition (measured: ready 5–8 ms, finished ≈ 270 ms); colour transitions and the header blur are suppressed during the switch so nothing smears or flashes; only the newest switch ends the suppression; the first paint is already themed by the server | quick | fade only | toggle has `aria-pressed`; no focus change | `ThemeControls.tsx`, `motion.css` |
-| 13 | Charts and changed metrics | a count or chart value changes | Numbers re-enter with a 4 px blurred slide only when the value actually changes (never on first render, navigation or an unchanged poll). Bars grow in height (400 ms) and the overview meter wipes via clip-path when their value changes | fast number swap; slow bars | numbers fade; bars/meter change without travel | values stay real text for assistive technology; nothing is announced for decoration | `Metric.tsx`, `OpenedChart.tsx`, `page.tsx` |
+| 13 | Charts and changed metrics | a count or chart value changes | Numbers re-enter with a 4 px blurred slide only when the value actually changes AND the change follows the person's own input in the last 3 s (never on first render, navigation, an unchanged poll or a background refresh; this is PRODUCT.md rule 6, enforced in `Metric.tsx`). Bars grow in height (400 ms) and the overview meter wipes via clip-path when their value changes | fast number swap; slow bars | numbers fade; bars/meter change without travel | values stay real text for assistive technology; nothing is announced for decoration | `Metric.tsx`, `OpenedChart.tsx`, `page.tsx` |
+
+## Form, list and loading motion added with the hosted UI
+
+Only the existing tokens and classes are used; no new keyframe, no new GSAP (GSAP stays in `Board.tsx`; everything below is CSS and React state).
+
+| Where | Behaviour | Class / token |
+| --- | --- | --- |
+| Every submit (`SubmitButton`, `ActionForm`, consent) | button disabled and `aria-busy` while pending, spinner (`animate-spin`, `motion-reduce:animate-none`: under reduced motion the label alone carries "pending"), labels stacked in one grid cell so the width never changes | `.btn[data-loading]` |
+| Result line | success clears itself after about 4 s, an error stays until the next edit; both clear on input or submit | `.result-in`, `.check-draw`, `.shake` |
+| Sheets that close on success | the existing toast confirms | `ToastProvider` |
+| Members, removed people, invitations | the row folds away after Withdraw / Remove / Reinstate (leaving Set); a new invitation rises in only if its id was not in the previous render (never on first mount or refresh) | `.row-leave`, `.card-enter` |
+| "Check your email" banner | rises in once | `.result-in` |
+| Linked pages | each peer's data streams behind a board-shaped skeleton; the pulse runs only while the request is pending | `.skeleton` |
+| `AutoRefresh` | interval 90 s, nothing while hidden or offline, one catch-up refresh when the tab returns after the interval | none |
 
 ## Evidence
 

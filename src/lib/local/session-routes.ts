@@ -14,7 +14,7 @@ export async function startLocalSession(): Promise<{ ok: true } | { ok: false; e
     // GitHub unreachable is not "signed out". The profile already on this computer opens from its own data; every GitHub
     // call is still verified against the profile's numeric account id before anything is sent.
     if (looksOffline(gh.message)) {
-      const local = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
+      const local = await db.user.findFirst({ where: { isDemo: false, githubId: { not: null } }, orderBy: { createdAt: "asc" } });
       if (local) {
         const s = await createSession(db, local.id);
         (await cookies()).set(SESSION_COOKIE, s.token, { httpOnly: true, sameSite: "strict", secure: false, path: "/", expires: s.expiresAt });

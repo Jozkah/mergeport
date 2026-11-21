@@ -15,10 +15,10 @@ describe("waiting rules are shared data", () => {
   it("lists a project rule under its project's space and applies it on another computer", async () => {
     const def = entityDef("waitrule")!;
     const ws = (await db.workspace.create({ data: { name: "w" } })).id;
-    const space = await db.space.create({ data: { remoteId: "s", teamRemoteId: "t", kind: "RESTRICTED", name: "K", repoOwner: "o", repoName: "r", repoGithubId: 1n, branch: "main" } as never });
+    const space = await db.space.create({ data: { workspaceId: ws, remoteId: "s", teamRemoteId: "t", kind: "RESTRICTED", name: "K", repoOwner: "o", repoName: "r", repoGithubId: 1n, branch: "main" } as never });
     const project = await db.project.create({ data: { workspaceId: ws, name: "K", slug: "k", spaceId: space.id } });
     await db.waitingRule.create({ data: { workspaceId: ws, scope: "PROJECT", projectId: project.id, waitingOn: [{ kind: "USER", ref: "acme" }], reason: "He merges", labels: [], authors: [] } });
-    const listed = await def.list(db, { commonSpaceId: null } as never);
+    const listed = await def.list(db, { commonSpaceId: null, workspaceId: ws });
     expect(listed).toHaveLength(1);
     expect(listed[0].spaceId).toBe(space.id);
     expect(listed[0].data).toMatchObject({ scope: "PROJECT", reason: "He merges", itemType: "PULL_REQUEST", includeDrafts: false });

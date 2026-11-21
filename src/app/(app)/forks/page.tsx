@@ -1,3 +1,4 @@
+import { isHosted } from "@/lib/public-url";
 import { ForkMapFields } from "@/components/forms/ForkMapFields";
 import { ViewBar } from "@/components/views/ViewBar";
 import { listViews } from "@/lib/services/views";
@@ -123,7 +124,7 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
       {(mappings.length > 0 || viewer.isAdmin) && <h2 className="mt-8 mb-3 text-[13px] font-medium text-ink-2">Set up</h2>}
       {mappings.length > 0 && <div className="mb-4"><SubscriptionsPanel db={db} viewer={viewer} mappings={mappings.map((m) => ({ id: m.id, label: m.upstream.fullName }))} /></div>}
 
-      {viewer.isAdmin && (
+      {viewer.isAdmin && !isHosted() && (
         <div className="mb-4">
           <Panel title="Watchlist" icon={Eye} id="watchlist" defaultOpen={mappings.length === 0}><WatchlistForm /></Panel>
         </div>

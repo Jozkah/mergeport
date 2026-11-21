@@ -32,7 +32,7 @@ export async function refreshRepositoryAndWait(
   o.kick?.();
   for (let waited = 0; waited < budget; waited += pollMs) {
     await sleep(pollMs);
-    const row = await db.job.findUnique({ where: { id: job.id }, select: { status: true, dirty: true } });
+    const row = await db.job.findUnique({ where: { id: job.id, workspaceId: job.workspaceId }, select: { status: true, dirty: true } });
     if (!row) return "failed";
     if (row.status === "DONE" && !row.dirty) return "done";
     if (row.status === "FAILED") return "failed";

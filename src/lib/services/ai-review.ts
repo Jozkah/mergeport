@@ -1,5 +1,5 @@
 import type { Db } from "@/lib/db";
-import { loadViewer, projectWhere, type Viewer } from "@/lib/authz/viewer";
+import { loadViewer, projectWhere, repoWhere, type Viewer } from "@/lib/authz/viewer";
 import { ValidationError } from "@/lib/errors";
 import type { Vault } from "@/lib/hub/session-vault";
 import { todayIn } from "@/lib/domain/planning";
@@ -32,7 +32,8 @@ export type Snapshot = { text: string; refs: Map<string, Ref>; projects: { id: s
 const kindOf = (ref: string): Kind | null => (ref[0] === "R" ? "review" : ref[0] === "C" ? "changes" : ref[0] === "B" ? "blocked" : null);
 
 /** Whether a pull request is the person's business: they wrote it, are assigned, or were asked to review. Everything else in a tracked repository is only watched. */
-export function involvesMe(d: DerivedItem, login: string): boolean {
+export function involvesMe(d: DerivedItem, login: string | null): boolean {
+  if (!login) return false;
   const i = d.item;
   return sameLogin(i.authorLogin, login) || i.assigneeLogins.includes(indexNeedle(login)) || i.reviewRequests.some((r) => !r.removedAt && r.kind !== "EXTERNAL_ROLE" && sameLogin(r.reviewerRef, login));
 }
@@ -59,8 +60,8 @@ export async function buildSnapshot(db: Db, v: Viewer, now = new Date()): Promis
   };
   // Only what involves the person is listed as work. Mergeport also tracks repositories the person merely watches: their blocked or
   // waiting pull requests are counted at the end and are never the person's to act on.
-  const mine = (items: DerivedItem[]) => items.filter((d) => involvesMe(d, v.login));
-  const yours = (d: DerivedItem) => (sameLogin(d.item.authorLogin, v.login) ? " (yours)" : "");
+  const mine = (items: DerivedItem[]) => items.filter((d) => involvesMe(d, v.githubLogin));
+  const yours = (d: DerivedItem) => (sameLogin(d.item.authorLogin, v.githubLogin) ? " (yours)" : "");
   section("Waiting for your review (a review was requested from you)", "R", att.needsMyReview, "review", 8);
   section("Your pull requests with changes requested", "C", att.changesRequested, "changes", 6);
   const blocked = mine(att.blocked);
@@ -72,9 +73,9 @@ export async function buildSnapshot(db: Db, v: Viewer, now = new Date()): Promis
       out.push(line(key, d, yours(d)));
     });
   }
-  const waiting = att.waitingExternal.filter((d) => sameLogin(d.item.authorLogin, v.login));
+  const waiting = att.waitingExternal.filter((d) => sameLogin(d.item.authorLogin, v.githubLogin));
   if (waiting.length) out.push("", `Your own pull requests waiting on other people (${waiting.length}): ${waiting.slice(0, 5).map((d) => `${d.item.repository.fullName}#${d.item.number}`).join(", ")}`);
-  const watched = att.blocked.filter((d) => !involvesMe(d, v.login)).length + att.waitingExternal.filter((d) => !sameLogin(d.item.authorLogin, v.login) && !involvesMe(d, v.login)).length;
+  const watched = att.blocked.filter((d) => !involvesMe(d, v.githubLogin)).length + att.waitingExternal.filter((d) => !sameLogin(d.item.authorLogin, v.githubLogin) && !involvesMe(d, v.githubLogin)).length;
   if (watched) out.push("", `Not yours: ${watched} other pull request${watched === 1 ? " is" : "s are"} blocked or waiting in repositories you only watch. They are listed on purpose only as a count; the person is not responsible for them.`);
 
   const today = todayIn(v.timezone, now);
@@ -85,7 +86,7 @@ export async function buildSnapshot(db: Db, v: Viewer, now = new Date()): Promis
       out.push(`- "${t.title.slice(0, 80)}" in ${t.project.name}, ${t.column.name}, ${priorityName(t.priority).toLowerCase()}${due ? `, due ${due}${due < today ? " (OVERDUE)" : ""}` : ""}`);
     }
   }
-  const broken = await db.repository.findMany({ where: { trackingStatus: "ACTIVE", syncError: { not: null } }, select: { fullName: true, syncError: true }, take: 4 });
+  const broken = await db.repository.findMany({ where: { AND: [repoWhere(v), { trackingStatus: "ACTIVE", syncError: { not: null } }] }, select: { fullName: true, syncError: true }, take: 4 });
   if (broken.length) out.push("", `Repositories that failed to sync: ${broken.map((r) => r.fullName).join(", ")}`);
   if (out.length === 1) out.push("", "Nothing needs attention right now.");
   return { text: out.join("\n"), refs, projects: projects.map((p) => ({ id: p.id, name: p.name })) };
@@ -170,7 +171,7 @@ export async function saveSuggestions(db: Db, v: Viewer, drafts: SuggestionDraft
   const since = new Date(now.getTime() - REPEAT_DAYS * 86_400_000);
   let autos = 0;
   for (const d of drafts) {
-    const known = await db.aiSuggestion.findFirst({ where: { sourceKey: d.sourceKey, OR: [{ state: "NEW" }, { createdAt: { gte: since } }] }, select: { id: true } });
+    const known = await db.aiSuggestion.findFirst({ where: { workspaceId: v.workspaceId, sourceKey: d.sourceKey, OR: [{ state: "NEW" }, { createdAt: { gte: since } }] }, select: { id: true } });
     if (known) {
       counts.skipped++;
       continue;
@@ -178,11 +179,11 @@ export async function saveSuggestions(db: Db, v: Viewer, drafts: SuggestionDraft
     const clear = d.kind === "review" || d.kind === "changes";
     if (mode === "create" && clear && autos < AUTO_CAP) {
       const task = await makeTask(db, v, d);
-      await db.aiSuggestion.create({ data: { sourceKey: d.sourceKey, title: d.title, reason: d.reason, payload: { ...d.payload, href: d.href }, state: "AUTO", taskId: task.id, decidedAt: now } });
+      await db.aiSuggestion.create({ data: { workspaceId: v.workspaceId, sourceKey: d.sourceKey, title: d.title, reason: d.reason, payload: { ...d.payload, href: d.href }, state: "AUTO", taskId: task.id, decidedAt: now } });
       autos++;
       counts.created++;
     } else {
-      await db.aiSuggestion.create({ data: { sourceKey: d.sourceKey, title: d.title, reason: d.reason, payload: { ...d.payload, href: d.href } } });
+      await db.aiSuggestion.create({ data: { workspaceId: v.workspaceId, sourceKey: d.sourceKey, title: d.title, reason: d.reason, payload: { ...d.payload, href: d.href } } });
       counts.suggested++;
     }
   }
@@ -203,50 +204,50 @@ async function makeTask(db: Db, v: Viewer, d: Pick<SuggestionDraft, "title" | "p
   return task;
 }
 
-export async function listSuggestions(db: Db) {
-  const rows = await db.aiSuggestion.findMany({ where: { state: "NEW" }, orderBy: { createdAt: "desc" }, take: 50 });
+export async function listSuggestions(db: Db, v: Viewer) {
+  const rows = await db.aiSuggestion.findMany({ where: { workspaceId: v.workspaceId, state: "NEW" }, orderBy: { createdAt: "desc" }, take: 50 });
   return rows.map((r) => ({ id: r.id, title: r.title, reason: r.reason, href: String((r.payload as { href?: unknown })?.href ?? ""), createdAt: r.createdAt }));
 }
 
 export async function acceptSuggestions(db: Db, v: Viewer, ids: string[]): Promise<number> {
   let made = 0;
   for (const id of ids.slice(0, 20)) {
-    const s = await db.aiSuggestion.findFirst({ where: { id, state: "NEW" } });
+    const s = await db.aiSuggestion.findFirst({ where: { id, workspaceId: v.workspaceId, state: "NEW" } });
     if (!s) continue;
     const p = s.payload as SuggestionDraft["payload"];
     const task = await makeTask(db, v, { title: s.title, payload: p });
-    await db.aiSuggestion.update({ where: { id }, data: { state: "ACCEPTED", taskId: task.id, decidedAt: new Date() } });
+    await db.aiSuggestion.update({ where: { id, workspaceId: v.workspaceId }, data: { state: "ACCEPTED", taskId: task.id, decidedAt: new Date() } });
     made++;
   }
   return made;
 }
 
-export async function dismissSuggestions(db: Db, ids: string[]): Promise<number> {
-  const r = await db.aiSuggestion.updateMany({ where: { id: { in: ids.slice(0, 50) }, state: "NEW" }, data: { state: "DISMISSED", decidedAt: new Date() } });
+export async function dismissSuggestions(db: Db, v: Viewer, ids: string[]): Promise<number> {
+  const r = await db.aiSuggestion.updateMany({ where: { workspaceId: v.workspaceId, id: { in: ids.slice(0, 50) }, state: "NEW" }, data: { state: "DISMISSED", decidedAt: new Date() } });
   return r.count;
 }
 
 export type AutopilotRun = "off" | "no-config" | "no-profile" | "not-yet" | "done" | "error";
 
 /** The daily background review. Runs at most once per local day (after 07:00), at most every 30 minutes after a failure, and only when the autopilot is on. */
-export async function runAutopilot(db: Db, vault: Vault, opts: { now?: Date; f?: Fetch; force?: boolean } = {}): Promise<AutopilotRun> {
+export async function runAutopilot(db: Db, workspaceId: string, vault: Vault, opts: { now?: Date; f?: Fetch; force?: boolean } = {}): Promise<AutopilotRun> {
   const now = opts.now ?? new Date();
-  const row = await db.aiSettings.findUnique({ where: { id: "ai" } });
+  const row = await db.aiSettings.findUnique({ where: { workspaceId } });
   if (!row || (row.autopilot !== "suggest" && row.autopilot !== "create")) return "off";
-  const cfg = await loadAiConfig(db, vault);
+  const cfg = await loadAiConfig(db, workspaceId, vault);
   if (!cfg || !cfg.apiKey) return "no-config";
-  const user = await db.user.findFirst({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });
-  const viewer = user ? await loadViewer(db, user.id) : null;
+  const member = await db.member.findFirst({ where: { workspaceId, status: "ACTIVE", user: { isDemo: false } }, orderBy: { createdAt: "asc" } });
+  const viewer = member ? await loadViewer(db, member.userId, workspaceId) : null;
   if (!viewer) return "no-profile";
   const day = todayIn(viewer.timezone, now);
   const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: viewer.timezone, hour: "2-digit", hour12: false }).format(now)) % 24;
   if (!opts.force && (row.lastRunDay === day || hour < 7 || (row.lastRunAt && now.getTime() - row.lastRunAt.getTime() < COOLDOWN_MS))) return "not-yet";
-  await db.aiSettings.update({ where: { id: "ai" }, data: { lastRunAt: now } }); // a failed run waits out the cooldown instead of retrying every tick
+  await db.aiSettings.update({ where: { workspaceId }, data: { lastRunAt: now } }); // a failed run waits out the cooldown instead of retrying every tick
   try {
     const r = await analyzeWorkspace(db, viewer, cfg, { now, f: opts.f });
     await saveSuggestions(db, viewer, r.drafts, row.autopilot as Autopilot, now);
-    if (r.model) await rememberModel(db, r.model);
-    await db.aiSettings.update({ where: { id: "ai" }, data: { lastRunDay: day, lastSummary: r.summary || null } });
+    if (r.model) await rememberModel(db, workspaceId, r.model);
+    await db.aiSettings.update({ where: { workspaceId }, data: { lastRunDay: day, lastSummary: r.summary || null } });
     return "done";
   } catch (e) {
     console.error("AI autopilot failed:", e instanceof Error ? e.message : e);

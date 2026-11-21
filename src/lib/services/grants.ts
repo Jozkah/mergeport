@@ -2,6 +2,7 @@ import type { Db } from "@/lib/db";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { requireAdmin, type Viewer } from "@/lib/authz/viewer";
 import { audit } from "./audit";
+import { purgeDigests } from "./digest-purge";
 
 export type GrantCaps = { canManageWork?: boolean; canReview?: boolean };
 
@@ -15,7 +16,7 @@ async function memberIn(db: Db, admin: Viewer, memberId: string) {
 export async function grantRepositories(db: Db, admin: Viewer, memberId: string, repositoryIds: string[], caps: GrantCaps = {}) {
   requireAdmin(admin);
   const member = await memberIn(db, admin, memberId);
-  if (member.role === "ADMIN") throw new ValidationError("Administrators already see every repository");
+  if (member.role === "ADMIN" || member.role === "OWNER") throw new ValidationError("Administrators already see every repository");
   const ids = [...new Set(repositoryIds)];
   const repos = await db.repository.findMany({
     where: { id: { in: ids }, workspaceId: admin.workspaceId, trackingStatus: { not: "REMOVED" } },
@@ -36,7 +37,8 @@ export async function grantRepositories(db: Db, admin: Viewer, memberId: string,
 
 export async function revokeRepositories(db: Db, admin: Viewer, memberId: string, repositoryIds: string[]) {
   requireAdmin(admin);
-  await memberIn(db, admin, memberId);
+  const member = await memberIn(db, admin, memberId);
+  await purgeDigests(db, admin.workspaceId, [member.userId]); // their stored digests may name what they are about to lose
   await db.repositoryGrant.updateMany({
     where: { memberId, repositoryId: { in: repositoryIds }, revokedAt: null },
     data: { revokedAt: new Date() },

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireViewer } from "@/lib/auth/current";
+import { requireWriter } from "@/lib/auth/current";
 import { db } from "@/lib/db";
 import { addDependency, removeDependency } from "@/lib/services/planning";
 import { applySuggestion, assignEpic, assignIteration, closeIteration, createBoard, createEpic, createIteration, deleteBoard, deleteEpic, setAutomation, setShipped, updateBoard, updateEpic } from "@/lib/services/planning-ext";
@@ -19,7 +19,7 @@ const refresh = () => {
 
 export async function createBoardAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const b = await createBoard(db, viewer, { projectId: str(fd, "projectId"), template: str(fd, "template") || undefined, name: str(fd, "name") || undefined });
     refresh();
     return { ok: true, message: `Board “${b.name}” created`, data: { id: b.id } };
@@ -29,7 +29,7 @@ export async function createBoardAction(fd: FormData): Promise<ActionResult> {
 /** Columns arrive as lines "key" or "key | label | limit" so a person can reorder, rename and limit them in one box. */
 export async function updateBoardAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const lines = str(fd, "columns").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const columns = lines.map((l) => {
       const [key, name, wip] = l.split("|").map((x) => x.trim());
@@ -43,7 +43,7 @@ export async function updateBoardAction(fd: FormData): Promise<ActionResult> {
 
 export async function deleteBoardAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await deleteBoard(db, viewer, str(fd, "id"));
     refresh();
     return { ok: true, message: "Board removed. Its cards are untouched." };
@@ -52,7 +52,7 @@ export async function deleteBoardAction(fd: FormData): Promise<ActionResult> {
 
 export async function createEpicAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await createEpic(db, viewer, { projectId: str(fd, "projectId"), title: str(fd, "title"), description: str(fd, "description"), ownerLogin: str(fd, "owner") || null, startDate: day(str(fd, "start")), targetDate: day(str(fd, "target")), decisions: str(fd, "decisions") });
     refresh();
     return { ok: true, message: "Epic created" };
@@ -61,7 +61,7 @@ export async function createEpicAction(fd: FormData): Promise<ActionResult> {
 
 export async function epicStatusAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     if (str(fd, "delete") === "1") await deleteEpic(db, viewer, str(fd, "id"));
     else await updateEpic(db, viewer, str(fd, "id"), { status: str(fd, "status") === "DONE" ? "DONE" : "OPEN" });
     refresh();
@@ -71,7 +71,7 @@ export async function epicStatusAction(fd: FormData): Promise<ActionResult> {
 
 export async function assignEpicAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await assignEpic(db, viewer, str(fd, "itemId"), str(fd, "epicId") || null);
     refresh();
     return { ok: true, message: "Saved" };
@@ -80,7 +80,7 @@ export async function assignEpicAction(fd: FormData): Promise<ActionResult> {
 
 export async function createIterationAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const start = day(str(fd, "start"));
     const end = day(str(fd, "end"));
     if (!start || !end) throw new Error("Choose a start and an end date");
@@ -92,7 +92,7 @@ export async function createIterationAction(fd: FormData): Promise<ActionResult>
 
 export async function assignIterationAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await assignIteration(db, viewer, str(fd, "itemId"), str(fd, "iterationId") || null);
     refresh();
     return { ok: true, message: "Saved" };
@@ -101,7 +101,7 @@ export async function assignIterationAction(fd: FormData): Promise<ActionResult>
 
 export async function closeIterationAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const r = await closeIteration(db, viewer, str(fd, "id"), str(fd, "carryTo") || null);
     refresh();
     return { ok: true, message: r.carried ? `Closed. ${r.carried} unfinished card${r.carried === 1 ? "" : "s"} carried over.` : "Closed" };
@@ -110,7 +110,7 @@ export async function closeIterationAction(fd: FormData): Promise<ActionResult> 
 
 export async function shipAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await setShipped(db, viewer, str(fd, "id"), str(fd, "shipped") !== "0", { tag: str(fd, "tag"), url: str(fd, "url") });
     refresh();
     return { ok: true, message: str(fd, "shipped") === "0" ? "Marked as not shipped" : "Marked as shipped" };
@@ -119,7 +119,7 @@ export async function shipAction(fd: FormData): Promise<ActionResult> {
 
 export async function automationAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await setAutomation(db, viewer, str(fd, "projectId"), str(fd, "mode") === "suggest" ? "suggest" : "off");
     refresh();
     return { ok: true, message: "Saved" };
@@ -128,7 +128,7 @@ export async function automationAction(fd: FormData): Promise<ActionResult> {
 
 export async function applySuggestionAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await applySuggestion(db, viewer, str(fd, "itemId"));
     refresh();
     return { ok: true, message: "Moved on the board. Nothing was changed on GitHub." };
@@ -137,7 +137,7 @@ export async function applySuggestionAction(fd: FormData): Promise<ActionResult>
 
 export async function linkAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     if (str(fd, "remove") === "1") await removeDependency(db, viewer, str(fd, "fromId"), str(fd, "toId"));
     else await addDependency(db, viewer, str(fd, "fromId"), str(fd, "toId"), str(fd, "kind") || "blocks");
     refresh();
@@ -147,7 +147,7 @@ export async function linkAction(fd: FormData): Promise<ActionResult> {
 
 export async function templateTaskAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const t = await createTaskFromTemplate(db, viewer, { projectId: str(fd, "projectId"), template: str(fd, "template"), title: str(fd, "title"), assigneeLogin: str(fd, "assignee") || null });
     refresh();
     return { ok: true, message: "Task created from the template", data: { id: t.id } };
@@ -156,7 +156,7 @@ export async function templateTaskAction(fd: FormData): Promise<ActionResult> {
 
 export async function promoteAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const r = await promoteTask(db, viewer, str(fd, "taskId"), str(fd, "repositoryId"));
     revalidatePath(`/tasks/${str(fd, "taskId")}`);
     refresh();

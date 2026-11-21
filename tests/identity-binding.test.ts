@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 import { ghFetch } from "@/lib/github/gh";
 import { GitHubRest } from "@/lib/github/rest";
@@ -22,7 +22,7 @@ const dbs: { close: () => Promise<void>; file: string }[] = [];
 
 async function profile(login: string, id: number) {
   const file = path.resolve(".data", `client-binding-${login}-${process.pid}-${dbs.length}.db`);
-  const db = createPrisma(file);
+  const db = createTestPrisma(file);
   await ensureLocalProfile(db, { id: BigInt(id), login, name: login, avatarUrl: null, host: "github.com" });
   dbs.push({ close: () => db.$disconnect(), file });
   return db;

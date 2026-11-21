@@ -66,52 +66,57 @@ export async function propose(db: Db, v: Viewer, input: { kind: ActionKind; item
     summary = `${event === "APPROVE" ? "Approve" : event === "REQUEST_CHANGES" ? "Request changes on" : "Review (comment) on"} ${label}`;
     payload = { event, body };
   }
-  const row = await db.aiPendingAction.create({ data: { kind: input.kind, workItemId: item.id, summary, payload: payload as never } });
+  const row = await db.aiPendingAction.create({ data: { workspaceId: v.workspaceId, kind: input.kind, workItemId: item.id, summary, payload: payload as never } });
   return { id: row.id, summary, label };
 }
 
 const detailOf = (kind: string, p: Record<string, unknown>) => (kind === "request-review" ? `Reviewers: ${(p.users as string[]).map((u) => `@${u}`).join(", ")}` : String(p.body ?? "") || "(no text)");
 
-export async function listPending(db: Db, now = new Date()): Promise<Pending[]> {
-  const rows = await db.aiPendingAction.findMany({ where: { state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } }, orderBy: { createdAt: "desc" }, take: 30 });
-  const items = await db.workItem.findMany({ where: { id: { in: rows.map((r) => r.workItemId) } }, select: { id: true, type: true } });
+export async function listPending(db: Db, v: Viewer, now = new Date()): Promise<Pending[]> {
+  const candidates = await db.aiPendingAction.findMany({ where: { workspaceId: v.workspaceId, state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } }, orderBy: { createdAt: "desc" }, take: 200 });
+  // A request names a pull request or issue; only the ones this person may see are listed (its summary and text are repository content).
+  const items = await db.workItem.findMany({ where: { id: { in: candidates.map((r) => r.workItemId) }, ...viaRepo(v) }, select: { id: true, type: true } });
   const type = new Map(items.map((i) => [i.id, i.type]));
+  const rows = candidates.filter((r) => type.has(r.workItemId)).slice(0, 30);
   return rows.map((r) => ({ id: r.id, kind: r.kind as ActionKind, summary: r.summary, detail: detailOf(r.kind, r.payload as Record<string, unknown>), href: `/${type.get(r.workItemId) === "ISSUE" ? "issues" : "pull-requests"}/${r.workItemId}`, createdAt: r.createdAt, error: r.result && r.result.startsWith("Not sent") ? r.result : null }));
 }
 
-export async function pendingCount(db: Db, now = new Date()): Promise<number> {
-  return db.aiPendingAction.count({ where: { state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } } });
+export async function pendingCount(db: Db, v: Viewer, now = new Date()): Promise<number> {
+  const rows = await db.aiPendingAction.findMany({ where: { workspaceId: v.workspaceId, state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } }, select: { workItemId: true }, take: 200 });
+  if (rows.length === 0) return 0;
+  const visible = new Set((await db.workItem.findMany({ where: { id: { in: rows.map((r) => r.workItemId) }, ...viaRepo(v) }, select: { id: true } })).map((i) => i.id));
+  return rows.filter((r) => visible.has(r.workItemId)).length;
 }
 
 /** Performs one approved request as the signed-in person. It is claimed first, so a double click cannot send it twice. */
 export async function approve(db: Db, v: Viewer, id: string, now = new Date()): Promise<{ ok: boolean; message: string }> {
-  const claimed = await db.aiPendingAction.updateMany({ where: { id, state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } }, data: { state: "DONE", decidedAt: now } });
+  const claimed = await db.aiPendingAction.updateMany({ where: { id, workspaceId: v.workspaceId, state: "PENDING", createdAt: { gte: new Date(now.getTime() - EXPIRES_MS) } }, data: { state: "DONE", decidedAt: now } });
   if (claimed.count === 0) throw new ValidationError("That request is no longer waiting (already decided, or older than a day).");
-  const row = await db.aiPendingAction.findUniqueOrThrow({ where: { id } });
+  const row = await db.aiPendingAction.findUniqueOrThrow({ where: { id, workspaceId: v.workspaceId } });
   const p = row.payload as Record<string, unknown>;
   const ctx = { db, v };
   try {
     if (row.kind === "comment") await work.addComment(ctx, row.workItemId, String(p.body));
     else if (row.kind === "request-review") await work.requestReview(ctx, row.workItemId, p.users as string[]);
     else await work.submitReview(ctx, row.workItemId, p.event as "COMMENT" | "REQUEST_CHANGES" | "APPROVE", String(p.body ?? ""));
-    await db.aiPendingAction.update({ where: { id }, data: { result: "Sent to GitHub" } });
+    await db.aiPendingAction.update({ where: { id, workspaceId: v.workspaceId }, data: { result: "Sent to GitHub" } });
     return { ok: true, message: `Sent: ${row.summary}` };
   } catch (e) {
     const message = e instanceof ForbiddenError || e instanceof ValidationError || e instanceof NotFoundError ? e.message : e instanceof Error ? cut(e.message, 300) : "It failed.";
     // A request that could not be sent goes back to waiting with the reason, so it can be tried again or rejected, never silently lost.
-    await db.aiPendingAction.update({ where: { id }, data: { state: "PENDING", decidedAt: null, result: `Not sent: ${message}` } });
+    await db.aiPendingAction.update({ where: { id, workspaceId: v.workspaceId }, data: { state: "PENDING", decidedAt: null, result: `Not sent: ${message}` } });
     return { ok: false, message: `Not sent: ${message}` };
   }
 }
 
-export async function reject(db: Db, id: string, now = new Date()): Promise<boolean> {
-  const r = await db.aiPendingAction.updateMany({ where: { id, state: "PENDING" }, data: { state: "REJECTED", decidedAt: now, result: "Rejected by the person" } });
+export async function reject(db: Db, v: Viewer, id: string, now = new Date()): Promise<boolean> {
+  const r = await db.aiPendingAction.updateMany({ where: { id, workspaceId: v.workspaceId, state: "PENDING" }, data: { state: "REJECTED", decidedAt: now, result: "Rejected by the person" } });
   return r.count > 0;
 }
 
 /** For the AI app that asked: where its request stands. */
-export async function status(db: Db, id: string, now = new Date()): Promise<{ state: string; summary: string; result: string | null }> {
-  const r = await db.aiPendingAction.findUnique({ where: { id } });
+export async function status(db: Db, v: Viewer, id: string, now = new Date()): Promise<{ state: string; summary: string; result: string | null }> {
+  const r = await db.aiPendingAction.findUnique({ where: { id, workspaceId: v.workspaceId } });
   if (!r) throw new NotFoundError();
   const expired = r.state === "PENDING" && now.getTime() - r.createdAt.getTime() > EXPIRES_MS;
   return { state: expired ? "EXPIRED" : r.state, summary: r.summary, result: r.result };

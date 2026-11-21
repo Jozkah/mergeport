@@ -1,9 +1,12 @@
+import { refuseWhenHosted } from "@/lib/public-url";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { HubAuth } from "@/lib/hub/connect";
 import { failure, guardConnect, readBody } from "@/lib/hub/connect-route";
 
 export async function POST(req: Request) {
+  const hostedRefusal = refuseWhenHosted();
+  if (hostedRefusal) return hostedRefusal;
   const refused = guardConnect(req);
   if (refused) return refused;
   const { url } = await readBody(req);

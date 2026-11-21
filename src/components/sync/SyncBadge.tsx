@@ -31,13 +31,19 @@ const NEEDS_ATTENTION = new Set<SyncStateName>(["conflict", "revoked", "signin",
  * return is visible and not a silent flip to "Syncing". The state is ALWAYS also text + icon, so reduced-motion and
  * colour-blind users get the same information; the help text is a tooltip AND available to assistive technology.
  */
-export function SyncBadge({ state: given, pending = 0, conflicts = 0, detail, href, scope }: { state: SyncStateName; pending?: number; conflicts?: number; detail?: string | null; href?: string; scope?: "source" }) {
+/** A hosted workspace has no "this computer": the two states whose help names it say the same thing about the server. */
+const HOSTED_HELP: Partial<Record<SyncStateName, string>> = {
+  synced: "Everything is saved and up to date.",
+  pending: "Saved. Waiting to be sent to GitHub.",
+};
+
+export function SyncBadge({ state: given, pending = 0, conflicts = 0, detail, href, scope, hosted = false }: { state: SyncStateName; pending?: number; conflicts?: number; detail?: string | null; href?: string; scope?: "source"; hosted?: boolean }) {
   const [wasDown, setWasDown] = useState(given === "offline" || given === "rate-limited");
   if (!wasDown && (given === "offline" || given === "rate-limited")) setWasDown(true);
   else if (wasDown && (given === "synced" || given === "conflict" || given === "revoked")) setWasDown(false);
   const state: SyncStateName = given === "syncing" && wasDown ? "reconnecting" : given;
 
-  const m = META[state];
+  const m = hosted && HOSTED_HELP[state] ? { ...META[state], help: HOSTED_HELP[state] as string } : META[state];
   const [shown, setShown] = useState(state);
   const [swapping, setSwapping] = useState(false);
   const [attn, setAttn] = useState(false);
@@ -63,11 +69,11 @@ export function SyncBadge({ state: given, pending = 0, conflicts = 0, detail, hr
   const sm = META[shown];
   const SI = sm.icon;
   const count = shown === "pending" && pending ? ` (${pending})` : shown === "conflict" && conflicts ? ` (${conflicts})` : "";
-  const common = { className: `pill sync-pill ${sm.cls}`, "data-state": state, "data-swapping": swapping ? "true" : undefined, "data-attn": attn ? "true" : undefined };
+  const common = { className: `pill sync-pill shrink-0 ${sm.cls}`, "data-state": state, "data-swapping": swapping ? "true" : undefined, "data-attn": attn ? "true" : undefined };
   // Changes are announced once, by SyncAnnouncer; the label itself is not a live region. The help text stays readable at all times.
   const body = (
     <>
-      <SI size={12} aria-hidden className={shown === "syncing" || shown === "reconnecting" ? "animate-spin" : undefined} />
+      <SI size={12} aria-hidden className={shown === "syncing" || shown === "reconnecting" ? "animate-spin motion-reduce:animate-none" : undefined} />
       <span className="sync-label">{sm.label}{count}</span>
       <span className="sr-only">{scope === "source" ? (detail ?? m.help) : `${m.help}${detail ? " " + detail : ""}`}</span>
     </>

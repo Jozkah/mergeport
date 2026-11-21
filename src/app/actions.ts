@@ -9,15 +9,17 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { STAGE_KEYS } from "@/lib/domain/stages";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireAdminViewer, requireViewer } from "@/lib/auth/current";
+import { requireAdminViewer, requireViewer, requireWriter } from "@/lib/auth/current";
 import { NotFoundError, ValidationError } from "@/lib/errors";
-import { assertProjectWritable, requireAdmin, requireRepo } from "@/lib/authz/viewer";
+import { assertProjectWritable, requireAdmin, requireRepo, projectWhere } from "@/lib/authz/viewer";
 import { removeFromTracking, trackLocally, upsertRepository, type RepoMeta } from "@/lib/services/repositories";
 import * as work from "@/lib/services/work-actions";
 import { addDependency, assertSameAudience, createCard, moveCard, requestManualReview, resolveManualReview, createColumnsForProject } from "@/lib/services/planning";
 import { mapLocalRoot, scanWorktrees, unmapLocalRoot } from "@/lib/services/worktrees";
 import { audit } from "@/lib/services/audit";
 import { portForDiscovery, publicPort } from "@/lib/github/factory";
+import { trackInstallationRepos } from "@/lib/services/installation-repos";
+import { isHosted } from "@/lib/public-url";
 import { applyWatchlist } from "@/lib/services/watchlist";
 import { readCached } from "@/lib/local/discovery";
 import type { Discovery } from "@/lib/github/port";
@@ -38,7 +40,8 @@ const urlRe = /^(?:https?:\/\/github\.com\/)?([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._
 /** Public import via the official public REST API, with no credential at all. Nothing is shared with teammates. */
 export async function importPublicAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    // Hosted: an administrator's decision (a member importing would otherwise give themselves access).
+    const { viewer } = isHosted() ? await requireAdminViewer() : await requireWriter();
     const m = urlRe.exec(str(fd, "repo"));
     if (!m) throw new ValidationError("Enter a GitHub URL or owner/repo");
     const meta = await publicPort(db).getRepository(m[1], m[2]).catch((e) => {
@@ -47,6 +50,7 @@ export async function importPublicAction(fd: FormData): Promise<ActionResult> {
     });
     if (meta.visibility !== "PUBLIC") throw new ValidationError("Only public repositories can be imported by URL");
     const [r] = await trackLocally(db, viewer, [meta]);
+    if (r.trackingStatus === "REMOVED") throw new ValidationError("That repository was removed from tracking. Connect it again from Connect repositories.");
     await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id, full: true }, dedupeKey: `sync:${r.id}` });
     revalidatePath("/repositories");
     return { ok: true, message: `${meta.fullName} is tracked on this computer. It is not shared with teammates.` };
@@ -56,11 +60,11 @@ export async function importPublicAction(fd: FormData): Promise<ActionResult> {
 /** Tracks repositories the person's own GitHub access can list. Tracking is local; it neither grants GitHub access nor publishes anything. */
 export async function trackSelectedAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const ids = new Set(strs(fd, "repo"));
     if (ids.size === 0) throw new ValidationError("Select at least one repository");
     // Selected from the saved list: no live GitHub call, so this works offline and never waits on a stalled CLI.
-    const saved = await readCached<Discovery>(db, "repos");
+    const saved = await readCached<Discovery>(db, "repos", new Date(), undefined, viewer.workspaceId);
     if (!saved.payload) throw new ValidationError("The repository list has not been loaded yet. Use Check again, then select.");
     const found = saved.payload.repos.filter((r) => ids.has(r.githubId.toString()));
     if (found.length !== ids.size) throw new ValidationError("Some selected repositories are no longer available to your GitHub account");
@@ -72,9 +76,25 @@ export async function trackSelectedAction(fd: FormData): Promise<ActionResult> {
   });
 }
 
+/**
+ * Hosted: tracks repositories the workspace's own GitHub connection can access. Administrators only: the connection sees every
+ * repository of the installation, so choosing which ones enter the workspace is an administrator's decision. Nobody gains access
+ * to a tracked repository by this alone (people see repositories through grants).
+ */
+export async function trackInstallationReposAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireAdminViewer();
+    const rows = await trackInstallationRepos(db, viewer, strs(fd, "repo"));
+    for (const r of rows) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id, full: true }, dedupeKey: `sync:${r.id}`, workspaceId: viewer.workspaceId });
+    notifyChange("state");
+    revalidatePath("/repositories");
+    return { ok: true, message: `${rows.length} repositor${rows.length === 1 ? "y is" : "ies are"} tracked. The first sync is queued.` };
+  });
+}
+
 export async function untrackRepositoryAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = isHosted() ? await requireAdminViewer() : await requireWriter();
     await removeFromTracking(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/repositories");
     return { ok: true, message: "Repository removed from tracking. Nothing was deleted on GitHub." };
@@ -83,7 +103,7 @@ export async function untrackRepositoryAction(fd: FormData): Promise<ActionResul
 
 export async function refreshRepositoryAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const repo = await requireRepo(db, viewer, str(fd, "repositoryId"));
     // A person asking for a refresh gets a complete one: every page is listed again (unchanged items cost no detail requests), so a
     // repository whose earlier sync was cut short is repaired instead of only receiving what changed since.
@@ -95,11 +115,11 @@ export async function refreshRepositoryAction(fd: FormData): Promise<ActionResul
 
 // ---------- GitHub work actions ----------
 
-const ctx = async () => ({ db, v: (await requireViewer()).viewer });
+const writerCtx = async () => ({ db, v: (await requireWriter()).viewer });
 
 export async function commentAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await work.addComment(await ctx(), str(fd, "id"), String(fd.get("body") ?? ""));
+    await work.addComment(await writerCtx(), str(fd, "id"), String(fd.get("body") ?? ""));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Comment posted" };
   });
@@ -107,7 +127,7 @@ export async function commentAction(fd: FormData): Promise<ActionResult> {
 
 export async function inlineCommentAction(input: { id: string; path: string; line: number; side: "LEFT" | "RIGHT"; body: string }): Promise<ActionResult> {
   return run(async () => {
-    await work.addReviewComment(await ctx(), input.id, { path: input.path, line: input.line, side: input.side === "LEFT" ? "LEFT" : "RIGHT", body: input.body });
+    await work.addReviewComment(await writerCtx(), input.id, { path: input.path, line: input.line, side: input.side === "LEFT" ? "LEFT" : "RIGHT", body: input.body });
     revalidatePath("/pull-requests/" + input.id);
     return { ok: true, message: "Comment posted" };
   });
@@ -115,7 +135,7 @@ export async function inlineCommentAction(input: { id: string; path: string; lin
 
 export async function labelsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await work.setLabels(await ctx(), str(fd, "id"), str(fd, "labels").split(",").map((s) => s.trim()));
+    await work.setLabels(await writerCtx(), str(fd, "id"), str(fd, "labels").split(",").map((s) => s.trim()));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Labels updated" };
   });
@@ -123,7 +143,7 @@ export async function labelsAction(fd: FormData): Promise<ActionResult> {
 
 export async function assigneesAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await work.setAssignees(await ctx(), str(fd, "id"), csv(str(fd, "assignees")));
+    await work.setAssignees(await writerCtx(), str(fd, "id"), csv(str(fd, "assignees")));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Assignees updated" };
   });
@@ -132,7 +152,7 @@ export async function assigneesAction(fd: FormData): Promise<ActionResult> {
 export async function milestoneAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const n = str(fd, "number");
-    await work.setRepoMilestone(await ctx(), str(fd, "id"), n ? Number(n) : null);
+    await work.setRepoMilestone(await writerCtx(), str(fd, "id"), n ? Number(n) : null);
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Milestone updated" };
   });
@@ -140,7 +160,7 @@ export async function milestoneAction(fd: FormData): Promise<ActionResult> {
 
 export async function requestReviewAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await work.requestReview(await ctx(), str(fd, "id"), csv(str(fd, "users")), csv(str(fd, "teams")));
+    await work.requestReview(await writerCtx(), str(fd, "id"), csv(str(fd, "users")), csv(str(fd, "teams")));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Review requested on GitHub" };
   });
@@ -149,7 +169,7 @@ export async function requestReviewAction(fd: FormData): Promise<ActionResult> {
 export async function submitReviewAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const event = z.enum(["APPROVE", "COMMENT", "REQUEST_CHANGES"]).parse(str(fd, "event"));
-    await work.submitReview(await ctx(), str(fd, "id"), event, String(fd.get("body") ?? ""));
+    await work.submitReview(await writerCtx(), str(fd, "id"), event, String(fd.get("body") ?? ""));
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Review submitted" };
   });
@@ -157,7 +177,7 @@ export async function submitReviewAction(fd: FormData): Promise<ActionResult> {
 
 export async function createIssueAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const c = await ctx();
+    const c = await writerCtx();
     const created = await work.createIssue(c, str(fd, "repositoryId"), { title: str(fd, "title"), body: String(fd.get("body") ?? ""), labels: csv(str(fd, "labels")) });
     revalidatePath("/issues");
     return { ok: true, message: `Issue #${created.number} created on GitHub` };
@@ -166,7 +186,7 @@ export async function createIssueAction(fd: FormData): Promise<ActionResult> {
 
 export async function mergeCheckAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const e = await work.mergeEligibility(await ctx(), str(fd, "id"));
+    const e = await work.mergeEligibility(await writerCtx(), str(fd, "id"));
     return { ok: true, data: { ...e } };
   });
 }
@@ -174,7 +194,7 @@ export async function mergeCheckAction(fd: FormData): Promise<ActionResult> {
 export async function mergeAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const method = z.enum(["merge", "squash", "rebase"]).parse(str(fd, "method"));
-    await work.mergePullRequest(await ctx(), str(fd, "id"), { method, confirmedHeadSha: str(fd, "sha"), acknowledgeWarnings: bool(fd, "ack") });
+    await work.mergePullRequest(await writerCtx(), str(fd, "id"), { method, confirmedHeadSha: str(fd, "sha"), acknowledgeWarnings: bool(fd, "ack") });
     revalidatePath("/pull-requests/" + str(fd, "id"));
     return { ok: true, message: "Pull request merged" };
   });
@@ -184,7 +204,7 @@ export async function mergeAction(fd: FormData): Promise<ActionResult> {
 
 export async function createCardAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const due = str(fd, "due");
     await createCard(db, viewer, {
       projectId: str(fd, "projectId"),
@@ -203,7 +223,7 @@ export async function createCardAction(fd: FormData): Promise<ActionResult> {
 /** Called from the board (drag or keyboard). Conflicts are reported so the client can roll back and reload. */
 export async function moveCardAction(input: { itemId: string; toColumnKey: string; beforePosition: number | null; afterPosition: number | null; expectedVersion: number }): Promise<ActionResult & { version?: number }> {
   const r = await run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const res = await moveCard(db, viewer, input);
     return { ok: true, data: { version: res.version } };
   });
@@ -213,7 +233,7 @@ export async function moveCardAction(input: { itemId: string; toColumnKey: strin
 
 export async function addDependencyAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await addDependency(db, viewer, str(fd, "blockerId"), str(fd, "blockedId"));
     revalidatePath("/planning");
     return { ok: true, message: "Dependency added" };
@@ -228,7 +248,7 @@ export async function createMilestoneAction(fd: FormData): Promise<ActionResult>
     const start = str(fd, "start");
     const target = str(fd, "target");
     const project = str(fd, "projectId");
-    await assertProjectWritable(db, project || null);
+    await assertProjectWritable(db, viewer, project || null);
     await db.dashboardMilestone.create({ data: { workspaceId: viewer.workspaceId, projectId: project || null, name, description: str(fd, "description") || null, ownerId: viewer.memberId, startDate: start ? new Date(start + "T00:00:00Z") : null, targetDate: target ? new Date(target + "T00:00:00Z") : null } });
     await audit(db, viewer, "milestone.create");
     revalidatePath("/planning");
@@ -238,7 +258,7 @@ export async function createMilestoneAction(fd: FormData): Promise<ActionResult>
 
 export async function manualWaitingAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await requestManualReview(db, viewer, {
       workItemId: str(fd, "workItemId") || undefined,
       planningItemId: str(fd, "planningItemId") || undefined,
@@ -254,7 +274,7 @@ export async function manualWaitingAction(fd: FormData): Promise<ActionResult> {
 
 export async function resolveWaitingAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await resolveManualReview(db, viewer, str(fd, "id"), z.enum(["SATISFIED", "CANCELLED"]).parse(str(fd, "outcome")), str(fd, "note"));
     revalidatePath("/attention");
     return { ok: true, message: "Decision recorded" };
@@ -269,7 +289,7 @@ export async function createProjectAction(fd: FormData): Promise<ActionResult> {
     const name = str(fd, "name");
     if (!name) throw new ValidationError("Name the project");
     // Resolved before anything is created, so a share that cannot happen never leaves a half-made project behind.
-    const spaceId = str(fd, "share") ? await commonSpaceIdForSharing(db) : null;
+    const spaceId = str(fd, "share") ? await commonSpaceIdForSharing(db, viewer.workspaceId) : null;
     const p = await db.project.create({ data: { workspaceId: viewer.workspaceId, name, slug: slugify(name), description: str(fd, "description") || null, spaceId } });
     await createColumnsForProject(db, p.id);
     if (str(fd, "reviewers")) await setProjectReviewers(db, viewer.workspaceId, p.id, p.name, str(fd, "reviewers"));
@@ -295,7 +315,7 @@ export async function autoSetupAction(fd: FormData): Promise<ActionResult> {
 export async function setProjectReviewersAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireAdminViewer();
-    const p = await db.project.findFirst({ where: { id: str(fd, "projectId"), workspaceId: viewer.workspaceId } });
+    const p = await db.project.findFirst({ where: { id: str(fd, "projectId"), ...projectWhere(viewer) } });
     if (!p) throw new ValidationError("Unknown project");
     const { reviewers } = await setProjectReviewers(db, viewer.workspaceId, p.id, p.name, str(fd, "reviewers"));
     await audit(db, viewer, "project.reviewers", { type: "Project", id: p.id }, { reviewers });
@@ -309,13 +329,13 @@ export async function setProjectReposAction(fd: FormData): Promise<ActionResult>
   return run(async () => {
     const { viewer } = await requireAdminViewer();
     const projectId = str(fd, "projectId");
-    const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
+    const p = await db.project.findFirst({ where: { id: projectId, ...projectWhere(viewer) } });
     if (!p) throw new ValidationError("Unknown project");
-    await assertProjectWritable(db, p.id);
+    await assertProjectWritable(db, viewer, p.id);
     const ids = strs(fd, "repo");
     const repos = await db.repository.findMany({ where: { id: { in: ids }, workspaceId: viewer.workspaceId } });
     if (repos.length !== ids.length) throw new ValidationError("Unknown repository");
-    await assertSameAudience(db, p.spaceId, ids);
+    await assertSameAudience(db, viewer.workspaceId, p.spaceId, ids);
     await db.$transaction([db.projectRepository.deleteMany({ where: { projectId } }), db.projectRepository.createMany({ data: ids.map((repositoryId) => ({ projectId, repositoryId })) })]);
     await audit(db, viewer, "project.repos", { type: "Project", id: projectId }, { repositoryIds: ids });
     revalidatePath("/admin/projects");
@@ -327,9 +347,9 @@ export async function setProjectMembersAction(fd: FormData): Promise<ActionResul
   return run(async () => {
     const { viewer } = await requireAdminViewer();
     const projectId = str(fd, "projectId");
-    const p = await db.project.findFirst({ where: { id: projectId, workspaceId: viewer.workspaceId } });
+    const p = await db.project.findFirst({ where: { id: projectId, ...projectWhere(viewer) } });
     if (!p) throw new ValidationError("Unknown project");
-    await assertProjectWritable(db, p.id);
+    await assertProjectWritable(db, viewer, p.id);
     const ids = strs(fd, "member");
     const members = await db.member.findMany({ where: { id: { in: ids }, workspaceId: viewer.workspaceId, status: "ACTIVE" } });
     if (members.length !== ids.length) throw new ValidationError("Unknown member");
@@ -352,9 +372,9 @@ export async function saveRuleAction(fd: FormData): Promise<ActionResult> {
     const projectId = scope === "PROJECT" ? str(fd, "projectId") : null;
     const ownerLogin = scope === "OWNER" ? str(fd, "ownerLogin") : null;
     if (scope === "REPOSITORY" && !(await db.repository.findFirst({ where: { id: repositoryId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a repository");
-    if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a project");
+    if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, ...projectWhere(viewer) } }))) throw new ValidationError("Choose a project");
     if (scope === "OWNER" && !ownerLogin) throw new ValidationError("Enter the GitHub owner");
-    if (scope === "PROJECT") await assertProjectWritable(db, projectId);
+    if (scope === "PROJECT") await assertProjectWritable(db, viewer, projectId);
     const rule = await db.reviewRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, labels: csv(str(fd, "labels")), reviewers, semantics: str(fd, "semantics") === "ALL" ? "ALL" : "ANY", reason } });
     await audit(db, viewer, "rule.create", { type: "ReviewRule", id: rule.id });
     revalidatePath("/admin/rules");
@@ -380,7 +400,7 @@ export async function saveWaitingRuleAction(fd: FormData): Promise<ActionResult>
     const projectId = scope === "PROJECT" ? str(fd, "projectId") : null;
     const ownerLogin = scope === "OWNER" ? str(fd, "ownerLogin").replace(/^@/, "") : null;
     if (scope === "REPOSITORY" && !(await db.repository.findFirst({ where: { id: repositoryId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a repository");
-    if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, workspaceId: viewer.workspaceId } }))) throw new ValidationError("Choose a project");
+    if (scope === "PROJECT" && !(await db.project.findFirst({ where: { id: projectId!, ...projectWhere(viewer) } }))) throw new ValidationError("Choose a project");
     if (scope === "OWNER" && !ownerLogin) throw new ValidationError("Enter the GitHub owner");
     const t = str(fd, "itemType");
     const rule = await db.waitingRule.create({ data: { workspaceId: viewer.workspaceId, scope, repositoryId, projectId, ownerLogin, itemType: t === "ISSUE" || t === "ANY" ? t : "PULL_REQUEST", labels: csv(str(fd, "labels")), authors: csv(str(fd, "authors")).map((a) => a.replace(/^@/, "")), includeDrafts: str(fd, "includeDrafts") === "on", waitingOn, reason, stage: STAGE_KEYS.includes(str(fd, "stage")) ? str(fd, "stage") : "" } });
@@ -397,7 +417,7 @@ export async function toggleWaitingRuleAction(fd: FormData): Promise<ActionResul
     const { viewer } = await requireAdminViewer();
     const r = await db.waitingRule.findFirst({ where: { id: str(fd, "id"), workspaceId: viewer.workspaceId } });
     if (!r) throw new ValidationError("Unknown rule");
-    await db.waitingRule.update({ where: { id: r.id }, data: { enabled: !r.enabled } });
+    await db.waitingRule.update({ where: { id: r.id, workspaceId: viewer.workspaceId }, data: { enabled: !r.enabled } });
     revalidatePath("/admin/rules");
     revalidatePath("/attention");
     revalidatePath("/");
@@ -410,7 +430,7 @@ export async function deleteWaitingRuleAction(fd: FormData): Promise<ActionResul
     const { viewer } = await requireAdminViewer();
     const r = await db.waitingRule.findFirst({ where: { id: str(fd, "id"), workspaceId: viewer.workspaceId } });
     if (!r) throw new ValidationError("Unknown rule");
-    await db.waitingRule.delete({ where: { id: r.id } });
+    await db.waitingRule.delete({ where: { id: r.id, workspaceId: viewer.workspaceId } });
     await audit(db, viewer, "waitingRule.delete", { type: "WaitingRule", id: r.id });
     revalidatePath("/admin/rules");
     revalidatePath("/attention");
@@ -453,7 +473,10 @@ export async function mapForkAction(fd: FormData): Promise<ActionResult> {
 export async function watchlistAction(input: { text: string }): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireAdminViewer();
-    const port = await portForDiscovery(db, { id: viewer.githubId.toString(), login: viewer.login });
+    // Hosted: repositories read through this workspace's GitHub connection are chosen on Connect repositories. Tracking by address would
+    // create repositories nothing can read (no installation), which would sit there silently stale.
+    if (isHosted()) throw new ValidationError("Adding by address is not available for this workspace. Choose repositories on Connect repositories.");
+    const port = await portForDiscovery(db, { id: (viewer.githubId ?? 0n).toString(), login: viewer.login }, { workspaceId: viewer.workspaceId });
     const results = await applyWatchlist(db, viewer, port, String(input.text ?? ""));
     revalidatePath("/forks");
     revalidatePath("/repositories");
@@ -464,7 +487,7 @@ export async function watchlistAction(input: { text: string }): Promise<ActionRe
 
 export async function refreshForkAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const m = await db.forkMapping.findFirst({ where: { id: str(fd, "mappingId") } });
     if (!m) throw new NotFoundError();
     await requireRepo(db, viewer, m.forkRepoId);
@@ -476,7 +499,7 @@ export async function refreshForkAction(fd: FormData): Promise<ActionResult> {
 
 export async function triageAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const row = await db.upstreamIssueTriage.findFirst({ where: { id: str(fd, "id") }, include: { mapping: true } });
     if (!row) throw new NotFoundError();
     await requireRepo(db, viewer, row.mapping.forkRepoId, "manageWork");
@@ -494,7 +517,7 @@ const TRIAGE = ["UNTRIAGED", "WATCHING", "RELEVANT", "ADDRESSED", "IGNORED"] as 
 /** Sets the status (and optionally the note) of many upstream issues at once. Every mapping touched must be one the person may manage. */
 export async function triageManyAction(input: { ids: string[]; status: (typeof TRIAGE)[number]; note?: string | null }): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const status = z.enum(TRIAGE).parse(input.status);
     const ids = [...new Set((input.ids ?? []).map(String))].slice(0, 500);
     if (ids.length === 0) throw new ValidationError("Pick at least one issue");
@@ -515,7 +538,7 @@ export async function triageManyAction(input: { ids: string[]; status: (typeof T
 /** Acknowledges many merged upstream pull requests at once: a decision by a person, not proof. */
 export async function ackManyAction(input: { ids: string[] }): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const ids = [...new Set((input.ids ?? []).map(String))].slice(0, 500);
     if (ids.length === 0) throw new ValidationError("Pick at least one pull request");
     const rows = await db.upstreamPrState.findMany({ where: { id: { in: ids } }, include: { mapping: true } });
@@ -533,7 +556,7 @@ export async function ackManyAction(input: { ids: string[] }): Promise<ActionRes
 
 export async function ackEvidenceAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const row = await db.upstreamPrState.findFirst({ where: { id: str(fd, "id") }, include: { mapping: true } });
     if (!row) throw new NotFoundError();
     await requireRepo(db, viewer, row.mapping.forkRepoId, "manageWork");
@@ -547,7 +570,7 @@ export async function ackEvidenceAction(fd: FormData): Promise<ActionResult> {
 
 export async function syncForkBranchAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const r = await work.syncForkBranch({ db, v: viewer }, str(fd, "mappingId"), { forkTip: str(fd, "forkTip"), upstreamTip: str(fd, "upstreamTip") });
     revalidatePath("/forks");
     return { ok: r.result !== "conflict", ...(r.result === "conflict" ? { error: r.message } : { message: `${r.message || "Fork updated"} Only the fork on GitHub changed; no local worktree was touched.` }) } as ActionResult;
@@ -558,7 +581,7 @@ export async function syncForkBranchAction(fd: FormData): Promise<ActionResult> 
 
 export async function mapRootAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await mapLocalRoot(db, viewer, str(fd, "repositoryId"), str(fd, "path"));
     await scanWorktrees(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/branches");
@@ -568,7 +591,7 @@ export async function mapRootAction(fd: FormData): Promise<ActionResult> {
 
 export async function scanRootAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const snap = await scanWorktrees(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/branches");
     return { ok: true, message: `Scanned ${snap.worktrees.length} worktree(s)` };
@@ -577,7 +600,7 @@ export async function scanRootAction(fd: FormData): Promise<ActionResult> {
 
 export async function unmapRootAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await unmapLocalRoot(db, viewer, str(fd, "repositoryId"));
     revalidatePath("/branches");
     return { ok: true, message: "Folder forgotten" };
@@ -607,19 +630,19 @@ export async function setTimezoneAction(fd: FormData): Promise<ActionResult> {
  */
 export async function setRepoWatchAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
+    const { viewer } = await requireWriter();
     const enabled = fd.get("enabled") === "on" || fd.get("enabled") === "true";
     const seconds = parseOptional(fd.get("seconds"), parseWatchSeconds);
     const maxRepos = parseOptional(fd.get("max"), parseWatchMaxRepos);
-    const cur = await readWatchConfig(db);
+    const cur = await readWatchConfig(db, viewer.workspaceId);
     await saveWatchSettings(db, {
       enabled: enabled !== cur.enabled ? enabled : undefined,
       seconds: seconds !== cur.stored.seconds ? seconds : undefined,
       maxRepos: maxRepos !== cur.stored.maxRepos ? maxRepos : undefined,
-    });
+    }, viewer.workspaceId);
     revalidatePath("/settings");
     revalidatePath("/repositories");
-    const now = await readWatchConfig(db);
+    const now = await readWatchConfig(db, viewer.workspaceId);
     return { ok: true, message: now.enabled ? `Checking up to ${now.maxRepos} repositories every ${now.seconds} seconds while Mergeport is open` : "Automatic checks are off. Repositories still refresh every 15 minutes." };
   });
 }
@@ -648,8 +671,8 @@ export async function deleteFilterAction(fd: FormData): Promise<ActionResult> {
 
 export async function markNotificationsReadAction(): Promise<ActionResult> {
   return run(async () => {
-    const { user } = await requireViewer();
-    await db.notification.updateMany({ where: { userId: user.id, readAt: null }, data: { readAt: new Date() } });
+    const { user, viewer } = await requireViewer();
+    await db.notification.updateMany({ where: { workspaceId: viewer.workspaceId, userId: user.id, readAt: null }, data: { readAt: new Date() } });
     revalidatePath("/activity");
     return { ok: true };
   });

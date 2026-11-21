@@ -11,7 +11,6 @@ import type { Vault } from "@/lib/hub/session-vault";
  */
 
 export const DEFAULT_AI_BASE_URL = "https://ai.kewaii.com/v1";
-const ID = "ai";
 // An older form posted the dropdown's stand-in for "nothing chosen" as the model name; read it as nothing chosen.
 const cleanModel = (m: string | null | undefined) => (m && m !== "__empty__" ? m : null);
 const LIST_TIMEOUT_MS = 30_000;
@@ -36,19 +35,19 @@ export function normalizeBaseUrl(raw: string): string {
   return (u.origin + u.pathname).replace(/\/+$/, "");
 }
 
-export async function getAiView(db: Db): Promise<AiView> {
-  const row = await db.aiSettings.findUnique({ where: { id: ID } });
+export async function getAiView(db: Db, workspaceId: string): Promise<AiView> {
+  const row = await db.aiSettings.findUnique({ where: { workspaceId } });
   return { baseUrl: row?.baseUrl ?? DEFAULT_AI_BASE_URL, hasKey: !!row?.cipher, model: cleanModel(row?.model), saved: !!row, autopilot: row?.autopilot === "suggest" || row?.autopilot === "create" ? row.autopilot : "off", lastRunAt: row?.lastRunAt ?? null, lastSummary: row?.lastSummary ?? null };
 }
 
 /** Whether the AI shortcuts should show: an endpoint is saved, and this is not the demo (which sends nothing out). */
-export async function aiEnabled(db: Db): Promise<boolean> {
+export async function aiEnabled(db: Db, workspaceId: string): Promise<boolean> {
   if (isDemo()) return false;
-  return !!(await db.aiSettings.findUnique({ where: { id: ID }, select: { id: true } }));
+  return !!(await db.aiSettings.findUnique({ where: { workspaceId }, select: { id: true } }));
 }
 
-export async function loadAiConfig(db: Db, vault: Vault): Promise<AiConfig | null> {
-  const row = await db.aiSettings.findUnique({ where: { id: ID } });
+export async function loadAiConfig(db: Db, workspaceId: string, vault: Vault): Promise<AiConfig | null> {
+  const row = await db.aiSettings.findUnique({ where: { workspaceId } });
   if (!row) return null;
   let apiKey: string | null = null;
   if (row.cipher) {
@@ -62,7 +61,7 @@ export async function loadAiConfig(db: Db, vault: Vault): Promise<AiConfig | nul
 }
 
 /** An empty `apiKey` keeps the saved key; `clearKey` removes it. */
-export async function saveAiSettings(db: Db, vault: Vault, input: { baseUrl: string; apiKey?: string; clearKey?: boolean; model?: string; autopilot?: string }): Promise<void> {
+export async function saveAiSettings(db: Db, workspaceId: string, vault: Vault, input: { baseUrl: string; apiKey?: string; clearKey?: boolean; model?: string; autopilot?: string }): Promise<void> {
   const baseUrl = normalizeBaseUrl(input.baseUrl || DEFAULT_AI_BASE_URL);
   const model = cleanModel(input.model?.trim());
   if (model && model.length > 200) throw new ValidationError("The model name is too long");
@@ -70,15 +69,15 @@ export async function saveAiSettings(db: Db, vault: Vault, input: { baseUrl: str
   const autopilot = input.autopilot === "off" || input.autopilot === "suggest" || input.autopilot === "create" ? input.autopilot : undefined;
   const cipher = input.clearKey ? null : key ? vault.encrypt(key) : undefined;
   await db.aiSettings.upsert({
-    where: { id: ID },
-    create: { id: ID, baseUrl, model, cipher: cipher ?? null, ...(autopilot ? { autopilot } : {}) },
+    where: { workspaceId },
+    create: { workspaceId, baseUrl, model, cipher: cipher ?? null, ...(autopilot ? { autopilot } : {}) },
     update: { baseUrl, model, ...(cipher !== undefined ? { cipher } : {}), ...(autopilot ? { autopilot } : {}) },
   });
 }
 
 /** Remembers which model answered, so automatic mode keeps using it instead of making the server swap. */
-export async function rememberModel(db: Db, model: string): Promise<void> {
-  await db.aiSettings.updateMany({ where: { id: ID, NOT: { lastModel: model } }, data: { lastModel: model } });
+export async function rememberModel(db: Db, workspaceId: string, model: string): Promise<void> {
+  await db.aiSettings.updateMany({ where: { workspaceId, NOT: { lastModel: model } }, data: { lastModel: model } });
 }
 
 const headers = (cfg: AiConfig): Record<string, string> => ({ "content-type": "application/json", ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}) });

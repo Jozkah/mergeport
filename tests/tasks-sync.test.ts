@@ -29,7 +29,7 @@ describe("tasks across computers", () => {
     const joined = await alice.team.join(plan.fullName, { confirmed: true });
     await alice.engine.syncSpace(joined);
 
-    const viewer = { userId: olive.profile.user.id, memberId: olive.profile.member.id, workspaceId: olive.profile.workspace.id, login: "olive", githubId: 1n, timezone: "UTC", isAdmin: true };
+    const viewer = { userId: olive.profile.user.id, memberId: olive.profile.member.id, workspaceId: olive.profile.workspace.id, login: "olive", githubId: 1n, githubLogin: "olive", timezone: "UTC", role: "ADMIN" as const, isAdmin: true };
     const task = await createTask(olive.db, viewer, { projectId: seed.project.id, title: "Rotate the keys", assigneeLogin: "alice", labels: "security", priority: 3 });
     await addComment(olive.db, viewer, task.id, "Please do this before friday");
     await updateTask(olive.db, viewer, task.id, { columnKey: "in-progress" });
@@ -55,7 +55,7 @@ describe("tasks across computers", () => {
     await olive.engine.syncSpace(common);
     const joined = await alice.team.join(plan.fullName, { confirmed: true });
     await alice.engine.syncSpace(joined);
-    const viewer = { userId: olive.profile.user.id, memberId: olive.profile.member.id, workspaceId: olive.profile.workspace.id, login: "olive", githubId: 1n, timezone: "UTC", isAdmin: true };
+    const viewer = { userId: olive.profile.user.id, memberId: olive.profile.member.id, workspaceId: olive.profile.workspace.id, login: "olive", githubId: 1n, githubLogin: "olive", timezone: "UTC", role: "ADMIN" as const, isAdmin: true };
     const task = await createTask(olive.db, viewer, { projectId: seed.project.id, title: "Ship" });
     const [first] = await addCheckItems(olive.db, viewer, task.id, "one\ntwo");
     await setCheckItemDone(olive.db, viewer, first.id, true);

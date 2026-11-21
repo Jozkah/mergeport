@@ -64,3 +64,32 @@ Purposeful, short, interruptible, always tied to a state change. The full matrix
 - Where it moves: sub-navigation collapse, mobile drawer, dialogs, tooltips, the sliding segmented pill, board cards (glide, enter, leave, one-off ring), toast stack, form feedback (check draw, one shake), sync pill (label cross-fade, one ring when a state needs a person), changed numbers and bars, theme switch.
 - Not animated, on purpose: table rows, typing, filters and search results, polling refreshes, unchanged counts, anything on first render or navigation.
 - Reduced motion redefines the tokens (distance 0, scale 1, blur 0, short durations), so every keyframe becomes a short fade; the board glide becomes a one-off outline. Information never depends on motion: state is always text + icon + colour.
+
+## Shared components and form rules (hosted UI review)
+
+One implementation each; do not hand-roll these in a page.
+
+- **`SubmitButton`** (`forms/SubmitButton.tsx`): the button of every plain `<form action>`. `aria-disabled` and `aria-busy` while pending (it keeps keyboard focus), spinner, labels stacked in one grid cell (no width jump), `pendingLabel`. A POST to a route handler marks itself busy on submit; `RedirectLink` does the same for provider links ("Redirecting…").
+- **`ActionForm`**: result lifecycle (message clears on input or submit, a success line clears after ~4 s, an error stays until the next edit); `onDone` returning `true` (or `keepBusyOnDone`) holds the button pending until navigation and shows "Redirecting…"; `submitDisabled`, `requireDirty` (settings: button off until a field changed), `hideSubmit` (a Select with `autoSubmit` sends it), `layout="inline"` for a field plus button on one row; the error line reserves its height (not in an inline row); `closeOnSuccess` also raises a toast.
+- **Buttons**: `.btn-lg` is the prominent form button (40 px, 44 px on touch). Do not write `!h-10` or `[&>div:last-child]:!mt-0`.
+- **`Select`**: restores its default on `form.reset()`, `onChange`, `autoSubmit` (submits the closest form when a different option is chosen), `required` (an empty choice blocks the form). A role is saved by choosing it; there is no separate Save.
+- **Names and addresses**: `.wrap-any` (`overflow-wrap:anywhere`) for user-supplied text; `<bdi>` around names and emails; `Host` shows a peer address without its scheme, truncated with the full origin in `title`, and `showScheme` wherever trust matters (consent shows the full origin in mono).
+- **`RoleChip` / `ScopeChip`**: roles and scopes are neutral (icon, no status colour). Status colours are reserved for real states, and every state pill has an icon (`SimplePill` defaults one per tone).
+- **`AuthShell`, `ErrorScreen`, `OrDivider`**: the one frame for sign-in, invitation, onboarding and consent (logo, one panel, one h1, 460 px). A dead end always offers its next step (home or sign in).
+- **`ConfirmSheet`**: every action that removes, revokes or hands over something. It names the consequence, has an explicit Cancel next to the danger button, and a toast confirms.
+- **`Disclosure`**: the one wrapper for `<details>`: 40 px row, chevron turns via `group-open`, focus ring.
+- **Hosted consent**: one form with Approve and Deny, same size, one pending state; the full origin with scheme sits under the heading, a non-https origin (loopback excepted) adds a warning banner; the 30-day expiry is a normal-contrast list item.
+- **Hosted wording**: nothing says "this computer", "gh" or "GitHub CLI" in a hosted workspace (`tests/hosted-access-ui.test.ts` renders pages and components with the hosted flag). Desktop-only routes show "This page is for the desktop app". GitHub not being connected is a dismissible warning banner with no development-phase wording.
+- **Navigation**: sidebar links use `prefetch={false}` (pages are `force-dynamic`), and member or account actions revalidate the pages they change, not the root layout.
+
+## Second review round (rules)
+
+- **One busy label**: every button that can be busy uses `PendingLabel` (`ui/PendingLabel.tsx`): all labels share one grid cell and the spinner sits inside the busy label's cell, so a busy button never grows. `SubmitButton`, `ActionForm`, `RedirectLink`, the consent buttons and the repository Refresh all use it. A busy button is `aria-disabled` (not `disabled`): it keeps keyboard focus and the click is swallowed. `disabled` is only for "cannot be sent yet", and then `submitDisabledReason` says why (`aria-describedby`). A held "Redirecting…" lets go after 10 s.
+- **Results**: an `ActionForm` resets BEFORE it sets its result (a reset clears the message). An inline row (`layout="inline"`) has no reserved status line: its success is a toast, its error stays in the row. A rejected autosave (`hideSubmit`) resets the form so the Select shows what is stored. An error with `field` marks that field invalid, describes it with the message and focuses it.
+- **Colour**: red (`btn-danger`) is only the confirming submit inside a `ConfirmSheet`. A trigger on a row or page is `btn` or `btn-quiet` with `text-blocked`. `Banner tone="info"` is the neutral `.banner-info`; blue is reserved for "needs my review".
+- **Save model**: a single-choice control saves by being chosen (`Select autoSubmit`, `AutoCheckbox`); a form with several fields has a Save button that stays off until something changed (`requireDirty`). A choice that changes what a person can do (admin role, showing a project to everyone) asks in a `ConfirmSheet` first. Button order in a sheet: primary rightmost from `sm` up, primary on top on a phone.
+- **Select**: a stored value that matches no option shows "Unavailable" (muted), never the first option. Width utilities go on the wrapper; the trigger fills it.
+- **Dates**: server and browser render the same text. `formatDateOnly` (en-US, UTC calendar day) for date-only values and expiries, `formatInstant(…, viewerTimezone)` for instants; both with `tnum`.
+- **Sub-headings** inside a panel body or form use `.subhead`; checkbox and radio rows use `.check-row` (40 px).
+- **Keyboard and touch**: a skip link ("Skip to content") is the first focusable element of the app layout; `scroll-padding-top` clears the sticky bar; controls set `touch-action: manipulation`; hit areas are 40 px (halos on `.btn`, `.select`, `.sync-pill`).
+- **Text fields**: free-text fields that are not sign-in set `autoComplete="off"` and `spellCheck={false}` (`plainText` in `lib/inputs.ts`); only instruction-style placeholders end in "…".

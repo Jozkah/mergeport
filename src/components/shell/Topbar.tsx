@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 import { Bell, ChevronRight, LayoutDashboard, LogOut } from "@/components/ui/icons";
 import { ThemeToggle } from "@/components/shell/ThemeControls";
 import { WorkspaceSwitcher } from "@/components/shell/WorkspaceSwitcher";
+import { AccountWorkspaceSwitcher } from "@/components/shell/AccountWorkspaceSwitcher";
+import { SubmitButton } from "@/components/forms/SubmitButton";
 import { Tip } from "@/components/ui/Tooltip";
 import { Metric } from "@/components/ui/Metric";
 import { SyncBadge, type SyncStateName } from "@/components/sync/SyncBadge";
@@ -36,12 +38,23 @@ const LABELS: Record<string, string> = {
   settings: "Settings",
   help: "Help",
   search: "Search",
+  members: "Members",
+  linked: "Linked instances",
 };
 
-export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePicker, workspaces }: { aiQuick?: React.ReactNode; workspaces?: React.ComponentProps<typeof WorkspaceSwitcher> | null; scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
-  const path = usePathname();
+/** Breadcrumb trail for a path. Only segments that are pages get a link; ids and container segments are never dead links. */
+export function crumbsFor(path: string): { href: string; label: string }[] {
   const parts = path.split("/").filter(Boolean);
-  const crumbs = parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
+  // /linked/<link>/projects/<project>: the list is the only page above the project.
+  if (parts[0] === "linked" && parts.length > 1) {
+    return [{ href: "/linked", label: LABELS.linked }, ...(parts.length > 3 ? [{ href: path, label: "Project" }] : [])];
+  }
+  return parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
+}
+
+export function Topbar({ hosted, aiQuick, unread, menu, syncNote, theme, sync, scopePicker, workspaces, accountSwitcher }: { hosted?: boolean; aiQuick?: React.ReactNode; accountSwitcher?: { workspaces: { id: string; name: string }[]; active: string } | null; workspaces?: React.ComponentProps<typeof WorkspaceSwitcher> | null; scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
+  const path = usePathname();
+  const crumbs = crumbsFor(path);
   return (
     <>
     <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-line bg-canvas/90 px-3 backdrop-blur-sm sm:gap-3 sm:px-4 lg:px-6">
@@ -68,9 +81,10 @@ export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePick
         </ol>
       </nav>
       {workspaces ? <div className="hidden sm:block"><WorkspaceSwitcher {...workspaces} /></div> : null}
-      {scopePicker}
-      {syncNote && <span className="hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
-      {sync && <SyncBadge {...sync} href="/sync" />}
+      {accountSwitcher ? <div className="hidden sm:block"><AccountWorkspaceSwitcher {...accountSwitcher} /></div> : null}
+      {scopePicker ? <div className="hidden sm:block">{scopePicker}</div> : null}
+      {syncNote && <span className="tnum hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
+      {sync && <SyncBadge {...sync} href="/sync" hosted={hosted} />}
       {aiQuick}
       <ThemeToggle initial={theme} />
       <Tip label={unread ? `Notifications (${unread} unread)` : "Notifications"}>
@@ -81,12 +95,18 @@ export function Topbar({ aiQuick, unread, menu, syncNote, theme, sync, scopePick
         </Link>
         )}</RingOnChange>
       </Tip>
-      <form action="/api/local/signout" method="post">
-        <Tip label="Sign out of this browser session"><button className="btn btn-quiet btn-icon" aria-label="Sign out"><LogOut size={16} aria-hidden /></button></Tip>
+      <form action="/auth/signout" method="post">
+        <Tip label="Sign out of this browser session"><SubmitButton iconOnly className="btn btn-quiet btn-icon" aria-label="Sign out"><LogOut size={16} aria-hidden /></SubmitButton></Tip>
       </form>
     </header>
-    {/* Narrow screens have no room for a third control in the bar: the switcher gets its own row under it. */}
-    {workspaces ? <div className="border-b border-line px-4 py-2 sm:hidden"><WorkspaceSwitcher {...workspaces} className="w-full" /></div> : null}
+    {/* Narrow screens have no room for more controls in the bar: scope and workspace get their own row under it. */}
+    {scopePicker || workspaces || accountSwitcher ? (
+      <div className="flex items-center gap-2 border-b border-line px-4 py-2 sm:hidden">
+        {scopePicker ? <div className="min-w-0 flex-1">{scopePicker}</div> : null}
+        {workspaces ? <div className="min-w-0 flex-1"><WorkspaceSwitcher {...workspaces} className="w-full" /></div> : null}
+        {accountSwitcher ? <div className="min-w-0 flex-1"><AccountWorkspaceSwitcher {...accountSwitcher} className="w-full" /></div> : null}
+      </div>
+    ) : null}
     </>
   );
 }

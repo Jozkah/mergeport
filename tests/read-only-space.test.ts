@@ -17,7 +17,7 @@ const MSG = /shared read-only with you/;
 async function share(canWrite: boolean, backend: "GITHUB" | "HUB" = "GITHUB") {
   const { db, ids } = S;
   const space = await db.space.create({
-    data: { remoteId: `sp-${canWrite}-${backend}`, teamRemoteId: "t1", kind: "COMMON", name: "Team", repoOwner: "o", repoName: backend === "HUB" ? "" : "r", backend, hubSpaceId: backend === "HUB" ? "hub-1" : "", canWrite, access: "OK" },
+    data: { workspaceId: S.a.workspaceId, remoteId: `sp-${canWrite}-${backend}`, teamRemoteId: "t1", kind: "COMMON", name: "Team", repoOwner: "o", repoName: backend === "HUB" ? "" : "r", backend, hubSpaceId: backend === "HUB" ? "hub-1" : "", canWrite, access: "OK" },
   });
   await db.project.update({ where: { id: ids.projects.atlas.id }, data: { spaceId: space.id } });
   return space;

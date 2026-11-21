@@ -36,7 +36,7 @@ export async function deleteMapping(db: Db, v: Viewer, id: string) {
   if (!v.isAdmin) throw new ValidationError("Only an administrator can change label mappings");
   const m = await db.labelMap.findFirst({ where: { id, workspaceId: v.workspaceId } });
   if (!m) throw new NotFoundError();
-  await db.labelMap.delete({ where: { id } });
+  await db.labelMap.delete({ where: { id, workspaceId: v.workspaceId } });
 }
 
 /** The taxonomy in use over the items this viewer can see, plus a preview of how the mappings change how items read. Counts only. */

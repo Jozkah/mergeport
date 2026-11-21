@@ -7,7 +7,7 @@ import { readActive, writeActive } from "@/lib/local/registry";
 import { profileDbPath, ensureLocalProfile, AccountMismatchError } from "@/lib/local/profile";
 import { resolveStartProfile, resolveSwitchTarget } from "@/lib/local/start-profile";
 import { waitForReady } from "@/lib/local/child-process";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { resetEnvCache } from "@/lib/env";
 
 const sess = vi.hoisted(() => ({ session: { user: { githubId: 7n } } as { user: { githubId: bigint } } | null }));
@@ -145,7 +145,7 @@ describe("resolveStartProfile", () => {
 describe("hub profile identity", () => {
   it("a hub db opened by another gh account is a mismatch", async () => {
     const f = profileDbPath(home, "github.com", 7n, HUB);
-    const db = createPrisma(f);
+    const db = createTestPrisma(f);
     await ensureLocalProfile(db, { id: 7n, login: "alice", name: null, avatarUrl: null, host: "github.com" });
     await expect(ensureLocalProfile(db, { id: 8n, login: "bram", name: null, avatarUrl: null, host: "github.com" })).rejects.toBeInstanceOf(AccountMismatchError);
     await db.$disconnect();

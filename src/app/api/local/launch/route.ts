@@ -1,3 +1,4 @@
+import { refuseWhenHosted } from "@/lib/public-url";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { redirectTo } from "@/lib/http";
@@ -12,6 +13,8 @@ import { startLocalSession } from "@/lib/local/session-routes";
 const g = globalThis as typeof globalThis & { __mpLaunchUsed?: boolean; __mpLaunchIssuedAt?: number };
 
 export async function GET(req: Request) {
+  const hostedRefusal = refuseWhenHosted();
+  if (hostedRefusal) return hostedRefusal;
   const given = new URL(req.url).searchParams.get("token") ?? "";
   g.__mpLaunchIssuedAt ??= processStartedAt();
   // Either the link the launcher printed at startup, or a fresh one the desktop shortcut asked the running app for (/api/local/link).

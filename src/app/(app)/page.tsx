@@ -3,13 +3,15 @@ import { AiTool } from "@/components/ai/AiTool";
 import { aiEnabled } from "@/lib/services/ai";
 import { readScope, scopeKey } from "@/lib/scope";
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { isHosted } from "@/lib/public-url";
 import { requireViewer } from "@/lib/authz-page";
 import { db } from "@/lib/db";
 import { attentionFor } from "@/lib/services/request-cache";
 import { openedPerDay, overview, recentActivity, visibleForkMappings } from "@/lib/services/queries";
 import { milestoneProgress } from "@/lib/services/planning";
 import { projectWhere, repoWhere } from "@/lib/authz/viewer";
-import { formatDateOnly, formatDuration, formatInstant, isoDate } from "@/lib/format";
+import { formatDateOnly, formatDuration, formatInstant } from "@/lib/format";
 import { Avatar, EmptyState, Mono, Panel, StatusPill, Time } from "@/components/ui/primitives";
 import { Activity, ArrowRight, BellRing, GitFork, Hourglass, Milestone, Newspaper, CircleAlert } from "@/components/ui/icons";
 import { itemHref } from "@/components/work/WorkTable";
@@ -56,11 +58,11 @@ export default async function Overview() {
         <p className="mt-1 text-[13px] text-ink-3">What needs you, and what is waiting on someone else, across the repositories you can see.</p>
       </div>
 
-      <AiShortcuts show={await aiEnabled(db)}>
+      <AiShortcuts show={await aiEnabled(db, viewer.workspaceId)}>
         <AiTool tool="focus" label="What should I do first?" />
       </AiShortcuts>
 
-      <GettingStarted steps={steps} />
+      <GettingStarted steps={steps} dismissed={(await cookies()).get("mp-gs")?.value === "1"} />
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Metric href="/attention?queue=needs-me" title="Needs my review" icon={BellRing} value={o.needsMyReview} note="Pull requests expecting you" tone="needs" />
@@ -102,8 +104,8 @@ export default async function Overview() {
         </div>
 
         <div className="flex min-w-0 flex-col gap-5">
-          <Panel title="Daily digest" icon={Newspaper} id="digest" actions={<Link href="/digest" className="btn">Open</Link>}>
-            {!digest ? <EmptyState icon={Newspaper} title="No digest yet">The first one is made on a morning Mergeport is open.</EmptyState> : (
+          <Panel title="Daily digest" icon={Newspaper} id="digest" actions={<Link href="/digest" className="btn">Open digest</Link>}>
+            {!digest ? <EmptyState icon={Newspaper} title="No digest yet">{isHosted() ? "The first one is made by the daily run." : "The first one is made on a morning Mergeport is open."}</EmptyState> : (
               <Link href={`/digest?day=${digest.day}`} className="block px-4 py-3 text-[13px] transition-colors duration-[var(--duration-feedback)] hover:bg-faint">
                 <p className="flex items-center gap-2 font-medium">
                   {formatDateOnly(new Date(digest.day + "T00:00:00Z"))}
@@ -140,7 +142,6 @@ export default async function Overview() {
           </Panel>
         </div>
       </div>
-      <span className="sr-only">{isoDate(now)}</span>
     </>
   );
 }

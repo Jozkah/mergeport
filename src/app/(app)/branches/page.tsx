@@ -1,3 +1,6 @@
+import { plainText } from "@/lib/inputs";
+import { DesktopOnly } from "@/components/ui/DesktopOnly";
+import { isHosted } from "@/lib/public-url";
 import Link from "next/link";
 import { byOwnerFirst } from "@/lib/domain/ordering";
 import { db } from "@/lib/db";
@@ -16,6 +19,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Branches({ searchParams }: { searchParams: Promise<{ repo?: string; q?: string }> }) {
   const { viewer } = await requireViewer();
+  if (isHosted()) return <DesktopOnly />; // desktop-only page: local worktrees do not exist on a hosted workspace
   const sp = await searchParams;
   const now = new Date();
   const repos = (await db.repository.findMany({ where: repoWhere(viewer), orderBy: { fullName: "asc" }, select: { id: true, fullName: true, owner: { select: { login: true } }, name: true } })).sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
@@ -49,7 +53,7 @@ export default async function Branches({ searchParams }: { searchParams: Promise
       <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
         <nav aria-label="Repositories" className="panel lg:sticky lg:top-3">
           <form method="get" action="/branches" className="px-2 pb-2 pt-1">
-            <input name="q" defaultValue={sp.q ?? ""} className="input !h-8" placeholder="Search repositories" aria-label="Search repositories" />
+            <input name="q" defaultValue={sp.q ?? ""} className="input !h-8" placeholder="Search repositories…" {...plainText} aria-label="Search repositories" />
           </form>
           <ul className="scroll-region !max-h-[calc(100dvh-16rem)] rounded-[9px] border border-edge bg-inset p-1">
             {listed.map((r) => (
@@ -111,7 +115,7 @@ export default async function Branches({ searchParams }: { searchParams: Promise
                       </ul>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <ActionForm action={scanRootAction} submitLabel="Scan again" pendingLabel="Scanning…" submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="repositoryId" value={repo.id} /></ActionForm>
-                        <ActionForm action={unmapRootAction} submitLabel="Forget folder" submitClassName="btn btn-danger" resetOnSuccess={false}><input type="hidden" name="repositoryId" value={repo.id} /></ActionForm>
+                        <ActionForm action={unmapRootAction} submitLabel="Forget folder" submitClassName="btn text-blocked" resetOnSuccess={false}><input type="hidden" name="repositoryId" value={repo.id} /></ActionForm>
                       </div>
                     </div>
                   ) : (

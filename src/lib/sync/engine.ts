@@ -5,6 +5,7 @@ import { GithubError } from "@/lib/github/port";
 import { HubError, isHubRevocationAnswer, type Backend, type EntityEvent, type HubClient } from "@/lib/hub/types";
 import { assertBackendMatch, BackendMismatchError } from "@/lib/local/backend-guard";
 import type { Backend as ProfileBackend } from "@/lib/local/backends";
+import { firstWorkspace } from "@/lib/local/profile";
 import { mapLimit } from "@/lib/util";
 import { APPLY_INVALID, ENTITY_SCHEMA, ENTITY_TYPES, entityDef, entityPath, parseEntityPath, type Ctx, type EntityDef, type Listed } from "./entities";
 import { same, threeWayMerge, type Data } from "./merge";
@@ -78,6 +79,8 @@ function parseEntity(text: string, expect: { type: string; id: string }): Entity
 
 export type EngineDeps = {
   db: Db;
+  /** The workspace this engine syncs for. Omitted: the local profile's one workspace (see firstWorkspace). A hosted worker passes it. */
+  workspaceId?: string;
   store: (space: Space) => CoordinationStore;
   actor: { id: bigint; login: string };
   now?: () => Date;
@@ -109,6 +112,10 @@ export class SyncEngine {
   private get db() {
     return this.d.db;
   }
+  /** The workspace every read and write of this engine is confined to. */
+  async workspaceId(): Promise<string> {
+    return this.d.workspaceId ?? (await firstWorkspace(this.db)).id;
+  }
   private opId() {
     return (this.d.newOpId ?? randomUUID)();
   }
@@ -130,10 +137,10 @@ export class SyncEngine {
   // ---------- context ----------
 
   private async ctx(space: Space): Promise<Ctx> {
-    const ws = await this.db.workspace.findFirstOrThrow();
-    const member = await this.db.member.findFirstOrThrow({ where: { workspaceId: ws.id, status: "ACTIVE" }, orderBy: { createdAt: "asc" } });
-    const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
-    return { workspaceId: ws.id, localMemberId: member.id, space, commonSpaceId: team?.commonSpaceId ?? null };
+    const workspaceId = space.workspaceId;
+    const member = await this.db.member.findFirstOrThrow({ where: { workspaceId, status: "ACTIVE" }, orderBy: { createdAt: "asc" } });
+    const team = await this.db.teamConfig.findUnique({ where: { workspaceId } });
+    return { workspaceId, localMemberId: member.id, space, commonSpaceId: team?.commonSpaceId ?? null };
   }
 
   private readonly permAt = new Map<string, number>();
@@ -149,20 +156,21 @@ export class SyncEngine {
     else await this.db.syncEntity.create({ data: { spaceId, type, entityId: id, path: entityPath(type, id), remoteSha: sha, baseVersion: version, baseData: {}, meta: { newer: true } as Prisma.InputJsonValue, deleted: true } });
   }
 
-  private async localMap(def: EntityDef, commonSpaceId: string | null): Promise<Map<string, Listed>> {
-    return new Map((await def.list(this.db, { commonSpaceId })).map((l) => [l.id, l]));
+  private async localMap(def: EntityDef, ctx: { commonSpaceId: string | null; workspaceId: string }): Promise<Map<string, Listed>> {
+    return new Map((await def.list(this.db, { commonSpaceId: ctx.commonSpaceId, workspaceId: ctx.workspaceId })).map((l) => [l.id, l]));
   }
 
   // ---------- capture local edits into the outbox ----------
 
   /** Diffs the local read model against what each space last agreed on and writes durable outbox operations. */
   async capture(): Promise<number> {
-    const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
+    const workspaceId = await this.workspaceId();
+    const team = await this.db.teamConfig.findUnique({ where: { workspaceId } });
     const commonSpaceId = team?.commonSpaceId ?? null;
-    const spaces = new Map((await this.db.space.findMany({ where: { access: "OK", canWrite: true } })).map((s) => [s.id, s]));
+    const spaces = new Map((await this.db.space.findMany({ where: { workspaceId, access: "OK", canWrite: true } })).map((s) => [s.id, s]));
     let created = 0;
     for (const def of ENTITY_TYPES) {
-      const listed = (await def.list(this.db, { commonSpaceId })).filter((l) => l.spaceId && spaces.has(l.spaceId));
+      const listed = (await def.list(this.db, { commonSpaceId, workspaceId })).filter((l) => l.spaceId && spaces.has(l.spaceId));
       const seen = new Set<string>();
       for (const l of listed) {
         const spaceId = l.spaceId!;
@@ -319,7 +327,7 @@ export class SyncEngine {
 
     const moved = cursor !== start;
     await this.db.space.update({
-      where: { id: space.id },
+      where: { id: space.id, workspaceId: space.workspaceId },
       data: {
         hubCursor: cursor, hubCursorOp: cursorOp, hubEpoch: epoch, lastPolledAt: now, ...(applied || moved ? { lastChangedAt: now, unchangedPolls: 0 } : {}),
         rateLimitedUntil: null,
@@ -345,7 +353,7 @@ export class SyncEngine {
     const detail: RestoreEntry[] = [];
     const unsent = new Set((await this.db.outboxOp.findMany({ where: { spaceId: space.id, status: { in: ["PENDING", "SENT", "CONFLICT"] } }, select: { entityType: true, entityId: true } })).map((o) => `${o.entityType}/${o.entityId}`));
     for (const def of ENTITY_TYPES) {
-      const local = await this.localMap(def, ctx.commonSpaceId);
+      const local = await this.localMap(def, ctx);
       for (const se of await this.db.syncEntity.findMany({ where: { spaceId: space.id, type: def.type } })) {
         const row = local.get(se.entityId);
         if (row?.spaceId && row.spaceId !== space.id) continue;
@@ -370,7 +378,7 @@ export class SyncEngine {
   async resendRestored(restoreId: string): Promise<{ queued: number }> {
     const rec = await this.db.hubRestore.findUniqueOrThrow({ where: { id: restoreId } });
     if (rec.status !== "OPEN") return { queued: 0 };
-    const space = await this.db.space.findUniqueOrThrow({ where: { id: rec.spaceId } });
+    const space = await this.db.space.findUniqueOrThrow({ where: { id: rec.spaceId, workspaceId: await this.workspaceId() } });
     const ctx = await this.ctx(space);
     let queued = 0;
     for (const e of rec.detail as unknown as RestoreEntry[]) {
@@ -380,7 +388,7 @@ export class SyncEngine {
       const se = await this.db.syncEntity.findUnique({ where: key });
       // Anything done to this entity since the restore wins over the old copy.
       if (await this.db.outboxOp.count({ where: { spaceId: space.id, entityType: e.type, entityId: e.entityId, status: { in: ["PENDING", "SENT", "CONFLICT", "QUARANTINED"] } } })) continue;
-      const local = (await this.localMap(def, ctx.commonSpaceId)).get(e.entityId);
+      const local = (await this.localMap(def, ctx)).get(e.entityId);
       const base = (se?.baseData as Data | null) ?? {};
       if (local && !same(local.data, base)) continue;
       // Against the hub's version when the restore was seen: if it has moved since, the push answers stale and the ordinary merge decides.
@@ -405,7 +413,7 @@ export class SyncEngine {
     const failed: { file: EntityFile; seq: bigint; error: string }[] = [];
     const fail = (file: EntityFile, seq: bigint, error: string) => failed.push({ file, seq, error });
     for (const def of ENTITY_TYPES) {
-      const local = await this.localMap(def, ctx.commonSpaceId);
+      const local = await this.localMap(def, ctx);
       const appliedHere: { id: string; data: Data }[] = [];
       for (const { file, seq } of items.filter((i) => i.file.type === def.type)) {
         const name = `${file.type}/${file.id}`;
@@ -497,12 +505,12 @@ export class SyncEngine {
       const man = mSha ? parseManifest(await store.blob(mSha).catch(() => "")) : ({ error: "This repository has no Mergeport manifest" } as const);
       if ("error" in man || man.spaceId !== space.remoteId) {
         // Not (or no longer) the space we joined: a replaced or renamed repository is never silently trusted.
-        await this.db.space.update({ where: { id: space.id }, data: { lastError: "error" in man ? man.error : "This repository is not the space you joined (its identity changed). Nothing was read from it." } });
+        await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: "error" in man ? man.error : "This repository is not the space you joined (its identity changed). Nothing was read from it." } });
         await this.schedule(space, "error");
         return { changed: false, applied: 0 };
       }
       if (man.schema > MANIFEST_SCHEMA) {
-        await this.db.space.update({ where: { id: space.id }, data: { access: "SCHEMA_NEWER", lastError: "This space was written by a newer Mergeport. Update the app; this space is read-only until then." } });
+        await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { access: "SCHEMA_NEWER", lastError: "This space was written by a newer Mergeport. Update the app; this space is read-only until then." } });
         this.emit(space.id, "state");
         return { changed: false, applied: 0 };
       }
@@ -528,7 +536,7 @@ export class SyncEngine {
     let deferred = 0;
     const skipped: string[] = [];
     for (const def of ENTITY_TYPES) {
-      const local = await this.localMap(def, ctx.commonSpaceId);
+      const local = await this.localMap(def, ctx);
       const appliedHere: { id: string; data: Data }[] = [];
       for (const { f, text } of blobs.filter((b) => b.f.type === def.type)) {
         const parsed = parseEntity(text, { type: f.type, id: f.id });
@@ -573,7 +581,7 @@ export class SyncEngine {
     }
 
     await this.refreshRole();
-    await this.db.space.update({ where: { id: space.id }, data: { headSha: head.sha, etag: head.etag, lastPolledAt: now, lastChangedAt: now, unchangedPolls: 0, deferredCount: deferred, lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity file(s): ${skipped[0]}` : null, rateLimitedUntil: null } });
+    await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { headSha: head.sha, etag: head.etag, lastPolledAt: now, lastChangedAt: now, unchangedPolls: 0, deferredCount: deferred, lastError: skipped.length ? `Skipped ${skipped.length} unreadable entity file(s): ${skipped[0]}` : null, rateLimitedUntil: null } });
     await this.schedule({ ...space, headSha: head.sha, etag: head.etag }, "changed");
     if (applied) this.emit(space.id, "pulled");
     return { changed: true, applied };
@@ -669,7 +677,7 @@ export class SyncEngine {
     const c = await this.db.syncConflict.findUniqueOrThrow({ where: { id: conflictId } });
     if (c.status !== "OPEN") return;
     const def = entityDef(c.entityType)!;
-    const space = await this.db.space.findUniqueOrThrow({ where: { id: c.spaceId } });
+    const space = await this.db.space.findUniqueOrThrow({ where: { id: c.spaceId, workspaceId: await this.workspaceId() } });
     const ctx = await this.ctx(space);
     const fields = c.fields as string[];
     const remote = c.remote as Data;
@@ -702,7 +710,7 @@ export class SyncEngine {
   }
 
   private async pushHub(space0: Space): Promise<{ sent: number }> {
-    let space = await this.db.space.findUniqueOrThrow({ where: { id: space0.id } });
+    let space = await this.db.space.findUniqueOrThrow({ where: { id: space0.id, workspaceId: space0.workspaceId } });
     const backend = this.backendOf(space); // throws when no hub client is configured, even for a read-only space
     if (backend.kind !== "hub") throw new Error("Not a hub space");
     const client = backend.client;
@@ -770,7 +778,7 @@ export class SyncEngine {
             await this.blockEntity(space.id, def.type, current.id, String(results.seq), current.version);
             continue;
           }
-          const row = (await this.localMap(def, ctx.commonSpaceId)).get(op.entityId);
+          const row = (await this.localMap(def, ctx)).get(op.entityId);
           if (row?.spaceId && row.spaceId !== space.id) continue;
           try {
             const m = await this.reconcile(ctx, def, current, String(results.seq), row?.data ?? null);
@@ -791,14 +799,14 @@ export class SyncEngine {
       if (!rewritten) break;
     }
     if (touched) {
-      space = await this.db.space.update({ where: { id: space.id }, data: { lastChangedAt: this.now(), lastError: null } });
+      space = await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastChangedAt: this.now(), lastError: null } });
       this.emit(space.id, "pushed");
     }
     return { sent };
   }
 
   private async pushGithub(space0: Space): Promise<{ sent: number }> {
-    let space = await this.db.space.findUniqueOrThrow({ where: { id: space0.id } });
+    let space = await this.db.space.findUniqueOrThrow({ where: { id: space0.id, workspaceId: space0.workspaceId } });
     if (!space.canWrite || space.access !== "OK") return { sent: 0 };
     const store = this.d.store(space);
     let sent = 0;
@@ -829,7 +837,7 @@ export class SyncEngine {
       if (head.sha !== space.headSha) {
         // Somebody else committed since we last read: merge first, then rebuild our commit on the new head.
         await this.pullSpace({ ...space, etag: null });
-        space = await this.db.space.findUniqueOrThrow({ where: { id: space.id } });
+        space = await this.db.space.findUniqueOrThrow({ where: { id: space.id, workspaceId: space.workspaceId } });
         if (space.access !== "OK") return { sent };
         continue;
       }
@@ -863,8 +871,8 @@ export class SyncEngine {
           await this.db.syncEntity.upsert({ where: key, create: { spaceId: space.id, type: op.entityType, entityId: op.entityId, ...row }, update: row });
         }
         await this.db.outboxOp.deleteMany({ where: { id: { in: ops.map((o) => o.id) } } });
-        await this.db.space.update({ where: { id: space.id }, data: { headSha: sha, etag: null, lastChangedAt: this.now(), lastPushedAt: this.now(), lastError: null } });
-        space = await this.db.space.findUniqueOrThrow({ where: { id: space.id } });
+        await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { headSha: sha, etag: null, lastChangedAt: this.now(), lastPushedAt: this.now(), lastError: null } });
+        space = await this.db.space.findUniqueOrThrow({ where: { id: space.id, workspaceId: space.workspaceId } });
         sent += ops.length;
         this.emit(space.id, "pushed");
       } catch (e) {
@@ -887,7 +895,7 @@ export class SyncEngine {
     } catch (e) {
       if (!(e instanceof BackendMismatchError)) throw e;
       // Shown as the space's sync error; the slow schedule keeps the poller from retrying it every tick.
-      await this.db.space.update({ where: { id: space.id }, data: { lastError: e.message, lastPolledAt: this.now(), nextPollAt: new Date(this.now().getTime() + MAX_POLL_MS) } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: e.message, lastPolledAt: this.now(), nextPollAt: new Date(this.now().getTime() + MAX_POLL_MS) } });
       this.emit(space.id, "state");
       return;
     }
@@ -896,7 +904,7 @@ export class SyncEngine {
     try {
       await this.pullSpace(space);
       await this.capture();
-      const fresh = await this.db.space.findUniqueOrThrow({ where: { id: space.id } });
+      const fresh = await this.db.space.findUniqueOrThrow({ where: { id: space.id, workspaceId: space.workspaceId } });
       await this.pushSpace(fresh);
     } finally {
       this.syncing.delete(space.id);
@@ -907,7 +915,7 @@ export class SyncEngine {
   /** Polls every space that is due. Safe to call often. */
   async tick(): Promise<{ polled: number }> {
     const now = this.now();
-    const spaces = await this.db.space.findMany({ where: { OR: [{ nextPollAt: null }, { nextPollAt: { lte: now } }] } });
+    const spaces = await this.db.space.findMany({ where: { workspaceId: await this.workspaceId(), OR: [{ nextPollAt: null }, { nextPollAt: { lte: now } }] } });
     let polled = 0;
     for (const s of spaces) {
       if (s.backend === "HUB" && this.d.hubLive?.()) continue; // the live stream drives hub spaces
@@ -927,12 +935,13 @@ export class SyncEngine {
   }
 
   async refreshNow(spaceId?: string): Promise<void> {
-    const spaces = spaceId ? await this.db.space.findMany({ where: { id: spaceId } }) : await this.db.space.findMany();
+    const workspaceId = await this.workspaceId();
+    const spaces = await this.db.space.findMany({ where: { workspaceId, ...(spaceId ? { id: spaceId } : {}) } });
     for (const s of spaces) await this.syncSpace({ ...s, etag: null, rateLimitedUntil: null });
   }
 
   private async schedule(space: Space, outcome: "changed" | "unchanged" | "error", retryAfterMs?: number): Promise<void> {
-    const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
+    const team = await this.db.teamConfig.findUnique({ where: { workspaceId: space.workspaceId } });
     const base = space.backend === "HUB" ? (this.d.hubLive?.() ? MAX_POLL_MS : 60_000) : Math.max(15, team?.pollSeconds ?? 30) * 1000;
     let interval: number;
     let unchanged = space.unchangedPolls;
@@ -945,7 +954,7 @@ export class SyncEngine {
     } else interval = retryAfterMs ?? Math.min(Math.max(space.pollIntervalMs, base) * 2, MAX_POLL_MS);
     const jittered = Math.round(interval * (0.8 + this.random() * 0.4));
     const now = this.now();
-    await this.db.space.update({ where: { id: space.id }, data: { pollIntervalMs: interval, unchangedPolls: unchanged, lastPolledAt: now, nextPollAt: new Date(now.getTime() + jittered) } });
+    await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { pollIntervalMs: interval, unchangedPolls: unchanged, lastPolledAt: now, nextPollAt: new Date(now.getTime() + jittered) } });
   }
 
   // ---------- access, errors, revocation ----------
@@ -953,44 +962,44 @@ export class SyncEngine {
   private async refreshPermissions(space: Space, store: CoordinationStore): Promise<Space> {
     const info = await store.info();
     if (!info.private) {
-      return this.db.space.update({ where: { id: space.id }, data: { access: "NO_ACCESS", lastError: "This repository is public. Coordination spaces must be private." } });
+      return this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { access: "NO_ACCESS", lastError: "This repository is public. Coordination spaces must be private." } });
     }
     if (!info.permissions.pull) throw new GithubError("forbidden", "No read access", undefined, undefined, 403);
     if (space.repoGithubId !== null && BigInt(info.id) !== space.repoGithubId) {
-      return this.db.space.update({ where: { id: space.id }, data: { access: "NO_ACCESS", canWrite: false, canAdmin: false, lastError: "This repository was deleted and recreated, or replaced. Join it again deliberately if you trust it." } });
+      return this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { access: "NO_ACCESS", canWrite: false, canAdmin: false, lastError: "This repository was deleted and recreated, or replaced. Join it again deliberately if you trust it." } });
     }
     this.permAt.set(space.id, this.now().getTime());
-    return this.db.space.update({ where: { id: space.id }, data: { canWrite: info.permissions.push || info.permissions.admin, canAdmin: info.permissions.admin, repoGithubId: BigInt(info.id), access: space.access === "REVOKED" ? "OK" : space.access } });
+    return this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { canWrite: info.permissions.push || info.permissions.admin, canAdmin: info.permissions.admin, repoGithubId: BigInt(info.id), access: space.access === "REVOKED" ? "OK" : space.access } });
   }
 
   private async handleError(space: Space, e: unknown, phase: "read" | "write"): Promise<void> {
     if (!(e instanceof GithubError)) {
-      await this.db.space.update({ where: { id: space.id }, data: { lastError: e instanceof Error ? e.message : String(e) } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: e instanceof Error ? e.message : String(e) } });
       return;
     }
     const now = this.now();
     if (e.kind === "rate-limited") {
       const until = e.resetAt ?? new Date(now.getTime() + (e.retryAfterSeconds ?? 60) * 1000);
-      await this.db.space.update({ where: { id: space.id }, data: { rateLimitedUntil: until, lastError: "GitHub rate limit reached. Edits stay queued locally.", nextPollAt: until } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { rateLimitedUntil: until, lastError: "GitHub rate limit reached. Edits stay queued locally.", nextPollAt: until } });
     } else if (e.kind === "network") {
       await this.schedule(space, "error");
-      await this.db.space.update({ where: { id: space.id }, data: { lastError: "offline" } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: "offline" } });
     } else if (e.kind === "not-found" || e.kind === "forbidden") {
       if (phase === "write" && e.kind === "forbidden") {
         // Lost write permission but maybe still readable: fall back to read-only and keep the edits for a person to decide on.
-        const s = await this.db.space.update({ where: { id: space.id }, data: { canWrite: false, lastError: "You no longer have write access to this space." } });
+        const s = await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { canWrite: false, lastError: "You no longer have write access to this space." } });
         await this.db.outboxOp.updateMany({ where: { spaceId: space.id, status: { in: ["PENDING", "SENT"] } }, data: { status: "QUARANTINED", error: "Write access was removed" } });
         void s;
       } else await this.revokeSpace(space.id, "Access to this coordination repository was removed");
     } else if (e.kind === "auth") {
-      await this.db.space.update({ where: { id: space.id }, data: { lastError: "Your GitHub sign-in (gh) is no longer valid. Run gh auth login." } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: "Your GitHub sign-in (gh) is no longer valid. Run gh auth login." } });
     } else await this.schedule(space, "error");
     this.emit(space.id, "state");
   }
 
   /** True when the space lost access (revokeSpace ran) since the caller last read it: a pull or push in flight must stop. */
   private async revokedMeanwhile(spaceId: string): Promise<boolean> {
-    const s = await this.db.space.findUnique({ where: { id: spaceId }, select: { access: true } });
+    const s = await this.db.space.findUnique({ where: { id: spaceId, workspaceId: await this.workspaceId() }, select: { access: true } });
     return !s || s.access === "REVOKED";
   }
 
@@ -1008,37 +1017,37 @@ export class SyncEngine {
   private async handleHubError(space: Space, e: unknown, phase: "read" | "write", client?: HubClient): Promise<void> {
     if (!(e instanceof HubError)) {
       await this.schedule(space, "error");
-      await this.db.space.update({ where: { id: space.id }, data: { lastError: e instanceof Error ? e.message : String(e) } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: e instanceof Error ? e.message : String(e) } });
       return;
     }
     const now = this.now();
     if (e.kind === "network") {
       await this.schedule(space, "error");
-      await this.db.space.update({ where: { id: space.id }, data: { lastError: "offline" } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: "offline" } });
     } else if (e.kind === "auth") {
       await this.schedule(space, "error");
-      await this.db.space.update({ where: { id: space.id }, data: { lastError: "Sign in to the server again" } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: "Sign in to the server again" } });
     } else if (isHubRevocationAnswer(e)) {
       // The hub's own "not yours any more" answer. Before anything is purged, its member listing must agree.
       if (await this.hubConfirmsRevoked(space, client)) await this.revokeSpace(space.id, "Access to this space was removed");
       else {
         await this.schedule(space, "error");
-        await this.db.space.update({ where: { id: space.id }, data: { lastError: "The server said this space is not available, but still lists it for you. Nothing was removed; retrying." } });
+        await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: "The server said this space is not available, but still lists it for you. Nothing was removed; retrying." } });
       }
     } else if ((e.kind === "not-found" || e.kind === "forbidden") && e.reason === undefined) {
       // Not the hub's JSON error: a proxy's default site, a firewall page, a misrouted request. Treated like a network error.
       await this.schedule(space, "error");
-      await this.db.space.update({ where: { id: space.id }, data: { lastError: `The server address answered ${e.status ?? e.kind} without a Mergeport error (a proxy or firewall?). Nothing was removed; retrying.` } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: `The server address answered ${e.status ?? e.kind} without a Mergeport error (a proxy or firewall?). Nothing was removed; retrying.` } });
     } else if (e.kind === "forbidden" && phase === "write") {
       // Lost write permission but maybe still readable: fall back to read-only and keep the edits for a person to decide on.
-      await this.db.space.update({ where: { id: space.id }, data: { canWrite: false, lastError: "You no longer have write access to this space." } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { canWrite: false, lastError: "You no longer have write access to this space." } });
       await this.db.outboxOp.updateMany({ where: { spaceId: space.id, status: { in: ["PENDING", "SENT"] } }, data: { status: "QUARANTINED", error: "Write access was removed" } });
     } else if (e.kind === "rate-limited") {
       const until = new Date(now.getTime() + (e.retryAfterSeconds ?? 60) * 1000);
-      await this.db.space.update({ where: { id: space.id }, data: { rateLimitedUntil: until, lastError: "The server asked to slow down. Edits stay queued locally.", nextPollAt: until } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { rateLimitedUntil: until, lastError: "The server asked to slow down. Edits stay queued locally.", nextPollAt: until } });
     } else {
       await this.schedule(space, "error");
-      await this.db.space.update({ where: { id: space.id }, data: { lastError: e.message } });
+      await this.db.space.update({ where: { id: space.id, workspaceId: space.workspaceId }, data: { lastError: e.message } });
     }
     this.emit(space.id, "state");
   }
@@ -1048,14 +1057,14 @@ export class SyncEngine {
    * from this machine. This cannot erase Git history or anything a person downloaded outside the app.
    */
   async revokeSpace(spaceId: string, why: string): Promise<void> {
-    const space = await this.db.space.findUniqueOrThrow({ where: { id: spaceId } });
-    await this.db.space.update({ where: { id: spaceId }, data: { access: "REVOKED", canWrite: false, canAdmin: false, lastError: why, headSha: null, etag: null, hubCursor: 0n, nextPollAt: new Date(this.now().getTime() + REVOKED_RECHECK_MS) } });
+    const space = await this.db.space.findUniqueOrThrow({ where: { id: spaceId, workspaceId: await this.workspaceId() } });
+    await this.db.space.update({ where: { id: spaceId, workspaceId: space.workspaceId }, data: { access: "REVOKED", canWrite: false, canAdmin: false, lastError: why, headSha: null, etag: null, hubCursor: 0n, nextPollAt: new Date(this.now().getTime() + REVOKED_RECHECK_MS) } });
     await this.db.outboxOp.updateMany({ where: { spaceId, status: { in: ["PENDING", "SENT", "CONFLICT"] } }, data: { status: "QUARANTINED", error: why } });
     if (space.canAdmin) {
       // An admin created this data on this computer. A repository that was renamed, deleted or hidden must never erase their
       // projects, cards and rules: they become local again, and can be shared into a new space.
-      await this.db.repository.updateMany({ where: { spaceId }, data: { spaceId: null } });
-      await this.db.project.updateMany({ where: { spaceId }, data: { spaceId: null } });
+      await this.db.repository.updateMany({ where: { workspaceId: space.workspaceId, spaceId }, data: { spaceId: null } });
+      await this.db.project.updateMany({ where: { workspaceId: space.workspaceId, spaceId }, data: { spaceId: null } });
     } else {
       const ctx = await this.ctx(space);
       const entities = await this.db.syncEntity.findMany({ where: { spaceId } });
@@ -1069,8 +1078,8 @@ export class SyncEngine {
         keepRepos.add(m.upstream.githubId);
       }
       const ownProjects = entities.filter((se) => se.type === "project" && own(se)).map((se) => se.entityId);
-      if (ownProjects.length) await this.db.project.updateMany({ where: { spaceId, id: { in: ownProjects } }, data: { spaceId: null } });
-      if (keepRepos.size) await this.db.repository.updateMany({ where: { spaceId, githubId: { in: [...keepRepos] } }, data: { spaceId: null } });
+      if (ownProjects.length) await this.db.project.updateMany({ where: { workspaceId: space.workspaceId, spaceId, id: { in: ownProjects } }, data: { spaceId: null } });
+      if (keepRepos.size) await this.db.repository.updateMany({ where: { workspaceId: space.workspaceId, spaceId, githubId: { in: [...keepRepos] } }, data: { spaceId: null } });
       for (const def of [...ENTITY_TYPES].reverse()) {
         if (def.type === "repo") continue;
         for (const se of entities.filter((e) => e.type === def.type)) {
@@ -1079,7 +1088,7 @@ export class SyncEngine {
         }
       }
       // Repositories last: removing them cascades their cached issues, pull requests and comments.
-      await this.db.repository.deleteMany({ where: { spaceId } });
+      await this.db.repository.deleteMany({ where: { workspaceId: space.workspaceId, spaceId } });
     }
     await this.db.syncEntity.deleteMany({ where: { spaceId } });
     await this.db.syncConflict.updateMany({ where: { spaceId, status: "OPEN" }, data: { status: "RESOLVED", resolution: "access-revoked", resolvedAt: this.now() } });
@@ -1090,7 +1099,7 @@ export class SyncEngine {
   /** After access returns, quarantined edits are NOT sent automatically. */
   async releaseQuarantine(spaceId: string, action: "retry" | "discard"): Promise<void> {
     if (action === "discard") {
-      const space = await this.db.space.findUniqueOrThrow({ where: { id: spaceId } });
+      const space = await this.db.space.findUniqueOrThrow({ where: { id: spaceId, workspaceId: await this.workspaceId() } });
       const ctx = await this.ctx(space);
       for (const op of await this.db.outboxOp.findMany({ where: { spaceId, status: "QUARANTINED" } })) {
         const def = entityDef(op.entityType);
@@ -1105,13 +1114,14 @@ export class SyncEngine {
 
   /** Role comes from GitHub permissions on the common space, never from a field anyone can edit. */
   async refreshRole(): Promise<void> {
-    const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
+    const workspaceId = await this.workspaceId();
+    const team = await this.db.teamConfig.findUnique({ where: { workspaceId } });
     if (!team || team.mode === "PERSONAL") return;
     // A hub profile's role is the hub's member role (set by syncHubSpaces); hub spaces never carry an admin bit, so never downgrade from one.
     if (team.backend === "HUB") return;
-    const common = team.commonSpaceId ? await this.db.space.findUnique({ where: { id: team.commonSpaceId } }) : null;
+    const common = team.commonSpaceId ? await this.db.space.findUnique({ where: { id: team.commonSpaceId, workspaceId } }) : null;
     const admin = !!common && common.access === "OK" && common.canAdmin;
-    await this.db.member.updateMany({ where: { status: "ACTIVE" }, data: { role: admin ? "ADMIN" : "MEMBER" } });
+    await this.db.member.updateMany({ where: { workspaceId, status: "ACTIVE", role: { in: ["OWNER", "ADMIN", "MEMBER"] } }, data: { role: admin ? "ADMIN" : "MEMBER" } });
   }
 
   // ---------- state for the interface ----------

@@ -1,17 +1,18 @@
 import { describeAccess, type RepoPermissions } from "@/lib/domain/repo-access";
-import Link from "next/link";
+import { isHosted } from "@/lib/public-url";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { listRepositories } from "@/lib/services/queries";
 import { repoWhere } from "@/lib/authz/viewer";
 import { formatDuration } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
-import { Banner, EmptyState, PageHeader, Panel } from "@/components/ui/primitives";
+import { Banner, PageHeader, Panel } from "@/components/ui/primitives";
 import { FolderGit2, Plus } from "@/components/ui/icons";
 import { importPublicAction } from "@/app/actions";
 import { watchView } from "@/lib/local/repo-watch";
 import { watchLabel, watchTitle } from "@/lib/local/watch-format";
 import { instantRepoIds } from "@/lib/hub/instant-badges";
+import { ConnectReposEmpty, ConnectReposLink, canConnectRepos } from "@/components/repos/ConnectRepos";
 import { RepoList, type RepoRow } from "@/components/repos/RepoList";
 
 export const metadata = { title: "Repositories" };
@@ -19,9 +20,9 @@ export const metadata = { title: "Repositories" };
 export default async function Repositories({ searchParams: _searchParams }: { searchParams: Promise<{ all?: string }> }) {
   const { viewer } = await requireViewer();
   const now = new Date();
-  const [repos, spaces] = await Promise.all([listRepositories(db, viewer), db.space.findMany({ where: { access: "OK" }, orderBy: [{ kind: "asc" }, { name: "asc" }] })]);
+  const [repos, spaces] = await Promise.all([listRepositories(db, viewer), db.space.findMany({ where: { workspaceId: viewer.workspaceId, access: "OK" }, orderBy: [{ kind: "asc" }, { name: "asc" }] })]);
   // Repositories the team's GitHub App covers (last result of "Add my tracked repositories"; local data, no GitHub request).
-  const instant = await instantRepoIds(db);
+  const instant = await instantRepoIds(db, viewer.workspaceId);
   const watch = await watchView(db, instant);
   const spaceById = new Map(spaces.map((s) => [s.id, s]));
   const writable = spaces.filter((s) => s.canWrite);
@@ -61,14 +62,15 @@ export default async function Repositories({ searchParams: _searchParams }: { se
       watch: watch.ids.has(r.githubId.toString()) ? { label: `Auto-sync ${watchLabel(watch.summary.effective)}`, title: watchTitle(watch.summary.effective) } : null,
     };
   });
+  const canConnect = canConnectRepos(viewer);
   const problems = repos.filter((r) => r.trackingStatus === "DISCONNECTED" || r.rateLimited || r.syncError);
 
   return (
     <>
       <PageHeader
         title="Repositories"
-        subtitle="Repositories tracked on this computer, plus any a teammate shared with you. Tracking is private to you until you share a repository to a space."
-        actions={<Link href="/repositories/connect" className="btn btn-primary"><Plus size={14} aria-hidden /> Connect repositories</Link>}
+        subtitle={isHosted() ? "Repositories tracked in this workspace. People see only the repositories they have been granted." : "Repositories tracked on this computer, plus any a teammate shared with you. Tracking is private to you until you share a repository to a space."}
+        actions={canConnect ? <ConnectReposLink canConnect><Plus size={14} aria-hidden /> Connect repositories</ConnectReposLink> : undefined}
       />
 
       {problems.length > 0 && (
@@ -93,18 +95,18 @@ export default async function Repositories({ searchParams: _searchParams }: { se
       )}
 
       <Panel title={`Tracked repositories (${repos.length})`} icon={FolderGit2} id="repos"
-        actions={
+        actions={isHosted() && !viewer.isAdmin ? undefined :
           <ActionForm action={importPublicAction} submitLabel="Track" pendingLabel="Checking…" className="flex w-full items-center gap-2 sm:w-auto [&>div]:!mt-0" submitClassName="btn btn-primary !h-8">
             <label className="sr-only" htmlFor="pub-url">Public repository URL or owner/repo</label>
             <input id="pub-url" name="repo" className="input !h-8 !w-full sm:!w-60" placeholder="Public URL or owner/repo" required />
           </ActionForm>
         }>
         {repos.length === 0 ? (
-          <EmptyState icon={FolderGit2} title="No repositories yet" action={<Link href="/repositories/connect" className="btn btn-primary">Connect repositories</Link>}>
+          <ConnectReposEmpty canConnect={canConnect} title="No repositories yet">
             Import a public repository by URL, or choose from repositories your GitHub account can access.
-          </EmptyState>
+          </ConnectReposEmpty>
         ) : (
-          <RepoList rows={rows} writable={writable.map((sp) => ({ id: sp.id, name: sp.name, everyone: sp.kind === "COMMON" }))} />
+          <RepoList hosted={isHosted()} rows={rows} writable={writable.map((sp) => ({ id: sp.id, name: sp.name, everyone: sp.kind === "COMMON" }))} />
         )}
       </Panel>
     </>

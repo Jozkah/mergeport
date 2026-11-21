@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireViewer } from "@/lib/auth/current";
+import { requireWriter } from "@/lib/auth/current";
 import { addCheckItems, deleteCheckItem, editCheckItem, moveCheckItem, setCheckItemDone } from "@/lib/services/checklist";
 import { addComment, createTask, deleteComment, deleteTask, editComment, updateTask } from "@/lib/services/tasks";
 import { promoteTask } from "@/lib/services/task-promotion";
@@ -23,7 +23,7 @@ export async function createTaskAction(fd: FormData): Promise<ActionResult> {
   let id = "";
   let retryRepo = "";
   const r = await run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const t = await createTask(db, viewer, {
       projectId: str(fd, "projectId"),
       title: str(fd, "title"),
@@ -56,7 +56,7 @@ export async function createTaskAction(fd: FormData): Promise<ActionResult> {
 
 export async function updateTaskAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const id = str(fd, "id");
     const has = (k: string) => fd.has(k);
     await updateTask(db, viewer, id, {
@@ -76,7 +76,7 @@ export async function updateTaskAction(fd: FormData): Promise<ActionResult> {
 
 export async function addCommentAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const id = str(fd, "id");
     await addComment(db, viewer, id, String(fd.get("body") ?? ""));
     refresh(id);
@@ -86,7 +86,7 @@ export async function addCommentAction(fd: FormData): Promise<ActionResult> {
 
 export async function editCommentAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const c = await editComment(db, viewer, str(fd, "commentId"), String(fd.get("body") ?? ""));
     refresh(c.itemId);
     return { ok: true, message: "Comment updated" };
@@ -95,7 +95,7 @@ export async function editCommentAction(fd: FormData): Promise<ActionResult> {
 
 export async function deleteCommentAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await deleteComment(db, viewer, str(fd, "commentId"));
     refresh(str(fd, "id"));
     return { ok: true, message: "Comment deleted" };
@@ -105,7 +105,7 @@ export async function deleteCommentAction(fd: FormData): Promise<ActionResult> {
 export async function deleteTaskAction(fd: FormData): Promise<ActionResult> {
   let done = false;
   const r = await run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await deleteTask(db, viewer, str(fd, "id"));
     refresh();
     done = true;
@@ -119,7 +119,7 @@ export async function deleteTaskAction(fd: FormData): Promise<ActionResult> {
 
 export async function addCheckItemsAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const id = str(fd, "id");
     const made = await addCheckItems(db, viewer, id, String(fd.get("text") ?? ""));
     refresh(id);
@@ -129,7 +129,7 @@ export async function addCheckItemsAction(fd: FormData): Promise<ActionResult> {
 
 export async function setCheckItemAction(input: { id: string; done: boolean }): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const c = await setCheckItemDone(db, viewer, input.id, !!input.done);
     refresh(c.itemId);
     return { ok: true };
@@ -138,7 +138,7 @@ export async function setCheckItemAction(input: { id: string; done: boolean }): 
 
 export async function editCheckItemAction(input: { id: string; text: string }): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     const c = await editCheckItem(db, viewer, input.id, input.text);
     refresh(c.itemId);
     return { ok: true };
@@ -147,7 +147,7 @@ export async function editCheckItemAction(input: { id: string; text: string }): 
 
 export async function deleteCheckItemAction(input: { id: string; taskId: string }): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await deleteCheckItem(db, viewer, input.id);
     refresh(input.taskId);
     return { ok: true };
@@ -156,7 +156,7 @@ export async function deleteCheckItemAction(input: { id: string; taskId: string 
 
 export async function moveCheckItemAction(input: { id: string; afterId: string | null; taskId: string }): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await moveCheckItem(db, viewer, input.id, input.afterId);
     refresh(input.taskId);
     return { ok: true };

@@ -2,6 +2,7 @@ import { Select } from "@/components/ui/Select";
 import { byOwnerFirst, byPersonalFirst } from "@/lib/domain/ordering";
 import { db } from "@/lib/db";
 import { requireAdminViewer } from "@/lib/authz-page";
+import { projectWhere } from "@/lib/authz/viewer";
 import type { Reviewer } from "@/lib/domain/review";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { ScopeTarget } from "@/components/forms/ScopeTarget";
@@ -21,7 +22,7 @@ export default async function Rules() {
   const [rules, reposRaw, projectsRaw] = await Promise.all([
     db.reviewRule.findMany({ where: { workspaceId: viewer.workspaceId }, include: { repository: { select: { fullName: true } }, project: { select: { name: true } } }, orderBy: [{ scope: "asc" }, { createdAt: "asc" }] }),
     db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: { not: "REMOVED" } }, select: { id: true, fullName: true, projects: { select: { projectId: true } } }, orderBy: { fullName: "asc" } }),
-    db.project.findMany({ where: { workspaceId: viewer.workspaceId }, orderBy: { name: "asc" } }),
+    db.project.findMany({ where: projectWhere(viewer), orderBy: { name: "asc" } }),
   ]);
 
   const repos = [...reposRaw].sort((x, y) => byOwnerFirst(viewer.login)(x.fullName, y.fullName));
@@ -97,7 +98,7 @@ export default async function Rules() {
                     <p className="mt-1 text-[13px]">{r.reason}</p>
                     <p className="mt-1 text-[12.5px] text-ink-3">{r.semantics === "ALL" ? "All of" : "Any of"}: {(r.reviewers as unknown as Reviewer[]).map((x) => `${x.ref}${x.kind === "TEAM" ? " (team)" : x.kind === "EXTERNAL_ROLE" ? " (external role)" : ""}`).join(", ")}{asStrings(r.labels).length ? <> · when labelled <Mono>{asStrings(r.labels).join(", ")}</Mono></> : " · any labels"}</p>
                   </div>
-                  <ActionForm action={deleteRuleAction} submitLabel="Delete" submitClassName="btn btn-danger"><input type="hidden" name="id" value={r.id} /></ActionForm>
+                  <ActionForm action={deleteRuleAction} submitLabel="Delete" submitClassName="btn text-blocked"><input type="hidden" name="id" value={r.id} /></ActionForm>
                 </li>
               ))}
             </ul>
@@ -116,7 +117,7 @@ export default async function Rules() {
                   </div>
                   <div className="flex gap-2">
                     <ActionForm action={toggleWaitingRuleAction} submitLabel={r.enabled ? "Turn off" : "Turn on"} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={r.id} /></ActionForm>
-                    <ActionForm action={deleteWaitingRuleAction} submitLabel="Delete" submitClassName="btn btn-danger"><input type="hidden" name="id" value={r.id} /></ActionForm>
+                    <ActionForm action={deleteWaitingRuleAction} submitLabel="Delete" submitClassName="btn text-blocked"><input type="hidden" name="id" value={r.id} /></ActionForm>
                   </div>
                 </li>
               ))}

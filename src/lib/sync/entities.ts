@@ -33,7 +33,7 @@ export type EntityDef = {
   type: string;
   order: number;
   setKeys?: string[];
-  list(db: Db, ctx: { commonSpaceId: string | null }): Promise<Listed[]>;
+  list(db: Db, ctx: { commonSpaceId: string | null; workspaceId: string }): Promise<Listed[]>;
   /** See ApplyOutcome. Never throws for a malformed entity: `valid` rejects it first. */
   apply(db: Db, ctx: Ctx, id: string, data: Data | null, version: number): Promise<ApplyOutcome>;
   /** Shape check of a remote entity (data null: a deletion). Anything apply() would choke on is refused here. */
@@ -70,8 +70,8 @@ async function repoByGithubId(db: Db, workspaceId: string, githubId: unknown) {
 const repo: EntityDef = {
   type: "repo",
   order: 1,
-  async list(db) {
-    const rows = await db.repository.findMany({ where: { spaceId: { not: null }, trackingStatus: { not: "REMOVED" }, isDemo: false }, include: { owner: true } });
+  async list(db, { workspaceId }) {
+    const rows = await db.repository.findMany({ where: { workspaceId, spaceId: { not: null }, trackingStatus: { not: "REMOVED" }, isDemo: false }, include: { owner: true } });
     return rows.map((r) => ({
       id: repoEntityId(r.githubId),
       spaceId: r.spaceId,
@@ -105,7 +105,7 @@ const repo: EntityDef = {
       const gid = BigInt(id.replace(/^repo-/, ""));
       const r = await repoByGithubId(db, ctx.workspaceId, gid);
       if (r && r.spaceId === ctx.space.id) {
-        await db.repository.update({ where: { id: r.id }, data: { trackingStatus: "REMOVED", spaceId: null } });
+        await db.repository.update({ where: { id: r.id, workspaceId: ctx.workspaceId }, data: { trackingStatus: "REMOVED", spaceId: null } });
         await db.repositoryGrant.updateMany({ where: { repositoryId: r.id, revokedAt: null }, data: { revokedAt: new Date() } });
         refreshHubWatch();
       }
@@ -142,8 +142,8 @@ const project: EntityDef = {
   type: "project",
   order: 2,
   setKeys: ["repoIds"],
-  async list(db) {
-    const rows = await db.project.findMany({ where: { spaceId: { not: null } }, include: { repositories: { include: { repository: true } } } });
+  async list(db, { workspaceId }) {
+    const rows = await db.project.findMany({ where: { workspaceId, spaceId: { not: null } }, include: { repositories: { include: { repository: true } } } });
     return rows.map((p) => ({
       id: p.id, spaceId: p.spaceId,
       data: { name: p.name, slug: p.slug, description: p.description, automation: p.automation, repoIds: p.repositories.map((x) => repoEntityId(x.repository.githubId)).sort() },
@@ -152,7 +152,7 @@ const project: EntityDef = {
   valid: (_id, d) => !d || (isStr(d.name) && isStr(d.slug) && optStr(d.description) && optStrs(d.repoIds)),
   async apply(db, ctx, id, data) {
     if (!data) {
-      await db.project.deleteMany({ where: { id } });
+      await db.project.deleteMany({ where: { id, workspaceId: ctx.workspaceId } });
       return;
     }
     const f = { name: String(data.name), slug: String(data.slug), description: (data.description as string | null) ?? null, automation: data.automation === "suggest" ? "suggest" : "off", spaceId: ctx.space.id };
@@ -175,8 +175,8 @@ const milestone: EntityDef = {
   type: "milestone",
   order: 3,
   setKeys: ["repoLinks"],
-  async list(db, { commonSpaceId }) {
-    const rows = await db.dashboardMilestone.findMany({ include: { project: true, repoLinks: { include: { repository: true } } } });
+  async list(db, { commonSpaceId, workspaceId }) {
+    const rows = await db.dashboardMilestone.findMany({ where: { workspaceId }, include: { project: true, repoLinks: { include: { repository: true } } } });
     return rows.map((m) => ({
       id: m.id,
       spaceId: m.project ? m.project.spaceId : commonSpaceId,
@@ -192,11 +192,11 @@ const milestone: EntityDef = {
       optStrs(d.repoLinks) && ((d.repoLinks as string[] | null) ?? []).every((l) => /^\d{1,20}#\d{1,9}$/.test(l))),
   async apply(db, ctx, id, data) {
     if (!data) {
-      await db.dashboardMilestone.deleteMany({ where: { id } });
+      await db.dashboardMilestone.deleteMany({ where: { id, workspaceId: ctx.workspaceId } });
       return;
     }
     const projectId = (data.projectId as string | null) ?? null;
-    const p = projectId ? await db.project.findUnique({ where: { id: projectId } }) : null;
+    const p = projectId ? await db.project.findUnique({ where: { id: projectId, workspaceId: ctx.workspaceId } }) : null;
     const f = { name: String(data.name), description: (data.description as string | null) ?? null, projectId: p ? projectId : null, startDate: toDate(data.startDate), targetDate: toDate(data.targetDate), status: String(data.status ?? "OPEN"), releaseTag: (data.releaseTag as string | null) ?? null, releaseUrl: (data.releaseUrl as string | null) ?? null, shippedAt: toDate(data.shippedAt) };
     await db.dashboardMilestone.upsert({ where: { id }, create: { id, workspaceId: ctx.workspaceId, ...f }, update: f });
     const wanted: string[] = [];
@@ -217,8 +217,8 @@ const card: EntityDef = {
   type: "card",
   order: 4,
   setKeys: ["blockedBy", "related", "duplicates"],
-  async list(db) {
-    const rows = await db.planningItem.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true, column: true, workItem: { include: { repository: true } }, blockedBy: true } });
+  async list(db, { workspaceId }) {
+    const rows = await db.planningItem.findMany({ where: { project: { workspaceId, spaceId: { not: null } } }, include: { project: true, column: true, workItem: { include: { repository: true } }, blockedBy: true } });
     return rows.map((c) => ({
       id: c.id, spaceId: c.project.spaceId,
       data: {
@@ -247,7 +247,7 @@ const card: EntityDef = {
     if (!col) return false; // the project entity has not been applied yet; the next pull retries
     const work = data.workRepoGithubId !== null && data.workRepoGithubId !== undefined ? await repoByGithubId(db, ctx.workspaceId, data.workRepoGithubId) : null;
     const wi = work && data.workNumber ? await db.workItem.findUnique({ where: { repositoryId_number: { repositoryId: work.id, number: Number(data.workNumber) } } }) : null;
-    const ms = data.milestoneId ? await db.dashboardMilestone.findUnique({ where: { id: String(data.milestoneId) } }) : null;
+    const ms = data.milestoneId ? await db.dashboardMilestone.findUnique({ where: { id: String(data.milestoneId), workspaceId: ctx.workspaceId } }) : null;
     const epic = data.epicId ? await db.epic.findUnique({ where: { id: String(data.epicId) }, select: { id: true } }) : null;
     const iteration = data.iterationId ? await db.iteration.findUnique({ where: { id: String(data.iterationId) }, select: { id: true } }) : null;
     const f = {
@@ -277,8 +277,8 @@ const card: EntityDef = {
 const taskcomment: EntityDef = {
   type: "taskcomment",
   order: 5,
-  async list(db) {
-    const rows = await db.taskComment.findMany({ where: { item: { project: { spaceId: { not: null } } } }, include: { item: { include: { project: true } } } });
+  async list(db, { workspaceId }) {
+    const rows = await db.taskComment.findMany({ where: { item: { project: { workspaceId, spaceId: { not: null } } } }, include: { item: { include: { project: true } } } });
     return rows.map((c) => ({ id: c.id, spaceId: c.item.project.spaceId, data: { itemId: c.itemId, authorLogin: c.authorLogin, kind: c.kind, body: c.body, createdAt: iso(c.createdAt), editedAt: iso(c.editedAt) } }));
   },
   valid: (_id, d) => !d || (isStr(d.itemId) && isStr(d.authorLogin) && isStr(d.body) && optStr(d.kind) && optDate(d.createdAt) && optDate(d.editedAt)),
@@ -299,8 +299,8 @@ const taskcomment: EntityDef = {
 const checkitem: EntityDef = {
   type: "checkitem",
   order: 5,
-  async list(db) {
-    const rows = await db.taskCheckItem.findMany({ where: { item: { project: { spaceId: { not: null } } } }, include: { item: { include: { project: true } } } });
+  async list(db, { workspaceId }) {
+    const rows = await db.taskCheckItem.findMany({ where: { item: { project: { workspaceId, spaceId: { not: null } } } }, include: { item: { include: { project: true } } } });
     return rows.map((c) => ({ id: c.id, spaceId: c.item.project.spaceId, data: { itemId: c.itemId, text: c.text, done: c.done, position: c.position, doneByLogin: c.doneByLogin, doneAt: iso(c.doneAt), createdAt: iso(c.createdAt) } }));
   },
   valid: (_id, d) => !d || (isStr(d.itemId) && isStr(d.text) && num(d.position) && optStr(d.doneByLogin) && optDate(d.doneAt) && optDate(d.createdAt)),
@@ -321,8 +321,8 @@ const checkitem: EntityDef = {
 const rule: EntityDef = {
   type: "rule",
   order: 5,
-  async list(db, { commonSpaceId }) {
-    const rows = await db.reviewRule.findMany({ include: { repository: true, project: true } });
+  async list(db, { commonSpaceId, workspaceId }) {
+    const rows = await db.reviewRule.findMany({ where: { workspaceId }, include: { repository: true, project: true } });
     return rows.map((r) => ({
       id: r.id,
       spaceId: r.scope === "REPOSITORY" ? (r.repository?.spaceId ?? null) : r.scope === "PROJECT" ? (r.project?.spaceId ?? null) : commonSpaceId,
@@ -332,7 +332,7 @@ const rule: EntityDef = {
   valid: (_id, d) => !d || (oneOf(d.scope, SCOPES) && optGid(d.repoGithubId) && optStr(d.projectId) && optStr(d.ownerLogin) && oneOf(d.semantics, ["ANY", "ALL"]) && isStr(d.reason)),
   async apply(db, ctx, id, data) {
     if (!data) {
-      await db.reviewRule.deleteMany({ where: { id } });
+      await db.reviewRule.deleteMany({ where: { id, workspaceId: ctx.workspaceId } });
       return;
     }
     const r = await repoByGithubId(db, ctx.workspaceId, data.repoGithubId);
@@ -349,8 +349,8 @@ const rule: EntityDef = {
 const waitrule: EntityDef = {
   type: "waitrule",
   order: 5,
-  async list(db, { commonSpaceId }) {
-    const rows = await db.waitingRule.findMany({ include: { repository: true, project: true } });
+  async list(db, { commonSpaceId, workspaceId }) {
+    const rows = await db.waitingRule.findMany({ where: { workspaceId }, include: { repository: true, project: true } });
     return rows.map((r) => ({
       id: r.id,
       spaceId: r.scope === "REPOSITORY" ? (r.repository?.spaceId ?? null) : r.scope === "PROJECT" ? (r.project?.spaceId ?? null) : commonSpaceId,
@@ -360,7 +360,7 @@ const waitrule: EntityDef = {
   valid: (_id, d) => !d || (oneOf(d.scope, SCOPES) && optGid(d.repoGithubId) && optStr(d.projectId) && optStr(d.ownerLogin) && optStr(d.itemType) && isStr(d.reason) && optStr(d.stage)),
   async apply(db, ctx, id, data) {
     if (!data) {
-      await db.waitingRule.deleteMany({ where: { id } });
+      await db.waitingRule.deleteMany({ where: { id, workspaceId: ctx.workspaceId } });
       return;
     }
     const r = await repoByGithubId(db, ctx.workspaceId, data.repoGithubId);
@@ -392,7 +392,7 @@ const view: EntityDef = {
       await db.savedFilter.deleteMany({ where: { id, shared: true } });
       return;
     }
-    const member = await db.member.findUnique({ where: { id: ctx.localMemberId } });
+    const member = await db.member.findUnique({ where: { id: ctx.localMemberId, workspaceId: ctx.workspaceId } });
     if (!member) return false;
     const f = { userId: member.userId, scope: String(data.scope), name: String(data.name), query: String(data.query ?? ""), shared: true, ownerLogin: String(data.ownerLogin ?? "") || null };
     await db.savedFilter.upsert({ where: { id }, create: { id, ...f }, update: f });
@@ -401,22 +401,22 @@ const view: EntityDef = {
 
 // ---------- boards, epics, iterations and planning history ----------
 
-const projectSpace = async (db: Db, projectId: string) => (await db.project.findUnique({ where: { id: projectId }, select: { spaceId: true } }))?.spaceId ?? null;
+const projectSpace = async (db: Db, workspaceId: string, projectId: string) => (await db.project.findUnique({ where: { id: projectId, workspaceId }, select: { spaceId: true } }))?.spaceId ?? null;
 
 const board: EntityDef = {
   type: "board",
   order: 4,
-  async list(db) {
-    const rows = await db.planBoard.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
+  async list(db, { workspaceId }) {
+    const rows = await db.planBoard.findMany({ where: { project: { workspaceId, spaceId: { not: null } } }, include: { project: true } });
     return rows.map((b) => ({ id: b.id, spaceId: b.project.spaceId, data: { projectId: b.projectId, name: b.name, template: b.template, columns: b.columns, groupBy: b.groupBy, density: b.density, position: b.position } }));
   },
   valid: (_id, d) => !d || (isStr(d.projectId) && isStr(d.name) && optStr(d.template) && optStr(d.groupBy) && optStr(d.density) && num(d.position)),
-  async apply(db, _ctx, id, data) {
+  async apply(db, ctx, id, data) {
     if (!data) {
       await db.planBoard.deleteMany({ where: { id } });
       return;
     }
-    if (!(await db.project.findUnique({ where: { id: String(data.projectId) }, select: { id: true } }))) return false;
+    if (!(await db.project.findUnique({ where: { id: String(data.projectId), workspaceId: ctx.workspaceId }, select: { id: true } }))) return false;
     const f = { projectId: String(data.projectId), name: String(data.name), template: String(data.template ?? ""), columns: (data.columns ?? []) as Prisma.InputJsonValue, groupBy: String(data.groupBy ?? "none"), density: String(data.density ?? "comfortable"), position: Number(data.position ?? 0) };
     await db.planBoard.upsert({ where: { id }, create: { id, ...f }, update: f });
   },
@@ -425,17 +425,17 @@ const board: EntityDef = {
 const epic: EntityDef = {
   type: "epic",
   order: 3,
-  async list(db) {
-    const rows = await db.epic.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
+  async list(db, { workspaceId }) {
+    const rows = await db.epic.findMany({ where: { project: { workspaceId, spaceId: { not: null } } }, include: { project: true } });
     return rows.map((e) => ({ id: e.id, spaceId: e.project.spaceId, data: { projectId: e.projectId, title: e.title, description: e.description, ownerLogin: e.ownerLogin, start: day(e.startDate), target: day(e.targetDate), status: e.status, decisions: e.decisions } }));
   },
   valid: (_id, d) => !d || (isStr(d.projectId) && isStr(d.title) && optStr(d.description) && optStr(d.ownerLogin) && optDate(d.start) && optDate(d.target) && optStr(d.status) && optStr(d.decisions)),
-  async apply(db, _ctx, id, data) {
+  async apply(db, ctx, id, data) {
     if (!data) {
       await db.epic.deleteMany({ where: { id } });
       return;
     }
-    if (!(await db.project.findUnique({ where: { id: String(data.projectId) }, select: { id: true } }))) return false;
+    if (!(await db.project.findUnique({ where: { id: String(data.projectId), workspaceId: ctx.workspaceId }, select: { id: true } }))) return false;
     const f = { projectId: String(data.projectId), title: String(data.title), description: (data.description as string | null) ?? null, ownerLogin: (data.ownerLogin as string | null) ?? null, startDate: toDate(data.start), targetDate: toDate(data.target), status: String(data.status ?? "OPEN"), decisions: (data.decisions as string | null) ?? null };
     await db.epic.upsert({ where: { id }, create: { id, ...f }, update: f });
   },
@@ -444,17 +444,17 @@ const epic: EntityDef = {
 const iteration: EntityDef = {
   type: "iteration",
   order: 3,
-  async list(db) {
-    const rows = await db.iteration.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
+  async list(db, { workspaceId }) {
+    const rows = await db.iteration.findMany({ where: { project: { workspaceId, spaceId: { not: null } } }, include: { project: true } });
     return rows.map((i) => ({ id: i.id, spaceId: i.project.spaceId, data: { projectId: i.projectId, name: i.name, start: day(i.startDate), end: day(i.endDate), closedAt: iso(i.closedAt) } }));
   },
   valid: (_id, d) => !d || (isStr(d.projectId) && isStr(d.name) && optDate(d.start) && optDate(d.end) && optDate(d.closedAt)),
-  async apply(db, _ctx, id, data) {
+  async apply(db, ctx, id, data) {
     if (!data) {
       await db.iteration.deleteMany({ where: { id } });
       return;
     }
-    if (!(await db.project.findUnique({ where: { id: String(data.projectId) }, select: { id: true } }))) return false;
+    if (!(await db.project.findUnique({ where: { id: String(data.projectId), workspaceId: ctx.workspaceId }, select: { id: true } }))) return false;
     const f = { projectId: String(data.projectId), name: String(data.name), startDate: toDate(data.start) ?? new Date(), endDate: toDate(data.end) ?? new Date(), closedAt: toDate(data.closedAt) };
     await db.iteration.upsert({ where: { id }, create: { id, ...f }, update: f });
   },
@@ -464,17 +464,17 @@ const iteration: EntityDef = {
 const planevent: EntityDef = {
   type: "planevent",
   order: 9,
-  async list(db) {
-    const rows = await db.planEvent.findMany({ where: { project: { spaceId: { not: null } } }, include: { project: true } });
+  async list(db, { workspaceId }) {
+    const rows = await db.planEvent.findMany({ where: { project: { workspaceId, spaceId: { not: null } } }, include: { project: true } });
     return rows.map((e) => ({ id: e.id, spaceId: e.project.spaceId, data: { projectId: e.projectId, itemId: e.itemId, kind: e.kind, fromKey: e.fromKey, toKey: e.toKey, refId: e.refId, actorLogin: e.actorLogin, at: iso(e.at) } }));
   },
   valid: (_id, d) => !d || (isStr(d.projectId) && isStr(d.itemId) && isStr(d.kind) && optStr(d.fromKey) && optStr(d.toKey) && optStr(d.refId) && optStr(d.actorLogin) && optDate(d.at)),
-  async apply(db, _ctx, id, data) {
+  async apply(db, ctx, id, data) {
     if (!data) {
       await db.planEvent.deleteMany({ where: { id } });
       return;
     }
-    if (!(await db.project.findUnique({ where: { id: String(data.projectId) }, select: { id: true } }))) return false;
+    if (!(await db.project.findUnique({ where: { id: String(data.projectId), workspaceId: ctx.workspaceId }, select: { id: true } }))) return false;
     const f = { projectId: String(data.projectId), itemId: String(data.itemId), kind: String(data.kind), fromKey: (data.fromKey as string | null) ?? null, toKey: (data.toKey as string | null) ?? null, refId: (data.refId as string | null) ?? null, actorLogin: (data.actorLogin as string | null) ?? null, at: toDate(data.at) ?? new Date() };
     await db.planEvent.upsert({ where: { id }, create: { id, ...f }, update: f });
   },
@@ -486,15 +486,15 @@ void projectSpace;
 const labelmap: EntityDef = {
   type: "labelmap",
   order: 9,
-  async list(db, { commonSpaceId }) {
-    const rows = await db.labelMap.findMany();
-    const repos = new Map((await db.repository.findMany({ where: { id: { in: rows.flatMap((r) => (r.repoKey ? [r.repoKey] : [])) } }, select: { id: true, githubId: true } })).map((r) => [r.id, r.githubId.toString()]));
+  async list(db, { commonSpaceId, workspaceId }) {
+    const rows = await db.labelMap.findMany({ where: { workspaceId } });
+    const repos = new Map((await db.repository.findMany({ where: { workspaceId, id: { in: rows.flatMap((r) => (r.repoKey ? [r.repoKey] : [])) } }, select: { id: true, githubId: true } })).map((r) => [r.id, r.githubId.toString()]));
     return rows.map((m) => ({ id: m.id, spaceId: commonSpaceId, data: { concept: m.concept, spelling: m.spelling, repoGithubId: m.repoKey ? (repos.get(m.repoKey) ?? null) : null } }));
   },
   valid: (_id, d) => !d || (isStr(d.concept) && isStr(d.spelling) && optGid(d.repoGithubId)),
   async apply(db, ctx, id, data) {
     if (!data) {
-      await db.labelMap.deleteMany({ where: { id } });
+      await db.labelMap.deleteMany({ where: { id, workspaceId: ctx.workspaceId } });
       return;
     }
     let repoKey = "";
@@ -511,15 +511,15 @@ const labelmap: EntityDef = {
 const upstreamsub: EntityDef = {
   type: "upstreamsub",
   order: 9,
-  async list(db, { commonSpaceId }) {
-    const rows = await db.upstreamSubscription.findMany();
+  async list(db, { commonSpaceId, workspaceId }) {
+    const rows = await db.upstreamSubscription.findMany({ where: { workspaceId } });
     const maps = new Map((await db.forkMapping.findMany({ where: { id: { in: rows.flatMap((r) => (r.mappingId ? [r.mappingId] : [])) } } })).map((m) => [m.id, m]));
     return rows.map((s) => ({ id: s.id, spaceId: commonSpaceId, data: { name: s.name, mappingId: s.mappingId && maps.has(s.mappingId) ? s.mappingId : null, criteria: s.criteria, muted: s.muted } }));
   },
   valid: (_id, d) => !d || (isStr(d.name) && optStr(d.mappingId)),
   async apply(db, ctx, id, data) {
     if (!data) {
-      await db.upstreamSubscription.deleteMany({ where: { id } });
+      await db.upstreamSubscription.deleteMany({ where: { id, workspaceId: ctx.workspaceId } });
       return;
     }
     const mappingId = (data.mappingId as string | null) ?? null;
@@ -532,8 +532,8 @@ const upstreamsub: EntityDef = {
 const backport: EntityDef = {
   type: "backport",
   order: 7,
-  async list(db) {
-    const rows = await db.backportRecord.findMany({ include: { mapping: { include: { fork: true } } } });
+  async list(db, { workspaceId }) {
+    const rows = await db.backportRecord.findMany({ where: { mapping: { fork: { workspaceId } } }, include: { mapping: { include: { fork: true } } } });
     return rows.map((b) => ({ id: b.id, spaceId: b.mapping.fork.spaceId, data: { mappingId: b.mappingId, upstreamNumber: b.upstreamNumber, targetBranch: b.targetBranch, state: b.state, evidence: b.evidence, localSha: b.localSha, note: b.note, byLogin: b.byLogin } }));
   },
   valid: (_id, d) => !d || (isStr(d.mappingId) && isStr(d.targetBranch) && Number.isInteger(Number(d.upstreamNumber)) && optStr(d.state) && optStr(d.evidence) && optStr(d.localSha) && optStr(d.note) && optStr(d.byLogin)),
@@ -553,11 +553,11 @@ const backport: EntityDef = {
 const availability: EntityDef = {
   type: "availability",
   order: 9,
-  async list(db, { commonSpaceId }) {
+  async list(db, { commonSpaceId, workspaceId }) {
     // The entity id is derived from the login, not the row id: two devices that set one person's availability write the SAME entity
     // (an ordinary merge) instead of two random ids that each side adopts and then tombstones. Rows made with an old random id are read
     // under the derived id too, so they converge on the next capture.
-    const rows = await db.reviewerAvailability.findMany();
+    const rows = await db.reviewerAvailability.findMany({ where: { workspaceId } });
     return rows.filter((a) => ENTITY_ID.test(availabilityId(a.login))).map((a) => ({ id: availabilityId(a.login), spaceId: commonSpaceId, data: { login: a.login, from: iso(a.unavailableFrom), until: iso(a.unavailableUntil), backup: a.backupLogin, note: a.note } }));
   },
   valid: (id, d) => !d || (isStr(d.login) && !!d.login && (!id.startsWith("avail-") || id === availabilityId(d.login)) && optDate(d.from) && optDate(d.until) && optStr(d.backup) && optStr(d.note)),
@@ -568,14 +568,14 @@ const availability: EntityDef = {
       if (!id.startsWith("avail-")) return;
       const rows = await db.reviewerAvailability.findMany({ where: { workspaceId: ctx.workspaceId } });
       const gone = rows.filter((r) => availabilityId(r.login) === id).map((r) => r.id);
-      if (gone.length) await db.reviewerAvailability.deleteMany({ where: { id: { in: gone } } });
+      if (gone.length) await db.reviewerAvailability.deleteMany({ where: { workspaceId: ctx.workspaceId, id: { in: gone } } });
       return;
     }
     const f = { unavailableFrom: toDate(data.from), unavailableUntil: toDate(data.until), backupLogin: (data.backup as string | null) ?? null, note: (data.note as string | null) ?? null };
     const login = String(data.login);
     // One row per person, whatever its id or the case of the login: the existing row is updated in place, never re-keyed.
     const mine = (await db.reviewerAvailability.findMany({ where: { workspaceId: ctx.workspaceId } })).find((r) => availabilityId(r.login) === availabilityId(login));
-    if (mine) await db.reviewerAvailability.update({ where: { id: mine.id }, data: f });
+    if (mine) await db.reviewerAvailability.update({ where: { id: mine.id, workspaceId: ctx.workspaceId }, data: f });
     else await db.reviewerAvailability.create({ data: { id: availabilityId(login), workspaceId: ctx.workspaceId, login, ...f } });
   },
 };
@@ -585,8 +585,8 @@ const availability: EntityDef = {
 const forkmap: EntityDef = {
   type: "forkmap",
   order: 6,
-  async list(db) {
-    const rows = await db.forkMapping.findMany({ where: { fork: { spaceId: { not: null } } }, include: { fork: true, upstream: true } });
+  async list(db, { workspaceId }) {
+    const rows = await db.forkMapping.findMany({ where: { fork: { workspaceId, spaceId: { not: null } } }, include: { fork: true, upstream: true } });
     return rows.map((m) => ({ id: m.id, spaceId: m.fork.spaceId, data: { forkRepoGithubId: m.fork.githubId.toString(), upstreamRepoGithubId: m.upstream.githubId.toString(), forkBranch: m.forkBranch, upstreamBranch: m.upstreamBranch } }));
   },
   valid: (_id, d) => !d || (isGid(d.forkRepoGithubId) && isGid(d.upstreamRepoGithubId) && isStr(d.forkBranch) && !!d.forkBranch && isStr(d.upstreamBranch) && !!d.upstreamBranch),
@@ -610,8 +610,8 @@ const forkmap: EntityDef = {
 const triage: EntityDef = {
   type: "triage",
   order: 7,
-  async list(db) {
-    const rows = await db.upstreamIssueTriage.findMany({ where: { mapping: { fork: { spaceId: { not: null } } } }, include: { mapping: { include: { fork: true } } } });
+  async list(db, { workspaceId }) {
+    const rows = await db.upstreamIssueTriage.findMany({ where: { mapping: { fork: { workspaceId, spaceId: { not: null } } } }, include: { mapping: { include: { fork: true } } } });
     return rows.map((t) => ({ id: t.id, spaceId: t.mapping.fork.spaceId, data: { mappingId: t.mappingId, issueNumber: t.issueNumber, title: t.title, htmlUrl: t.htmlUrl, status: t.status, note: t.note } }));
   },
   valid: (_id, d) =>
@@ -633,8 +633,8 @@ const triage: EntityDef = {
 const waiting: EntityDef = {
   type: "waiting",
   order: 8,
-  async list(db) {
-    const rows = await db.waitingRecord.findMany({ where: { source: "MANUAL" }, include: { workItem: { include: { repository: true } }, planningItem: { include: { project: true } } } });
+  async list(db, { workspaceId }) {
+    const rows = await db.waitingRecord.findMany({ where: { workspaceId, source: "MANUAL" }, include: { workItem: { include: { repository: true } }, planningItem: { include: { project: true } } } });
     const out: Listed[] = [];
     for (const w of rows) {
       const spaceId = w.workItem?.repository.spaceId ?? w.planningItem?.project.spaceId ?? null;
@@ -654,19 +654,19 @@ const waiting: EntityDef = {
       oneOf(d.status, ["PENDING", "SATISFIED", "CANCELLED", "STALE"]) && isStr(d.startedAt) && optDate(d.startedAt) && optDate(d.clearedAt) && optStr(d.clearReason)),
   async apply(db, ctx, id, data) {
     if (!data) {
-      await db.waitingRecord.deleteMany({ where: { id } });
+      await db.waitingRecord.deleteMany({ where: { id, workspaceId: ctx.workspaceId } });
       return;
     }
     const r = await repoByGithubId(db, ctx.workspaceId, data.workRepoGithubId);
     const wi = r && data.workNumber ? await db.workItem.findUnique({ where: { repositoryId_number: { repositoryId: r.id, number: Number(data.workNumber) } } }) : null;
-    const card = data.cardId ? await db.planningItem.findUnique({ where: { id: String(data.cardId) } }) : null;
+    const card = data.cardId ? await db.planningItem.findUnique({ where: { id: String(data.cardId), project: { workspaceId: ctx.workspaceId } } }) : null;
     if (!wi && !card) return false;
     const f = {
       workspaceId: ctx.workspaceId, workItemId: wi?.id ?? null, planningItemId: card?.id ?? null, source: "MANUAL" as const, reviewerKind: data.reviewerKind as "USER" | "TEAM" | "EXTERNAL_ROLE",
       reviewerRef: String(data.reviewerRef), reason: String(data.reason), stage: String(data.stage ?? ""), status: data.status as "PENDING" | "SATISFIED" | "CANCELLED" | "STALE", startedAt: new Date(String(data.startedAt)),
       clearedAt: toDate(data.clearedAt), clearReason: (data.clearReason as string | null) ?? null,
     };
-    await db.waitingRecord.upsert({ where: { id }, create: { id, ...f }, update: f });
+    await db.waitingRecord.upsert({ where: { id, workspaceId: ctx.workspaceId }, create: { id, ...f }, update: f });
   },
 };
 

@@ -15,7 +15,7 @@ const LEVELS: Record<string, string> = {
  * Address, key, model and autopilot of an OpenAI-compatible endpoint, in two groups: how to reach it, and how it behaves. The model
  * list is asked from the endpoint, because the models behind it change over time.
  */
-export function AiSettingsPanel({ baseUrl, hasKey, model, autopilot }: { baseUrl: string; hasKey: boolean; model: string | null; autopilot: "off" | "suggest" | "create" }) {
+export function AiSettingsPanel({ baseUrl, hasKey, model, autopilot, hosted = false }: { baseUrl: string; hasKey: boolean; model: string | null; autopilot: "off" | "suggest" | "create"; hosted?: boolean }) {
   const form = useRef<HTMLDivElement>(null);
   const [models, setModels] = useState<string[]>([]);
   const [loaded, setLoaded] = useState<string[]>([]);
@@ -61,7 +61,7 @@ export function AiSettingsPanel({ baseUrl, hasKey, model, autopilot }: { baseUrl
             <div>
               <label className="label" htmlFor="ai-key">API key</label>
               <input id="ai-key" name="apiKey" type="password" className="input" autoComplete="off" placeholder={hasKey ? "Saved. Type to replace it." : "Paste your key"} />
-              <p className="mt-1 text-[12px] text-ink-3 text-pretty">Stored encrypted on this computer. It is only sent to the address above.</p>
+              <p className="mt-1 text-[12px] text-ink-3 text-pretty">{hosted ? "Stored encrypted on the server. It is only sent to the address above." : "Stored encrypted on this computer. It is only sent to the address above."}</p>
               {hasKey && <label className="mt-1 flex min-h-10 w-fit cursor-pointer items-center gap-2 text-[12.5px]"><input type="checkbox" name="clearKey" /> Remove the saved key</label>}
             </div>
           </fieldset>
@@ -89,7 +89,7 @@ export function AiSettingsPanel({ baseUrl, hasKey, model, autopilot }: { baseUrl
                 <option value="create">Create</option>
               </Select>
               <p className="mt-1 text-[12px] text-ink-3 text-pretty" aria-live="polite">{LEVELS[level]}</p>
-              {level !== "off" && <p className="mt-1 text-[12px] text-ink-3 text-pretty">It runs while Mergeport is open, after 7:00, and sends titles and status of what it reads to the address above. It only writes local tasks and suggestions, never anything on GitHub.</p>}
+              {level !== "off" && <p className="mt-1 text-[12px] text-ink-3 text-pretty">{hosted ? "It runs each morning after 7:00" : "It runs while Mergeport is open, after 7:00"}, and sends titles and status of what it reads to the address above. It only writes local tasks and suggestions, never anything on GitHub.</p>}
             </div>
           </fieldset>
         </div>

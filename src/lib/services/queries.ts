@@ -2,7 +2,7 @@ import { byOwnerFirst, byPersonalFirst } from "@/lib/domain/ordering";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { NotFoundError } from "@/lib/errors";
-import { projectWhere, repoWhere, viaRepo, type Viewer } from "@/lib/authz/viewer";
+import { accessSpaceWhere, projectWhere, repoWhere, viaRepo, type Viewer } from "@/lib/authz/viewer";
 import { deriveReview, type ReviewDerivation, type ReviewInput, type Reviewer } from "@/lib/domain/review";
 import { resolveRule, type RuleRow } from "@/lib/domain/rules";
 import { applyWaitingRules, matchingWaitingRules, type WaitingRuleRow } from "@/lib/domain/waiting-rules";
@@ -28,7 +28,7 @@ async function loadRuleContext(db: Db, v: Viewer) {
   const [rules, waitingRules, members, projectLinks] = await Promise.all([
     db.reviewRule.findMany({ where: { workspaceId: v.workspaceId } }),
     db.waitingRule.findMany({ where: { workspaceId: v.workspaceId, enabled: true } }),
-    db.member.findMany({ where: { workspaceId: v.workspaceId, status: "ACTIVE" }, include: { user: { select: { login: true } } } }),
+    db.member.findMany({ where: { workspaceId: v.workspaceId, status: "ACTIVE" }, include: { user: { select: { login: true, githubId: true } } } }),
     db.projectRepository.findMany({ where: { project: { workspaceId: v.workspaceId } } }),
   ]);
   const ruleRows: RuleRow[] = rules.map((r) => ({
@@ -43,7 +43,7 @@ async function loadRuleContext(db: Db, v: Viewer) {
     reason: r.reason,
     enabled: r.enabled,
   }));
-  const internalLogins = new Set(members.map((m) => m.user.login.toLowerCase()));
+  const internalLogins = new Set(members.filter((m) => m.user.githubId !== null).map((m) => m.user.login.toLowerCase())); // GitHub logins only: an email user's mailbox name is not one
   const projectsByRepo = new Map<string, string[]>();
   for (const l of projectLinks) (projectsByRepo.get(l.repositoryId) ?? projectsByRepo.set(l.repositoryId, []).get(l.repositoryId)!).push(l.projectId);
   const waitingRows: WaitingRuleRow[] = waitingRules.map((r) => ({
@@ -122,7 +122,8 @@ function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<type
     now,
   };
   const matched = matchingWaitingRules(rc.waitingRows, { repositoryId: row.repositoryId, ownerLogin: row.repository.owner.login, projectIds: rc.projectsByRepo.get(row.repositoryId) ?? [], labels, authorLogin: row.authorLogin, type: row.type, draft: row.draft });
-  const derivation = applyWaitingRules(deriveReview(input, v.login), input, matched, v.login);
+  // GitHub identity only: for an email user `login` is the mailbox name and must never match a GitHub user of the same name.
+  const derivation = applyWaitingRules(deriveReview(input, v.githubLogin), input, matched, v.githubLogin);
   const stages = deriveStages({ derivation, input, matched, manual: row.waiting.map((w) => ({ stage: w.stage, reviewerKind: w.reviewerKind, reviewerRef: w.reviewerRef, reason: w.reason, startedAt: w.startedAt, status: w.status, source: w.source })), now });
   return { item: row, derivation, ruleConflict: res.kind === "conflict" ? res.message : null, manualWaiting, stages, dependencyBlockers: input.blockedByDependencies ?? 0 };
 }
@@ -210,7 +211,7 @@ export async function overview(db: Db, v: Viewer, now = new Date()) {
  *  - draft items are visible to members of the project (explicit audience); admin sees all.
  */
 export async function planningWhere(_db: Db, v: Viewer, projectId?: string): Promise<Prisma.PlanningItemWhereInput> {
-  const projectFilter: Prisma.PlanningItemWhereInput = { project: { workspaceId: v.workspaceId, ...(projectId ? { id: projectId } : {}) } };
+  const projectFilter: Prisma.PlanningItemWhereInput = { project: { workspaceId: v.workspaceId, ...(projectId ? { id: projectId } : {}), AND: [accessSpaceWhere(v)] } };
   if (v.isAdmin) return projectFilter;
   return {
     AND: [
@@ -252,8 +253,8 @@ export async function listWorkItems(db: Db, v: Viewer, p: WorkItemListParams) {
   if (p.projectId) and.push({ repository: { projects: { some: { projectId: p.projectId } } } });
   if (p.label) and.push(await labelFilter(db, v, p.label));
   if (p.assignee) and.push({ assigneeLogins: { contains: indexNeedle(p.assignee) } });
-  if (p.author) and.push({ authorLogin: { contains: p.author } }); // SQLite LIKE: case-insensitive substring
-  if (p.q) and.push({ OR: [{ title: { contains: p.q } }, ...(Number.isInteger(Number(p.q)) ? [{ number: Number(p.q) }] : [])] });
+  if (p.author) and.push({ authorLogin: { contains: p.author, mode: "insensitive" } }); // case-insensitive substring (SQLite LIKE was; Postgres needs mode)
+  if (p.q) and.push({ OR: [{ title: { contains: p.q, mode: "insensitive" } }, ...(Number.isInteger(Number(p.q)) ? [{ number: Number(p.q) }] : [])] });
   const where: Prisma.WorkItemWhereInput = { AND: and };
 
   const pageSize = Math.min(Math.max(p.pageSize ?? 25, 1), 100);
@@ -291,14 +292,14 @@ export async function searchGlobal(db: Db, v: Viewer, q: string) {
   const term = q.trim();
   if (term.length < 2) return { repositories: [], workItems: [], planning: [] };
   const [repositories, workItems, planning] = await Promise.all([
-    db.repository.findMany({ where: { AND: [repoWhere(v), { fullName: { contains: term } }] }, take: 6, select: { id: true, fullName: true } }),
+    db.repository.findMany({ where: { AND: [repoWhere(v), { fullName: { contains: term, mode: "insensitive" } }] }, take: 6, select: { id: true, fullName: true } }),
     db.workItem.findMany({
-      where: { AND: [viaRepo(v), { OR: [{ title: { contains: term } }, ...(Number.isInteger(Number(term)) ? [{ number: Number(term) }] : [])] }] },
+      where: { AND: [viaRepo(v), { OR: [{ title: { contains: term, mode: "insensitive" } }, ...(Number.isInteger(Number(term)) ? [{ number: Number(term) }] : [])] }] },
       take: 8,
       orderBy: { updatedAtGh: "desc" },
       select: { id: true, number: true, title: true, type: true, repository: { select: { fullName: true } } },
     }),
-    db.planningItem.findMany({ where: { AND: [await planningWhere(db, v), { title: { contains: term } }] }, take: 5, select: { id: true, title: true, projectId: true } }),
+    db.planningItem.findMany({ where: { AND: [await planningWhere(db, v), { title: { contains: term, mode: "insensitive" } }] }, take: 5, select: { id: true, title: true, projectId: true } }),
   ]);
   return { repositories, workItems, planning };
 }
@@ -321,7 +322,8 @@ export async function listRepositories(db: Db, v: Viewer) {
 
 /** Project names are only exposed to members who belong to that project. Admin sees all. */
 function projectWhereForNames(v: Viewer): Prisma.ProjectWhereInput {
-  return v.isAdmin ? { workspaceId: v.workspaceId } : { workspaceId: v.workspaceId, members: { some: { memberId: v.memberId } } };
+  const base: Prisma.ProjectWhereInput = { workspaceId: v.workspaceId, AND: [accessSpaceWhere(v)] };
+  return v.isAdmin ? base : { ...base, members: { some: { memberId: v.memberId } } };
 }
 
 export async function listProjects(db: Db, v: Viewer) {
@@ -380,13 +382,13 @@ export async function visibleForkMappings(db: Db, v: Viewer) {
 
 export async function unreadNotificationCount(db: Db, v: Viewer) {
   // Notifications tied to a repository are only counted while the viewer still has access to it.
-  return db.notification.count({ where: { userId: v.userId, readAt: null, OR: [{ repositoryId: null }, { repositoryId: { in: await visibleIds(db, v) } }] } });
+  return db.notification.count({ where: { workspaceId: v.workspaceId, userId: v.userId, readAt: null, OR: [{ repositoryId: null }, { repositoryId: { in: await visibleIds(db, v) } }] } });
 }
 async function visibleIds(db: Db, v: Viewer) {
   return (await db.repository.findMany({ where: repoWhere(v), select: { id: true } })).map((r) => r.id);
 }
 export async function listNotifications(db: Db, v: Viewer, take = 30) {
-  return db.notification.findMany({ where: { userId: v.userId, OR: [{ repositoryId: null }, { repositoryId: { in: await visibleIds(db, v) } }] }, orderBy: { createdAt: "desc" }, take });
+  return db.notification.findMany({ where: { workspaceId: v.workspaceId, userId: v.userId, OR: [{ repositoryId: null }, { repositoryId: { in: await visibleIds(db, v) } }] }, orderBy: { createdAt: "desc" }, take });
 }
 
 export async function deriveForIds(db: Db, v: Viewer, ids: string[], now = new Date(), contextProjectId?: string | null): Promise<Map<string, DerivedItem>> {

@@ -7,14 +7,14 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useId, useRef, useState, type ComponentType, type SVGProps } from "react";
 import * as D from "@radix-ui/react-dialog";
-import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, Newspaper, PanelLeft, RefreshCw, Route, Search, Settings, Sparkles, Users, X } from "@/components/ui/icons";
+import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, Globe, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, Newspaper, PanelLeft, RefreshCw, Route, Search, Settings, Sparkles, Users, X } from "@/components/ui/icons";
 import { Collapse } from "@/components/ui/Collapse";
 import { Metric } from "@/components/ui/Metric";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 type Item = { href: string; label: string; icon: Icon; count?: number; children?: { href: string; label: string; count?: number }[] };
 
-export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number; inbox?: number; digest?: number; ai?: number };
+export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number; inbox?: number; digest?: number; ai?: number; /** Federation is switched on for this server: show Linked instances. */ linked?: boolean; /** Hosted: the desktop-only pages (Team as a GitHub space, Branches as local worktrees) do not apply. */ hosted?: boolean };
 
 function buildNav(c: NavCounts, isAdmin: boolean) {
   const main: Item[] = [
@@ -44,9 +44,9 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
   const source: Item[] = [
     { href: "/repositories", label: "Repositories", icon: FolderGit2 },
     { href: "/forks", label: "Forks", icon: GitFork },
-    { href: "/branches", label: "Branches", icon: GitBranch },
+    ...(c.hosted ? [] : [{ href: "/branches", label: "Branches", icon: GitBranch }]),
   ];
-  const team: Item[] = [{ href: "/team", label: "Team", icon: Users }];
+  const team: Item[] = [...(c.hosted ? [] : [{ href: "/team", label: "Team", icon: Users }]), ...(c.linked ? [{ href: "/linked", label: "Linked instances", icon: Globe }] : [])];
   // Used now and then: folded away until you are on one of them.
   const more: Item[] = [
     { href: "/capacity", label: "Review capacity", icon: Route },
@@ -79,13 +79,13 @@ function NavList({ items, onNavigate }: { items: Item[]; onNavigate?: () => void
         return (
           <li key={it.href}>
             <div className="relative">
-              <Link href={it.href} className="nav-item" data-section={sectionFor(it.href)} aria-current={active && !it.children ? "page" : undefined} onClick={onNavigate}>
+              <Link href={it.href} prefetch={false} className={`nav-item${it.children ? " pr-11" : ""}`} data-section={sectionFor(it.href)} aria-current={active && !it.children ? "page" : undefined} onClick={onNavigate}>
                 <I size={16} aria-hidden className="shrink-0 text-ink-3" />
                 <span className="min-w-0 flex-1 truncate">{it.label}</span>
                 {!it.children && it.count ? <span className="rounded-full bg-ink px-1.5 text-[11px] leading-[18px] text-ink-invert"><Metric value={it.count} /></span> : null}
               </Link>
               {it.children && (
-                <button type="button" className="btn btn-quiet btn-icon absolute right-1 top-1 !h-8 !w-8" aria-label={`${expanded ? "Collapse" : "Expand"} ${it.label}`} aria-expanded={expanded} aria-controls={`${uid}-sub-${it.href.replace(/\W/g, "")}`} onClick={() => setOpen((s) => ({ ...s, [it.href]: !expanded }))}>
+                <button type="button" className="btn btn-quiet btn-icon absolute right-0 top-0 !h-10 !w-10" aria-label={`${expanded ? "Collapse" : "Expand"} ${it.label}`} aria-expanded={expanded} aria-controls={`${uid}-sub-${it.href.replace(/\W/g, "")}`} onClick={() => setOpen((s) => ({ ...s, [it.href]: !expanded }))}>
                   <ChevronDown size={14} aria-hidden className="chevron" data-open={expanded} />
                 </button>
               )}
@@ -97,7 +97,7 @@ function NavList({ items, onNavigate }: { items: Item[]; onNavigate?: () => void
                   const act = full === c.href;
                   return (
                     <li key={c.href}>
-                      <Link href={c.href} className="nav-item !text-[12.5px]" aria-current={act ? "page" : undefined} onClick={onNavigate}>
+                      <Link href={c.href} prefetch={false} className="nav-item !text-[12.5px]" aria-current={act ? "page" : undefined} onClick={onNavigate}>
                         <span className="min-w-0 flex-1 truncate">{c.label}</span>
                         {c.count ? <span className="text-[11.5px] text-ink-3"><Metric value={c.count} /></span> : null}
                       </Link>
@@ -114,11 +114,13 @@ function NavList({ items, onNavigate }: { items: Item[]; onNavigate?: () => void
   );
 }
 
-function Group({ label, children }: { label: string; children: React.ReactNode }) {
+/** A group of links with an optional heading; a group with nothing in it renders nothing (no orphan heading). */
+function Group({ label, items, onNavigate }: { label?: string; items: Item[]; onNavigate?: () => void }) {
+  if (items.length === 0) return null;
   return (
     <div>
-      <p className="mb-1 px-2.5 text-[11.5px] font-medium uppercase tracking-[0.04em] text-ink-3">{label}</p>
-      {children}
+      {label ? <p className="mb-1 px-2.5 text-[11.5px] font-medium uppercase tracking-[0.04em] text-ink-3">{label}</p> : null}
+      <NavList items={items} onNavigate={onNavigate} />
     </div>
   );
 }
@@ -140,7 +142,7 @@ function MoreGroup({ items, onNavigate }: { items: Item[]; onNavigate?: () => vo
   };
   return (
     <div ref={box}>
-      <button type="button" aria-expanded={shown} aria-controls={id} onClick={toggle} className="-my-1 mb-0 flex min-h-8 w-full items-center gap-1 px-2.5 text-left text-[11.5px] font-medium uppercase tracking-[0.04em] text-ink-3 hover:text-ink">
+      <button type="button" aria-expanded={shown} aria-controls={id} onClick={toggle} className="-my-1 mb-0 flex min-h-10 w-full items-center gap-1 px-2.5 text-left text-[11.5px] font-medium uppercase tracking-[0.04em] text-ink-3 hover:text-ink">
         More <ChevronDown size={12} aria-hidden className="chevron" data-open={shown} />
       </button>
       <Collapse open={shown} id={id}><NavList items={items} onNavigate={onNavigate} /></Collapse>
@@ -163,17 +165,17 @@ function SidebarBody({ counts, isAdmin, user, onNavigate, workspace }: { counts:
       <form action="/search" role="search" className="relative">
         <label htmlFor={searchId} className="sr-only">Search repositories, pull requests and issues</label>
         <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-[9px] text-ink-3" />
-        <input id={searchId} name="q" type="search" placeholder="Search anything" className="input !pl-8" autoComplete="off" />
+        <input id={searchId} name="q" type="search" placeholder="Search anything…" className="input !pl-8" autoComplete="off" spellCheck={false} />
       </form>
       {/* Rows stay 40px, so on short screens the list scrolls on its own (bottom fade says there is more) and the account link stays put. */}
       <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-5 pr-0.5 [mask-image:linear-gradient(to_bottom,#000_calc(100%_-_20px),transparent)]">
-        <Group label="Main navigation"><NavList items={nav.main} onNavigate={onNavigate} /></Group>
-        <Group label="Source"><NavList items={nav.source} onNavigate={onNavigate} /></Group>
-        <Group label="Collaboration"><NavList items={nav.team} onNavigate={onNavigate} /></Group>
+        <Group items={nav.main} onNavigate={onNavigate} />
+        <Group label="Source" items={nav.source} onNavigate={onNavigate} />
+        <Group label="Collaboration" items={nav.team} onNavigate={onNavigate} />
         <MoreGroup items={nav.more} onNavigate={onNavigate} />
-        {nav.admin.length > 0 && <Group label="Administration"><NavList items={nav.admin} onNavigate={onNavigate} /></Group>}
+        <Group label="Administration" items={nav.admin} onNavigate={onNavigate} />
       </nav>
-      <Link href="/settings" onClick={onNavigate} className="flex items-center gap-2.5 rounded-[10px] border border-line bg-surface p-2 shadow-hair transition-colors duration-[var(--duration-feedback)] hover:bg-subtle">
+      <Link href="/settings" prefetch={false} onClick={onNavigate} className="flex items-center gap-2.5 rounded-[10px] border border-line bg-surface p-2 shadow-hair transition-colors duration-[var(--duration-feedback)] hover:bg-subtle">
         <Avatar login={user.login} url={user.avatarUrl} size={32} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-medium leading-4">{user.name ?? user.login}</span>

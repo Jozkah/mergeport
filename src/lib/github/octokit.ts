@@ -36,9 +36,10 @@ export type OctokitPortOptions = {
   fetch?: typeof fetch;
 };
 
-export function createOctokit(auth: string | undefined, fetchImpl?: typeof fetch): Octokit {
+export function createOctokit(auth: string | undefined, fetchImpl?: typeof fetch, baseUrl?: string): Octokit {
   return new Octokit({
     auth,
+    ...(baseUrl ? { baseUrl } : {}),
     // We surface rate limits to the caller instead of sleeping inside a request; the job queue backs off.
     throttle: { onRateLimit: () => false, onSecondaryRateLimit: () => false },
     retry: { enabled: false },
@@ -180,6 +181,16 @@ export class OctokitPort implements GithubPort {
     }
     // After the last page of the authorized list comes one more page: public repositories GitHub does not list as yours.
     return { repos: data.map(OctokitPort.toRepoMeta), nextPage: OctokitPort.nextPage(headers.link) ?? EXTRAS_PAGE, notes };
+  }
+
+  /**
+   * One page of the repositories this installation can access (`GET /installation/repositories`, installation token only). This is
+   * everything the installation may read, private repositories included: which of them a person may SEE is Mergeport's decision
+   * (repoWhere), never this list's.
+   */
+  async listInstallationRepositories(page: number): Promise<{ repos: RepoMeta[]; nextPage: number | null }> {
+    const { data, headers } = await this.get<{ repositories?: any[] }>("GET /installation/repositories", { per_page: 100, page });
+    return { repos: (data.repositories ?? []).map(OctokitPort.toRepoMeta), nextPage: OctokitPort.nextPage(headers.link) };
   }
 
   /** Full names already returned by `/user/repos` in this run, so the extras step does not fetch them again. */

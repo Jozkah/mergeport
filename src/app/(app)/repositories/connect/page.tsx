@@ -1,6 +1,8 @@
 import { byOwnerFirst } from "@/lib/domain/ordering";
 import Link from "next/link";
 import { db } from "@/lib/db";
+import { isHosted } from "@/lib/public-url";
+import { HostedConnect } from "@/components/repos/HostedConnect";
 import { requireViewer } from "@/lib/authz-page";
 import { KEY_REPOS, cached, refreshing } from "@/lib/local/discovery-jobs";
 import { ActionForm } from "@/components/forms/ActionForm";
@@ -29,10 +31,12 @@ type Tab = (typeof TABS)[number][0];
 
 export default async function Connect({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
   const { viewer } = await requireViewer();
+  // Hosted: the list comes from this workspace's own GitHub connection (installation), not from a person's gh login.
+  if (isHosted()) return <HostedConnect viewer={viewer} />;
   const { show } = await searchParams;
   const tab: Tab = TABS.some(([k]) => k === show) ? (show as Tab) : "all";
-  const view = await cached.repos();
-  const tracked = new Set((await db.repository.findMany({ where: { trackingStatus: { not: "REMOVED" } }, select: { githubId: true } })).map((r) => r.githubId.toString()));
+  const view = await cached.repos(viewer.workspaceId);
+  const tracked = new Set((await db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: { not: "REMOVED" } }, select: { githubId: true } })).map((r) => r.githubId.toString()));
   // Archived repositories are read-only for everyone, so they are not offered for tracking.
   const all = (view.payload?.repos ?? []).filter((r) => !r.archived).slice().sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
   const mine = (r: (typeof all)[number]) => r.owner.login.toLowerCase() === viewer.login.toLowerCase();
@@ -72,7 +76,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
             {view.fetchedAt ? "Your GitHub account listed no repositories when last checked. Public repositories can be added by URL on the Repositories page." : view.state === "EMPTY" || view.state === "RETRYING" ? "Asking GitHub in the background. This page stays usable meanwhile." : "GitHub has not been reachable yet, so nothing is saved. This is not an empty account: use Check again when you are online."}
           </EmptyState>
         ) : (
-          <ActionForm action={trackSelectedAction} submitLabel="Track selected" pendingLabel="Tracking…" className="flex flex-col" success={{ link: { href: "/repositories", label: "Open Repositories" } }}>
+          <ActionForm action={trackSelectedAction} submitLabel="Track selected" pendingLabel="Tracking…" className="flex flex-col" success={{ link: { href: "/repositories", label: "Open repositories" } }}>
             <ul className="max-h-[60vh] overflow-y-auto">
               {repos.map((r) => {
                 const already = tracked.has(r.githubId.toString());

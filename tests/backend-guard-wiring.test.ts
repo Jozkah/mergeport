@@ -1,13 +1,14 @@
+import { wsId } from "./helpers";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { syncHubSpaces } from "@/lib/hub/spaces";
 import { BackendMismatchError } from "@/lib/local/backend-guard";
 import { hubBackendId, type Backend } from "@/lib/local/backends";
 import { SyncEngine } from "@/lib/sync/engine";
 import { TeamService } from "@/lib/team/service";
 
-const db = createPrisma(path.resolve(".data", `backend-guard-wiring-${process.pid}.db`));
+const db = createTestPrisma(path.resolve(".data", `backend-guard-wiring-${process.pid}.db`));
 afterAll(() => db.$disconnect());
 
 const base = { remoteId: "r", teamRemoteId: "t", kind: "COMMON" as const, name: "n" };
@@ -26,8 +27,8 @@ function engine(profileBackend: Backend) {
 }
 
 let n = 0;
-const githubSpace = () => db.space.create({ data: { ...base, remoteId: `g${n}`, repoOwner: "acme", repoName: `guard-${n++}` } });
-const hubSpace = () => db.space.create({ data: { ...base, remoteId: `h${n}`, backend: "HUB", repoOwner: "", repoName: "", hubSpaceId: `guard-${n++}` } });
+const githubSpace = async () => db.space.create({ data: { workspaceId: await wsId(db), ...base, remoteId: `g${n}`, repoOwner: "acme", repoName: `guard-${n++}` } });
+const hubSpace = async () => db.space.create({ data: { workspaceId: await wsId(db), ...base, remoteId: `h${n}`, backend: "HUB", repoOwner: "", repoName: "", hubSpaceId: `guard-${n++}` } });
 
 describe("backend isolation guard wired into the engine", () => {
   it("a GITHUB space in a hub profile is refused before any network call", async () => {

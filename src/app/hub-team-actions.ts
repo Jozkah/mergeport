@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireViewer } from "@/lib/auth/current";
+import { requireWriter } from "@/lib/auth/current";
 import { ValidationError } from "@/lib/errors";
 import { HubForbidden, HubRequestError, HubUnauthorized } from "@/lib/hub/ports";
 import { isHubBackend } from "@/lib/local/backends";
@@ -42,7 +42,7 @@ async function hubRun(fn: () => Promise<ActionResult | void>): Promise<ActionRes
 
 export async function hubInviteAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    await requireWriter();
     const { svc } = await hubService();
     await svc.invite(str(fd, "login"), role(fd, "role"));
     revalidatePath("/team");
@@ -52,7 +52,7 @@ export async function hubInviteAction(fd: FormData): Promise<ActionResult> {
 
 export async function hubChangeRoleAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    await requireWriter();
     const { svc } = await hubService();
     await svc.changeRole(str(fd, "githubId"), role(fd, "role"));
     revalidatePath("/team");
@@ -62,7 +62,7 @@ export async function hubChangeRoleAction(fd: FormData): Promise<ActionResult> {
 
 export async function hubRemoveMemberAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    await requireWriter();
     const { svc } = await hubService();
     await svc.removeMember(str(fd, "githubId"));
     revalidatePath("/team");
@@ -72,7 +72,7 @@ export async function hubRemoveMemberAction(fd: FormData): Promise<ActionResult>
 
 export async function hubCancelInviteAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    await requireWriter();
     const { svc } = await hubService();
     await svc.cancelInvite(str(fd, "inviteId"));
     revalidatePath("/team");
@@ -82,7 +82,7 @@ export async function hubCancelInviteAction(fd: FormData): Promise<ActionResult>
 
 export async function hubReinstateMemberAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    await requireWriter();
     const { svc } = await hubService();
     await svc.reinstateMember(str(fd, "githubId"), str(fd, "role"));
     revalidatePath("/team");
@@ -92,7 +92,7 @@ export async function hubReinstateMemberAction(fd: FormData): Promise<ActionResu
 
 export async function hubCreateSpaceAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    await requireWriter();
     const { svc } = await hubService();
     // The audience can only name people the hub currently lists as members; anything else in the form is dropped.
     const known = new Set((await svc.overview()).members.filter((m) => m.status !== "REMOVED").map((m) => m.githubId));
@@ -106,7 +106,7 @@ export async function hubCreateSpaceAction(fd: FormData): Promise<ActionResult> 
 
 export async function hubDeleteSpaceAction(fd: FormData): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    await requireWriter();
     const { svc } = await hubService();
     await svc.deleteSpace(str(fd, "spaceId"), { confirmed: str(fd, "confirm") === "on" });
     revalidatePath("/team");
@@ -117,7 +117,7 @@ export async function hubDeleteSpaceAction(fd: FormData): Promise<ActionResult> 
 /** Ends the session on the hub and forgets it here. The caller then switches the app back to GitHub. */
 export async function hubSignOutAction(): Promise<ActionResult> {
   return hubRun(async () => {
-    await requireViewer();
+    await requireWriter();
     const { svc, dbFile } = await hubService();
     await svc.signOut(dbFile);
     return { ok: true, data: { switchTo: "github" } };

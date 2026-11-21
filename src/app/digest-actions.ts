@@ -26,7 +26,7 @@ export async function markDigestReadAction(day: string): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireViewer();
     if (!isDay(day)) throw new ValidationError("That is not a day");
-    await markDigestRead(db, viewer.userId, day);
+    await markDigestRead(db, viewer, day);
     revalidatePath("/digest");
     revalidatePath("/");
     return { ok: true };

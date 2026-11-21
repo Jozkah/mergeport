@@ -9,6 +9,8 @@ import { STAGES, stageLabel } from "@/lib/domain/stages";
 import { sinceLastLooked } from "@/lib/services/seen";
 import { SinceYouLooked } from "@/components/review/SinceYouLooked";
 import { OwnersPanel } from "@/components/code/ReviewTools";
+import { isHosted } from "@/lib/public-url";
+import { GITHUB_WRITES_DISABLED } from "@/lib/github/hosted";
 import { WorktreePanel } from "@/components/work/WorktreePanel";
 import { linksForPull } from "@/lib/services/work-links";
 import { deriveReadiness } from "@/lib/domain/readiness";
@@ -56,7 +58,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   const manualOpen = derived.manualWaiting;
   const sinceLooked = await sinceLastLooked(db, viewer, item.id);
   const localLinks = isPr ? await linksForPull(db, viewer, item.id) : null;
-  const writeBlocked = !hasConnection ? "Sign in with the GitHub CLI (gh auth login) to make changes on GitHub." : undefined;
+  const writeBlocked = !hasConnection ? (isHosted() ? `${GITHUB_WRITES_DISABLED}.` : "Sign in with the GitHub CLI (gh auth login) to make changes on GitHub.") : undefined;
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
   const comments = item.comments;
@@ -234,7 +236,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
         {labels.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{labels.map((l) => <LabelChip key={l.name} {...l} />)}</div>}
       </header>
 
-      {!isDemo() && (await getAiView(db)).saved && <AiTool className="mb-5" tool="item" id={item.id} label="Where does this stand?" hint="AI summary of the discussion, what blocks it and the next step." />}
+      {!isDemo() && (await getAiView(db, viewer.workspaceId)).saved && <AiTool className="mb-5" tool="item" id={item.id} label="Where does this stand?" hint="AI summary of the discussion, what blocks it and the next step." />}
 
       {isPr && readiness && item.state === "OPEN" && (
         <div className="mb-5">

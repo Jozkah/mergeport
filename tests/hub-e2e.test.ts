@@ -1,8 +1,10 @@
+import { wsId } from "./helpers";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Space } from "@/generated/prisma/client";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { HttpHubClient } from "@/lib/hub/client";
 import type { SocketLike } from "@/lib/hub/link";
 import { startHubLive } from "@/lib/hub/live";
@@ -57,10 +59,10 @@ const open: { close(): Promise<void> }[] = [];
 async function makeClient(githubId: bigint, login: string, token: string) {
   const file = path.resolve(".data", `client-e2e-${login}-${process.pid}-${counter++}.db`);
   for (const sfx of ["", "-wal", "-shm"]) fs.rmSync(file + sfx, { force: true });
-  const db: Db = createPrisma(file);
+  const db: Db = createTestPrisma(file);
   const profile = await ensureLocalProfile(db, { id: githubId, login, name: login, avatarUrl: null, host: "github.com" });
   const origin = hub.url;
-  await db.teamConfig.upsert({ where: { id: "team" }, create: { id: "team", mode: "TEAM", backend: "HUB", hubOrigin: origin }, update: { mode: "TEAM", backend: "HUB", hubOrigin: origin } });
+  await db.teamConfig.upsert({ where: { workspaceId: await wsId(db) }, create: { workspaceId: await wsId(db), mode: "TEAM", backend: "HUB", hubOrigin: origin }, update: { mode: "TEAM", backend: "HUB", hubOrigin: origin } });
   const client = new HttpHubClient(origin, async () => token);
   const sockets: NodeSocket[] = [];
   let live: ReturnType<typeof startHubLive> | null = null;
@@ -213,10 +215,13 @@ describe("two clients against the real hub", () => {
     expect(removed.status).toBe(204);
     expect(await sock.closed).toBe(4403);
     await vi.waitFor(async () => expect((await alice.space("common")).access).toBe("REVOKED"), { timeout: 3000 });
-    expect(alice.live!.link.state).toBe("removed");
-    expect((await alice.db.outboxOp.findMany()).map((o) => o.status)).toEqual(["QUARANTINED"]);
-    expect(await alice.db.project.count()).toBe(0);
-    expect(await alice.db.planningItem.count()).toBe(0);
+    // access flips first; the quarantine and removing her copies follow: wait for the end state, not the first step
+    await vi.waitFor(async () => {
+      expect(alice.live!.link.state).toBe("removed");
+      expect((await alice.db.outboxOp.findMany()).map((o) => o.status)).toEqual(["QUARANTINED"]);
+      expect(await alice.db.project.count()).toBe(0);
+      expect(await alice.db.planningItem.count()).toBe(0);
+    }, { timeout: 3000 });
     // the hub revoked her sessions on removal (admin-routes.ts), so the old token is simply unknown: 401
     await expect(alice.client.me()).rejects.toMatchObject({ kind: "auth" });
     expect(await title(olive, "c1")).toBe("One");

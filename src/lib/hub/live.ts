@@ -60,11 +60,11 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
         let retries = 0;
         for (;;) {
           dirty.delete(spaceId);
-          const sp = await o.db.space.findUnique({ where: { id: spaceId } });
+          const sp = await o.db.space.findUnique({ where: { id: spaceId, workspaceId: await o.engine.workspaceId() } });
           if (!sp || sp.backend !== "HUB" || sp.access === "REVOKED") return;
           await o.engine.syncSpace(sp);
           if (dirty.has(spaceId)) continue;
-          const after = await o.db.space.findUnique({ where: { id: spaceId } });
+          const after = await o.db.space.findUnique({ where: { id: spaceId, workspaceId: await o.engine.workspaceId() } });
           const want = wanted.get(spaceId);
           if (stopped || !after || after.access === "REVOKED" || want === undefined || after.hubCursor >= want || retries++ >= MAX_RETRIES) return;
           await new Promise<void>((resolve) => {
@@ -86,7 +86,7 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
     return p;
   };
   const syncAll = async () => {
-    const spaces = await o.db.space.findMany({ where: { backend: "HUB" } });
+    const spaces = await o.db.space.findMany({ where: { workspaceId: await o.engine.workspaceId(), backend: "HUB" } });
     await Promise.all(spaces.map((s) => syncOne(s.id)));
   };
 
@@ -109,13 +109,13 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
     await syncAll();
   };
 
-  const byHubId = (hubSpaceId: string) => o.db.space.findFirst({ where: { backend: "HUB", hubSpaceId } });
+  const byHubId = async (hubSpaceId: string) => o.db.space.findFirst({ where: { workspaceId: await o.engine.workspaceId(), backend: "HUB", hubSpaceId } });
   const revoke = async (hubSpaceId: string) => {
     const sp = await byHubId(hubSpaceId);
     if (sp && sp.access !== "REVOKED") await o.engine.revokeSpace(sp.id, "You no longer have access to this space");
   };
   const revokeAll = async () => {
-    for (const s of await o.db.space.findMany({ where: { backend: "HUB" } })) {
+    for (const s of await o.db.space.findMany({ where: { workspaceId: await o.engine.workspaceId(), backend: "HUB" } })) {
       if (s.access !== "REVOKED") await o.engine.revokeSpace(s.id, "You were removed from this server");
     }
   };
@@ -190,7 +190,7 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
     if (link.state !== "live") return refreshAndSyncAll();
     void sendWatch().catch(() => {}); // safety net for a tracking change that did not announce itself
     const now = new Date();
-    for (const s of await o.db.space.findMany({ where: { backend: "HUB", access: { not: "REVOKED" } } })) {
+    for (const s of await o.db.space.findMany({ where: { workspaceId: await o.engine.workspaceId(), backend: "HUB", access: { not: "REVOKED" } } })) {
       const want = wanted.get(s.id);
       const unhealthy = !!s.lastError || (!!s.rateLimitedUntil && s.rateLimitedUntil <= now) || (want !== undefined && s.hubCursor < want);
       if (unhealthy) void syncOne(s.id);
@@ -211,7 +211,7 @@ export function startHubLive(o: HubLiveOptions): { link: HubLink; live(): boolea
   // An op left SENT by a crash mid-push is safe to resend: the hub answers `duplicate`.
   void (async () => {
     try {
-      const ids = (await o.db.space.findMany({ where: { backend: "HUB" }, select: { id: true } })).map((x) => x.id);
+      const ids = (await o.db.space.findMany({ where: { workspaceId: await o.engine.workspaceId(), backend: "HUB" }, select: { id: true } })).map((x) => x.id);
       await o.db.outboxOp.updateMany({ where: { spaceId: { in: ids }, status: "SENT" }, data: { status: "PENDING" } });
     } catch {
       // the next push settles it

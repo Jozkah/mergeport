@@ -4,13 +4,16 @@ import path from "node:path";
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
   test: {
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
     environment: "node",
     globalSetup: ["tests/global-setup.ts"],
     fileParallelism: false,
+    testTimeout: 20_000, // each isolated test database is a CREATE DATABASE ... TEMPLATE; Postgres is slower than a SQLite file
     env: {
       DEMO_MODE: "true",
-      MERGEPORT_DB: path.resolve(import.meta.dirname, ".data", "test.db"),
+      // Embedded Postgres started by tests/global-setup.ts (port 5434, data dir .data/pg-test).
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5434/mergeport_test",
+      MERGEPORT_DB: path.resolve(import.meta.dirname, ".data", "test.db"), // anchor path for the vault key file only
     },
   },
 });

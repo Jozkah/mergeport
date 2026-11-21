@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { importLegacy, loadSchema, parseSchema, type LegacyRows } from "@/lib/db/postgres-import";
 import { freshSeed, leaks } from "./helpers";
 
@@ -16,7 +17,7 @@ const files: string[] = [];
 const fresh = () => {
   const f = path.resolve(".data", `client-migration-${process.pid}-${files.length}.db`);
   files.push(f);
-  return createPrisma(f);
+  return createTestPrisma(f);
 };
 
 beforeAll(async () => {
@@ -72,6 +73,21 @@ describe("legacy Postgres import", () => {
       for (const n of names) expect(w.labelNames).toContain(`|${n}|`);
     }
     await db.$disconnect();
+  });
+
+  it("a legacy administrator keeps the full view whether the old row says ADMIN or OWNER (the roles migration added OWNER)", async () => {
+    const adminUser = legacy.User.find((u) => u.login === "owner-demo")!;
+    const counts: number[] = [];
+    for (const role of ["ADMIN", "OWNER"]) {
+      const rows: LegacyRows = { ...legacy, Member: legacy.Member.map((m) => (m.userId === adminUser.id ? { ...m, role } : m)) };
+      const db = fresh();
+      await importLegacy(db, models, rows, { login: "owner-demo" });
+      counts.push(await db.workItem.count({ where: { NOT: { labels: { equals: [] } } } }));
+      expect((await db.member.findFirstOrThrow()).role).toBe("ADMIN");
+      await db.$disconnect();
+    }
+    expect(counts[0]).toBeGreaterThan(0);
+    expect(counts[1]).toBe(counts[0]);
   });
 
   it("does not carry rows that hang off content the person could not see, nor other people's audit trail", async () => {

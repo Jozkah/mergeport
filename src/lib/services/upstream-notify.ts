@@ -5,7 +5,7 @@ import type { Db } from "@/lib/db";
  * Shared by the merge pipeline and the release watch so both honour the same preference.
  */
 export async function notifyUpstream(db: Db, r: { kind: "upstream-update" | "upstream-release"; mappingId: string; forkRepoId: string; workspaceId: string; title: string }) {
-  const admins = await db.member.findMany({ where: { workspaceId: r.workspaceId, status: "ACTIVE", role: "ADMIN" }, select: { userId: true } });
+  const admins = await db.member.findMany({ where: { workspaceId: r.workspaceId, status: "ACTIVE", role: { in: ["OWNER", "ADMIN"] } }, select: { userId: true } });
   for (const a of admins) {
     const pref = await db.notificationPref.findUnique({ where: { userId: a.userId } });
     // The kind is not in the Settings list yet (that list is fixed by tests/notify.test.ts); a stored `inApp: false` for it is honoured.

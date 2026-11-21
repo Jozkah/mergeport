@@ -1,3 +1,4 @@
+import { wsId } from "./helpers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 import { GithubError } from "@/lib/github/port";
@@ -65,7 +66,7 @@ describe("create team and invitations", () => {
     const manifest = JSON.parse(server.files("olive", repo.name)["mergeport.json"]);
     expect(manifest).toMatchObject({ schema: 1, kind: "mergeport-space", spaceKind: "COMMON", teamName: "Atlas Crew" });
     expect(space.canAdmin).toBe(true);
-    expect((await olive.db.teamConfig.findUniqueOrThrow({ where: { id: "team" } })).mode).toBe("TEAM");
+    expect((await olive.db.teamConfig.findUniqueOrThrow({ where: { workspaceId: await wsId(olive.db) } })).mode).toBe("TEAM");
   });
 
   it("a name collision gets a suffix and never touches the unrelated repository", async () => {
@@ -477,7 +478,19 @@ describe("privacy boundaries", () => {
     await expect(alice.team.createRestrictedSpace({ name: "Sneaky", owner: "olive" })).rejects.toBeInstanceOf(GithubError);
     await alice.engine.syncSpace(aliceCommon);
     expect((await alice.db.member.findFirstOrThrow()).role).toBe("MEMBER");
+    // a row that holds OWNER (a profile that was a hosted workspace, or migrated by the roles migration) gets no authority from it either
+    await alice.db.member.updateMany({ data: { role: "OWNER" } });
+    await alice.engine.refreshRole();
+    const after = await alice.db.member.findFirstOrThrow();
+    expect(after.role).toBe("MEMBER");
     void common;
+  });
+
+  it("a READER is not promoted by the legacy role sync", async () => {
+    const { alice, aliceCommon } = await teamOfTwo();
+    await alice.db.member.updateMany({ data: { role: "READER" } });
+    await alice.engine.syncSpace(aliceCommon);
+    expect((await alice.db.member.findFirstOrThrow()).role).toBe("READER");
   });
 
   it("no token, path or local file ever reaches a coordination repository", async () => {

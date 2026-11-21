@@ -5,6 +5,7 @@ import { canSpend, shouldApplyUpdate } from "@/lib/domain/sync";
 import { classifyCompare, classifyUpstreamMerge } from "@/lib/domain/forks";
 import { GithubError, type GithubPort, type RemoteComment, type RemoteWorkItem } from "@/lib/github/port";
 import { mapLimit } from "@/lib/util";
+import { purgeDigests } from "@/lib/services/digest-purge";
 import { indexList, sameLogin } from "@/lib/domain/text-index";
 import { refreshHubWatch } from "@/lib/hub/watch";
 import { parsePrefs, wantsInApp } from "@/lib/domain/notify-prefs";
@@ -152,7 +153,7 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
   // closed PR, so history must not turn into "waiting on" rows or fresh notifications.
   const isOpen = i.state === "OPEN";
   const active = isOpen ? [...requested.users.map((u) => ({ kind: "USER" as const, ref: u })), ...requested.teams.map((t) => ({ kind: "TEAM" as const, ref: t }))] : [];
-  if (!isOpen) await db.notification.deleteMany({ where: { kind: "review-requested", readAt: null, href: `/pull-requests/${wi.id}` } });
+  if (!isOpen) await db.notification.deleteMany({ where: { kind: "review-requested", readAt: null, repositoryId, href: `/pull-requests/${wi.id}` } });
   const open = await db.reviewRequest.findMany({ where: { workItemId: wi.id, removedAt: null } });
   for (const o of open) {
     if (!active.some((a) => a.kind === o.kind && a.ref.toLowerCase() === o.reviewerRef.toLowerCase())) await db.reviewRequest.update({ where: { id: o.id }, data: { removedAt: now } });
@@ -168,7 +169,7 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
 /** Notifications are dashboard records only. They carry repositoryId so reads can be filtered by current grants. */
 async function notifyReviewer(db: Db, workItemId: string, login: string, title: string) {
   const wi = await db.workItem.findUniqueOrThrow({ where: { id: workItemId }, include: { repository: true } });
-  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: login } } }, include: { user: true } });
+  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { githubId: { not: null }, login: { contains: login, mode: "insensitive" } } }, include: { user: true } });
   const member = candidates.find((m) => sameLogin(m.user.login, login));
   if (!member) return;
   await notifyUser(db, member.userId, wi, "review-requested", `Review requested: ${title}`);
@@ -185,7 +186,7 @@ async function notifyUser(db: Db, userId: string, wi: { id: string; repositoryId
 async function notifyAuthorChanges(db: Db, workItemId: string, reviewer: string | null, title: string) {
   const wi = await db.workItem.findUniqueOrThrow({ where: { id: workItemId }, include: { repository: true } });
   if (wi.state !== "OPEN" || !wi.authorLogin || (reviewer && sameLogin(reviewer, wi.authorLogin))) return;
-  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { login: { contains: wi.authorLogin } } }, include: { user: true } });
+  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { githubId: { not: null }, login: { contains: wi.authorLogin, mode: "insensitive" } } }, include: { user: true } });
   const member = candidates.find((m) => sameLogin(m.user.login, wi.authorLogin!));
   if (!member) return;
   await notifyUser(db, member.userId, wi, "changes-requested", `Changes requested${reviewer ? ` by ${reviewer}` : ""}: ${title}`);
@@ -203,6 +204,7 @@ export async function syncRepository(db: Db, port: GithubPort, repositoryId: str
   try {
     // Refresh canonical metadata first: handles rename, transfer, default-branch change and archive.
     const meta = await port.getRepository(owner, name);
+    const wasPublic = repo.visibility === "PUBLIC";
     // A transfer changes the owner too; later requests are built from owner + name, so both move together. The REMOVED guard stays.
     const newOwner = await db.githubOwner.upsert({
       where: { githubId: meta.owner.githubId },
@@ -213,6 +215,15 @@ export async function syncRepository(db: Db, port: GithubPort, repositoryId: str
       where: { id: repo.id, trackingStatus: { not: "REMOVED" } },
       data: { ownerId: newOwner.id, htmlUrl: meta.htmlUrl, fullName: meta.fullName, name: meta.name, defaultBranch: meta.defaultBranch, archived: meta.archived, visibility: meta.visibility, isFork: meta.isFork, parentGithubId: meta.parentGithubId ?? null, parentFullName: meta.parentFullName ?? null, permissions: (meta.permissions ?? undefined) as Prisma.InputJsonValue | undefined },
     });
+
+    // A public repository turning private: grants given while it was public (a member who tracked it, or an administrator's blanket grant) must
+    // not carry over. Everyone but owners and administrators loses it until someone grants it again on purpose, and stored digests go.
+    if (wasPublic && meta.visibility !== "PUBLIC") {
+      const holders = await db.repositoryGrant.findMany({ where: { repositoryId: repo.id, revokedAt: null }, select: { member: { select: { userId: true } } } });
+      await db.repositoryGrant.updateMany({ where: { repositoryId: repo.id, revokedAt: null }, data: { revokedAt: now } });
+      await purgeDigests(db, repo.workspaceId, holders.map((h) => h.member.userId));
+      await db.auditLog.create({ data: { workspaceId: repo.workspaceId, action: "repository.visibility-flip", targetType: "Repository", targetId: repo.id, meta: { from: "PUBLIC", to: meta.visibility, grantsRevoked: holders.length } } });
+    }
 
     const touched: RemoteWorkItem[] = [];
     for (let page = 1; ; ) {
@@ -256,11 +267,11 @@ export async function syncRepository(db: Db, port: GithubPort, repositoryId: str
 
     // Review requests left on pull requests that are no longer open (older syncs recorded them) stop counting as pending.
     await db.reviewRequest.updateMany({ where: { removedAt: null, workItem: { repositoryId: repo.id, state: { not: "OPEN" } } }, data: { removedAt: now } });
-    const staleNotes = await db.notification.findMany({ where: { kind: "review-requested", readAt: null, repositoryId: repo.id }, select: { id: true, href: true } });
+    const staleNotes = await db.notification.findMany({ where: { workspaceId: repo.workspaceId, kind: "review-requested", readAt: null, repositoryId: repo.id }, select: { id: true, href: true } });
     if (staleNotes.length) {
       const ids = staleNotes.map((n) => n.href?.replace("/pull-requests/", "") ?? "");
       const open = new Set((await db.workItem.findMany({ where: { id: { in: ids }, state: "OPEN" }, select: { id: true } })).map((w) => w.id));
-      await db.notification.deleteMany({ where: { id: { in: staleNotes.filter((n, k) => !open.has(ids[k])).map((n) => n.id) } } });
+      await db.notification.deleteMany({ where: { workspaceId: repo.workspaceId, id: { in: staleNotes.filter((n, k) => !open.has(ids[k])).map((n) => n.id) } } });
     }
     await setStatus(db, repo.id, { lastSyncedAt: now, syncError: null, rateLimited: false, trackingStatus: "ACTIVE", statusDetail: null });
     return result;

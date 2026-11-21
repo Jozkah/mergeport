@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { RestorePreview } from "@/lib/services/backup";
 
 /** Download a backup, or choose one to restore. Restoring always shows what it would change first and needs a confirmation. */
-export function BackupPanel() {
+export function BackupPanel({ hosted = false }: { hosted?: boolean }) {
   const [text, setText] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [preview, setPreview] = useState<RestorePreview | null>(null);
@@ -31,7 +31,7 @@ export function BackupPanel() {
     <div className="flex flex-col gap-4 p-4 text-[13px]">
       <div>
         <p className="font-medium">Back up</p>
-        <p className="mt-0.5 text-ink-3">A file of planning, rules, views, preferences and unsent edits. No credentials or folder paths.</p>
+        <p className="mt-0.5 text-ink-3">{hosted ? "A file of this workspace's planning, rules, views and preferences. No credentials." : "A file of planning, rules, views, preferences and unsent edits. No credentials or folder paths."}</p>
         <a className="btn mt-2 inline-flex" href="/api/backup/export" download>Download a backup</a>
       </div>
       <div className="border-t border-line pt-4">
@@ -46,7 +46,7 @@ export function BackupPanel() {
             <table className="mt-2 w-full text-left text-[12.5px]"><thead className="text-ink-3"><tr><th className="py-1 pr-3 font-medium">Records</th><th className="px-2 font-medium">New</th><th className="px-2 font-medium">Changed</th><th className="px-2 font-medium">Same</th><th className="px-2 font-medium">Skipped</th></tr></thead>
               <tbody className="divide-y divide-line">{preview.tables.map((t) => <tr key={t.table}><td className="py-1 pr-3">{t.table}</td><td className="tnum px-2">{t.create}</td><td className="tnum px-2">{t.update}</td><td className="tnum px-2">{t.same}</td><td className="tnum px-2">{t.skipped}</td></tr>)}</tbody></table>
             {preview.skipped.length > 0 && <ul className="mt-2 list-disc pl-5 text-waiting">{preview.skipped.map((s) => <li key={s.table + s.why}>{s.count} {s.table} skipped: {s.why}</li>)}</ul>}
-            <p className="mt-2 text-ink-3">Unsent edits in this backup: {preview.unsentEdits}. {preview.outbox.restorable} can be restored here{preview.outbox.skipped ? `, ${preview.outbox.skipped} cannot (their team space is not set up on this computer)` : ""}.</p>
+            {!hosted && <p className="mt-2 text-ink-3">Unsent edits in this backup: {preview.unsentEdits}. {preview.outbox.restorable} can be restored here{preview.outbox.skipped ? `, ${preview.outbox.skipped} cannot (their team space is not set up on this computer)` : ""}.</p>}
             {preview.notes.map((n) => <p key={n} className="mt-1 text-ink-3">{n}</p>)}
             <div className="mt-3 flex gap-2">
               <button type="button" className="btn btn-primary" disabled={busy} onClick={async () => { const r = await call("/api/backup/restore"); if (r) { setMsg({ ok: true, text: "Restored." }); setPreview(null); setText(null); } }}>{busy ? "Restoring…" : "Restore this backup"}</button>

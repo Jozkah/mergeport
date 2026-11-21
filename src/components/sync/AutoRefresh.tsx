@@ -26,7 +26,7 @@ export function AutoRefresh({ listKey, auto, busy, label = "Check again" }: { li
   }, [auto]);
   return (
     <button type="button" className="btn !h-7" onClick={ask} disabled={pending || busy} aria-label={`${label}: ask GitHub again in the background`}>
-      {pending || busy ? <LoaderCircle size={13} aria-hidden className="animate-spin" /> : <RefreshCw size={13} aria-hidden />} {pending || busy ? "Checking…" : label}
+      {pending || busy ? <LoaderCircle size={13} aria-hidden className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={13} aria-hidden />} {pending || busy ? "Checking…" : label}
     </button>
   );
 }

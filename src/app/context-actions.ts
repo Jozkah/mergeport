@@ -3,7 +3,7 @@
 import path from "node:path";
 import { revalidatePath } from "next/cache";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireViewer } from "@/lib/auth/current";
+import { requireViewer, requireWriter } from "@/lib/auth/current";
 import { ValidationError } from "@/lib/errors";
 import { createContext, profileDirOf, renameContext, setActive } from "@/lib/local/contexts";
 import { RESTART_EXIT_CODE } from "@/lib/local/restart-code";
@@ -19,7 +19,7 @@ function where() {
 
 export async function createContextAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
+    await requireWriter();
     const { dir, baseName } = where();
     try {
       const c = createContext(dir, baseName, str(fd, "name"));
@@ -33,7 +33,7 @@ export async function createContextAction(fd: FormData): Promise<ActionResult> {
 
 export async function renameContextAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await requireViewer();
+    await requireWriter();
     const { dir, baseName } = where();
     try {
       renameContext(dir, baseName, str(fd, "id"), str(fd, "name"));

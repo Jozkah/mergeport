@@ -39,17 +39,17 @@ export function Panel({ title, icon: I, actions, children, className, bodyClassN
 }
 
 /**
- * The subtitle is one line at every width (ellipsis; a string subtitle keeps its full text in `title`). Longer explanation
+ * The subtitle clamps to two lines (a string subtitle keeps its full text in `title`). Longer explanation
  * goes in `help`: a closed "About this page" disclosure (native <details>, so it works without JavaScript).
  */
 export function PageHeader({ title, subtitle, actions, help }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; help?: ReactNode }) {
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
       <div className="min-w-0 max-w-full">
-        <h1 className="flex items-center gap-3 text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink"><SectionTile /><span className="min-w-0">{title}</span></h1>
-        {subtitle && <p className="mt-1 max-w-[70ch] truncate text-[13px] text-ink-3" title={typeof subtitle === "string" ? subtitle : undefined}>{subtitle}</p>}
+        <h1 className="wrap-any flex items-center gap-3 text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink [text-wrap:balance]"><SectionTile /><span className="min-w-0">{title}</span></h1>
+        {subtitle && <p className="mt-1 line-clamp-2 max-w-[70ch] text-[13px] text-ink-3" title={typeof subtitle === "string" ? subtitle : undefined}>{subtitle}</p>}
         {help && (
-          <details className="groupmt-0.5 max-w-[70ch]">
+          <details className="group mt-0.5 max-w-[70ch]">
             <summary className="-ml-1 inline-flex h-10 cursor-pointer list-none items-center gap-1.5 rounded-[6px] px-1 text-[12.5px] text-ink-3 transition-colors duration-[var(--duration-feedback)] hover:text-ink [&::-webkit-details-marker]:hidden">
               <Info size={14} aria-hidden className="shrink-0" />
               About this page
@@ -87,10 +87,14 @@ export function StatusPill({ status, label }: { status: PrimaryStatus; label?: s
   );
 }
 
-export function SimplePill({ tone, icon: I, children }: { tone: "needs" | "waiting" | "changes" | "blocked" | "ok" | "unknown"; icon?: Icon; children: ReactNode }) {
+const TONE_ICON: Record<"needs" | "waiting" | "changes" | "blocked" | "ok" | "unknown", Icon> = { needs: Info, waiting: Hourglass, changes: CircleAlert, blocked: Ban, ok: Check, unknown: CircleHelp };
+
+/** A state pill always carries an icon (colour never stands alone): pass `icon`, or the tone's default is used. */
+export function SimplePill({ tone, icon, children }: { tone: "needs" | "waiting" | "changes" | "blocked" | "ok" | "unknown"; icon?: Icon; children: ReactNode }) {
+  const I = icon ?? TONE_ICON[tone];
   return (
     <span className={cn("pill", `pill-${tone}`)}>
-      {I && <I size={12} aria-hidden />}
+      <I size={12} aria-hidden />
       {children}
     </span>
   );
@@ -132,10 +136,12 @@ export function EmptyState({ icon: I, title, children, action }: { icon?: Icon; 
  * `dismissible` adds a close button; with a `storageKey` the dismissal is remembered on this device (see DismissibleBanner).
  */
 export function Banner({ tone = "info", title, children, action, dismissible = false, storageKey }: { tone?: "info" | "warn" | "error"; title: string; children?: ReactNode; action?: ReactNode; dismissible?: boolean; storageKey?: string }) {
-  const cls = tone === "error" ? "pill-blocked" : tone === "warn" ? "pill-waiting" : "pill-needs";
+  const cls = tone === "error" ? "pill-blocked" : tone === "warn" ? "pill-waiting" : "banner-info"; // info is neutral: blue is reserved for "needs my review"
   const I = tone === "info" ? Info : CircleAlert;
   const role = tone === "error" ? "alert" : "status";
-  const className = cn("flex items-start gap-3 rounded-[10px] border px-3 py-2.5 text-[13px]", cls);
+  // With an action the row wraps below sm: the icon and text stay on the first line, the action drops to its own row under the text
+  // (indented to the text) and the dismiss X stays top-right. From sm up everything sits side by side.
+  const className = cn("flex items-start gap-3 rounded-[10px] border px-3 py-2.5 text-[13px]", !!action && "flex-wrap sm:flex-nowrap", cls);
   const style = { height: "auto", borderRadius: 10 };
   const body = (
     <>
@@ -144,7 +150,7 @@ export function Banner({ tone = "info", title, children, action, dismissible = f
         <p className="font-medium">{title}</p>
         {children && <div className="mt-0.5 text-[12.5px] opacity-90">{children}</div>}
       </div>
-      {action}
+      {action && <div data-banner-action className="order-last w-full pl-7 sm:order-none sm:w-auto sm:pl-0 max-sm:[&_.btn]:!h-10">{action}</div>}
     </>
   );
   if (dismissible) return <DismissibleBanner storageKey={storageKey} role={role} className={className} style={style} label={`Dismiss: ${title}`}>{body}</DismissibleBanner>;

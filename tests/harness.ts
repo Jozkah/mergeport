@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Space } from "@/generated/prisma/client";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 import { GitHubRest } from "@/lib/github/rest";
@@ -22,7 +23,7 @@ export async function makeClient(server: FakeGitHubServer, login: string, opts: 
   const user = server.users.get(login) ?? server.addUser(login);
   const file = path.resolve(".data", `client-${login}-${process.pid}-${counter++}.db`);
   for (const sfx of ["", "-wal", "-shm"]) fs.rmSync(file + sfx, { force: true });
-  const db: Db = createPrisma(file);
+  const db: Db = createTestPrisma(file);
   const actor = { id: BigInt(user.id), login };
   const profile = await ensureLocalProfile(db, { id: actor.id, login, name: login, avatarUrl: null, host: "github.com" });
   const f = server.fetchFor(login);

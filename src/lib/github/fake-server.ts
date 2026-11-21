@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey, generateKeyPairSync, randomBytes, verify } from "node:crypto";
 
 /**
  * In-memory GitHub, enough REST surface to run team creation, invitations, discovery and the coordination
@@ -16,7 +16,11 @@ type FakeRepo = {
   pulls?: Map<number, { number: number; state: "open" | "closed"; head: string; base: string; title: string; body: string }>;
   /** Releases as GitHub's REST lists them, newest first. */
   releases?: { id: number; tag_name: string; name: string | null; html_url: string; published_at: string | null; draft: boolean; prerelease: boolean; body: string | null }[];
+  /** Issues and pull requests (see `addWork`); read with installation tokens. */
+  work?: { id: number; number: number; kind: "issue" | "pr"; title: string; author: string; state: "open" | "closed"; updatedAt: string; headSha: string; reviews?: { id: number; user: string; state: string }[]; requested?: string[]; comments?: { id: number; user: string; body: string }[] }[];
 };
+
+export type FakeInstallation = { id: number; accountLogin: string; accountId: number; accountType: "User" | "Organization"; selection: "all" | "selected"; repos: Set<string>; suspended: boolean };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
@@ -27,6 +31,19 @@ export class FakeGitHubServer {
   orgs = new Map<string, { id: number; login: string; owners: Set<string>; members: Set<string> }>();
   repos = new Map<string, FakeRepo>();
   calls: string[] = [];
+  installations = new Map<number, FakeInstallation>();
+  private app: { appId: string; publicKeyPem: string } | null = null;
+  private instTokens = new Map<string, { installationId: number; expiresAt: number }>();
+  private userTokens = new Map<string, string>();
+  private oauthCodes = new Map<string, { login: string; redirectUri: string; challenge: string | null; used: boolean }>();
+  private oauthClient: { clientId: string; clientSecret: string } | null = null;
+  /** Test helper: every OAuth code exchange that reached the fake (the secret is not recorded), and the user tokens revoked so far. */
+  oauthExchanges: { code: string; redirectUri: string; verifier: string | null; ok: boolean }[] = [];
+  revokedUserTokens: string[] = [];
+  /** Simulates an App without the permission to read organization memberships: GET /user/memberships/orgs/:org answers 403. */
+  forbidOrgMemberships = false;
+  /** Whether GET /user/installations also lists suspended installations (live GitHub behaviour is unverified). */
+  listSuspendedForUsers = false;
   offline = false;
   rateLimitedUntil: number | null = null;
   private nextId = 1000;
@@ -293,6 +310,261 @@ export class FakeGitHubServer {
       return json(200, pullJson(x));
     }
     return json(404, { message: "Not Found" });
+  }
+
+  // ---------- GitHub App surface ----------
+  /** Registers the fake App: a fresh RSA key pair. The private key is for the test to configure Mergeport with; the public key verifies app JWTs here. */
+  registerApp(appId = "12345"): { appId: string; privateKeyPem: string; publicKeyPem: string } {
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
+    this.app = { appId, publicKeyPem: publicKey };
+    return { appId, privateKeyPem: privateKey, publicKeyPem: publicKey };
+  }
+  /** Installs the App on a user or organisation; `repos` are full names that must already exist in `repos`. */
+  addInstallation(accountLogin: string, o: { repos?: string[]; selection?: "all" | "selected"; suspended?: boolean } = {}): FakeInstallation {
+    const acct = this.users.get(accountLogin) ?? this.orgs.get(accountLogin);
+    if (!acct) throw new Error(`unknown account ${accountLogin}`);
+    const inst: FakeInstallation = { id: this.nextId++, accountLogin, accountId: acct.id, accountType: this.orgs.has(accountLogin) ? "Organization" : "User", selection: o.selection ?? "selected", repos: new Set((o.repos ?? []).map((n) => n.toLowerCase())), suspended: !!o.suspended };
+    this.installations.set(inst.id, inst);
+    return inst;
+  }
+  /** Sets the App's OAuth client credentials that POST /login/oauth/access_token checks. */
+  setOAuthClient(clientId: string, clientSecret: string) {
+    this.oauthClient = { clientId, clientSecret };
+  }
+  /** What GitHub does after the person authorizes on github.com: a single-use code for `login`, bound to a redirect_uri and (optionally) a PKCE challenge. */
+  issueOAuthCode(login: string, o: { redirectUri: string; codeChallenge?: string }): string {
+    const code = randomBytes(10).toString("hex");
+    this.oauthCodes.set(code, { login, redirectUri: o.redirectUri, challenge: o.codeChallenge ?? null, used: false });
+    return code;
+  }
+  /** A user-to-server token for `login`. */
+  issueUserToken(login: string): string {
+    const t = `ghu_${randomBytes(18).toString("hex")}`;
+    this.userTokens.set(t, login);
+    return t;
+  }
+  /** Seconds an installation token lives (GitHub: one hour). */
+  installationTokenTtlMs = 3_600_000;
+  /** Test helper: the installation token strings handed out so far. */
+  issuedInstallationTokens(): string[] {
+    return [...this.instTokens.keys()];
+  }
+
+  /** The fetch Mergeport's App code uses: authenticates by the Authorization header (app JWT, installation token or user token). */
+  appFetch(): typeof fetch {
+    return (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url);
+      const method = (init.method ?? "GET").toUpperCase();
+      const label = `${method} ${url.pathname}${url.search}`;
+      this.calls.push(`app ${label}`);
+      if (this.offline) throw new TypeError("fetch failed");
+      for (const f of this.failures) if (f.times > 0 && f.re.test(label)) { f.times--; return json(f.status, { message: f.message }); }
+      if (this.rateLimitedUntil && this.rateLimitedUntil > this.clock()) {
+        return json(403, { message: "API rate limit exceeded" }, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(this.rateLimitedUntil / 1000)) });
+      }
+      const headers = new Headers(init.headers);
+      const auth = headers.get("authorization") ?? "";
+      // GitHub accepts both schemes; Octokit sends `token <t>` for installation tokens and `Bearer <jwt>` for the app JWT.
+      const bearer = /^(?:Bearer|token) (.+)$/i.exec(auth)?.[1];
+      const inst = bearer ? this.instTokens.get(bearer) : undefined;
+      if (inst) this.calls.push(`inst:${inst.installationId} ${label}`);
+      let body: any;
+      try {
+        body = init.body ? JSON.parse(String(init.body)) : undefined;
+      } catch {
+        body = undefined;
+      }
+      return this.appRoute(method, url, bearer, { body, basic: /^Basic (.+)$/i.exec(auth)?.[1], headers });
+    }) as typeof fetch;
+  }
+
+  /** GitHub's own checks on an app JWT: RS256 signature, `iat` not in the future, `exp` in the future and at most 10 minutes ahead, `iss` the App. */
+  private checkAppJwt(jwt: string | undefined): Response | null {
+    const bad = (message: string) => json(401, { message, documentation_url: "https://docs.github.com/rest" });
+    if (!this.app) return bad("A JSON web token could not be decoded");
+    const parts = (jwt ?? "").split(".");
+    if (parts.length !== 3) return bad("A JSON web token could not be decoded");
+    let head: any, claims: any;
+    try {
+      head = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+      claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    } catch {
+      return bad("A JSON web token could not be decoded");
+    }
+    if (head?.alg !== "RS256") return bad("A JSON web token could not be decoded");
+    const ok = verify("RSA-SHA256", Buffer.from(`${parts[0]}.${parts[1]}`), createPublicKey(this.app.publicKeyPem), Buffer.from(parts[2], "base64url"));
+    if (!ok) return bad("Bad credentials");
+    const nowS = Math.floor(this.clock() / 1000);
+    if (!Number.isInteger(claims.iat) || claims.iat > nowS) return bad("'Issued at' claim ('iat') must be an Integer representing the time that the assertion was issued");
+    if (!Number.isInteger(claims.exp) || claims.exp <= nowS) return bad("'Expiration time' claim ('exp') must be a numeric value representing the future time at which the assertion expires");
+    if (claims.exp > nowS + 600) return bad("'Expiration time' claim ('exp') is too far in the future");
+    if (String(claims.iss) !== this.app.appId) return bad("'Issuer' claim ('iss') must be the App's ID");
+    return null;
+  }
+
+  private instJson(i: FakeInstallation) {
+    return {
+      id: i.id, app_id: Number(this.app?.appId ?? 0), target_type: i.accountType, repository_selection: i.selection,
+      account: { id: i.accountId, login: i.accountLogin, type: i.accountType },
+      suspended_at: i.suspended ? new Date(this.clock()).toISOString() : null,
+    };
+  }
+  private instRepos(i: FakeInstallation) {
+    return [...this.repos.values()].filter((r) => i.selection === "all" ? r.owner === i.accountLogin : i.repos.has(`${r.owner}/${r.name}`.toLowerCase())).sort((a, b) => a.id - b.id);
+  }
+  private page<T>(items: T[], url: URL, key: string, render: (x: T) => unknown): Response {
+    const per = Math.min(100, Math.max(1, Number(url.searchParams.get("per_page") ?? 30)));
+    const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+    const slice = items.slice((page - 1) * per, page * per);
+    const next = new URL(url.href);
+    next.searchParams.set("page", String(page + 1));
+    return json(200, { total_count: items.length, [key]: slice.map(render) }, page * per < items.length ? { link: `<${next.href}>; rel="next"` } : {});
+  }
+
+  // ---------- issues and pull requests, as an installation sees them ----------
+  /** Test helper: an issue or pull request in a fake repository (what `GET /repos/{o}/{r}/issues` lists). */
+  addWork(owner: string, name: string, w: { number: number; kind?: "issue" | "pr"; title: string; author?: string; state?: "open" | "closed"; updatedAt?: string; headSha?: string; reviews?: { id: number; user: string; state: string }[]; requested?: string[]; comments?: { id: number; user: string; body: string }[] }): void {
+    const r = this.repo(owner, name);
+    if (!r) throw new Error(`unknown repository ${owner}/${name}`);
+    (r.work ??= []).push({ ...w, kind: w.kind ?? "issue", author: w.author ?? owner, state: w.state ?? "open", updatedAt: w.updatedAt ?? new Date(this.clock()).toISOString(), id: this.nextId++, headSha: w.headSha ?? sha1(`${name}#${w.number}`) });
+  }
+
+  private userJson(login: string) {
+    return { id: (this.users.get(login) ?? this.orgs.get(login))?.id ?? 1, login, avatar_url: null };
+  }
+
+  private workJson(r: FakeRepo, w: NonNullable<FakeRepo["work"]>[number]) {
+    const base = {
+      id: w.id, number: w.number, title: w.title, body: null, state: w.state, user: this.userJson(w.author), labels: [], assignees: [], milestone: null,
+      html_url: `https://github.com/${r.owner}/${r.name}/${w.kind === "pr" ? "pull" : "issues"}/${w.number}`, created_at: w.updatedAt, updated_at: w.updatedAt, closed_at: w.state === "closed" ? w.updatedAt : null, draft: false,
+    };
+    return w.kind === "pr" ? { ...base, pull_request: { merged_at: null }, merged: false, merged_at: null, head: { sha: w.headSha, ref: `feature-${w.number}` }, base: { ref: r.defaultBranch }, mergeable: true, additions: 1, deletions: 0, changed_files: 1 } : base;
+  }
+
+  /** Reads of one repository with an installation token: only repositories the installation can access exist. ETags make an unchanged list answer 304, as GitHub does. */
+  private installationRepoRoute(i: FakeInstallation, method: string, url: URL, headers: Headers): Response {
+    const m = /^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/.exec(url.pathname);
+    const r = m ? this.repo(decodeURIComponent(m[1]), decodeURIComponent(m[2])) : undefined;
+    if (!m || !r || !this.instRepos(i).includes(r)) return json(404, { message: "Not Found" });
+    if (method !== "GET") return json(403, { message: "Resource not accessible by integration" }); // the App holds read permissions only
+    const sub = m[3] ?? "";
+    const work = r.work ?? [];
+    const cacheable = (body: unknown, headers2: Record<string, string> = {}) => {
+      const etag = `W/"${sha1(JSON.stringify(body))}"`;
+      if (headers.get("if-none-match") === etag) return json(304, null, { etag });
+      return json(200, body, { etag, ...headers2 });
+    };
+    let n: RegExpExecArray | null;
+    if (sub === "") return cacheable(this.repoJson(r, i.accountLogin));
+    if (sub === "/issues") {
+      const per = Math.min(100, Number(url.searchParams.get("per_page") ?? 30));
+      const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+      const since = url.searchParams.get("since");
+      const all = work.filter((w) => !since || w.updatedAt >= since).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+      const next = new URL(url.href);
+      next.searchParams.set("page", String(page + 1));
+      return cacheable(all.slice((page - 1) * per, page * per).map((w) => this.workJson(r, w)), page * per < all.length ? { link: `<${next.href}>; rel="next"` } : {});
+    }
+    if ((n = /^\/(?:issues|pulls)\/(\d+)$/.exec(sub))) {
+      const w = work.find((x) => x.number === Number(n![1]) && (sub.startsWith("/pulls") ? x.kind === "pr" : true));
+      return w ? cacheable(this.workJson(r, w)) : json(404, { message: "Not Found" });
+    }
+    if ((n = /^\/pulls\/(\d+)\/reviews$/.exec(sub))) return cacheable((work.find((x) => x.number === Number(n![1]))?.reviews ?? []).map((v) => ({ id: v.id, user: this.userJson(v.user), state: v.state, body: "", commit_id: null, submitted_at: new Date(this.clock()).toISOString() })));
+    if ((n = /^\/(?:issues|pulls)\/(\d+)\/comments$/.exec(sub))) return cacheable(sub.startsWith("/issues") ? (work.find((x) => x.number === Number(n![1]))?.comments ?? []).map((c) => ({ id: c.id, user: this.userJson(c.user), body: c.body, created_at: new Date(this.clock()).toISOString(), updated_at: new Date(this.clock()).toISOString() })) : []);
+    if ((n = /^\/pulls\/(\d+)\/requested_reviewers$/.exec(sub))) return cacheable({ users: (work.find((x) => x.number === Number(n![1]))?.requested ?? []).map((u) => this.userJson(u)), teams: [] });
+    if (/^\/commits\/[^/]+\/check-runs$/.test(sub)) return cacheable({ total_count: 0, check_runs: [] });
+    if (/^\/commits\/[^/]+\/status$/.test(sub)) return cacheable({ state: "pending", total_count: 0, statuses: [] });
+    if (sub === "/branches") return cacheable([{ name: r.defaultBranch, commit: { sha: this.head(r) ?? sha1(`${r.name}@head`) } }]);
+    return json(404, { message: "Not Found" });
+  }
+
+  private appRoute(method: string, url: URL, bearer: string | undefined, extra: { body?: any; basic?: string; headers?: Headers } = {}): Response {
+    const path = url.pathname;
+    let m: RegExpExecArray | null;
+    // github.com (not the API): the OAuth code exchange.
+    if (url.host === "github.com" && method === "POST" && path === "/login/oauth/access_token") return this.exchange(extra.body);
+    if (method === "DELETE" && (m = /^\/applications\/([^/]+)\/token$/.exec(path))) {
+      const [id, secret] = Buffer.from(extra.basic ?? "", "base64").toString("utf8").split(":");
+      if (!this.oauthClient || id !== this.oauthClient.clientId || secret !== this.oauthClient.clientSecret || decodeURIComponent(m[1]) !== id) return json(401, { message: "Bad credentials" });
+      const t = String(extra.body?.access_token ?? "");
+      if (!this.userTokens.delete(t)) return json(404, { message: "Not Found" });
+      this.revokedUserTokens.push(t);
+      return json(204, null);
+    }
+    if (path.startsWith("/repos/")) {
+      const t = bearer ? this.instTokens.get(bearer) : undefined;
+      if (!t || t.expiresAt <= this.clock()) return json(401, { message: "Bad credentials" });
+      const i = this.installations.get(t.installationId);
+      if (!i) return json(401, { message: "Bad credentials" });
+      if (i.suspended) return json(403, { message: "This installation has been suspended" });
+      return this.installationRepoRoute(i, method, url, extra.headers ?? new Headers());
+    }
+    if (method === "POST" && (m = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(path))) {
+      const err = this.checkAppJwt(bearer);
+      if (err) return err;
+      const i = this.installations.get(Number(m[1]));
+      if (!i) return json(404, { message: "Not Found" });
+      if (i.suspended) return json(403, { message: "This installation has been suspended" });
+      const token = `ghs_${randomBytes(18).toString("hex")}`;
+      const expires = this.clock() + this.installationTokenTtlMs;
+      this.instTokens.set(token, { installationId: i.id, expiresAt: expires });
+      return json(201, { token, expires_at: new Date(expires).toISOString(), permissions: { metadata: "read" }, repository_selection: i.selection });
+    }
+    if (method === "GET" && (m = /^\/app\/installations\/(\d+)$/.exec(path))) {
+      const err = this.checkAppJwt(bearer);
+      if (err) return err;
+      const i = this.installations.get(Number(m[1]));
+      return i ? json(200, this.instJson(i)) : json(404, { message: "Not Found" });
+    }
+    if (method === "GET" && path === "/installation/repositories") {
+      const t = bearer ? this.instTokens.get(bearer) : undefined;
+      if (!t || t.expiresAt <= this.clock()) return json(401, { message: "Bad credentials" });
+      const i = this.installations.get(t.installationId);
+      if (!i) return json(401, { message: "Bad credentials" });
+      if (i.suspended) return json(403, { message: "This installation has been suspended" });
+      return this.page(this.instRepos(i), url, "repositories", (r) => this.repoJson(r, r.owner));
+    }
+    const me = bearer ? this.userTokens.get(bearer) : undefined;
+    if (method === "GET" && path === "/user") {
+      const u = me ? this.users.get(me) : undefined;
+      return me && u ? json(200, { id: u.id, login: u.login, type: "User" }) : json(401, { message: "Bad credentials" });
+    }
+    if (method === "GET" && (m = /^\/user\/memberships\/orgs\/([^/]+)$/.exec(path))) {
+      if (!me) return json(401, { message: "Bad credentials" });
+      if (this.forbidOrgMemberships) return json(403, { message: "Resource not accessible by integration" });
+      const org = this.orgs.get(decodeURIComponent(m[1]));
+      if (!org || !org.members.has(me)) return json(404, { message: "Not Found" });
+      return json(200, { state: "active", role: org.owners.has(me) ? "admin" : "member", organization: { login: org.login, id: org.id } });
+    }
+    if (path === "/user/installations" || /^\/user\/installations\/\d+\/repositories$/.test(path)) {
+      if (!me) return json(401, { message: "Bad credentials" });
+      const mine = (i: FakeInstallation) => (this.listSuspendedForUsers || !i.suspended) && (i.accountLogin === me || !!this.orgs.get(i.accountLogin)?.members.has(me));
+      if (path === "/user/installations") return this.page([...this.installations.values()].filter(mine).sort((a, b) => a.id - b.id), url, "installations", (i) => this.instJson(i));
+      const i = this.installations.get(Number(/\/(\d+)\//.exec(path)![1]));
+      if (!i || !mine(i)) return json(404, { message: "Not Found" });
+      return this.page(this.instRepos(i).filter((r) => this.canRead(r, me)), url, "repositories", (r) => this.repoJson(r, me));
+    }
+    return json(404, { message: "Not Found" });
+  }
+
+  /** POST github.com/login/oauth/access_token. Like GitHub, a refusal is a 200 with an `error` field. Checks client id and secret, single use, redirect_uri and PKCE (S256). */
+  private exchange(b: any): Response {
+    const record = (ok: boolean) => this.oauthExchanges.push({ code: String(b?.code ?? ""), redirectUri: String(b?.redirect_uri ?? ""), verifier: typeof b?.code_verifier === "string" ? b.code_verifier : null, ok });
+    const refuse = (error: string) => {
+      record(false);
+      return json(200, { error });
+    };
+    if (!this.oauthClient || b?.client_id !== this.oauthClient.clientId || b?.client_secret !== this.oauthClient.clientSecret) return refuse("incorrect_client_credentials");
+    const c = this.oauthCodes.get(String(b?.code ?? ""));
+    if (!c || c.used) return refuse("bad_verification_code");
+    c.used = true;
+    if (c.redirectUri !== b.redirect_uri) return refuse("redirect_uri_mismatch");
+    if (c.challenge !== null) {
+      const v = typeof b.code_verifier === "string" ? b.code_verifier : "";
+      if (!v || createHash("sha256").update(v).digest("base64url") !== c.challenge) return refuse("bad_verification_code");
+    }
+    record(true);
+    return json(200, { access_token: this.issueUserToken(c.login), token_type: "bearer", scope: "" });
   }
 
   private putObj(r: FakeRepo, o: Obj): string {

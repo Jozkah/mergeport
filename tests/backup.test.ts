@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
 import { ensureLocalProfile } from "@/lib/local/profile";
 import { BACKUP_VERSION, exportBackup, parseBackup, previewRestore, restoreBackup } from "@/lib/services/backup";
@@ -17,7 +18,7 @@ let n = 0;
 async function target(withRepos: boolean): Promise<{ db: Db; v: Viewer }> {
   const file = path.resolve(".data", `restore-${process.pid}-${n++}.db`);
   files.push(file);
-  const db = createPrisma(file);
+  const db = createTestPrisma(file);
   const p = await ensureLocalProfile(db, { id: 9001n, login: "restorer", name: "Restorer", avatarUrl: null, host: "github.com" });
   if (withRepos) {
     for (const r of await S.db.repository.findMany({ where: { isDemo: false }, include: { owner: true } })) {
@@ -95,14 +96,14 @@ describe("backup and restore", () => {
 
   it("restores unsent edits only into a team space that exists there, and keeps them pending", async () => {
     const { db, admin } = S;
-    const space = await db.space.create({ data: { remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
+    const space = await db.space.create({ data: { workspaceId: admin.workspaceId, remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
     await db.outboxOp.create({ data: { id: "op-1", spaceId: space.id, entityType: "card", entityId: "c1", kind: "UPSERT", data: { a: 1 }, status: "FAILED" } });
     const text = await exportBackup(db, admin);
     const b = parseBackup(text);
     expect(b.source.unsentEdits).toBe(1);
     const { db: tdb, v } = await target(true);
     expect((await restoreBackup(tdb, v, b, { confirmed: true })).outbox).toEqual({ restorable: 0, skipped: 1 });
-    await tdb.space.create({ data: { remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
+    await tdb.space.create({ data: { workspaceId: v.workspaceId, remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
     expect((await restoreBackup(tdb, v, b, { confirmed: true })).outbox).toEqual({ restorable: 1, skipped: 0 });
     expect((await tdb.outboxOp.findUniqueOrThrow({ where: { id: "op-1" } })).status).toBe("PENDING");
     await tdb.$disconnect();
@@ -124,7 +125,7 @@ describe("backup and restore", () => {
   it("is atomic: a bad row leaves nothing half-restored", async () => {
     const { db, admin } = S;
     const b = parseBackup(await exportBackup(db, admin));
-    b.tables.PlanningItem = [{ ...b.tables.PlanningItem[0], id: "broken-card", columnId: "no-such-column" }, ...b.tables.PlanningItem];
+    b.tables.PlanningItem = [{ ...b.tables.PlanningItem[0], id: "broken-card", position: "not a number" }, ...b.tables.PlanningItem];
     const { db: tdb, v } = await target(true);
     await expect(restoreBackup(tdb, v, b, { confirmed: true })).rejects.toThrow();
     expect(await tdb.project.count()).toBe(0);

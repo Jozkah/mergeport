@@ -43,7 +43,8 @@ export function parseSchema(text: string): Map<string, ModelInfo> {
       } else if (enums.has(type) && !list) info.fields.push({ name, type: "Enum", optional });
       else if (!list) {
         const rel = /@relation\([^)]*fields:\s*\[([^\]]+)\]/.exec(line);
-        if (rel) info.relations.push({ name, target: type, from: rel[1].split(",").map((s) => s.trim()), optional });
+        // A composite relation (e.g. Repository (workspaceId, installationId) -> WorkspaceInstallation) cannot be checked one field at a time; legacy data never has one.
+        if (rel && !rel[1].includes(",")) info.relations.push({ name, target: type, from: rel[1].split(",").map((s) => s.trim()), optional });
       }
     }
     out.set(info.name, info);
@@ -103,7 +104,7 @@ export async function importLegacy(db: Db, models: Map<string, ModelInfo>, rows:
   const myMember = (rows.Member ?? []).find((m) => m.userId === user.id);
   const keep = new Map<string, Set<unknown>>();
   // A legacy non-administrator only ever saw repositories and projects they were granted / belonged to; keep exactly those.
-  const legacyAdmin = myMember?.role === "ADMIN";
+  const legacyAdmin = myMember?.role === "ADMIN" || myMember?.role === "OWNER";
   const visibleRepos = new Set((rows.RepositoryGrant ?? []).filter((g) => g.memberId === myMember?.id && !g.revokedAt).map((g) => g.repositoryId));
   const myProjects = new Set((rows.ProjectMember ?? []).filter((m) => m.memberId === myMember?.id).map((m) => m.projectId));
 

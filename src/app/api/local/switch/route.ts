@@ -1,3 +1,4 @@
+import { refuseWhenHosted } from "@/lib/public-url";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
@@ -13,6 +14,8 @@ import { requestSwitch } from "@/lib/local/switch-client";
  * backend means it failed and the previous workspace was restored.
  */
 export async function POST(req: Request) {
+  const hostedRefusal = refuseWhenHosted();
+  if (hostedRefusal) return hostedRefusal;
   if (!localRequest(req)) return new NextResponse("Bad origin", { status: 403 });
   const s = await findSession(db, (await cookies()).get(SESSION_COOKIE)?.value);
   if (!s) return new NextResponse("Unauthorized", { status: 401 });

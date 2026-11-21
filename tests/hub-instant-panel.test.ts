@@ -1,9 +1,11 @@
+import { wsId } from "./helpers";
 import { renderToStaticMarkup } from "react-dom/server";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { resetEnvCache } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
 import { GitHubRest } from "@/lib/github/rest";
@@ -26,7 +28,10 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/team", useRouter: () =>
 vi.mock("@/lib/db", async (orig) => ({ ...(await orig<typeof import("@/lib/db")>()), get db() { return h.db; } }));
 vi.mock("@/lib/local/runtime", () => ({ getTeamService: async () => null, getEngine: async () => null, getHubTeamService: h.getHubTeamService, syncSoon: () => {} }));
 vi.mock("@/lib/local/workspaces", () => ({ currentBackend: async () => hubBackendId("https://hub.example.com") }));
-vi.mock("@/lib/auth/current", () => ({ requireViewer: async () => ({ user: { githubId: 2n, login: "adm" }, viewer: { login: "adm", timezone: "UTC", isAdmin: true, workspaceId: (globalThis as { __ws?: string }).__ws }, csrf: "x" }) }));
+vi.mock("@/lib/auth/current", () => {
+  const requireViewer = async () => ({ user: { githubId: 2n, login: "adm" }, viewer: { login: "adm", timezone: "UTC", isAdmin: true, workspaceId: (globalThis as { __ws?: string }).__ws }, csrf: "x" });
+  return { requireViewer, requireWriter: requireViewer };
+});
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/lib/hub/ports-impl", async (orig) => ({ ...(await orig<typeof import("@/lib/hub/ports-impl")>()), hubLinkStatus: async () => h.link as HubLinkStatus }));
 vi.mock("@/lib/hub/github-app-install", async (orig) => ({ ...(await orig<typeof import("@/lib/hub/github-app-install")>()), profileRest: () => h.rest }));
@@ -69,7 +74,7 @@ beforeEach(() => {
   process.env.MERGEPORT_HOME = home;
   resetEnvCache();
   vi.clearAllMocks();
-  h.db = createPrisma(path.join(home, "t.db"));
+  h.db = createTestPrisma(path.join(home, "t.db"));
   (globalThis as { __ws?: string }).__ws = undefined;
 });
 afterEach(async () => {
@@ -355,7 +360,7 @@ describe("actions", () => {
     h.rest = new GitHubRest((async () => new Response(JSON.stringify({ message: "Resource not accessible" }), { status: 403 })) as unknown as typeof fetch);
     const { addTrackedRepositoriesAction } = await import("@/app/hub-webhook-actions");
     expect(await addTrackedRepositoriesAction()).toEqual({ ok: true, message: "GitHub does not allow this from here. Use the install link; coverage is detected automatically.", data: { neutral: true } });
-    expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-coverage" } })).toBeNull();
+    expect(await h.db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(h.db), key: "github-app-coverage" } } })).toBeNull();
   });
 
   it("Check now treats any covered repository as success, from either source", async () => {
@@ -388,10 +393,10 @@ describe("actions", () => {
     expect(await saveWebhookSecretAction(fd({ secret: "c".repeat(64) }))).toMatchObject({ ok: true });
     await saveCoverage(h.db, { appSlug: "team-app", checkedAt: new Date().toISOString(), covered: ["11"] });
     await saveHubCoverage(h.db, ["11"]);
-    await h.db.discoveryCache.create({ data: { key: "github-app-hub-webhooks", payload: { enabled: true, at: new Date().toISOString() } } });
+    await h.db.discoveryCache.create({ data: { workspaceId: await wsId(h.db), key: "github-app-hub-webhooks", payload: { enabled: true, at: new Date().toISOString() } } });
     expect(await turnOffInstantUpdatesAction()).toMatchObject({ ok: true });
-    expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-hub-coverage" } })).toBeNull();
-    expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-hub-webhooks" } })).toBeNull();
+    expect(await h.db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(h.db), key: "github-app-hub-coverage" } } })).toBeNull();
+    expect(await h.db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(h.db), key: "github-app-hub-webhooks" } } })).toBeNull();
     expect(calls).toEqual(["set:64:team-app", "set:64:", "clear"]);
     expect((await readCoverage(h.db, "team-app")).size).toBe(0);
     mockApi(apiFor("3", OFF, calls), "3");
@@ -452,8 +457,8 @@ describe("the Instant badge", () => {
   it("leaving the team clears the hub-reported coverage too", async () => {
     const { leaveTeamLocally } = await import("@/lib/team/leave");
     await saveHubCoverage(h.db, ["21"]);
-    await leaveTeamLocally(h.db);
-    expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-hub-coverage" } })).toBeNull();
+    await leaveTeamLocally(h.db, await wsId(h.db));
+    expect(await h.db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(h.db), key: "github-app-hub-coverage" } } })).toBeNull();
   });
 
   it("readCoverage is empty for an unknown or different slug", async () => {
@@ -466,7 +471,7 @@ describe("the Instant badge", () => {
   it("leaving the team clears the stored coverage", async () => {
     const { leaveTeamLocally } = await import("@/lib/team/leave");
     await stored();
-    await leaveTeamLocally(h.db);
-    expect(await h.db.discoveryCache.findUnique({ where: { key: "github-app-coverage" } })).toBeNull();
+    await leaveTeamLocally(h.db, await wsId(h.db));
+    expect(await h.db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId: await wsId(h.db), key: "github-app-coverage" } } })).toBeNull();
   });
 });

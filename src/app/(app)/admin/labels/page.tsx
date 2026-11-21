@@ -30,7 +30,7 @@ export default async function Labels() {
               {t.mappings.map((m) => (
                 <li key={m.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
                   <span><span className="font-mono">{m.spelling}</span> means <span className="font-medium">{m.concept}</span> <span className="text-ink-3">· {m.repositoryId ? (repoName.get(m.repositoryId) ?? "one repository") : "every repository"}</span></span>
-                  {viewer.isAdmin && <ActionForm action={deleteMappingAction} submitLabel="Remove" submitClassName="btn btn-danger"><input type="hidden" name="id" value={m.id} /></ActionForm>}
+                  {viewer.isAdmin && <ActionForm action={deleteMappingAction} submitLabel="Remove" submitClassName="btn text-blocked"><input type="hidden" name="id" value={m.id} /></ActionForm>}
                 </li>
               ))}
             </ul>

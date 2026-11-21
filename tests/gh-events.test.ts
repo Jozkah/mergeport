@@ -1,7 +1,8 @@
 import path from "node:path";
 import fs from "node:fs";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { createPrisma, type Db } from "@/lib/db";
+import { type Db } from "@/lib/db";
+import { createTestPrisma } from "./pg";
 import { truncateAll } from "@/lib/demo/seed";
 import { handleGithubEvent, resetGithubEventState, type GithubEvent } from "@/lib/hub/gh-events";
 import { OctokitPort, createOctokit } from "@/lib/github/octokit";
@@ -51,7 +52,7 @@ afterAll(async () => {
 
 /** Runs the real full sync (OctokitPort mapping included) against a fake REST API serving `rest`, and returns what it stored. */
 async function fullSync(rest: Parameters<typeof restFetch>[0], now: Date) {
-  syncDb ??= createPrisma(syncFile);
+  syncDb ??= createTestPrisma(syncFile);
   await truncateAll(syncDb);
   const ws = await syncDb.workspace.create({ data: { name: "ws" } });
   const repo = await upsertRepository(syncDb, ws.id, META);

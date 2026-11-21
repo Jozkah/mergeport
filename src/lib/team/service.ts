@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Space } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
+import { firstWorkspace } from "@/lib/local/profile";
 import { ForbiddenError, ValidationError } from "@/lib/errors";
 import { GithubError } from "@/lib/github/port";
 import { GitHubRest } from "@/lib/github/rest";
@@ -88,8 +89,14 @@ export class TeamService {
     private readonly actor: Actor,
     private readonly engine: SyncEngine | null = null,
     private readonly now: () => Date = () => new Date(),
+    private readonly workspace?: string,
   ) {
     this.rest = new GitHubRest(fetchImpl);
+  }
+
+  /** The workspace this service acts in: named by the caller, else the engine's, else the local profile's one workspace. */
+  private async ws(): Promise<string> {
+    return this.workspace ?? (this.engine ? await this.engine.workspaceId() : (await firstWorkspace(this.db)).id);
   }
 
   private store(owner: string, repo: string) {
@@ -136,14 +143,15 @@ export class TeamService {
   async createTeam(plan: TeamPlan, opts: { confirmed: boolean }): Promise<Space> {
     if (!opts.confirmed) throw new ValidationError("Confirm the repository, owner and permissions before anything is created");
     this.engine?.assertBackend("GITHUB");
-    const existing = await this.db.teamConfig.findUnique({ where: { id: "team" } });
+    const workspaceId = await this.ws();
+    const existing = await this.db.teamConfig.findUnique({ where: { workspaceId } });
     if (existing?.mode === "TEAM") throw new ValidationError("This profile is already part of a team");
     if (await this.exists(plan.owner, plan.repoName)) throw new ValidationError("A repository with that name appeared since the plan was made. Review a new plan.");
     const teamId = randomUUID();
     const space = await this.createSpaceRepo({ owner: plan.owner, repoName: plan.repoName, name: "Team workspace", kind: "COMMON", teamId, teamName: plan.teamName });
     await this.db.teamConfig.upsert({
-      where: { id: "team" },
-      create: { id: "team", mode: "TEAM", teamRemoteId: teamId, name: plan.teamName, ownerLogin: this.actor.login, commonSpaceId: space.id },
+      where: { workspaceId },
+      create: { workspaceId, mode: "TEAM", teamRemoteId: teamId, name: plan.teamName, ownerLogin: this.actor.login, commonSpaceId: space.id },
       update: { mode: "TEAM", teamRemoteId: teamId, name: plan.teamName, ownerLogin: this.actor.login, commonSpaceId: space.id },
     });
     await this.engine?.refreshRole();
@@ -159,7 +167,7 @@ export class TeamService {
     const manifest: Manifest = { schema: MANIFEST_SCHEMA, kind: "mergeport-space", spaceId, teamId: i.teamId, teamName: i.teamName, spaceKind: i.kind, name: i.name, createdAt: this.now().toISOString(), createdBy: { id: this.actor.id.toString(), login: this.actor.login } };
     await this.store(i.owner, i.repoName).initialCommit("main", "mergeport.json", JSON.stringify(manifest, null, 2) + "\n", "Initialize Mergeport space");
     const space = await this.db.space.create({
-      data: { remoteId: spaceId, teamRemoteId: i.teamId, kind: i.kind, name: i.name, repoOwner: i.owner, repoName: i.repoName, repoGithubId: BigInt(created.data.id), branch: created.data.default_branch ?? "main", canWrite: true, canAdmin: true, access: "OK" },
+      data: { workspaceId: await this.ws(), remoteId: spaceId, teamRemoteId: i.teamId, kind: i.kind, name: i.name, repoOwner: i.owner, repoName: i.repoName, repoGithubId: BigInt(created.data.id), branch: created.data.default_branch ?? "main", canWrite: true, canAdmin: true, access: "OK" },
     });
     return space;
   }
@@ -169,9 +177,10 @@ export class TeamService {
   /** A separate private repository whose collaborators are exactly the audience. Admin of the common space only (GitHub enforces repo creation rights). */
   async createRestrictedSpace(input: { name: string; owner?: string }): Promise<Space> {
     this.engine?.assertBackend("GITHUB");
-    const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
+    const workspaceId = await this.ws();
+    const team = await this.db.teamConfig.findUnique({ where: { workspaceId } });
     if (!team || team.mode !== "TEAM" || !team.teamRemoteId) throw new ValidationError("Create or join a team first");
-    const common = team.commonSpaceId ? await this.db.space.findUnique({ where: { id: team.commonSpaceId } }) : null;
+    const common = team.commonSpaceId ? await this.db.space.findUnique({ where: { id: team.commonSpaceId, workspaceId } }) : null;
     const name = input.name.trim();
     if (name.length < 2) throw new ValidationError("Name the space");
     const owner = input.owner ?? common?.repoOwner ?? this.actor.login;
@@ -322,8 +331,9 @@ export class TeamService {
     const described: Partial<SpaceCandidate> = { ...common, spaceName: man.name, spaceKind: man.spaceKind, teamName: man.teamName, teamId: man.teamId, schema: man.schema, createdBy: man.createdBy, entityCounts };
     if (man.schema > MANIFEST_SCHEMA) return reject("unsupported-schema", "This space was created by a newer Mergeport. Update the app before joining.", described);
 
-    const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
-    const commonSpace = team?.commonSpaceId ? await this.db.space.findUnique({ where: { id: team.commonSpaceId } }) : null;
+    const workspaceId = await this.ws();
+    const team = await this.db.teamConfig.findUnique({ where: { workspaceId } });
+    const commonSpace = team?.commonSpaceId ? await this.db.space.findUnique({ where: { id: team.commonSpaceId, workspaceId } }) : null;
     const warnings: string[] = [];
     if (team?.mode === "TEAM") {
       if (team.teamRemoteId !== man.teamId) return reject("other-team", `This space belongs to a different team (${man.teamName}). You are in “${team.name}”. Leave it before joining another.`, described);
@@ -334,7 +344,7 @@ export class TeamService {
     }
     if (info.ownerType === "User" && man.createdBy.id !== String(info.ownerId)) return reject("untrusted-owner", `The manifest says @${man.createdBy.login} created this space, but it lives in a personal account owned by @${info.ownerLogin}. A copied manifest does not make a repository trustworthy.`, described);
 
-    const known = await this.db.space.findFirst({ where: { OR: [{ remoteId: man.spaceId }, { repoGithubId: BigInt(info.id) }, { repoOwner: o, repoName: n }] } });
+    const known = await this.db.space.findFirst({ where: { workspaceId, OR: [{ remoteId: man.spaceId }, { repoGithubId: BigInt(info.id) }, { repoOwner: o, repoName: n }] } });
     if (known) {
       if ((known.repoGithubId !== null && known.repoGithubId !== BigInt(info.id)) || known.remoteId !== man.spaceId) {
         return reject("identity-changed", "A space with this name was joined before, but this is a different repository (its GitHub id or space id changed). It will not be trusted automatically.", described);
@@ -361,21 +371,22 @@ export class TeamService {
     const info = await store.info();
     const man = parseManifest(await store.blob((await store.tree((await store.head(info.defaultBranch) as { treeSha: string }).treeSha)).find((t) => t.path === "mergeport.json")!.sha));
     if ("error" in man) throw new ValidationError(man.error);
-    const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
-    const known = await this.db.space.findFirst({ where: { OR: [{ remoteId: man.spaceId }, { repoOwner: owner, repoName: repo }] } });
+    const workspaceId = await this.ws();
+    const team = await this.db.teamConfig.findUnique({ where: { workspaceId } });
+    const known = await this.db.space.findFirst({ where: { workspaceId, OR: [{ remoteId: man.spaceId }, { repoOwner: owner, repoName: repo }] } });
     if (known) {
-      return this.db.space.update({ where: { id: known.id }, data: { access: "OK", canWrite: info.permissions.push || info.permissions.admin, canAdmin: info.permissions.admin, nextPollAt: null, headSha: null, etag: null, lastError: null } });
+      return this.db.space.update({ where: { id: known.id, workspaceId }, data: { access: "OK", canWrite: info.permissions.push || info.permissions.admin, canAdmin: info.permissions.admin, nextPollAt: null, headSha: null, etag: null, lastError: null } });
     }
     const space = await this.db.space.create({
-      data: { remoteId: man.spaceId, teamRemoteId: man.teamId, kind: man.spaceKind, name: man.name, repoOwner: info.fullName.split("/")[0], repoName: info.fullName.split("/")[1], repoGithubId: BigInt(info.id), branch: info.defaultBranch, canWrite: info.permissions.push || info.permissions.admin, canAdmin: info.permissions.admin, access: "OK" },
+      data: { workspaceId, remoteId: man.spaceId, teamRemoteId: man.teamId, kind: man.spaceKind, name: man.name, repoOwner: info.fullName.split("/")[0], repoName: info.fullName.split("/")[1], repoGithubId: BigInt(info.id), branch: info.defaultBranch, canWrite: info.permissions.push || info.permissions.admin, canAdmin: info.permissions.admin, access: "OK" },
     });
     if (!team || team.mode !== "TEAM") {
       await this.db.teamConfig.upsert({
-        where: { id: "team" },
-        create: { id: "team", mode: "TEAM", teamRemoteId: man.teamId, name: man.teamName, ownerLogin: man.createdBy.login, commonSpaceId: man.spaceKind === "COMMON" ? space.id : null },
+        where: { workspaceId },
+        create: { workspaceId, mode: "TEAM", teamRemoteId: man.teamId, name: man.teamName, ownerLogin: man.createdBy.login, commonSpaceId: man.spaceKind === "COMMON" ? space.id : null },
         update: { mode: "TEAM", teamRemoteId: man.teamId, name: man.teamName, ownerLogin: man.createdBy.login, commonSpaceId: man.spaceKind === "COMMON" ? space.id : null },
       });
-    } else if (man.spaceKind === "COMMON" && !team.commonSpaceId) await this.db.teamConfig.update({ where: { id: "team" }, data: { commonSpaceId: space.id } });
+    } else if (man.spaceKind === "COMMON" && !team.commonSpaceId) await this.db.teamConfig.update({ where: { workspaceId }, data: { commonSpaceId: space.id } });
     await this.engine?.refreshRole();
     return space;
   }
@@ -386,7 +397,7 @@ export class TeamService {
    * repository, so this is the only way they are found. Bounded: at most `limit` repositories are inspected.
    */
   async candidates(limit = 25): Promise<SpaceCandidate[]> {
-    const team = await this.db.teamConfig.findUnique({ where: { id: "team" } });
+    const team = await this.db.teamConfig.findUnique({ where: { workspaceId: await this.ws() } });
     // Before joining anything this lists every private "mergeport-<team>-<space>" repository the account can already read, so a new
     // computer finds an accepted invitation without anyone typing a name. Joining still needs the explicit review and confirm.
     const joined = !!team && team.mode === "TEAM" && !!team.teamRemoteId;

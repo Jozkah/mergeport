@@ -1,14 +1,15 @@
+import { wsId } from "../helpers";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "../pg";
 import { clearHubSession, loadHubSession, openVault, saveHubSession } from "@/lib/hub/session-vault";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-vault-"));
-const db = createPrisma(path.resolve(".data", `hub-client-vault-${process.pid}.db`));
+const db = createTestPrisma(path.resolve(".data", `hub-client-vault-${process.pid}.db`));
 afterAll(async () => {
   await db.$disconnect();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -37,7 +38,7 @@ describe("session vault", () => {
     const vault = openVault(keyFile);
     await saveHubSession(db, vault, sess);
     expect(await loadHubSession(db, vault)).toEqual(sess);
-    const row = await db.hubSession.findUniqueOrThrow({ where: { id: "session" } });
+    const row = await db.hubSession.findUniqueOrThrow({ where: { workspaceId: await wsId(db) } });
     expect(row.cipher).not.toContain(TOKEN);
     expect(fs.readFileSync(keyFile).toString("latin1")).not.toContain(TOKEN);
   });
@@ -56,10 +57,10 @@ describe("session vault", () => {
 
   it("returns null for a tampered cipher", async () => {
     const vault = openVault(path.join(dir, "key2"));
-    const row = await db.hubSession.findUniqueOrThrow({ where: { id: "session" } });
+    const row = await db.hubSession.findUniqueOrThrow({ where: { workspaceId: await wsId(db) } });
     const parts = row.cipher.split(".");
     parts[3] = Buffer.from("tampered").toString("base64");
-    await db.hubSession.update({ where: { id: "session" }, data: { cipher: parts.join(".") } });
+    await db.hubSession.update({ where: { workspaceId: await wsId(db) }, data: { cipher: parts.join(".") } });
     expect(await loadHubSession(db, vault)).toBeNull();
   });
 
@@ -81,13 +82,13 @@ describe("session vault", () => {
   it("returns null when the auth tag segment is tampered", async () => {
     const vault = openVault(path.join(dir, "key2"));
     await saveHubSession(db, vault, sess);
-    const row = await db.hubSession.findUniqueOrThrow({ where: { id: "session" } });
+    const row = await db.hubSession.findUniqueOrThrow({ where: { workspaceId: await wsId(db) } });
     const parts = row.cipher.split(".");
     parts[2] = Buffer.alloc(16, 1).toString("base64");
-    await db.hubSession.update({ where: { id: "session" }, data: { cipher: parts.join(".") } });
+    await db.hubSession.update({ where: { workspaceId: await wsId(db) }, data: { cipher: parts.join(".") } });
     expect(await loadHubSession(db, vault)).toBeNull();
     parts[2] = Buffer.alloc(4, 1).toString("base64");
-    await db.hubSession.update({ where: { id: "session" }, data: { cipher: parts.join(".") } });
+    await db.hubSession.update({ where: { workspaceId: await wsId(db) }, data: { cipher: parts.join(".") } });
     expect(await loadHubSession(db, vault)).toBeNull();
   });
 

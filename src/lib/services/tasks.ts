@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
-import { assertProjectWritable, requireProject, type Viewer } from "@/lib/authz/viewer";
+import { assertProjectWritable, repoWhere, requireProject, type Viewer } from "@/lib/authz/viewer";
 import { positionBetween } from "@/lib/domain/planning";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { audit } from "./audit";
@@ -48,7 +48,7 @@ export async function loadTask(db: Db, v: Viewer, id: string) {
 /** loadTask for a mutation: also refuses when the task's project is shared into a space this person can only read. */
 export async function loadTaskForWrite(db: Db, v: Viewer, id: string) {
   const task = await loadTask(db, v, id);
-  await assertProjectWritable(db, task.projectId);
+  await assertProjectWritable(db, v, task.projectId);
   return task;
 }
 
@@ -64,7 +64,7 @@ export async function listTasks(db: Db, v: Viewer, f: TaskFilter = {}) {
   else if ((f.status ?? "open") === "open") and.push({ column: { key: { not: "done" } } });
   else if (f.status === "done") and.push({ column: { key: "done" } });
   const q = f.q?.trim();
-  if (q) and.push({ OR: [{ title: { contains: q } }, { description: { contains: q } }] });
+  if (q) and.push({ OR: [{ title: { contains: q, mode: "insensitive" } }, { description: { contains: q, mode: "insensitive" } }] });
   const rows = await db.planningItem.findMany({
     where: { AND: and },
     include: { column: true, project: { select: { id: true, name: true, slug: true } }, workItem: { select: { number: true, type: true, repository: { select: { fullName: true } } } }, _count: { select: { comments: { where: { kind: "COMMENT" } } } } },
@@ -104,7 +104,8 @@ export async function assigneeCandidates(db: Db, v: Viewer, projectId: string): 
     add(t.assigneeLogin);
     add(t.authorLogin);
   }
-  const repoIds = (await db.projectRepository.findMany({ where: { projectId: project.id }, select: { repositoryId: true } })).map((r) => r.repositoryId);
+  // Only repositories this person can see: a project may link a private repository they have no grant on, and its authors are not theirs to learn.
+  const repoIds = (await db.projectRepository.findMany({ where: { projectId: project.id, repository: repoWhere(v) }, select: { repositoryId: true } })).map((r) => r.repositoryId);
   if (repoIds.length) {
     for (const w of await db.workItem.findMany({ where: { repositoryId: { in: repoIds }, state: "OPEN" }, select: { authorLogin: true, assignees: true }, take: 400 })) {
       add(w.authorLogin);

@@ -7,9 +7,7 @@ import { acceptSuggestionsAction, dismissSuggestionsAction } from "@/app/ai-acti
 import { AiTool } from "@/components/ai/AiTool";
 import { Progress, useAiJob } from "@/components/ai/progress";
 import { LoaderCircle, Sparkles } from "@/components/ui/icons";
-
-/** A little longer than the row-leave animation (--duration-fast, 250 ms). */
-const FOLD_MS = 320;
+import { FOLD_MS } from "@/lib/motion";
 
 export type Suggestion = { id: string; title: string; reason: string; href: string };
 type Result = { summary: string; model: string; counts: { created: number; suggested: number; skipped: number }; suggestions: Suggestion[] };

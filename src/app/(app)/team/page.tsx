@@ -1,3 +1,5 @@
+import { DesktopOnly } from "@/components/ui/DesktopOnly";
+import { isHosted } from "@/lib/public-url";
 import NextLink from "next/link";
 import { Select } from "@/components/ui/Select";
 import { db } from "@/lib/db";
@@ -32,6 +34,7 @@ type SP = { name?: string; owner?: string; invite?: string; users?: string; perm
 
 export default async function TeamPage({ searchParams }: { searchParams: Promise<SP> }) {
   const { viewer } = await requireViewer();
+  if (isHosted()) return <DesktopOnly />; // desktop-only page: GitHub-repository teams do not exist on a hosted workspace
   const backend = await currentBackend();
   const sp = await searchParams;
   if (isHubBackend(backend)) {
@@ -40,25 +43,25 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
     return <HubTeamPage backend={backend} githubApp={result ? { result, reason: sp.reason } : null} />;
   }
   const demo = isDemo();
-  const cfg = await db.teamConfig.findUnique({ where: { id: "team" } });
-  const spaces = await db.space.findMany({ orderBy: [{ kind: "asc" }, { createdAt: "asc" }] });
-  const team = await getTeamService();
-  const engine = await getEngine();
+  const cfg = await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } });
+  const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId }, orderBy: [{ kind: "asc" }, { createdAt: "asc" }] });
+  const team = await getTeamService(viewer.workspaceId);
+  const engine = await getEngine(viewer.workspaceId);
 
   let plan: TeamPlan | null = null;
   let planError: string | null = null;
   if (team && sp.name && cfg?.mode !== "TEAM") {
     // The ONLY live GitHub call while rendering, and only because the person just asked for a plan. It has a hard deadline.
     try {
-      plan = await (await teamWithDeadline(12_000)).planTeam({ name: sp.name, owner: sp.owner || undefined });
+      plan = await (await teamWithDeadline(12_000, viewer.workspaceId)).planTeam({ name: sp.name, owner: sp.owner || undefined });
     } catch (e) {
       planError = e instanceof GhErr && e.kind === "network" ? "GitHub did not answer. Check your connection and review the plan again." : e instanceof Error ? e.message : "Could not prepare the plan";
     }
   }
   // Everything below comes from the local cache: no GitHub call, no waiting. Each list says how old it is and why.
-  const invView = !demo && team ? await cached.invitations() : null;
+  const invView = !demo && team ? await cached.invitations(viewer.workspaceId) : null;
   const invitations = invView?.payload ?? [];
-  const candView = !demo && team ? await cached.candidates() : null;
+  const candView = !demo && team ? await cached.candidates(viewer.workspaceId) : null;
   const candidates = candView?.payload ?? [];
   const states = engine ? new Map(await Promise.all(spaces.map(async (s) => [s.id, await engine.stateFor(s)] as const))) : new Map();
   const delay = expectedConsistencyDelaySeconds(cfg?.pollSeconds ?? 30);
@@ -73,7 +76,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
     : null;
   const invitePlan = team && invitePlanSpace && sp.users ? (() => { try { return team.planInvite(invitePlanSpace, sp.users!.split(/[,\s]+/), sp.perm === "pull" ? "pull" : "push"); } catch { return null; } })() : null;
   const statusBySpace = new Map<string, Awaited<ReturnType<typeof cached.invitationStatus>>>();
-  if (team) for (const sp2 of spaces.filter((x) => x.canAdmin && x.access === "OK")) statusBySpace.set(sp2.id, await cached.invitationStatus(sp2.id));
+  if (team) for (const sp2 of spaces.filter((x) => x.canAdmin && x.access === "OK")) statusBySpace.set(sp2.id, await cached.invitationStatus(viewer.workspaceId, sp2.id));
 
   return (
     <>
@@ -150,7 +153,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
           <summary className="cursor-pointer font-medium">Stop using this team on this computer</summary>
           <div className="mt-2 flex flex-col gap-2">
             <p className="text-ink-3">Returns to personal mode and makes shared repositories and projects local again. Boards, cards and rules stay. Nothing changes on GitHub: repositories, invitations and collaborators remain until you remove them there.</p>
-            <ActionForm action={leaveTeamAction} submitLabel="Stop using this team" submitClassName="btn btn-danger" resetOnSuccess={false}>
+            <ActionForm action={leaveTeamAction} submitLabel="Stop using this team" submitClassName="btn text-blocked" resetOnSuccess={false}>
               <label className="flex items-start gap-2"><input type="checkbox" name="confirm" required className="mt-0.5" /> I understand this computer will stop syncing with this team.</label>
             </ActionForm>
           </div>
@@ -204,7 +207,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                             {statuses.payload.map((i: InvitationStatus) => (
                               <li key={i.username} className="flex items-center justify-between gap-2">
                                 <span>@{i.username} <SimplePill tone={i.state === "accepted" ? "ok" : i.state === "pending" ? "waiting" : "blocked"}>{i.state}</SimplePill></span>
-                                <ActionForm action={revokeAccessAction} submitLabel={i.state === "accepted" ? "Remove access" : "Cancel"} submitClassName="btn btn-danger !h-7" className="[&>div]:!mt-0"><input type="hidden" name="spaceId" value={s.id} /><input type="hidden" name="username" value={i.username} /></ActionForm>
+                                <ActionForm action={revokeAccessAction} submitLabel={i.state === "accepted" ? "Remove access" : "Cancel"} submitClassName="btn text-blocked !h-7" className="[&>div]:!mt-0"><input type="hidden" name="spaceId" value={s.id} /><input type="hidden" name="username" value={i.username} /></ActionForm>
                               </li>
                             ))}
                           </ul>

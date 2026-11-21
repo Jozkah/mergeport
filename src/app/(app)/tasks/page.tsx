@@ -1,3 +1,4 @@
+import { plainText } from "@/lib/inputs";
 import { TemplateButton } from "@/components/tasks/TemplatePanels";
 import { OpenCardLink } from "@/components/planning/TaskDrawer";
 import Link from "next/link";
@@ -18,6 +19,7 @@ import { NewTask } from "@/components/tasks/NewTask";
 import { AiTasks } from "@/components/tasks/AiTasks";
 import { getAiView } from "@/lib/services/ai";
 import { isDemo } from "@/lib/env";
+import { isHosted } from "@/lib/public-url";
 import { issueDestinationsByProject } from "@/lib/services/task-promotion";
 
 export const metadata = { title: "Tasks" };
@@ -41,9 +43,10 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
   const [tasks, counts] = await Promise.all([listTasks(db, viewer, { scope, projectId: project?.id, status, label: sp.label || undefined, q: sp.q }), taskCounts(db, viewer)]);
   const peopleByProject: Record<string, string[]> = {};
   for (const p of projects) peopleByProject[p.id] = await assigneeCandidates(db, viewer, p.id);
-  const issueRepos = isDemo() ? {} : await issueDestinationsByProject(db, viewer, projects.map((p) => p.id));
-  const ai = isDemo() ? null : await getAiView(db);
-  const pendingAi = ai?.saved ? await db.aiSuggestion.count({ where: { state: "NEW" } }) : 0;
+  // Creating the GitHub issue is a GitHub write: hosted workspaces are read-only for now, so the option is not offered there.
+  const issueRepos = isDemo() || isHosted() ? {} : await issueDestinationsByProject(db, viewer, projects.map((p) => p.id));
+  const ai = isDemo() ? null : await getAiView(db, viewer.workspaceId);
+  const pendingAi = ai?.saved ? await db.aiSuggestion.count({ where: { workspaceId: viewer.workspaceId, state: "NEW" } }) : 0;
   const today = todayIn(viewer.timezone);
   const now = new Date();
   const href = (over: Partial<Search>) => {
@@ -73,7 +76,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
           {scope !== "mine" && <input type="hidden" name="scope" value={scope} />}
           {project && <input type="hidden" name="project" value={project.id} />}
           {status !== "open" && <input type="hidden" name="status" value={status} />}
-          <input name="q" defaultValue={sp.q ?? ""} className="input !w-56" placeholder="Search tasks" aria-label="Search tasks" />
+          <input name="q" defaultValue={sp.q ?? ""} className="input !w-56" placeholder="Search tasks…" {...plainText} aria-label="Search tasks" />
         </form>
       </div>
       {sp.label && <p className="mb-2 text-[12.5px] text-ink-3">Label: <LabelChip name={sp.label} color="888888" /> <Link className="link" href={href({ label: undefined })}>clear</Link></p>}

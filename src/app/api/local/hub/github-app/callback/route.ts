@@ -1,3 +1,4 @@
+import { refuseWhenHosted } from "@/lib/public-url";
 import { NextResponse } from "next/server";
 import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
@@ -38,6 +39,8 @@ const page = (status: number, title: string, text: string, to: string) =>
 const done = (result: "created" | "failed", reason?: string) => page(200, "Mergeport", result === "created" ? "The GitHub App was created. Going back to Team." : "The GitHub App could not be set up. Going back to Team.", result === "created" ? "/team?github-app=created" : `/team?github-app=failed&reason=${reason}`);
 
 export async function GET(req: Request) {
+  const hostedRefusal = refuseWhenHosted();
+  if (hostedRefusal) return hostedRefusal;
   if (!loopbackHost(req)) return new NextResponse("Bad origin", { status: 403 });
   if (isDemo()) return new NextResponse("Not available in demo mode", { status: 403 });
   const q = new URL(req.url).searchParams;

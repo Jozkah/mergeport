@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { isHosted } from "@/lib/public-url";
 import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
+import { repoWhere } from "@/lib/authz/viewer";
 import { isDemo } from "@/lib/env";
 import { getEngine, getTeamService } from "@/lib/local/runtime";
 import { syncCenter } from "@/lib/services/sync-center";
@@ -22,20 +24,20 @@ const val = (v: unknown) => (v === undefined || v === null ? "none" : typeof v =
 
 export default async function SyncPage() {
   const { viewer } = await requireViewer();
-  const engine = await getEngine();
-  const cfg = await db.teamConfig.findUnique({ where: { id: "team" } });
-  const spaces = await db.space.findMany({ orderBy: { createdAt: "asc" } });
-  const conflicts = await db.syncConflict.findMany({ where: { status: "OPEN" }, include: { space: true }, orderBy: { createdAt: "asc" } });
-  const restores = await db.hubRestore.findMany({ where: { status: "OPEN" }, include: { space: true }, orderBy: { at: "asc" } });
-  const quarantined = await db.outboxOp.findMany({ where: { status: "QUARANTINED" }, include: { space: true } });
-  const pendingOps = await db.outboxOp.findMany({ where: { status: { in: ["PENDING", "SENT", "FAILED"] } }, include: { space: true }, orderBy: { createdAt: "asc" }, take: 50 });
+  const engine = await getEngine(viewer.workspaceId);
+  const cfg = await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } });
+  const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId }, orderBy: { createdAt: "asc" } });
+  const conflicts = await db.syncConflict.findMany({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { createdAt: "asc" } });
+  const restores = await db.hubRestore.findMany({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { at: "asc" } });
+  const quarantined = await db.outboxOp.findMany({ where: { status: "QUARANTINED", space: { workspaceId: viewer.workspaceId } }, include: { space: true } });
+  const pendingOps = await db.outboxOp.findMany({ where: { status: { in: ["PENDING", "SENT", "FAILED"] }, space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { createdAt: "asc" }, take: 50 });
   const poll = cfg?.pollSeconds ?? 30;
   const delay = expectedConsistencyDelaySeconds(poll);
   // A job still marked RUNNING by a process that died is not work in progress; it is reclaimed on a timer.
   const bootAt = processStartedAt();
-  const own = { workspaceId: viewer.workspaceId, isDemo: false, trackingStatus: { not: "REMOVED" as const } };
-  const sourceRepos = await db.repository.findMany({ where: own, select: { id: true, fullName: true, trackingStatus: true, rateLimited: true, syncError: true, statusDetail: true, lastSyncedAt: true }, orderBy: { fullName: "asc" } });
-  const [running, queued] = await Promise.all([db.job.count({ where: { type: "sync.repository", status: "RUNNING", lockedAt: { gte: bootAt } } }), db.job.count({ where: { type: "sync.repository", status: "QUEUED" } })]);
+  const own = { isDemo: false, trackingStatus: { not: "REMOVED" as const } };
+  const sourceRepos = await db.repository.findMany({ where: { AND: [repoWhere(viewer), own] }, select: { id: true, fullName: true, trackingStatus: true, rateLimited: true, syncError: true, statusDetail: true, lastSyncedAt: true }, orderBy: { fullName: "asc" } });
+  const [running, queued] = await Promise.all([db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "RUNNING", lockedAt: { gte: bootAt } } }), db.job.count({ where: { workspaceId: viewer.workspaceId, type: "sync.repository", status: "QUEUED" } })]);
   const source = deriveSourceStatus({
     tracked: sourceRepos.length, running, queued,
     refused: sourceRepos.filter((r) => r.trackingStatus === "DISCONNECTED").length,
@@ -45,8 +47,8 @@ export default async function SyncPage() {
   });
   const sourceProblems = sourceRepos.filter((r) => r.trackingStatus === "DISCONNECTED" || r.rateLimited || r.syncError);
   const lastSource = sourceRepos.reduce<Date | null>((m, r) => (r.lastSyncedAt && (!m || r.lastSyncedAt > m) ? r.lastSyncedAt : m), null);
-  const center = await syncCenter(db, poll);
-  const teamSvc = await getTeamService();
+  const center = await syncCenter(db, viewer.workspaceId, poll);
+  const teamSvc = await getTeamService(viewer.workspaceId);
   const quota = teamSvc && !isDemo() ? await Promise.race([teamSvc.rateLimit(), new Promise<null>((r) => setTimeout(() => r(null), 3000))]) : null;
   const states = engine ? await Promise.all(spaces.map(async (s) => [s, await engine.stateFor(s)] as const)) : [];
 
@@ -130,7 +132,7 @@ export default async function SyncPage() {
       )}
 
       <Panel title="Spaces" icon={RefreshCw} id="spaces">
-        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet" action={<Link href="/team" className="btn btn-primary">Set up a team</Link>}>Everything stays on this computer. Create or join a team to share.</EmptyState> : (
+        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet" action={isHosted() ? undefined : <Link href="/team" className="btn btn-primary">Set up a team</Link>}>{isHosted() ? "Repository data is refreshed from GitHub in the background. Nothing else needs syncing." : "Everything stays on this computer. Create or join a team to share."}</EmptyState> : (
           <ul>
             {states.map(([s, st]) => (
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 text-[13px] last:border-b-0">
@@ -190,7 +192,7 @@ export default async function SyncPage() {
                     <span><Mono>{sp.repoName}</Mono> · {quarantined.filter((q) => q.spaceId === spaceId).length} edit(s)</span>
                     <span className="flex gap-2">
                       <ActionForm action={releaseQuarantineAction} submitLabel="Try sending again" submitAriaLabel={`Try sending the edits for ${sp.repoName} again`} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="spaceId" value={spaceId} /><input type="hidden" name="action" value="retry" /></ActionForm>
-                      <ActionForm action={releaseQuarantineAction} submitLabel="Discard" submitAriaLabel={`Discard the unsent edits for ${sp.repoName}`} submitClassName="btn btn-danger" resetOnSuccess={false}><input type="hidden" name="spaceId" value={spaceId} /><input type="hidden" name="action" value="discard" /></ActionForm>
+                      <ActionForm action={releaseQuarantineAction} submitLabel="Discard" submitAriaLabel={`Discard the unsent edits for ${sp.repoName}`} submitClassName="btn text-blocked" resetOnSuccess={false}><input type="hidden" name="spaceId" value={spaceId} /><input type="hidden" name="action" value="discard" /></ActionForm>
                     </span>
                   </div>
                 );

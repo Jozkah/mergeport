@@ -1,8 +1,9 @@
 import { unstable_rethrow } from "next/navigation";
 import { ConflictError, ForbiddenError, NotFoundError, UnauthenticatedError, ValidationError } from "@/lib/errors";
 import { GithubError } from "@/lib/github/port";
+import { GithubNotConnectedError, GithubWritesDisabledError } from "@/lib/github/hosted";
 
-export type ActionResult = { ok: true; message?: string; data?: Record<string, unknown> } | { ok: false; error: string; retryable?: boolean };
+export type ActionResult = { ok: true; message?: string; data?: Record<string, unknown> } | { ok: false; error: string; retryable?: boolean; /** The form field (its `name`) the error is about: it is marked invalid, described by the message and focused. */ field?: string };
 
 /** Maps domain errors to messages a person can act on. Unknown errors are logged and reported generically. */
 export async function run(fn: () => Promise<ActionResult | void>): Promise<ActionResult> {
@@ -16,6 +17,7 @@ export async function run(fn: () => Promise<ActionResult | void>): Promise<Actio
     unstable_rethrow(e);
     if (e instanceof NotFoundError) return { ok: false, error: "That item was not found, or you do not have access to it." };
     if (e instanceof ForbiddenError || e instanceof ValidationError || e instanceof ConflictError) return { ok: false, error: e.message, retryable: e instanceof ConflictError };
+    if (e instanceof GithubNotConnectedError || e instanceof GithubWritesDisabledError) return { ok: false, error: e.message };
     if (e instanceof UnauthenticatedError) return { ok: false, error: "Your session has ended. Sign in again." };
     if (e instanceof GithubError) {
       if (e.kind === "rate-limited") return { ok: false, error: `GitHub rate limit reached. Try again ${e.resetAt ? "after " + e.resetAt.toUTCString() : "in a minute"}.`, retryable: true };

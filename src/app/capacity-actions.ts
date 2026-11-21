@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { run, type ActionResult } from "@/lib/action-result";
-import { requireViewer } from "@/lib/auth/current";
+import { requireWriter } from "@/lib/auth/current";
 import { db } from "@/lib/db";
 import { setAvailability } from "@/lib/services/capacity";
 
@@ -12,7 +12,7 @@ const day = (s: string, end = false) => (s ? new Date(`${s}T${end ? "23:59:59" :
 /** Shared team configuration: who is away and who covers. It suggests a backup; it never reassigns or notifies anyone. */
 export async function availabilityAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const { viewer } = await requireViewer();
+    const { viewer } = await requireWriter();
     await setAvailability(db, viewer, {
       login: str(fd, "login"),
       clear: str(fd, "clear") === "1",

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { createPrisma } from "@/lib/db";
+import { createTestPrisma } from "../pg";
 import { defaultGhRunner } from "@/lib/github/exec";
 import { discoverAll, ghPort } from "@/lib/github/factory";
 import { ghFetch } from "@/lib/github/gh";
@@ -25,7 +25,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mp-live-"));
 const dbs: { $disconnect(): Promise<void> }[] = [];
 
 async function profile(id: bigint, login: string) {
-  const db = createPrisma(path.join(tmp, `p-${id}-${dbs.length}.db`));
+  const db = createTestPrisma(path.join(tmp, `p-${id}-${dbs.length}.db`));
   dbs.push(db);
   await ensureLocalProfile(db, { id, login, name: login, avatarUrl: null, host: "github.com" });
   return db;

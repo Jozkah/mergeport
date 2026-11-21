@@ -23,16 +23,16 @@ export function parseReviewerRefs(input: string): string[] {
  * The author of a pull request can never be its own approver, so a reviewer who also authors one is shown as such, not counted.
  */
 export async function setProjectReviewers(db: Db, workspaceId: string, projectId: string, projectName: string, input: string) {
-  await assertProjectWritable(db, projectId); // the rule is published with the project
+  await assertProjectWritable(db, { workspaceId }, projectId); // the rule is published with the project
   const refs = parseReviewerRefs(input);
   const existing = await db.reviewRule.findFirst({ where: { workspaceId, scope: "PROJECT", projectId, reason: { startsWith: OWNED } } });
   if (refs.length === 0) {
-    if (existing) await db.reviewRule.delete({ where: { id: existing.id } });
+    if (existing) await db.reviewRule.delete({ where: { id: existing.id, workspaceId } });
     return { reviewers: [] as string[] };
   }
   const reviewers = refs.map((ref) => ({ kind: ref.includes("/") ? "TEAM" : "USER", ref }));
   const data = { reviewers, reason: projectRuleReason(projectName), semantics: "ANY" as const, enabled: true };
-  if (existing) await db.reviewRule.update({ where: { id: existing.id }, data });
+  if (existing) await db.reviewRule.update({ where: { id: existing.id, workspaceId }, data });
   else await db.reviewRule.create({ data: { workspaceId, scope: "PROJECT", projectId, labels: [], ...data } });
   return { reviewers: refs };
 }

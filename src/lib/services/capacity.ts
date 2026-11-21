@@ -49,7 +49,7 @@ export async function reviewCapacity(db: Db, v: Viewer, now = new Date()): Promi
   const rows = members.map((m) => {
     const login = m.user.login;
     const a = away.get(lc(login));
-    const t = tally.get(lc(login));
+    const t = m.user.githubId !== null ? tally.get(lc(login)) : undefined; // review requests belong to GitHub accounts, not to a mailbox name
     const unavailable = awayNow(a, now);
     const backup = a?.backupLogin ?? null;
     const backupFree = !!backup && logins.has(lc(backup)) && !awayNow(away.get(lc(backup)), now);

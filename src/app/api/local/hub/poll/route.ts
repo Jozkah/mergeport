@@ -1,3 +1,4 @@
+import { refuseWhenHosted } from "@/lib/public-url";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { HubAuth, completeConnect } from "@/lib/hub/connect";
@@ -13,6 +14,8 @@ import { requestSwitch } from "@/lib/local/switch-client";
  * session token stays on this computer and is never part of the response.
  */
 export async function POST(req: Request) {
+  const hostedRefusal = refuseWhenHosted();
+  if (hostedRefusal) return hostedRefusal;
   const refused = guardConnect(req);
   if (refused) return refused;
   const { pollId } = await readBody(req);

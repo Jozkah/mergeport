@@ -8,7 +8,7 @@ const KILL_TIMEOUT_MS = 15_000;
 /** Runs `next start` for one profile. kill() resolves only after the process has exited, so the port is free again. */
 export function spawnNext(spec: ChildSpec, extraEnv: Record<string, string>): ChildHandle {
   const next = path.join("node_modules", "next", "dist", "bin", "next");
-  const env = { ...process.env, MERGEPORT_DB: spec.dbFile, MERGEPORT_LAUNCH_TOKEN: spec.token, MERGEPORT_PORT: String(spec.port), MERGEPORT_BACKEND: spec.backend ?? "github", DEMO_MODE: spec.demo ? "true" : "false", NODE_ENV: "production", ...extraEnv } as unknown as NodeJS.ProcessEnv;
+  const env = { ...process.env, MERGEPORT_DB: spec.dbFile, MERGEPORT_LAUNCH_TOKEN: spec.token, MERGEPORT_PORT: String(spec.port), MERGEPORT_BACKEND: spec.backend ?? "github", DEMO_MODE: spec.demo ? "true" : "false", NODE_ENV: "production", MERGEPORT_INLINE_WORKER: "1", ...extraEnv } as unknown as NodeJS.ProcessEnv;
   const child = spawn(process.execPath, [next, "start", "-H", "127.0.0.1", "-p", String(spec.port)], { stdio: "inherit", env });
   let exited = false;
   const waiters: Array<() => void> = [];
