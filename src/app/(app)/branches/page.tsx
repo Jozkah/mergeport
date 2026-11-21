@@ -1,3 +1,5 @@
+import { notFound } from "next/navigation";
+import { isHosted } from "@/lib/public-url";
 import Link from "next/link";
 import { byOwnerFirst } from "@/lib/domain/ordering";
 import { db } from "@/lib/db";
@@ -16,6 +18,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Branches({ searchParams }: { searchParams: Promise<{ repo?: string; q?: string }> }) {
   const { viewer } = await requireViewer();
+  if (isHosted()) notFound(); // desktop-only page: GitHub-repository teams / local worktrees do not exist on a hosted workspace
   const sp = await searchParams;
   const now = new Date();
   const repos = (await db.repository.findMany({ where: repoWhere(viewer), orderBy: { fullName: "asc" }, select: { id: true, fullName: true, owner: { select: { login: true } }, name: true } })).sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));

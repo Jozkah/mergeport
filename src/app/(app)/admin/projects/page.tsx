@@ -12,19 +12,25 @@ import { createProjectAction, setProjectMembersAction, setProjectReposAction, se
 import { byOwnerFirst, byPersonalFirst } from "@/lib/domain/ordering";
 import { projectReviewerRefs } from "@/lib/services/project-reviewers";
 import { setProjectSpaceAction } from "@/app/team-actions";
+import { setProjectSpaceAclAction } from "@/app/workspace-actions";
+import { listMySpaces } from "@/lib/services/access-spaces";
+import { isHosted } from "@/lib/public-url";
 
 export const metadata = { title: "Projects" };
 export const dynamic = "force-dynamic";
 
 export default async function Projects() {
   const { viewer } = await requireAdminViewer();
-  const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId, access: "OK", canWrite: true }, orderBy: [{ kind: "asc" }, { name: "asc" }] });
+  const hosted = isHosted();
+  // Hosted: the access spaces this person may use (the common one, and the restricted ones they are in). Names of other restricted spaces are never loaded here.
+  const mySpaces = hosted ? await listMySpaces(db, viewer) : [];
+  const spaces = hosted ? [] : await db.space.findMany({ where: { workspaceId: viewer.workspaceId, access: "OK", canWrite: true }, orderBy: [{ kind: "asc" }, { name: "asc" }] });
   const [projectsRaw, reposRaw, members] = await Promise.all([
-    db.project.findMany({ where: projectWhere(viewer), include: { repositories: true, members: true }, orderBy: { name: "asc" } }),
+    db.project.findMany({ where: projectWhere(viewer), include: { repositories: true, members: true, accessSpace: { select: { name: true, kind: true } } }, orderBy: { name: "asc" } }),
     db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: { not: "REMOVED" } }, select: { id: true, fullName: true }, orderBy: { fullName: "asc" } }),
     db.member.findMany({ where: { workspaceId: viewer.workspaceId, status: "ACTIVE", role: { in: ["MEMBER", "READER"] } }, include: { user: true } }),
   ]);
-  const canShareWithTeam = spaces.some((s) => s.kind === "COMMON");
+  const canShareWithTeam = !hosted && spaces.some((s) => s.kind === "COMMON");
   const me = viewer.login;
   const projects = [...projectsRaw].sort((x, y) => byPersonalFirst(me)(x.name, y.name));
   const repos = [...reposRaw].sort((x, y) => byOwnerFirst(me)(x.fullName, y.fullName));
@@ -46,7 +52,7 @@ export default async function Projects() {
       {projects.length === 0 ? <Panel title="Projects" icon={Layers}><EmptyState icon={Layers} title="No projects yet">Use <strong>New project</strong> to group repositories you plan together.</EmptyState></Panel> : (
         <div className="fit-grid" style={{ "--fit-min": "720px" } as React.CSSProperties}>
           {projects.map((p) => (
-            <Panel key={p.id} title={p.name} icon={Layers} id={`p-${p.id}`} actions={<span className="hidden text-[12px] text-ink-3 sm:inline">{p.repositories.length} repositories · {p.members.length} people{reviewerText.get(p.id) ? ` · reviewers: ${reviewerText.get(p.id)}` : ""} · {p.spaceId ? "shared" : "only on this computer"}</span>}>
+            <Panel key={p.id} title={p.name} icon={Layers} id={`p-${p.id}`} actions={<span className="hidden text-[12px] text-ink-3 sm:inline">{p.repositories.length} repositories · {p.members.length} people{reviewerText.get(p.id) ? ` · reviewers: ${reviewerText.get(p.id)}` : ""} · {hosted ? (p.accessSpace?.kind === "RESTRICTED" ? `space: ${p.accessSpace.name}` : "Shared with the workspace") : p.spaceId ? "shared" : "only on this computer"}</span>}>
               <div className="flex flex-col divide-y divide-line">
                 <details className="group p-4">
                   <summary className="cursor-pointer list-none text-[13px] font-medium [&::-webkit-details-marker]:hidden">Repositories <span className="font-normal text-ink-3">({p.repositories.length})</span></summary>
@@ -61,8 +67,8 @@ export default async function Projects() {
                     {members.length === 0 ? (
                       <div className="rounded-[8px] border border-dashed border-line-strong p-3 text-[12.5px] text-ink-2">
                         <p className="font-medium">Nobody to add yet.</p>
-                        <p className="mt-1 text-ink-3">People appear once they join your team. Invites grant the private coordination repository only, never source repositories.</p>
-                        <Link href="/team" className="btn mt-2 inline-flex">Invite people on Team</Link>
+                        <p className="mt-1 text-ink-3">{hosted ? "People appear once they join this workspace. Membership never grants repository access." : "People appear once they join your team. Invites grant the private coordination repository only, never source repositories."}</p>
+                        <Link href={hosted ? "/settings/members" : "/team"} className="btn mt-2 inline-flex">{hosted ? "Invite people in Members" : "Invite people on Team"}</Link>
                       </div>
                     ) : (
                       <>
@@ -73,7 +79,7 @@ export default async function Projects() {
                   </fieldset>
                   <p className="mt-2 text-[12px] text-ink-3">Members see internal tasks. Repository content still needs a repository grant.</p>
                 </ActionForm>
-                        <p className="mt-2 text-[12px] text-ink-3">Need someone else? <Link className="underline" href="/team">Invite people on Team</Link>.</p>
+                        <p className="mt-2 text-[12px] text-ink-3">Need someone else? <Link className="underline" href={hosted ? "/settings/members" : "/team"}>{hosted ? "Invite people in Members" : "Invite people on Team"}</Link>.</p>
                       </>
                     )}
                   </div>
@@ -87,6 +93,20 @@ export default async function Projects() {
                   <p className="mt-1 text-[12px] text-ink-3">Every open pull request here waits for these people. Authors cannot approve their own, so it stays unmet for them. Finer rules: Review routing.</p>
                 </ActionForm></div>
                 </details>
+                {hosted ? (
+                <details className="p-4">
+                  <summary className="cursor-pointer list-none text-[13px] font-medium [&::-webkit-details-marker]:hidden">Access <span className="font-normal text-ink-3">({p.accessSpace?.kind === "RESTRICTED" ? p.accessSpace.name : "Everyone"})</span></summary>
+                  <div className="mt-3"><ActionForm action={setProjectSpaceAclAction} submitLabel="Save access" resetOnSuccess={false} className="max-w-md">
+                    <input type="hidden" name="projectId" value={p.id} />
+                    <label className="label" htmlFor={`ac-${p.id}`}>Who can see this project</label>
+                    <Select id={`ac-${p.id}`} name="spaceId" defaultValue={p.accessSpaceId ?? ""} className="select">
+                      <option value="">Everyone in the workspace</option>
+                      {mySpaces.filter((sp) => sp.kind === "RESTRICTED").map((sp) => <option key={sp.id} value={sp.id}>{sp.name} (restricted)</option>)}
+                    </Select>
+                    <p className="mt-1 text-[12px] text-ink-3">A restricted space is seen only by the people listed in it, and you must be one of them to move a project into or out of it. Manage spaces in Members.</p>
+                  </ActionForm></div>
+                </details>
+                ) : (
                 <details className="p-4">
                   <summary className="cursor-pointer list-none text-[13px] font-medium [&::-webkit-details-marker]:hidden">Sharing <span className="font-normal text-ink-3">({p.spaceId ? "shared through a team space" : "only on this computer"})</span></summary>
                   <div className="mt-3"><ActionForm action={setProjectSpaceAction} submitLabel="Save sharing" resetOnSuccess={false} className="max-w-md">
@@ -99,6 +119,7 @@ export default async function Projects() {
                   <p className="mt-1 text-[12px] text-ink-3">The project, board and tasks go to that space&apos;s private repository; everyone who can read it sees them.</p>
                 </ActionForm></div>
                 </details>
+                )}
               </div>
             </Panel>
           ))}

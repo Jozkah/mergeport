@@ -8,7 +8,7 @@ import { sha256 } from "@/lib/crypto";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
 import { planningBoard } from "@/lib/services/planning-view";
-import { createRestrictedSpace, setProjectAccessSpace, setSpaceMember } from "@/lib/services/access-spaces";
+import { createRestrictedSpace, removeSpaceMember, setProjectAccessSpace, setSpaceMember } from "@/lib/services/access-spaces";
 import { createTask } from "@/lib/services/tasks";
 import { decryptSecret, encryptSecret, federationState, normaliseOrigin, parseKey, pkceChallenge } from "@/lib/federation/config";
 import { completeCallback, listLinks, remoteGet, settleRefreshes, startLink, unlink, workspaceLinks } from "@/lib/federation/consumer";
@@ -443,6 +443,7 @@ describe("provider read API", () => {
   it("hidden and nonexistent projects are indistinguishable (404, same body)", async () => {
     const { token } = await linkUp(w);
     const space = await createRestrictedSpace(db, w.admin, "Skunk");
+    await setSpaceMember(db, w.admin, space.id, w.ids.members.admin.id, true);
     await setProjectAccessSpace(db, w.admin, w.ids.projects.atlas.id, space.id); // `a` is not in it
     const hidden = await projectRoute(w.B, get(`/api/federation/v1/projects/${w.ids.projects.atlas.id}`, token), w.ids.projects.atlas.id);
     const missing = await projectRoute(w.B, get("/api/federation/v1/projects/nope", token), "nope");
@@ -525,7 +526,9 @@ describe("what a grant can read is exactly what its person can read", () => {
     const space = await createRestrictedSpace(db, w.admin, "Skunkworks");
     await setSpaceMember(db, w.admin, space.id, w.ids.members.a.id, true);
     await createTask(db, w.admin, { projectId: w.ids.projects.atlas.id, title: "ZEBRA-RESTRICTED-TASK" });
+    await setSpaceMember(db, w.admin, space.id, w.ids.members.admin.id, true);
     await setProjectAccessSpace(db, w.admin, w.ids.projects.atlas.id, space.id);
+    await removeSpaceMember(db, w.admin, space.id, w.ids.members.admin.id); // the owner stays outside
     const inside = await linkUp(w, w.aOwner, { userId: w.ids.users.a.id, workspaceId: w.ids.ws.id });
     const outside = await linkUp(w, await addAOwner2(), { userId: w.ids.users.b.id, workspaceId: w.ids.ws.id });
     const listIn = (await json(await projectsRoute(w.B, get("/api/federation/v1/projects", inside.token)))).projects as ProjectDto[];

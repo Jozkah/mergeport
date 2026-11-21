@@ -36,7 +36,10 @@ async function restrictAtlas(aCanWrite = true) {
   const space = await createRestrictedSpace(db, admin, "Skunkworks");
   await setSpaceMember(db, admin, space.id, ids.members.a.id, aCanWrite);
   const task = await createTask(db, admin, { projectId: ids.projects.atlas.id, title: SECRET, assigneeLogin: "alice-demo" });
+  // Moving a project into a restricted space needs membership of it: the owner joins, moves it, and leaves again (so they stay outside, as these tests expect).
+  await setSpaceMember(db, admin, space.id, ids.members.admin.id, true);
   await setProjectAccessSpace(db, admin, ids.projects.atlas.id, space.id);
+  await removeSpaceMember(db, admin, space.id, ids.members.admin.id);
   return { space, task };
 }
 

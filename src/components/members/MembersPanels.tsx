@@ -148,6 +148,9 @@ export function SpacesPanel({ spaces, members, projects }: { spaces: SpaceSummar
   return (
     <Panel title={<>Spaces (<span className="tnum">{spaces.length}</span>)</>} icon={ShieldCheck} id="spaces">
       <p className="max-w-[70ch] text-pretty border-b border-line p-4 text-[12.5px] text-ink-3">Everyone in the workspace reads the common space. A restricted space is read only by the people listed in it, and edited only by those with edit access. Readers never edit.</p>
+      {spaces.filter((s) => s.kind === "COMMON").map((s) => (
+        <p key={s.id} className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 text-[13px]"><span className="font-medium">{s.name}</span><SimplePill tone="ok">Everyone</SimplePill><span className="text-[12.5px] text-ink-3">{s.projectCount} project{s.projectCount === 1 ? "" : "s"}</span></p>
+      ))}
       {restricted.length === 0 ? (
         <EmptyState icon={Lock} title="No restricted spaces">Projects live in the common space until you move them into a restricted one.</EmptyState>
       ) : (
@@ -162,6 +165,13 @@ export function SpacesPanel({ spaces, members, projects }: { spaces: SpaceSummar
                   </ActionForm>
                 </Sheet>
               </div>
+              {s.isMember && projects.length > 0 && (
+                <ActionForm action={setProjectSpaceAclAction} submitLabel="Move here" pendingLabel="Moving…" submitClassName="btn !h-10" resetOnSuccess={false} submitAriaLabel={`Move a project into ${s.name}`} className="mt-2 flex flex-wrap items-end gap-3 [&>div:last-child]:!mt-0">
+                  <input type="hidden" name="spaceId" value={s.id} />
+                  <div><label className="label" htmlFor={`mvh-${s.id}`}>Move a project here</label>
+                    <Select id={`mvh-${s.id}`} name="projectId" defaultValue={projects[0].id} className="select !h-10 !w-56">{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></div>
+                </ActionForm>
+              )}
               {s.members.length === 0 ? <p className="mt-2 text-[12.5px] text-ink-3">No members yet.</p> : (
                 <ul className="mt-2" aria-label={`Members of ${s.name}`}>
                   {s.members.map((m) => (

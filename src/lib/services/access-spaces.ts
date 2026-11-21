@@ -51,11 +51,13 @@ export async function listSpacesForAdmin(db: Db, v: Viewer): Promise<SpaceSummar
     include: { members: { include: { member: { include: { user: true } } } }, _count: { select: { projects: true } } },
     orderBy: [{ kind: "asc" }, { createdAt: "asc" }],
   });
+  // The common space holds every project that names no restricted space.
+  const commonCount = await db.project.count({ where: { workspaceId: v.workspaceId, accessSpaceId: null } });
   return rows.map((s) => ({
     id: s.id,
     kind: s.kind,
     name: s.name,
-    projectCount: s._count.projects,
+    projectCount: s.kind === "COMMON" ? commonCount : s._count.projects,
     isMember: s.members.some((m) => m.memberId === v.memberId),
     members: s.members.map((m) => ({ memberId: m.memberId, login: m.member.user.login, email: m.member.user.email, role: m.member.role, canWrite: m.canWrite })).sort((a, b) => a.login.localeCompare(b.login)),
   }));
@@ -120,6 +122,13 @@ export async function setProjectAccessSpace(db: Db, v: Viewer, projectId: unknow
   if (typeof projectId !== "string") throw new NotFoundError();
   const project = await requireProject(db, v, projectId);
   const target = typeof spaceId === "string" && spaceId ? await spaceOf(db, v, spaceId) : null;
+  // Into or out of a restricted space only for someone who is IN it: nobody pulls a hidden project into view, or hides a project from its own people, blind.
+  // (Out of: the project is invisible to a non-member, so requireProject above already answered NotFound; the check below is the explicit second line.)
+  const restrictedIds = [project.accessSpaceId, target?.kind === "RESTRICTED" ? target.id : null].filter((x): x is string => !!x);
+  for (const sid of restrictedIds) {
+    const inside = await db.accessSpaceMember.findFirst({ where: { spaceId: sid, memberId: v.memberId, space: { workspaceId: v.workspaceId } }, select: { memberId: true } });
+    if (!inside) throw new ForbiddenError("Join the restricted space first: only its members can move projects into or out of it.");
+  }
   await db.project.update({ where: { id: project.id, workspaceId: v.workspaceId }, data: { accessSpaceId: target && target.kind === "RESTRICTED" ? target.id : null } });
   await audit(db, { workspaceId: v.workspaceId, userId: v.userId }, "project.space", { type: "Project", id: project.id }, { space: target?.id ?? "common" });
 }

@@ -56,7 +56,7 @@ const fd = (o: Record<string, string>) => {
  * One calm line per repository: who it belongs to, whether it is healthy, who it is shared with, and one button. Everything else
  * (refresh, share, stop tracking, open on GitHub) is in the row's menu, and the choices that matter get a short confirmation.
  */
-export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceOpt[] }) {
+export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; writable: SpaceOpt[]; hosted?: boolean }) {
   const router = useRouter();
   const { show } = useToast();
   const [q, setQ] = useState("");
@@ -172,7 +172,7 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
                 </p>
               </div>
               {anyShared && <div className="hidden w-48 shrink-0 text-[12.5px] lg:block">
-                {r.spaceId ? <span className="inline-flex items-center gap-1.5 text-ink-2"><Users size={13} aria-hidden className="text-ink-3" /><span className="truncate">{r.spaceName ?? "a team space"}</span></span> : <span className="text-ink-3">Only on this computer</span>}
+                {r.spaceId ? <span className="inline-flex items-center gap-1.5 text-ink-2"><Users size={13} aria-hidden className="text-ink-3" /><span className="truncate">{r.spaceName ?? "a team space"}</span></span> : <span className="text-ink-3">{hosted ? "Shared with the workspace" : "Only on this computer"}</span>}
               </div>}
               <div className="hidden w-40 shrink-0 text-[12.5px] xl:block">
                 {r.projects.length === 0 ? <span className="text-ink-3">No project</span> : <span className="flex flex-wrap gap-1">{r.projects.slice(0, 2).map((p) => <span key={p} className="rounded-full border border-line px-2 py-0.5 text-[11.5px]">{p}</span>)}{r.projects.length > 2 && <span className="text-ink-3">+{r.projects.length - 2}</span>}</span>}
@@ -195,7 +195,7 @@ export function RepoList({ rows, writable }: { rows: RepoRow[]; writable: SpaceO
           ))}
         </ul>
       )}
-      {!anyShared && visible.length > 0 && <p className="text-[12px] text-ink-3">All repositories are only on this computer.</p>}
+      {!anyShared && !hosted && visible.length > 0 && <p className="text-[12px] text-ink-3">All repositories are only on this computer.</p>}
       {visible.length > shown.length && <button type="button" className="btn self-start" onClick={() => setLimit((l) => l + PAGE)}>Show {Math.min(PAGE, visible.length - shown.length)} more <span className="text-ink-3">of {visible.length - shown.length} left</span></button>}
 
       <Dialog open={dialog?.kind === "untrack"} onClose={() => setDialog(null)} title={dialog && dialog.ids.length > 1 ? `Stop tracking ${dialog.ids.length} repositories?` : "Stop tracking this repository?"} description="Stopping tracking removes it from the dashboard on this computer only. Nothing is deleted or changed on GitHub, and you can connect it again later.">

@@ -1,5 +1,6 @@
 import { describeAccess, type RepoPermissions } from "@/lib/domain/repo-access";
 import Link from "next/link";
+import { isHosted } from "@/lib/public-url";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { listRepositories } from "@/lib/services/queries";
@@ -67,7 +68,7 @@ export default async function Repositories({ searchParams: _searchParams }: { se
     <>
       <PageHeader
         title="Repositories"
-        subtitle="Repositories tracked on this computer, plus any a teammate shared with you. Tracking is private to you until you share a repository to a space."
+        subtitle={isHosted() ? "Repositories tracked in this workspace. People see only the repositories they have been granted." : "Repositories tracked on this computer, plus any a teammate shared with you. Tracking is private to you until you share a repository to a space."}
         actions={<Link href="/repositories/connect" className="btn btn-primary"><Plus size={14} aria-hidden /> Connect repositories</Link>}
       />
 
@@ -104,7 +105,7 @@ export default async function Repositories({ searchParams: _searchParams }: { se
             Import a public repository by URL, or choose from repositories your GitHub account can access.
           </EmptyState>
         ) : (
-          <RepoList rows={rows} writable={writable.map((sp) => ({ id: sp.id, name: sp.name, everyone: sp.kind === "COMMON" }))} />
+          <RepoList hosted={isHosted()} rows={rows} writable={writable.map((sp) => ({ id: sp.id, name: sp.name, everyone: sp.kind === "COMMON" }))} />
         )}
       </Panel>
     </>

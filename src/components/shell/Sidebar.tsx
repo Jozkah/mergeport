@@ -14,7 +14,7 @@ import { Metric } from "@/components/ui/Metric";
 type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 type Item = { href: string; label: string; icon: Icon; count?: number; children?: { href: string; label: string; count?: number }[] };
 
-export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number; inbox?: number; digest?: number; ai?: number; /** Federation is switched on for this server: show Linked instances. */ linked?: boolean };
+export type NavCounts = { needsMyReview: number; waiting: number; changes: number; blocked: number; needsTeam: number; tasks?: number; inbox?: number; digest?: number; ai?: number; /** Federation is switched on for this server: show Linked instances. */ linked?: boolean; /** Hosted: the desktop-only pages (Team as a GitHub space, Branches as local worktrees) do not apply. */ hosted?: boolean };
 
 function buildNav(c: NavCounts, isAdmin: boolean) {
   const main: Item[] = [
@@ -44,9 +44,9 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
   const source: Item[] = [
     { href: "/repositories", label: "Repositories", icon: FolderGit2 },
     { href: "/forks", label: "Forks", icon: GitFork },
-    { href: "/branches", label: "Branches", icon: GitBranch },
+    ...(c.hosted ? [] : [{ href: "/branches", label: "Branches", icon: GitBranch }]),
   ];
-  const team: Item[] = [{ href: "/team", label: "Team", icon: Users }, ...(c.linked ? [{ href: "/linked", label: "Linked instances", icon: Globe }] : [])];
+  const team: Item[] = [...(c.hosted ? [] : [{ href: "/team", label: "Team", icon: Users }]), ...(c.linked ? [{ href: "/linked", label: "Linked instances", icon: Globe }] : [])];
   // Used now and then: folded away until you are on one of them.
   const more: Item[] = [
     { href: "/capacity", label: "Review capacity", icon: Route },

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isHosted } from "@/lib/public-url";
 import { requireViewer } from "@/lib/authz-page";
 import { db } from "@/lib/db";
 import { isDay } from "@/lib/domain/digest";
@@ -31,7 +32,7 @@ export default async function DigestPage({ searchParams }: { searchParams: Promi
       <>
         <PageHeader title="Daily digest" subtitle="What you did yesterday, what was left undone, and what needs you or other people." />
         <EmptyState icon={Newspaper} title="No digest yet">
-          {s.enabled ? `The first one is made on a day Mergeport is open after ${String(s.hour).padStart(2, "0")}:00. It is built only from the data on this computer.` : "The daily digest is turned off. You can turn it on in Settings."}
+          {s.enabled ? `${isHosted() ? "The first one is made by the daily run after" : "The first one is made on a day Mergeport is open after"} ${String(s.hour).padStart(2, "0")}:00. It is built only from the data ${isHosted() ? "in this workspace" : "on this computer"}.` : "The daily digest is turned off. You can turn it on in Settings."}
         </EmptyState>
       </>
     );
@@ -43,7 +44,7 @@ export default async function DigestPage({ searchParams }: { searchParams: Promi
     <>
       <PageHeader
         title={`Digest for ${label(digest.day)}`}
-        subtitle={<>Built {formatInstant(digest.generatedAt, viewer.timezone)} from the data on this computer: nothing was fetched or sent. What is open and what needs attention is as of that moment.</>}
+        subtitle={<>Built {formatInstant(digest.generatedAt, viewer.timezone)} from the data {isHosted() ? "in this workspace" : "on this computer"}: nothing was fetched or sent. What is open and what needs attention is as of that moment.</>}
         actions={
           <>
             {older ? <Link href={`/digest?day=${older}`} className="btn" aria-label={`Older digest, ${label(older)}`}><ArrowLeft size={14} aria-hidden /> {label(older)}</Link> : <button type="button" className="btn" disabled>Older</button>}

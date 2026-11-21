@@ -68,6 +68,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     digest: await unreadDigestCount(db, viewer),
     ai: aiSuggestions + aiRequests,
     linked: federationState().kind === "enabled",
+    hosted: isHosted(),
     tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login.toLowerCase(), column: { key: { not: "done" } } }] } }),
   };
   const last = lastSync._max.lastSyncedAt;

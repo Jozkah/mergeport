@@ -17,6 +17,7 @@ import { WATCH_MAX_REPOS_LIMIT, WATCH_MAX_REPOS_MIN, WATCH_MAX_SECONDS, WATCH_MI
 import { planAutoSetup } from "@/lib/services/auto-setup";
 import { db } from "@/lib/db";
 import { Bell, Globe, Newspaper, Users, Wand2 } from "@/components/ui/icons";
+import { isHosted } from "@/lib/public-url";
 import { federationState } from "@/lib/federation/config";
 import Link from "next/link";
 import { ROLE_LABEL } from "@/lib/authz/roles";
@@ -33,10 +34,11 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ clones?: string }> }) {
   const { viewer, user } = await requireViewer();
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
-  const gh = isDemo() ? null : await currentGhStatus();
+  const hosted = isHosted(); // hosted: no "this computer", no local clones, no gh on the server
+  const gh = isDemo() || hosted ? null : await currentGhStatus();
   const zones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["UTC"];
   const clones = (await searchParams).clones ?? path.dirname(process.cwd()); // by default the folder that holds this app, where clones usually sit
-  const setup = viewer.isAdmin && !isDemo() ? await planAutoSetup(db, viewer, { clonesFolder: clones }) : null;
+  const setup = viewer.isAdmin && !isDemo() && !hosted ? await planAutoSetup(db, viewer, { clonesFolder: clones }) : null;
   const prefs = await getPrefs(db, user.id);
   const { summary: watch, config: wcfg } = await watchView(db);
   const ai = isDemo() ? null : await getAiView(db, viewer.workspaceId);
@@ -46,8 +48,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Settings"
-        subtitle={`Signed in as @${user.login}${viewer.isAdmin ? " (administrator of the team space)" : ""}.`}
-        help={<>These settings belong to this computer. The daily digest uses your timezone ({user.timezone}); it is built only from the data on this computer, with no network call, and shows in the bell and on Overview.</>}
+        subtitle={`Signed in as @${user.login}${viewer.isAdmin ? ` (administrator of ${hosted ? "this workspace" : "the team space"})` : ""}.`}
+        help={hosted ? <>The daily digest uses your timezone ({user.timezone}) and shows in the bell and on Overview.</> : <>These settings belong to this computer. The daily digest uses your timezone ({user.timezone}); it is built only from the data on this computer, with no network call, and shows in the bell and on Overview.</>}
       />
       <div className="fit-grid" style={{ "--fit-min": "520px" } as React.CSSProperties}>
         <Panel title="Display" icon={Settings} id="display">
@@ -94,12 +96,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <AiSettingsPanel baseUrl={ai.baseUrl} hasKey={ai.hasKey} model={ai.model} autopilot={ai.autopilot} />
           </Panel>
         )}
-        {!isDemo() && (
+        {!isDemo() && !hosted && (
           <Panel title="Use from other AI apps" icon={Wand2} id="mcp" defaultOpen={false} summary="Claude, opencode, Cursor and others (MCP)">
             <McpPanel launcher={path.join(process.cwd(), "scripts", "mcp.mjs")} />
           </Panel>
         )}
-        <Panel title="Sync" icon={RefreshCw} id="polling">
+        {!hosted && <Panel title="Sync" icon={RefreshCw} id="polling">
           <div className="p-4">
             <ActionForm action={setPollSecondsAction} submitLabel="Save" resetOnSuccess={false} className="max-w-xs">
               <label className="label" htmlFor="poll">Active polling interval (seconds, 15 to 600)</label>
@@ -107,13 +109,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <p className="mt-1 text-[12px] text-ink-3">Shorter means fresher data and more GitHub requests.</p>
             </ActionForm>
           </div>
-        </Panel>
+        </Panel>}
         {viewer.isAdmin && (
           <Panel title="Backup and restore" icon={Settings} id="backup" defaultOpen={false} summary="Export a copy or restore from one">
             <BackupPanel />
           </Panel>
         )}
-        <Panel title="Auto-sync of repositories" icon={RefreshCw} id="auto-sync" defaultOpen={false} summary={!watch.enabled ? "Off" : `On, every ${watch.effective} s`}>
+        {!hosted && <Panel title="Auto-sync of repositories" icon={RefreshCw} id="auto-sync" defaultOpen={false} summary={!watch.enabled ? "Off" : `On, every ${watch.effective} s`}>
           <div className="p-4">
             <ActionForm action={setRepoWatchAction} submitLabel="Save" resetOnSuccess={false} className="max-w-md">
               <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" name="enabled" defaultChecked={watch.enabled} /> Check repositories I don&apos;t own while Mergeport is open</label>
@@ -131,7 +133,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </p>
             {watch.enabled && watch.stretched && <p className="mt-1 text-[12px] text-ink-3">Stretched from {watch.configured} s: {watch.repos} repositories every {watch.effective} s is 300 requests a minute. Watch fewer repositories to check faster.</p>}
           </div>
-        </Panel>
+        </Panel>}
         {setup && (
           <Panel title="Set up automatically" icon={Wand2} id="auto">
             <div className="flex flex-col gap-3 p-4 text-[13px]">
@@ -152,7 +154,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </div>
           </Panel>
         )}
-        <Panel title="GitHub account" icon={KeyRound} id="gh" defaultOpen={false} summary={gh === null ? "Demo mode" : gh.state === "ok" ? `@${gh.identity.login} via the GitHub CLI` : "Not connected"}>
+        {!hosted && <Panel title="GitHub account" icon={KeyRound} id="gh" defaultOpen={false} summary={gh === null ? "Demo mode" : gh.state === "ok" ? `@${gh.identity.login} via the GitHub CLI` : "Not connected"}>
           <div className="flex flex-col gap-3 p-4 text-[13px]">
             {gh === null ? (
               <p className="text-ink-3">Demo mode: nothing here talks to GitHub.</p>
@@ -172,7 +174,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               </ul>
             </details>
           </div>
-        </Panel>
+        </Panel>}
       </div>
     </>
   );

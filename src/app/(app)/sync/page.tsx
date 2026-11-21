@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isHosted } from "@/lib/public-url";
 import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -130,7 +131,7 @@ export default async function SyncPage() {
       )}
 
       <Panel title="Spaces" icon={RefreshCw} id="spaces">
-        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet" action={<Link href="/team" className="btn btn-primary">Set up a team</Link>}>Everything stays on this computer. Create or join a team to share.</EmptyState> : (
+        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet" action={isHosted() ? undefined : <Link href="/team" className="btn btn-primary">Set up a team</Link>}>{isHosted() ? "Repository data is refreshed from GitHub in the background. Nothing else needs syncing." : "Everything stays on this computer. Create or join a team to share."}</EmptyState> : (
           <ul>
             {states.map(([s, st]) => (
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 text-[13px] last:border-b-0">
