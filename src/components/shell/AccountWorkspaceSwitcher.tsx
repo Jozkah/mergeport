@@ -1,15 +1,29 @@
-import { switchWorkspaceAction } from "@/app/account-actions";
+"use client";
 
-/** Hosted accounts with several workspaces. A plain form: the server checks the chosen id against the person's ACTIVE memberships. */
-export function AccountWorkspaceSwitcher({ workspaces, active, className = "" }: { workspaces: { id: string; name: string }[]; active: string; className?: string }) {
+import { useFormStatus } from "react-dom";
+import { switchWorkspaceAction } from "@/app/account-actions";
+import { LoaderCircle } from "@/components/ui/icons";
+import { Select } from "@/components/ui/Select";
+
+function Field({ workspaces, active }: { workspaces: { id: string; name: string }[]; active: string }) {
+  const { pending } = useFormStatus();
   return (
-    <form action={switchWorkspaceAction} className={`flex items-center gap-1.5 ${className}`}>
-      <select aria-label="Workspace" name="workspaceId" defaultValue={active} className="select !h-8 !py-0 min-w-0 flex-1 text-[12.5px] sm:w-[11rem] sm:flex-none">
+    <>
+      <Select aria-label="Workspace" aria-busy={pending} name="workspaceId" defaultValue={active} autoSubmit disabled={pending} className="select min-w-0 flex-1 text-[12.5px] sm:w-[11rem] sm:flex-none">
         {workspaces.map((w) => (
           <option key={w.id} value={w.id}>{w.name}</option>
         ))}
-      </select>
-      <button className="btn !h-8 text-[12.5px]">Switch</button>
+      </Select>
+      {pending ? <LoaderCircle size={14} aria-hidden className="shrink-0 animate-spin text-ink-3 motion-reduce:animate-none" /> : null}
+    </>
+  );
+}
+
+/** Hosted accounts with several workspaces. Choosing one switches at once (the server checks the id against the person's ACTIVE memberships). */
+export function AccountWorkspaceSwitcher({ workspaces, active, className = "" }: { workspaces: { id: string; name: string }[]; active: string; className?: string }) {
+  return (
+    <form action={switchWorkspaceAction} className={`flex items-center gap-1.5 ${className}`}>
+      <Field workspaces={workspaces} active={active} />
     </form>
   );
 }

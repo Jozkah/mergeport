@@ -1,7 +1,8 @@
 "use client";
 
 import * as S from "@radix-ui/react-select";
-import { Children, isValidElement, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode } from "react";
+import { Children, isValidElement, useEffect, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { Check, ChevronDown } from "@/components/ui/icons";
 import { Glide } from "@/components/ui/Glide";
 
@@ -39,7 +40,7 @@ const textOf = (n: ReactNode): string => (typeof n === "string" || typeof n === 
 const enc = (v: string) => (v === "" ? EMPTY : v);
 const dec = (v: string) => (v === EMPTY ? "" : v);
 
-export function Select({ children, className, id, name, defaultValue, value, onChange, required, disabled, "aria-label": ariaLabel, "aria-busy": ariaBusy }: {
+export function Select({ children, className, id, name, defaultValue, value, onChange, autoSubmit, required, disabled, "aria-label": ariaLabel, "aria-busy": ariaBusy }: {
   children: ReactNode;
   className?: string;
   id?: string;
@@ -47,6 +48,9 @@ export function Select({ children, className, id, name, defaultValue, value, onC
   defaultValue?: string | number;
   value?: string | number;
   onChange?: (e: ChangeEvent<HTMLSelectElement>) => void;
+  /** Submit the closest form as soon as a different option is chosen (no separate Save button). */
+  autoSubmit?: boolean;
+  /** An empty choice blocks the form (the browser names the missing field) and is announced as required. */
   required?: boolean;
   disabled?: boolean;
   "aria-label"?: string;
@@ -55,23 +59,41 @@ export function Select({ children, className, id, name, defaultValue, value, onC
   const view = useRef<HTMLDivElement>(null);
   const groups = collect(children);
   const all = groups.flatMap((g) => g.options);
-  const [inner, setInner] = useState(defaultValue !== undefined ? String(defaultValue) : (all[0]?.value ?? ""));
+  const initial = defaultValue !== undefined ? String(defaultValue) : (all[0]?.value ?? "");
+  const [inner, setInner] = useState(initial);
+  const field = useRef<HTMLInputElement>(null);
+  // form.reset() (ActionForm does it after a success) puts native controls back to their default; this one is React state, so it
+  // listens for the same event. Without it the hidden input would keep posting the old choice.
+  useEffect(() => {
+    const form = field.current?.form;
+    if (!form) return;
+    const onReset = () => setInner(initial);
+    form.addEventListener("reset", onReset);
+    return () => form.removeEventListener("reset", onReset);
+  }, [initial]);
   const current = value !== undefined ? String(value) : inner;
   const label = all.find((o) => o.value === current)?.label ?? all[0]?.label;
   return (
     <>
       {/* Radix would post its internal stand-in for an empty value; this posts what the person chose. */}
-      {name ? <input type="hidden" name={name} value={current} disabled={disabled} /> : null}
+      {name && required ? (
+        // A hidden input is never validated; a clipped, unfocusable text input is, so an empty required select blocks the submit.
+        <input ref={field} type="text" name={name} value={current} disabled={disabled} required tabIndex={-1} aria-hidden onChange={() => {}} className="pointer-events-none absolute size-px opacity-0" />
+      ) : (
+        <input ref={field} type="hidden" name={name} value={current} disabled={disabled || !name} />
+      )}
     <S.Root
       value={enc(current)}
       required={required}
       disabled={disabled}
       onValueChange={(v) => {
-        setInner(dec(v));
+        const changed = dec(v) !== current;
+        flushSync(() => setInner(dec(v)));
         onChange?.({ target: { value: dec(v), name: name ?? "" }, currentTarget: { value: dec(v), name: name ?? "" } } as ChangeEvent<HTMLSelectElement>);
+        if (autoSubmit && changed) field.current?.form?.requestSubmit();
       }}
     >
-      <S.Trigger id={id} aria-label={ariaLabel} aria-busy={ariaBusy} className={`${className ?? "select"} flex items-center justify-between gap-2 text-left`}>
+      <S.Trigger id={id} aria-label={ariaLabel} aria-busy={ariaBusy} aria-required={required || undefined} className={`${className ?? "select"} flex items-center justify-between gap-2 text-left`}>
         <span className="min-w-0 flex-1 truncate"><S.Value>{label}</S.Value></span>
         <S.Icon asChild><ChevronDown size={14} aria-hidden className="shrink-0 text-ink-3" /></S.Icon>
       </S.Trigger>

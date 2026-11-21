@@ -60,7 +60,7 @@ export async function approveFederationAction(fd: FormData): Promise<ActionResul
     if (!safeEqual(str(fd, "csrf"), csrf)) throw new ForbiddenError("This page is out of date. Reload it and try again.");
     const ctx = await ctxOrThrow();
     const { redirectTo } = await approveAuthorization(ctx, user.id, authorizeFields(ctx, fd), str(fd, "workspaceId") || viewer.workspaceId);
-    return { ok: true, data: { redirect: redirectTo } };
+    return { ok: true, message: "Approved. Returning to the other instance…", data: { redirect: redirectTo } };
   });
 }
 
@@ -70,7 +70,7 @@ export async function denyFederationAction(fd: FormData): Promise<ActionResult> 
     if (!safeEqual(str(fd, "csrf"), csrf)) throw new ForbiddenError("This page is out of date. Reload it and try again.");
     const ctx = await ctxOrThrow();
     const { redirectTo } = await denyAuthorization(ctx, user.id, authorizeFields(ctx, fd), str(fd, "workspaceId") || viewer.workspaceId);
-    return { ok: true, data: { redirect: redirectTo } };
+    return { ok: true, message: "Denied. Nothing was shared.", data: { redirect: redirectTo } };
   });
 }
 

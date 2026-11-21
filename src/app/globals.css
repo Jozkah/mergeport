@@ -455,6 +455,14 @@ table.data tbody tr:hover {
 .btn[data-loading="true"] {
   cursor: progress;
 }
+/* Prominent form buttons (sign-in, invitation, onboarding): 40 px, 44 px on touch. Replaces per-file height overrides. */
+.btn-lg {
+  height: 40px;
+}
+.wrap-any {
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
 @media (pointer: coarse) {
   .btn,
   .input,
@@ -465,6 +473,9 @@ table.data tbody tr:hover {
   }
   .btn-icon {
     min-width: 44px;
+  }
+  .btn-lg {
+    height: 44px;
   }
 }
 .input,
@@ -583,6 +594,12 @@ table.data tbody tr:hover {
   color: var(--color-ok);
   background: var(--color-ok-bg);
   border-color: var(--color-ok-line);
+}
+/* Roles and scopes describe what something is, not how it is doing: neutral ink, no status colour. */
+.pill-neutral {
+  color: var(--color-ink-2);
+  background: var(--color-surface);
+  border-color: var(--color-line);
 }
 .pill-unknown {
   color: var(--color-unknown);

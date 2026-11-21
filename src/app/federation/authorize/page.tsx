@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { Logo } from "@/components/ui/Logo";
+import { AuthShell, ErrorScreen } from "@/components/ui/AuthShell";
 import { Banner } from "@/components/ui/primitives";
 import { ConsentForms } from "@/components/federation/FederationForms";
 import { getAuth } from "@/lib/auth/current";
@@ -11,17 +11,19 @@ import { eligibleWorkspaces, parseAuthorizeRequest } from "@/lib/federation/prov
 export const metadata = { title: "Approve linked instance", referrer: "same-origin" };
 export const dynamic = "force-dynamic";
 
-const Shell = ({ children }: { children: React.ReactNode }) => (
-  <main className="mx-auto flex min-h-dvh w-full max-w-[520px] flex-col justify-center gap-5 px-4 py-10">
-    <div className="flex items-center gap-2.5">
-      <Logo size={36} />
-      <span className="text-[18px] font-medium">Mergeport</span>
-    </div>
-    <div className="panel"><div className="panel-body p-5">{children}</div></div>
-  </main>
-);
-
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+
+/** A plain-http origin is only unremarkable on the same machine. */
+function insecure(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    if (u.protocol === "https:") return false;
+    const h = u.hostname;
+    return !(h === "localhost" || h.endsWith(".localhost") || h === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(h));
+  } catch {
+    return true;
+  }
+}
 
 /**
  * /federation/authorize. Step 2 of linking, shown to the person who owns the data. The request is validated first (the return
@@ -37,10 +39,9 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
   const parsed = parseAuthorizeRequest(ctx, flat);
   if (!parsed.ok) {
     return (
-      <Shell>
-        <h1 className="text-[20px] font-medium">This request cannot be approved</h1>
-        <p className="mt-2 text-[13px] text-ink-3">{parsed.error} Nothing was shared. Go back to the other instance and start the link again.</p>
-      </Shell>
+      <ErrorScreen title="This request cannot be approved">
+        {parsed.error} Nothing was shared. Go back to the other instance and start the link again.
+      </ErrorScreen>
     );
   }
   const req = parsed.req;
@@ -53,25 +54,31 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
   const host = req.clientOrigin.replace(/^https?:\/\//, "");
   if (eligible.length === 0) {
     return (
-      <Shell>
-        <h1 className="text-[20px] font-medium">Nothing can be shared with {host}</h1>
+      <AuthShell title={<>Nothing can be shared with <bdi>{host}</bdi></>}>
         <div className="mt-3">
           <Banner tone="warn" title="Linking is not allowed">
             {refused > 0 ? "No workspace of yours accepts links from this instance. An administrator of the workspace can allow it in Settings, Linked instances." : "You are not a member of any workspace yet."}
           </Banner>
         </div>
-        <Link href="/" className="btn mt-4 !h-10">Back to Mergeport</Link>
-      </Shell>
+        <Link href="/" className="btn btn-lg mt-4 w-full">Back to Mergeport</Link>
+      </AuthShell>
     );
   }
   const fields = { clientOrigin: req.clientOrigin, redirectUri: req.redirectUri, state: req.state, codeChallenge: req.codeChallenge, csrf: a.session.csrfToken };
   const one = eligible.length === 1 ? eligible[0] : null;
   return (
-    <Shell>
-      <h1 className="text-[20px] font-medium text-balance">
-        <span className="[overflow-wrap:anywhere]">{host}</span> wants read-only access to {one ? <>your <strong>{one.name}</strong> projects</> : "your projects"} as you
-      </h1>
-      <p className="mt-2 text-[13px] text-ink-3">Signed in as {a.user.email ?? `@${a.user.login}`}. After you approve, that instance shows your projects to you, there. It is you looking, not a copy: this instance keeps the data and checks your access on every request.</p>
+    <AuthShell
+      title={<span className="text-balance"><bdi>{host}</bdi> wants read-only access to your projects as you</span>}
+    >
+      {/* The full origin with its scheme: this is what the person is trusting. */}
+      <p className="mono mt-2 break-all text-[12.5px] text-ink-2" title={req.clientOrigin}><bdi>{req.clientOrigin}</bdi></p>
+      {insecure(req.clientOrigin) && (
+        <div className="mt-3"><Banner tone="warn" title="This address is not secure">It does not use https, so what it shows you could be read or changed on the way. Only continue if you trust this network and know this instance.</Banner></div>
+      )}
+      {one ? (
+        <p className="mt-3 text-[13px] text-ink-2">Workspace shared: <strong className="wrap-any font-medium"><bdi>{one.name}</bdi></strong></p>
+      ) : null}
+      <p className="mt-2 text-[13px] text-ink-3">Signed in as <bdi className="break-all">{a.user.email ?? `@${a.user.login}`}</bdi>. After you approve, that instance shows your projects to you, there. It is you looking, not a copy: this instance keeps the data and checks your access on every request.</p>
       <h2 className="mt-4 text-[13px] font-medium">Read-only includes</h2>
       <ul className="mt-1 list-disc pl-5 text-[13px] text-ink-2">
         <li>Names and descriptions of the projects you can see in the workspace you choose.</li>
@@ -83,8 +90,12 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
         <li>The ability to change, move, create or delete anything.</li>
         <li>Email addresses, GitHub access, settings, other workspaces, or other people&apos;s accounts.</li>
       </ul>
-      <p className="mt-3 text-[12.5px] text-ink-3">Access ends after 30 days without use (180 days at most). You can revoke it at any time under Linked instances, and so can your administrators.</p>
+      <h2 className="mt-4 text-[13px] font-medium">How long it lasts</h2>
+      <ul className="mt-1 list-disc pl-5 text-[13px] text-ink-2">
+        <li>Access ends after 30 days without use (180 days at most).</li>
+        <li>You can revoke it at any time under Linked instances, and so can your administrators.</li>
+      </ul>
       <ConsentForms fields={fields} workspaces={eligible.map((e) => ({ id: e.workspaceId, name: e.name, role: e.role }))} />
-    </Shell>
+    </AuthShell>
   );
 }

@@ -39,9 +39,11 @@ export async function POST(req: Request) {
   const form = await req.formData().catch(() => null);
   const next = form?.get("next");
   const result = await requestMagicLink(db, { email: form?.get("email"), next: typeof next === "string" ? next : null, ip, browserNonce: nonce, origin: originFor(req), mailer });
-  if (result === "invalid") return redirectTo(req, "/sign-in?error=email-invalid", 303);
+  // On a failure the typed address comes back in the page's own field (never on success: the "sent" page does not repeat it).
+  const typed = typeof form?.get("email") === "string" ? `&email=${encodeURIComponent(String(form?.get("email")).slice(0, 254))}` : "";
+  if (result === "invalid") return redirectTo(req, `/sign-in?error=email-invalid${typed}`, 303);
   // Set for sent AND throttled alike, so the response does not tell the two apart.
   jar.set(MAGIC_COOKIE, nonce, { httpOnly: true, sameSite: "lax", secure: cookiesSecure(), path: "/auth/magic", maxAge: Math.floor(MAGIC_LINK_TTL_MS / 1000) });
-  if (result === "send-failed") return redirectTo(req, "/sign-in?error=mail-failed", 303);
+  if (result === "send-failed") return redirectTo(req, `/sign-in?error=mail-failed${typed}`, 303);
   return redirectTo(req, "/sign-in?sent=1", 303);
 }

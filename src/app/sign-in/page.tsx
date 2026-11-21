@@ -23,10 +23,10 @@ const ERRORS: Record<string, string> = {
   "hub-expired": "The sign-in code expired. Connect again.",
 };
 
-export default async function SignIn({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string; next?: string }> }) {
+export default async function SignIn({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string; next?: string; email?: string }> }) {
   const sp = await searchParams;
   // A hosted deployment (MERGEPORT_PUBLIC_URL) signs people in with email or OIDC. The GitHub CLI, hub and demo sections below belong to the local app.
-  if (isHosted()) return <AccountSignIn error={sp.error} sent={sp.sent === "1"} next={sp.next} />;
+  if (isHosted()) return <AccountSignIn error={sp.error} sent={sp.sent === "1"} next={sp.next} email={sp.email} />;
   const demo = isDemo();
   const st = demo ? null : await currentGhStatus(true);
   const launched = Boolean(env().MERGEPORT_LAUNCH_TOKEN);
@@ -73,7 +73,7 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
               {launched ? (
                 <p className="text-ink-3">Open Mergeport with the link the launcher opened (<span className="mono">npm run local</span>). That one-time link ties this browser to this process.</p>
               ) : (
-                <form action="/api/local/signin" method="post"><button className="btn btn-primary !h-10 w-full">Continue as @{st.identity.login}</button></form>
+                <form action="/api/local/signin" method="post"><button className="btn btn-primary btn-lg w-full">Continue as @{st.identity.login}</button></form>
               )}
             </div>
           )}

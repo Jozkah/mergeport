@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { SESSION_COOKIE, destroyAllSessions } from "@/lib/auth/session";
+import type { ActionResult } from "@/lib/action-result";
 import { redirect } from "next/navigation";
 import { getAuth } from "@/lib/auth/current";
 import { selectWorkspace } from "@/lib/authz/active-workspace";
@@ -22,8 +23,10 @@ export async function createWorkspaceAction(formData: FormData): Promise<void> {
   try {
     await createWorkspaceFor(db, a.user.id, formData.get("name"), a.session.id);
   } catch (e) {
-    if (e instanceof ValidationError) redirect("/onboarding?error=name");
-    if (e instanceof ConflictError) redirect("/onboarding?error=limit");
+    // The typed name travels back so a refused name or a limit message does not lose it.
+    const typed = `&name=${encodeURIComponent(String(formData.get("name") ?? "").slice(0, 80))}`;
+    if (e instanceof ValidationError) redirect(`/onboarding?error=name${typed}`);
+    if (e instanceof ConflictError) redirect(`/onboarding?error=limit${typed}`);
     throw e;
   }
   revalidatePath("/", "layout");
@@ -37,6 +40,12 @@ export async function signOutEverywhereAction(): Promise<void> {
   await destroyAllSessions(db, a.user.id);
   (await cookies()).delete(SESSION_COOKIE);
   redirect("/sign-in");
+}
+
+/** The same, as a form action with an ActionResult (the Settings > Account confirmation sheet). It always ends in a redirect. */
+export async function signOutEverywhereFormAction(): Promise<ActionResult> {
+  await signOutEverywhereAction();
+  return { ok: true };
 }
 
 /** The workspace switcher. The id is untrusted: selectWorkspace accepts it only for a workspace the person is an ACTIVE member of. */

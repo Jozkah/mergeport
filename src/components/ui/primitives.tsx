@@ -49,7 +49,7 @@ export function PageHeader({ title, subtitle, actions, help }: { title: ReactNod
         <h1 className="flex items-center gap-3 text-[24px] font-medium leading-8 tracking-[-0.01em] text-ink"><SectionTile /><span className="min-w-0">{title}</span></h1>
         {subtitle && <p className="mt-1 max-w-[70ch] truncate text-[13px] text-ink-3" title={typeof subtitle === "string" ? subtitle : undefined}>{subtitle}</p>}
         {help && (
-          <details className="groupmt-0.5 max-w-[70ch]">
+          <details className="group mt-0.5 max-w-[70ch]">
             <summary className="-ml-1 inline-flex h-10 cursor-pointer list-none items-center gap-1.5 rounded-[6px] px-1 text-[12.5px] text-ink-3 transition-colors duration-[var(--duration-feedback)] hover:text-ink [&::-webkit-details-marker]:hidden">
               <Info size={14} aria-hidden className="shrink-0" />
               About this page
@@ -87,10 +87,14 @@ export function StatusPill({ status, label }: { status: PrimaryStatus; label?: s
   );
 }
 
-export function SimplePill({ tone, icon: I, children }: { tone: "needs" | "waiting" | "changes" | "blocked" | "ok" | "unknown"; icon?: Icon; children: ReactNode }) {
+const TONE_ICON: Record<"needs" | "waiting" | "changes" | "blocked" | "ok" | "unknown", Icon> = { needs: Info, waiting: Hourglass, changes: CircleAlert, blocked: Ban, ok: Check, unknown: CircleHelp };
+
+/** A state pill always carries an icon (colour never stands alone): pass `icon`, or the tone's default is used. */
+export function SimplePill({ tone, icon, children }: { tone: "needs" | "waiting" | "changes" | "blocked" | "ok" | "unknown"; icon?: Icon; children: ReactNode }) {
+  const I = icon ?? TONE_ICON[tone];
   return (
     <span className={cn("pill", `pill-${tone}`)}>
-      {I && <I size={12} aria-hidden />}
+      <I size={12} aria-hidden />
       {children}
     </span>
   );
