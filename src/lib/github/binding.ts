@@ -144,23 +144,3 @@ export async function markInstallationState(db: Db | Prisma.TransactionClient, i
   const data = state === "active" ? { suspendedAt: null, deletedAt: null } : state === "suspended" ? { suspendedAt: now } : { deletedAt: now };
   return (await db.githubInstallation.updateMany({ where, data })).count === 1;
 }
-
-/**
- * GitHub says the installation can no longer see these repositories (`installation_repositories` removed). For every workspace bound to the
- * installation, each tracked repository with one of the GitHub ids is set to DISCONNECTED and detached from the installation (this file is
- * the only writer of `Repository.installationId`). Planning data stays; a REMOVED repository is left as it is. The ids only FIND rows that
- * already name this installation: nothing is created or authorized from them. Returns the number detached per workspace.
- */
-export async function disconnectRemovedRepositories(tx: Prisma.TransactionClient, installationId: bigint, githubIds: bigint[]): Promise<{ workspaceId: string; count: number }[]> {
-  if (githubIds.length === 0) return [];
-  const bindings = await tx.workspaceInstallation.findMany({ where: { installationId }, select: { workspaceId: true }, orderBy: { workspaceId: "asc" } });
-  const out: { workspaceId: string; count: number }[] = [];
-  for (const b of bindings) {
-    const r = await tx.repository.updateMany({
-      where: { workspaceId: b.workspaceId, installationId, githubId: { in: githubIds }, trackingStatus: { not: "REMOVED" } },
-      data: { installationId: null, trackingStatus: "DISCONNECTED", statusDetail: "GitHub no longer shares this repository with Mergeport." },
-    });
-    if (r.count > 0) out.push({ workspaceId: b.workspaceId, count: r.count });
-  }
-  return out;
-}

@@ -16,10 +16,13 @@ export const dynamic = "force-dynamic";
  *
  * Order, each step before the next: hosted and configured (else 404); a declared size over 1 MiB (413); the body read with a hard
  * 1 MiB cap (413); the signature over the RAW body (401). Only then are headers checked, the JSON parsed and the database used for
- * anything but the abuse counters. The handler queues jobs or flips a state and answers; it never calls GitHub.
+ * anything but the abuse counter. The handler queues jobs and answers; it never calls GitHub.
+ *
+ * A validly signed delivery is NEVER answered 429 (GitHub does not retry, so the event would be lost): the only address limit is on
+ * INVALID signatures. Load is bounded per installation instead (processDelivery sheds with 202 far above any real rate). The address
+ * comes from MERGEPORT_TRUST_PROXY / X-Forwarded-For, which a hosted deployment must have (hostedConfigProblems refuses to start without).
  */
 
-const RATE_PER_MINUTE = 600;
 const BAD_SIGNATURES_PER_MINUTE = 30;
 const EVENT = /^[a-z][a-z_]{0,49}$/;
 const DELIVERY = /^[A-Za-z0-9-]{8,64}$/;
@@ -41,7 +44,6 @@ export async function POST(req: Request) {
     const within = await take(db, bucket("bad", req), BAD_SIGNATURES_PER_MINUTE, 60_000).catch(() => true);
     return within ? reply(401, "invalid signature") : reply(429, "slow down");
   }
-  if (!(await take(db, bucket("ip", req), RATE_PER_MINUTE, 60_000))) return reply(429, "slow down");
 
   const event = req.headers.get("x-github-event");
   const delivery = req.headers.get("x-github-delivery");
@@ -65,6 +67,8 @@ export async function POST(req: Request) {
         return reply(400, "unusable payload");
       case "unknown-installation":
         return reply(200, "unknown installation");
+      case "shed":
+        return reply(202, "shed");
       case "duplicate":
         return reply(200, "duplicate");
       case "accepted":

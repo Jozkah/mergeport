@@ -142,12 +142,13 @@ configured (anything else: 404). The secret is `MERGEPORT_GITHUB_APP_WEBHOOK_SEC
 1. A declared `Content-Length` over 1 MiB is refused (413) before reading; the body is then read with a hard 1 MiB cap on the stream itself (413).
 2. `X-Hub-Signature-256` must be `sha256=` plus 64 hex digits and equal HMAC-SHA256 of the RAW body (constant-time compare of equal-length buffers; the hex may be
    upper or lower case, the prefix is exact). Missing, malformed, wrong length, wrong secret or truncated body: 401. Only an abuse counter is written.
-3. Per-address limits (`RateLimitState`, address from the trusted proxy chain, stored as a hash): 600 requests a minute (429), and 30 invalid signatures a minute (429).
+3. Invalid signatures only are limited per address (30 a minute, 429; `RateLimitState`, address from `X-Forwarded-For` via the trusted proxy chain, stored as a hash). `MERGEPORT_TRUST_PROXY=true` is required on a hosted deployment and the startup check enforces it (`hostedConfigProblems`). A validly signed delivery is NEVER answered 429 (GitHub does not retry): per installation, more than 3000 events a minute are acknowledged with 202 `shed` and not queued (logged; the reconcile covers them).
 4. `X-GitHub-Event` (lower-case letters and underscores) and `X-GitHub-Delivery` (letters, digits, hyphens, 8 to 64 characters) are required (400). `ping`: 200, no writes.
 5. The body is parsed (400 unless a JSON object). An event or action this deployment does not act on: 202, no writes. A handled event without a usable
    `installation.id`: 400. An installation we do not hold: 200, no writes (a webhook never creates an installation or a binding).
-6. One transaction: insert the delivery id (`GithubDelivery`, `ON CONFLICT DO NOTHING`; zero rows means a duplicate: 200 `duplicate`, nothing else written), stamp
-   `GithubInstallation.lastWebhookAt`, then the handler. Any failure rolls back everything (500, no delivery row), so GitHub's "Redeliver" works.
+6. The delivery id is inserted (`GithubDelivery`, `ON CONFLICT DO NOTHING`; zero rows means a duplicate: 200 `duplicate`, nothing else happens). Then the jobs are queued OUTSIDE any
+   transaction (`enqueue` settles create races by retrying, which an aborted Postgres transaction cannot). If queueing fails, the delivery row is deleted again and the answer is 500, so
+   GitHub's "Redeliver" works (jobs already queued are coalesced by their dedupe keys). Only then are the live stamps set (`GithubInstallation.lastWebhookAt`, `Repository.lastEventAt`, each at most once a minute).
 
 The route never calls GitHub: handlers queue jobs or flip a state, so the answer is fast. It reads no cookie and no session; `src/proxy.ts` exempts exactly
 `POST /api/github/webhook` on a hosted deployment from the browser Origin rule (the signature is the credential), like the federation token endpoints.
@@ -162,20 +163,18 @@ The route never calls GitHub: handlers queue jobs or flip a state, so the answer
 | `check_run`, `check_suite` | any | `sync.item` per pull request listed (at most 10), else `sync.repository` |
 | `status`, `push`, `create`, `delete`, `label`, `milestone` | any | `sync.repository`, dedupe `sync:<repository>` (the key reconcile and Refresh share, so bursts coalesce) |
 | `repository` | `publicized`, `privatized`, `renamed`, `transferred`, `edited`, `archived`, `unarchived`, `deleted` | `sync.repository` at once. The visibility flip (grants revoked, digests purged) is `syncRepository`'s job, not duplicated here. A deleted repository answers 404 in the job, which marks it DISCONNECTED exactly as reconcile does; planning data stays. |
-| `installation` | `suspend`, `deleted` | installation state `suspended` / `deleted` (global row, every workspace sees it), one audit row per bound workspace, only when the state changed |
-| `installation` | `unsuspend`, `created`, `new_permissions_accepted` | state `active` |
-| `installation_repositories` | `removed` | tracked repositories named in `repositories_removed` become DISCONNECTED and lose `installationId` (through `binding.ts`), audit row per workspace |
-| `installation_repositories` | `added` | nothing: administrators choose what to track |
+| `installation` | any | one `github.installation.check` job per installation (dedupe `ghinst:<id>`, system job). It asks GitHub as the App (`GET /app/installations/:id`) and records what is TRUE now: 404 = deleted, `suspended_at` set = suspended, else active; audit rows (one per bound workspace) only when the recorded state really changes. The action word is never trusted, because deliveries arrive late and out of order. |
+| `installation_repositories` | any | the same check job; for `removed` also a `sync.repository` per tracked repository named in `repositories_removed` (at most 2000 ids per delivery, read in chunks; beyond that the reconcile is pulled forward). A repository GitHub really removed from the installation answers 404 in that job and `syncRepository` marks it DISCONNECTED (existing path); one that is still readable stays connected. Nothing is detached directly. |
 
-Bindings and their proof columns are never touched by a webhook.
+Bindings and their proof columns are never touched by a webhook. A sync job against a suspended installation does nothing (not connected) and keeps the recorded state; the check job, "Check again" or a later event moves it.
 
 **Redelivery.** GitHub reuses the delivery id when someone redelivers. After a delivery succeeded, redelivering it is a no-op by design (`duplicate`). After a failure
 (500) nothing was recorded, so it is processed normally. Ids are kept for 7 days.
 
-**Maintenance and pacing.** A daily system job (`github.maintenance`) deletes `GithubDelivery` rows older than 7 days and `GithubAppState` rows past their expiry.
-A repository whose installation received a webhook within 24 hours and synced cleanly within the last hour is skipped by the 15-minute reconcile (so about hourly);
-silent installations, never-synced, failed, rate-limited and DISCONNECTED repositories are reconciled every run, so the safety net stays. Settings > GitHub shows
-"Live updates": "On (last event ...)", "Waiting for the first event from GitHub", or "Updates arrive about every 15 minutes".
+**Maintenance and pacing.** A daily system job (`github.maintenance`) deletes `GithubDelivery` rows older than 7 days, `GithubAppState` rows past their expiry and expired `RateLimitState`
+counters (not the GitHub budget rows), in batches of 1000. A repository that an event named within 24 hours (`Repository.lastEventAt`) and that synced cleanly within the last hour is skipped by the
+15-minute reconcile (so about hourly); never-synced, failed, rate-limited, DISCONNECTED and silent repositories are reconciled every run, so the safety net stays. Settings > GitHub shows
+"Live updates": "On (last event ..., reconciles about hourly while events arrive)", "Waiting for the first event from GitHub", or "Updates arrive about every 15 minutes".
 
 ## Threat notes
 
@@ -229,3 +228,4 @@ Everything above is tested against the fake only. Before relying on it, run the 
 15. That `check_run` / `check_suite` payloads list `pull_requests` (empty for runs on branches of forks or without a pull request, in which case the repository is refreshed instead).
 16. That a deletion of a repository (`repository` `deleted`) leads to a DISCONNECTED repository through the 404 in the job, and that `archived` only flags it.
 17. That the reverse proxy forwards the body unchanged (no re-encoding, compression or size rewrite) and keeps `X-Hub-Signature-256`, and that 1 MiB is enough for every subscribed event.
+18. That `GET /repos/<owner>/<repo>` with an installation token answers 404 (or 403) for a repository that was removed from the installation but still exists, which is what turns a removed repository DISCONNECTED; and that `GET /app/installations/<id>` answers 404 after an uninstall and carries `suspended_at` while suspended.

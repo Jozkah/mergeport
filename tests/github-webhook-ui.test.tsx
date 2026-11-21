@@ -22,12 +22,12 @@ const live = (v: GithubView) => render(<GithubSettingsBody view={v} result={null
 
 describe("Settings > GitHub: Live updates", () => {
   it("shows when the last event arrived", () => {
-    expect(live(view({ installations: [row({ lastWebhookAt: new Date("2026-11-21T11:55:00Z") })] }))).toBe("Live updates: On (last event 5m ago)");
+    expect(live(view({ installations: [row({ lastWebhookAt: new Date("2026-11-21T11:55:00Z") })] }))).toBe("Live updates: On (last event 5m ago). Reconciles about hourly while events arrive.");
   });
 
   it("uses the newest event across the workspace's accounts", () => {
     const text = liveUpdatesText(true, [row({ lastWebhookAt: new Date("2026-11-21T09:00:00Z") }), row({ installationId: "7", lastWebhookAt: new Date("2026-11-21T11:00:00Z") }), row({ installationId: "8", lastWebhookAt: null })], NOW);
-    expect(text).toBe("On (last event 1h ago)");
+    expect(text).toBe("On (last event 1h ago). Reconciles about hourly while events arrive.");
   });
 
   it("waits for the first event when the server is set up and none arrived", () => {

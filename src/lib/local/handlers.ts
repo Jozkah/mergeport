@@ -4,6 +4,7 @@ import { SOURCE_BUDGET_KEY } from "@/lib/github/budget";
 import { portForSync } from "@/lib/github/factory";
 import { GithubNotConnectedError } from "@/lib/github/hosted";
 import { workspaceGithubStatus } from "@/lib/github/status";
+import { checkInstallationFromGithub } from "@/lib/github/installation-check";
 import { pruneGithubAppData } from "@/lib/github/webhook-maintenance";
 import { enqueueHostedReconcile } from "@/lib/github/webhook-pacing";
 import type { Handler, JobRow } from "@/lib/jobs";
@@ -124,6 +125,11 @@ const rawHandlers: Record<string, Handler> = {
       const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases", mapping: { fork: { workspaceId } } }, select: { mappingId: true } });
       for (const w of watches) await maybeRequestReleaseCheck(db, w.mappingId);
     });
+  }) as Handler,
+  // Hosted: GitHub told us something happened to an installation (webhook); ask GitHub what is true now and record that. A system job per installation.
+  "github.installation.check": (async (p: { installationId: string }) => {
+    if (!/^\d{1,19}$/.test(String(p?.installationId))) return;
+    await checkInstallationFromGithub(db, BigInt(p.installationId));
   }) as Handler,
   // Hosted housekeeping (no GitHub, no network): old webhook delivery ids and expired install states. A system-wide job.
   "github.maintenance": (async () => {

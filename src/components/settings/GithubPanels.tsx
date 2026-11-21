@@ -95,7 +95,7 @@ function InstallationItem({ row, manage }: { row: InstallationRow; manage: boole
 /** The latest message from GitHub across the workspace's accounts, as the "Live updates" line says it. */
 export function liveUpdatesText(configured: boolean, installations: InstallationRow[], now: Date): string {
   const last = installations.reduce<Date | null>((a, r) => (r.lastWebhookAt && (!a || r.lastWebhookAt > a) ? r.lastWebhookAt : a), null);
-  if (last) return `On (last event ${relativeTime(last, now)})`;
+  if (last) return `On (last event ${relativeTime(last, now)}). Reconciles about hourly while events arrive.`;
   return configured ? "Waiting for the first event from GitHub" : "Updates arrive about every 15 minutes";
 }
 

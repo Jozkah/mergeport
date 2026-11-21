@@ -5,10 +5,10 @@ import { createTestPrisma } from "./pg";
 import { ORIGIN, state } from "./auth-mocks";
 import { workspaceWithOwner } from "./roles-helpers";
 import { hostedGithub, releaseApp, useApp } from "./github-hosted-helpers";
-import { setRepositoryInstallation } from "@/lib/github/binding";
-import { connectionState } from "@/lib/github/connection-state";
+import { listWorkspaceInstallations, setRepositoryInstallation } from "@/lib/github/binding";
 import { pruneGithubAppData } from "@/lib/github/webhook-maintenance";
 import { enqueueHostedReconcile } from "@/lib/github/webhook-pacing";
+import { MAX_REMOVED_IDS, repositoryIds } from "@/lib/github/webhook-lifecycle";
 import { WEBHOOK_MAX_BYTES, verifyWebhookSignature } from "@/lib/github/webhook-signature";
 
 /**
@@ -36,6 +36,7 @@ const db = () => state.db!;
 let n = 0;
 let seq = 0;
 let errorSpy: ReturnType<typeof vi.spyOn>;
+let gh: ReturnType<typeof hostedGithub>;
 
 const sign = (body: string | Buffer, secret = SECRET) => "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
 const newId = () => `0f9c1a2e-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
@@ -82,7 +83,7 @@ beforeEach(async () => {
   spy.process.mockClear();
   spy.enqueue.mockClear();
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-  const gh = hostedGithub();
+  gh = hostedGithub();
   vi.stubEnv("MERGEPORT_PUBLIC_URL", ORIGIN);
   vi.stubEnv("MERGEPORT_TRUST_PROXY", "true");
   vi.stubEnv("DEMO_MODE", "false");
@@ -227,8 +228,6 @@ describe("headers, payload and unknown events", () => {
       ["star", evt(1001, { action: "created" })],
       ["workflow_run", evt(1001, { action: "completed" })],
       ["repository", evt(1001, { action: "created" })], // an irrelevant action of a relevant event
-      ["installation", evt(1001, { action: "something_new" }, null)],
-      ["installation_repositories", evt(1001, { action: "bogus" }, null)],
     ] as const) {
       const r = await post(payload, { event });
       expect(r.status, event).toBe(202);
@@ -390,90 +389,223 @@ describe("dedupe and failure", () => {
     expect(await lastWebhook(1001n)).not.toBeNull();
   });
 
-  it("sets lastWebhookAt on an accepted delivery for a known installation, also when no repository matched, and only for that installation", async () => {
+  it("stamps lastWebhookAt for an item or repository event of a known installation (also when no repository matched), only that installation, never for ping or lifecycle events", async () => {
+    expect(await lastWebhook(1001n)).toBeNull();
+    await post({ zen: "x" }, { event: "ping" });
+    await post({ action: "suspend", installation: { id: 1001 } }, { event: "installation" });
     expect(await lastWebhook(1001n)).toBeNull();
     await post(evt(1001, { action: "opened", issue: { number: 1 } }, 55555n), { event: "issues" });
     expect(await lastWebhook(1001n)).not.toBeNull();
     expect(await lastWebhook(2002n)).toBeNull();
   });
+
+  it("stamps lastEventAt on the repository rows an event maps to (not others), at most once a minute", async () => {
+    const at = async (id: string, ws: string) => (await db().repository.findFirstOrThrow({ where: { id, workspaceId: ws } })).lastEventAt;
+    await post(evt(1001, { action: "opened", issue: { number: 1 } }), { event: "issues" });
+    const first = await at(rA, A);
+    expect(first).not.toBeNull();
+    expect(await at(rB, B)).not.toBeNull();
+    expect(await at(rC, B)).toBeNull();
+    await post(evt(1001, { action: "edited", issue: { number: 1 } }), { event: "issues" }); // within the minute: the row is not written again
+    expect(await at(rA, A)).toEqual(first);
+    await db().repository.updateMany({ where: { id: rA, workspaceId: A }, data: { lastEventAt: new Date(Date.now() - 5 * 60_000) } });
+    await post(evt(1001, { action: "edited", issue: { number: 2 } }), { event: "issues" });
+    expect((await at(rA, A))!.getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it("parallel deliveries for the same not-yet-queued item all succeed and leave exactly one job per workspace (no transaction to abort)", async () => {
+    const payload = (a: string) => evt(1001, { action: a, pull_request: { number: 9 } });
+    const rs = await Promise.all(["opened", "synchronize", "edited", "labeled", "reopened", "assigned"].map((a) => post(payload(a), { event: "pull_request" })));
+    expect(rs.map((r) => r.status)).toEqual([200, 200, 200, 200, 200, 200]);
+    expect(await jobKeys()).toEqual([`A:sync.item:item:${rA}:9`, `B:sync.item:item:${rB}:9`]);
+    expect(await deliveries()).toBe(6);
+  });
+
+  it("queueing that fails AFTER the delivery was recorded removes the delivery row again, so redelivery of the same id works", async () => {
+    const delivery = newId();
+    const payload = evt(1001, { action: "opened", issue: { number: 3 } });
+    const real = spy.enqueue.getMockImplementation()!;
+    spy.enqueue.mockImplementationOnce(real).mockRejectedValueOnce(new Error("second job failed")); // the first job is queued, the second fails
+    const failed = await post(payload, { delivery });
+    expect(failed.status).toBe(500);
+    expect(await deliveries()).toBe(0);
+    expect(await lastWebhook(1001n)).toBeNull();
+    expect((await post(payload, { delivery })).status).toBe(200);
+    expect(await deliveries()).toBe(1);
+    expect(await jobs()).toHaveLength(2); // the job queued before the failure is coalesced with the redelivery's
+  });
 });
 
-describe("installation lifecycle", () => {
-  const life = (installation: number, action: string) => post({ action, installation: { id: installation } }, { event: "installation" });
+describe("installation lifecycle (GitHub is asked, the event's action word is not trusted)", () => {
+  let LIVE: bigint;
+  let fi: ReturnType<typeof gh.server.addInstallation>;
+  const lifeJobs = () => db().job.findMany({ where: { type: "github.installation.check" }, orderBy: { dedupeKey: "asc" } });
+  const runCheck = async (id: bigint = LIVE) => {
+    const { handlers } = await import("@/lib/local/handlers");
+    await handlers["github.installation.check"]({ installationId: String(id) } as never, {} as never);
+  };
+  const life = (installation: bigint | number, action: string, event = "installation") => post({ action, installation: { id: Number(installation) } }, { event });
   const proofs = () => db().workspaceInstallation.findMany({ select: { workspaceId: true, installationId: true, verifiedAt: true, verifiedGithubUserId: true, proofMethod: true }, orderBy: [{ workspaceId: "asc" }, { installationId: "asc" }] });
   const audits = (action: string) => db().auditLog.findMany({ where: { action, workspaceId: { in: [A, B] } }, orderBy: { workspaceId: "asc" } });
+  /** What Settings shows for the live installation in a workspace. */
+  const statusIn = async (ws: string) => (await listWorkspaceInstallations(db(), ws)).find((r) => r.installationId === LIVE)!.status;
+  const stateOf = async () => {
+    const r = await db().githubInstallation.findUniqueOrThrow({ where: { installationId: LIVE } });
+    return r.deletedAt ? "deleted" : r.suspendedAt ? "suspended" : "active";
+  };
 
-  it("deleted, suspend, unsuspend, created and new_permissions_accepted move the global state; every workspace sees it; audit once per workspace per change", async () => {
+  beforeEach(async () => {
+    fi = gh.server.addInstallation("acme");
+    LIVE = BigInt(fi.id);
+    await installation(LIVE, "acme");
+    await bindTo(A, LIVE);
+    await bindTo(B, LIVE);
+  });
+
+  it("a lifecycle event only queues one deduplicated check job per installation: no state flips, no stamp, no GitHub call", async () => {
+    gh.server.calls.length = 0;
+    for (const action of ["suspend", "unsuspend", "deleted", "created", "new_permissions_accepted", "whatever"]) expect((await life(LIVE, action)).status).toBe(200);
+    expect(await stateOf()).toBe("active");
+    expect(await audits("github.installation-suspended")).toHaveLength(0);
+    const queued = await lifeJobs();
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({ dedupeKey: `ghinst:${LIVE}`, workspaceId: null, status: "QUEUED", payload: { installationId: String(LIVE) } });
+    expect((await db().githubInstallation.findUniqueOrThrow({ where: { installationId: LIVE } })).lastWebhookAt).toBeNull();
+    expect(gh.server.calls).toHaveLength(0);
+  });
+
+  it("jobs are isolated per installation", async () => {
+    await life(LIVE, "suspend");
+    await life(1001, "suspend");
+    expect((await lifeJobs()).map((j) => j.dedupeKey)).toEqual([`ghinst:1001`, `ghinst:${LIVE}`].sort());
+  });
+
+  it("out-of-order events end in the state GitHub reports: a late `suspend` after an `unsuspend` leaves it active", async () => {
     const before = await proofs();
-    expect(await connectionState(db(), A)).toBe("ok");
-
-    expect((await life(1001, "suspend")).status).toBe(200);
-    expect(await connectionState(db(), A)).toBe("suspended");
-    expect((await life(1001, "suspend")).status).toBe(200); // a repeat records nothing more
+    fi.suspended = true;
+    await life(LIVE, "suspend");
+    await runCheck();
+    expect(await stateOf()).toBe("suspended");
+    expect(await statusIn(A)).toBe("suspended");
     expect((await audits("github.installation-suspended")).map((a) => a.workspaceId).sort()).toEqual([A, B].sort());
 
-    await life(1001, "unsuspend");
-    expect(await connectionState(db(), A)).toBe("ok");
-    expect(await connectionState(db(), B)).toBe("ok");
+    fi.suspended = false; // GitHub unsuspended; then a LATE `suspend` delivery arrives
+    await life(LIVE, "unsuspend");
+    await life(LIVE, "suspend");
+    await runCheck();
+    expect(await stateOf()).toBe("active");
+    expect(await statusIn(B)).toBe("active");
+    expect((await audits("github.installation-active")).map((a) => a.workspaceId).sort()).toEqual([A, B].sort());
 
-    await life(1001, "deleted");
-    expect(await connectionState(db(), A)).toBe("removed");
-    const row = await db().githubInstallation.findUniqueOrThrow({ where: { installationId: 1001n } });
-    expect(row.deletedAt).not.toBeNull();
-    expect((await audits("github.installation-deleted")).map((a) => a.workspaceId).sort()).toEqual([A, B].sort());
-    expect((await audits("github.installation-deleted"))[0].actorUserId).toBeNull();
-
-    await life(1001, "created");
-    expect(await connectionState(db(), A)).toBe("ok");
-    await life(1001, "deleted");
-    await life(1001, "new_permissions_accepted");
-    expect(await connectionState(db(), A)).toBe("ok");
-
-    // the other installation and every binding's proof columns are untouched
-    expect((await db().githubInstallation.findUniqueOrThrow({ where: { installationId: 2002n } })).deletedAt).toBeNull();
+    await life(LIVE, "suspend"); // late and wrong, GitHub still says active: nothing changes, no audit
+    await runCheck();
+    expect(await stateOf()).toBe("active");
+    expect(await audits("github.installation-active")).toHaveLength(2);
+    expect(await audits("github.installation-suspended")).toHaveLength(2);
     expect(await proofs()).toEqual(before);
-    expect(await db().workspaceInstallation.count()).toBe(3);
-    // repositories are untouched by a state change: they work again when the installation does
-    expect((await db().repository.findUniqueOrThrow({ where: { id: rA } })).installationId).toBe(1001n);
   });
 
-  it("installation_repositories removed disconnects tracked repositories of THAT installation in every bound workspace, with audit rows", async () => {
-    const r = await post({ action: "removed", installation: { id: 1001 }, repositories_removed: [{ id: Number(REPO), full_name: "acme/x" }, { id: 424242 }, { id: "bad" }, null], repositories_added: [] }, { event: "installation_repositories" });
+  it("deleted and created follow GitHub too (404 = deleted; present again = active), audit once per real change", async () => {
+    gh.server.installations.delete(fi.id);
+    await life(LIVE, "deleted");
+    await runCheck();
+    expect(await stateOf()).toBe("deleted");
+    expect(await statusIn(A)).toBe("removed");
+    await runCheck(); // asked again, same answer: no second audit
+    expect(await audits("github.installation-deleted")).toHaveLength(2);
+
+    await life(LIVE, "created"); // a late `created` while GitHub still says gone
+    await runCheck();
+    expect(await stateOf()).toBe("deleted");
+
+    gh.server.installations.set(fi.id, fi);
+    await life(LIVE, "created");
+    await runCheck();
+    expect(await stateOf()).toBe("active");
+    expect(await db().workspaceInstallation.count({ where: { installationId: LIVE } })).toBe(2); // bindings stay
+  });
+
+  it("a check for an installation we do not hold, or a job with a junk payload, writes nothing", async () => {
+    const { handlers } = await import("@/lib/local/handlers");
+    await handlers["github.installation.check"]({ installationId: "999999" } as never, {} as never);
+    await handlers["github.installation.check"]({ installationId: "x; drop" } as never, {} as never);
+    expect(await db().githubInstallation.count()).toBe(3);
+  });
+
+  it("installation_repositories: removed queues the check plus a refresh per tracked repository, and disconnects nothing itself", async () => {
+    const r = await post({ action: "removed", installation: { id: 1001 }, repositories_removed: [{ id: Number(REPO) }, { id: 424242 }, { id: "bad" }, null] }, { event: "installation_repositories" });
     expect(r.status).toBe(200);
-    for (const id of [rA, rB]) {
-      const row = await db().repository.findUniqueOrThrow({ where: { id } });
-      expect(row).toMatchObject({ trackingStatus: "DISCONNECTED", installationId: null });
-      expect(row.statusDetail).toBeTruthy();
-    }
-    // the repository served by the other installation is untouched
-    expect(await db().repository.findUniqueOrThrow({ where: { id: rC } })).toMatchObject({ trackingStatus: "ACTIVE", installationId: 2002n });
-    const logs = await audits("github.repositories-removed");
-    expect(logs.map((l) => l.workspaceId).sort()).toEqual([A, B].sort());
-    expect(logs.every((l) => (l.meta as { repositoriesDisconnected: number }).repositoriesDisconnected === 1)).toBe(true);
-    // the bindings stay, planning data stays
-    expect(await db().workspaceInstallation.count()).toBe(3);
-    expect(await db().repository.count()).toBe(3);
+    const got = await jobs();
+    expect(got.filter((j) => j.type === "sync.repository").map((j) => `${j.workspaceId === A ? "A" : "B"}:${j.dedupeKey}`).sort()).toEqual([`A:sync:${rA}`, `B:sync:${rB}`]);
+    expect(got.filter((j) => j.type === "github.installation.check")).toHaveLength(1);
+    for (const id of [rA, rB]) expect(await db().repository.findUniqueOrThrow({ where: { id } })).toMatchObject({ trackingStatus: "ACTIVE", installationId: 1001n });
+    expect(await db().workspaceInstallation.count()).toBe(5);
   });
 
-  it("removed ids that belong to another installation's repositories change nothing (a forged list)", async () => {
+  it("removed ids that belong to another installation's repositories queue no refresh (a forged list), and `added` only queues the check", async () => {
     await post({ action: "removed", installation: { id: 1001 }, repositories_removed: [{ id: Number(OTHER) }] }, { event: "installation_repositories" });
-    expect(await db().repository.findUniqueOrThrow({ where: { id: rC } })).toMatchObject({ trackingStatus: "ACTIVE", installationId: 2002n });
-    expect(await audits("github.repositories-removed")).toHaveLength(0);
+    await post({ action: "added", installation: { id: 1001 }, repositories_added: [{ id: Number(REPO) }] }, { event: "installation_repositories" });
+    expect((await jobs()).map((j) => j.type)).toEqual(["github.installation.check"]);
   });
 
-  it("added does nothing (administrators choose what to track) and a REMOVED repository stays REMOVED", async () => {
-    await post({ action: "added", installation: { id: 1001 }, repositories_added: [{ id: 999 }] }, { event: "installation_repositories" });
-    expect(await jobs()).toHaveLength(0);
-    expect(await db().repository.count({ where: { installationId: { not: null } } })).toBe(3);
-    await db().repository.updateMany({ where: { id: rA, workspaceId: A }, data: { trackingStatus: "REMOVED" } });
-    await post({ action: "removed", installation: { id: 1001 }, repositories_removed: [{ id: Number(REPO) }] }, { event: "installation_repositories" });
-    expect((await db().repository.findUniqueOrThrow({ where: { id: rA } })).trackingStatus).toBe("REMOVED");
-    expect((await audits("github.repositories-removed")).map((l) => l.workspaceId)).toEqual([B]);
+  it("removed then added ends connected: the refresh finds the repository still readable, and the check says active", async () => {
+    const pub = await gh.create("pub", false);
+    void pub;
+    fi.repos.add("acme/pub");
+    const ghRepo = (await (await gh.server.fetchFor("acme-owner")("https://api.github.com/repos/acme/pub")).json()) as { id: number };
+    const owner = await db().githubOwner.upsert({ where: { githubId: 9001n }, create: { githubId: 9001n, login: "acme", type: "ORGANIZATION" }, update: {} });
+    const repo = await db().repository.create({ data: { workspaceId: A, githubId: BigInt(ghRepo.id), ownerId: owner.id, name: "pub", fullName: "acme/pub", htmlUrl: "https://github.com/acme/pub" } });
+    await setRepositoryInstallation(db(), A, repo.id, LIVE);
+    const { handlers } = await import("@/lib/local/handlers");
+    const sync = async () => handlers["sync.repository"]({ repositoryId: repo.id } as never, { workspaceId: A } as never);
+
+    await life(LIVE, "removed", "installation_repositories"); // junk action word: ignored, still just a check
+    await post({ action: "removed", installation: { id: fi.id }, repositories_removed: [{ id: ghRepo.id }] }, { event: "installation_repositories" });
+    await post({ action: "added", installation: { id: fi.id }, repositories_added: [{ id: ghRepo.id }] }, { event: "installation_repositories" });
+    await runCheck();
+    await sync();
+    expect(await db().repository.findUniqueOrThrow({ where: { id: repo.id } })).toMatchObject({ trackingStatus: "ACTIVE", installationId: LIVE });
+    expect(await stateOf()).toBe("active");
+  });
+
+  it("a repository GitHub really removed from the installation answers 404 in its refresh job and becomes DISCONNECTED (the existing path)", async () => {
+    await gh.create("gone", false);
+    fi.repos.add("acme/gone");
+    const ghRepo = (await (await gh.server.fetchFor("acme-owner")("https://api.github.com/repos/acme/gone")).json()) as { id: number };
+    const owner = await db().githubOwner.upsert({ where: { githubId: 9001n }, create: { githubId: 9001n, login: "acme", type: "ORGANIZATION" }, update: {} });
+    const repo = await db().repository.create({ data: { workspaceId: A, githubId: BigInt(ghRepo.id), ownerId: owner.id, name: "gone", fullName: "acme/gone", htmlUrl: "https://github.com/acme/gone" } });
+    await setRepositoryInstallation(db(), A, repo.id, LIVE);
+    fi.repos.delete("acme/gone"); // GitHub: removed from the installation
+    await post({ action: "removed", installation: { id: fi.id }, repositories_removed: [{ id: ghRepo.id }] }, { event: "installation_repositories" });
+    const queued = (await jobs()).find((j) => j.type === "sync.repository" && j.workspaceId === A);
+    expect(queued).toBeTruthy();
+    const { handlers } = await import("@/lib/local/handlers");
+    await expect(handlers["sync.repository"](queued!.payload as never, queued as never)).rejects.toThrow();
+    expect(await db().repository.findUniqueOrThrow({ where: { id: repo.id } })).toMatchObject({ trackingStatus: "DISCONNECTED" });
+  });
+
+  it("a large removal is chunked, not sliced: 1500 tracked repositories each get a refresh", async () => {
+    const owner = await db().githubOwner.upsert({ where: { githubId: 9001n }, create: { githubId: 9001n, login: "acme", type: "ORGANIZATION" }, update: {} });
+    const ids = Array.from({ length: 1500 }, (_, i) => 50_000 + i);
+    await db().repository.createMany({ data: ids.map((g) => ({ workspaceId: A, githubId: BigInt(g), ownerId: owner.id, name: `m${g}`, fullName: `acme/m${g}`, htmlUrl: "https://github.com/acme/m", installationId: 1001n })) });
+    const r = await post({ action: "removed", installation: { id: 1001 }, repositories_removed: ids.map((g) => ({ id: g })) }, { event: "installation_repositories" });
+    expect(r.status).toBe(200);
+    expect(await db().job.count({ where: { type: "sync.repository", workspaceId: A } })).toBe(1500);
+    expect(await db().job.count({ where: { type: "reconcile.all" } })).toBe(0); // under the cap: no hint needed
+  }, 120_000);
+
+  it("repositoryIds caps one delivery at 2000 ids, flags the rest, and drops junk", () => {
+    const list = [...Array.from({ length: 2500 }, (_, i) => ({ id: i + 1 })), { id: -4 }, { id: "x" }, null];
+    const r = repositoryIds(list);
+    expect(r.ids).toHaveLength(MAX_REMOVED_IDS);
+    expect(r.truncated).toBe(true);
+    expect(repositoryIds([{ id: 1 }, { id: 1 }, { id: 2 }])).toEqual({ ids: [1n, 2n], truncated: false });
+    expect(repositoryIds("nope")).toEqual({ ids: [], truncated: false });
   });
 });
 
 describe("maintenance", () => {
-  it("prunes delivery ids older than 7 days and app states past their expiry, nothing else", async () => {
+  it("prunes delivery ids older than 7 days, app states past their expiry and expired counters, in batches, nothing else", async () => {
     const now = new Date("2026-11-21T12:00:00Z");
     const day = 86_400_000;
     await db().githubDelivery.createMany({
@@ -490,7 +622,19 @@ describe("maintenance", () => {
         { stateHash: "fresh", userId: user, workspaceId: B, kind: "connect", expiresAt: new Date(now.getTime() + 60_000) },
       ],
     });
-    expect(await pruneGithubAppData(db(), now)).toEqual({ deliveries: 1, states: 2 });
+    // more than one batch of each (1000 per statement): 1200 old deliveries, 1500 expired counters
+    await db().githubDelivery.createMany({ data: Array.from({ length: 1200 }, (_, i) => ({ deliveryId: `bulk-delivery-${i}`, event: "push", receivedAt: new Date(now.getTime() - 9 * day) })) });
+    const past = new Date(now.getTime() - 1000);
+    await db().rateLimitState.createMany({
+      data: [
+        ...Array.from({ length: 1500 }, (_, i) => ({ key: `ghwh:bad:expired${i}`, remaining: 0, limit: 30, resetAt: past })),
+        { key: "ghwh:bad:fresh", remaining: 3, limit: 30, resetAt: new Date(now.getTime() + 60_000) },
+        { key: "installation:77", remaining: 0, limit: 5000, resetAt: past },
+        { key: "source", remaining: 0, limit: 5000, resetAt: past },
+      ],
+    });
+    expect(await pruneGithubAppData(db(), now)).toEqual({ deliveries: 1201, states: 2, counters: 1500 });
+    expect((await db().rateLimitState.findMany({ where: { NOT: { key: { startsWith: "ws:" } } }, orderBy: { key: "asc" } })).map((r) => r.key)).toEqual(["ghwh:bad:fresh", "installation:77", "source"]);
     expect((await db().githubDelivery.findMany()).map((d) => d.deliveryId)).toEqual(["new-delivery-1"]);
     expect((await db().githubAppState.findMany({ where: { workspaceId: { in: [A, B] } } })).map((s) => s.stateHash)).toEqual(["fresh"]);
     expect(await db().githubInstallation.count()).toBe(2);
@@ -511,37 +655,40 @@ describe("maintenance", () => {
 describe("reconcile pacing", () => {
   const now = new Date("2026-11-21T12:00:00Z");
   const min = 60_000;
-  const setup = async (o: { webhookAgoMin: number | null; syncedAgoMin: number | null; error?: string; repo?: string; ws?: string }) => {
-    await db().githubInstallation.update({ where: { installationId: 1001n }, data: { lastWebhookAt: o.webhookAgoMin === null ? null : new Date(now.getTime() - o.webhookAgoMin * min) } });
-    await db().repository.updateMany({ where: { id: o.repo ?? rA, workspaceId: o.ws ?? A }, data: { lastSyncedAt: o.syncedAgoMin === null ? null : new Date(now.getTime() - o.syncedAgoMin * min), syncError: o.error ?? null } });
+  const setup = async (o: { eventAgoMin: number | null; syncedAgoMin: number | null; error?: string; ws?: string; repo?: string }) => {
+    await db().repository.updateMany({
+      where: { id: o.repo ?? rA, workspaceId: o.ws ?? A },
+      data: { lastEventAt: o.eventAgoMin === null ? null : new Date(now.getTime() - o.eventAgoMin * min), lastSyncedAt: o.syncedAgoMin === null ? null : new Date(now.getTime() - o.syncedAgoMin * min), syncError: o.error ?? null },
+    });
     await db().job.deleteMany({});
     return enqueueHostedReconcile(db(), o.ws ?? A, now);
   };
 
-  it("a workspace whose installation got a webhook in the last 24 h reconciles about hourly: a sync 30 minutes old is skipped, 58 minutes old runs", async () => {
-    expect(await setup({ webhookAgoMin: 30, syncedAgoMin: 30 })).toBe(0);
+  it("a repository that an event named in the last 24 h reconciles about hourly: a sync 30 minutes old is skipped, 58 minutes old runs", async () => {
+    expect(await setup({ eventAgoMin: 30, syncedAgoMin: 30 })).toBe(0);
     expect(await jobs()).toHaveLength(0);
-    expect(await setup({ webhookAgoMin: 30, syncedAgoMin: 54 })).toBe(0);
-    expect(await setup({ webhookAgoMin: 30, syncedAgoMin: 58 })).toBe(1);
+    expect(await setup({ eventAgoMin: 30, syncedAgoMin: 54 })).toBe(0);
+    expect(await setup({ eventAgoMin: 30, syncedAgoMin: 58 })).toBe(1);
     expect(await jobKeys()).toEqual([`A:sync.repository:sync:${rA}`]);
   });
 
-  it("the safety net stays: silent installations, never-synced, failed or disconnected repositories run on every pass", async () => {
-    expect(await setup({ webhookAgoMin: null, syncedAgoMin: 5 })).toBe(1); // no webhook ever
-    expect(await setup({ webhookAgoMin: 25 * 60, syncedAgoMin: 5 })).toBe(1); // silent for over a day
-    expect(await setup({ webhookAgoMin: 5, syncedAgoMin: null })).toBe(1); // never synced
-    expect(await setup({ webhookAgoMin: 5, syncedAgoMin: 5, error: "boom" })).toBe(1); // last sync failed
+  it("the safety net stays: silent repositories, never-synced, failed or disconnected ones run on every pass", async () => {
+    expect(await setup({ eventAgoMin: null, syncedAgoMin: 5 })).toBe(1); // no event ever
+    expect(await setup({ eventAgoMin: 25 * 60, syncedAgoMin: 5 })).toBe(1); // silent for over a day
+    expect(await setup({ eventAgoMin: 5, syncedAgoMin: null })).toBe(1); // never synced
+    expect(await setup({ eventAgoMin: 5, syncedAgoMin: 5, error: "boom" })).toBe(1); // last sync failed
     await db().repository.updateMany({ where: { id: rA, workspaceId: A }, data: { syncError: null, trackingStatus: "DISCONNECTED" } });
     await db().job.deleteMany({});
     expect(await enqueueHostedReconcile(db(), A, now)).toBe(1); // disconnected: re-checked so a restored access is noticed
   });
 
-  it("is per workspace and per installation: B's repository on the silent installation 2002 still runs while 1001's is skipped", async () => {
-    await db().githubInstallation.update({ where: { installationId: 1001n }, data: { lastWebhookAt: new Date(now.getTime() - 5 * min) } });
+  it("is per repository, not per installation: a busy repository is skipped while a quiet one of the same installation still runs", async () => {
+    const other = await track(B, 300n, 1001n);
     await db().repository.updateMany({ where: { workspaceId: B }, data: { lastSyncedAt: new Date(now.getTime() - 10 * min), syncError: null } });
+    await db().repository.updateMany({ where: { id: rB, workspaceId: B }, data: { lastEventAt: new Date(now.getTime() - 5 * min) } });
     await db().job.deleteMany({});
-    expect(await enqueueHostedReconcile(db(), B, now)).toBe(1);
-    expect(await jobKeys()).toEqual([`B:sync.repository:sync:${rC}`]);
+    expect(await enqueueHostedReconcile(db(), B, now)).toBe(2); // rC (other installation) and `other` (no event); rB skipped
+    expect((await jobs()).map((j) => j.dedupeKey).sort()).toEqual([`sync:${other}`, `sync:${rC}`].sort());
   });
 });
 
@@ -591,15 +738,34 @@ describe("perimeter: proxy exemption and rate limits", () => {
     expect((await post(body, { event: "ping", ip: "198.51.100.9" })).status).toBe(200);
   });
 
-  it("limits requests per address to 600 a minute (429 after)", async () => {
+  it("never answers a validly signed delivery with 429, even from an address whose invalid-signature budget is spent", async () => {
     const hash = createHash("sha256").update("198.51.100.77").digest("hex").slice(0, 24);
-    await db().rateLimitState.create({ data: { key: `ghwh:ip:${hash}`, remaining: 0, limit: 600, resetAt: new Date(Date.now() + 60_000) } });
-    expect((await post({ zen: "x" }, { event: "ping", ip: "198.51.100.77" })).status).toBe(429);
-    expect((await post({ zen: "x" }, { event: "ping", ip: "198.51.100.78" })).status).toBe(200);
+    await db().rateLimitState.create({ data: { key: `ghwh:bad:${hash}`, remaining: 0, limit: 30, resetAt: new Date(Date.now() + 60_000) } });
+    const r = await post(evt(1001, { action: "opened", issue: { number: 1 } }), { ip: "198.51.100.77" });
+    expect(r.status).toBe(200);
+  });
+
+  it("works without a trusted proxy header: signed deliveries from many installations are never limited by a shared address bucket", async () => {
+    vi.stubEnv("MERGEPORT_TRUST_PROXY", "");
+    for (let i = 0; i < 12; i++) expect((await post(evt(i % 2 ? 1001 : 2002, { action: "opened", issue: { number: i + 1 } }, i % 2 ? REPO : OTHER), { headers: { "x-forwarded-for": "" } })).status).toBe(200);
+    expect(await db().rateLimitState.count({ where: { key: { startsWith: "ghwh:ip:" } } })).toBe(0);
+  });
+
+  it("sheds a flood from ONE installation (202, nothing queued, no stamp) without touching another installation", async () => {
+    await db().rateLimitState.create({ data: { key: "ghwh:inst:1001", remaining: 0, limit: 3000, resetAt: new Date(Date.now() + 60_000) } });
+    const shed = await post(evt(1001, { action: "opened", issue: { number: 1 } }), { event: "issues" });
+    expect(shed.status).toBe(202);
+    expect(await result(shed)).toBe("shed");
+    expect(await jobs()).toHaveLength(0);
+    expect(await deliveries()).toBe(0);
+    expect(await lastWebhook(1001n)).toBeNull();
+    expect(errorSpy.mock.calls.flat().join(" ")).toContain("shed");
+    expect((await post(evt(2002, { action: "opened", issue: { number: 1 } }, OTHER), { event: "issues" })).status).toBe(200);
+    expect(await jobs()).toHaveLength(1);
   });
 
   it("the counters hold a hash of the address, not the address", async () => {
-    await post({ zen: "x" }, { event: "ping", ip: "198.51.100.123" });
+    await post({ zen: "x" }, { event: "ping", ip: "198.51.100.123", sig: sign("x", "nope") });
     const keys = (await db().rateLimitState.findMany({ where: { key: { startsWith: "ghwh:" } } })).map((r) => r.key);
     expect(keys.length).toBeGreaterThan(0);
     expect(keys.join()).not.toContain("198.51.100.123");

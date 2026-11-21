@@ -25,7 +25,7 @@ export type EnqueueInput = { type: string; payload: Prisma.InputJsonValue; dedup
  * and enqueues per-workspace work) belongs to exactly one workspace. The caller may say which; otherwise it is the workspace of the
  * repository or fork mapping the payload points at. A payload that names neither yields null (a system job).
  */
-export async function jobWorkspace(db: Db | Prisma.TransactionClient, job: Pick<EnqueueInput, "payload" | "workspaceId">): Promise<string | null> {
+export async function jobWorkspace(db: Db, job: Pick<EnqueueInput, "payload" | "workspaceId">): Promise<string | null> {
   if (job.workspaceId !== undefined) return job.workspaceId;
   const p = (job.payload ?? {}) as { repositoryId?: unknown; mappingId?: unknown };
   if (typeof p.repositoryId === "string") return (await db.repository.findUnique({ where: { id: p.repositoryId }, select: { workspaceId: true } }))?.workspaceId ?? null;
@@ -33,7 +33,7 @@ export async function jobWorkspace(db: Db | Prisma.TransactionClient, job: Pick<
   return null;
 }
 
-export async function enqueue(db: Db | Prisma.TransactionClient, job: EnqueueInput) {
+export async function enqueue(db: Db, job: EnqueueInput) {
   const runAt = job.runAt ?? new Date();
   const maxAttempts = job.maxAttempts ?? 5;
   const workspaceId = await jobWorkspace(db, job);
