@@ -35,7 +35,8 @@ const unavailable = (m: string, status?: number) => new GithubAppError("unavaila
 const toId = (v: unknown): bigint | null => (typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? BigInt(v) : null);
 const accountType = (v: unknown): "USER" | "ORGANIZATION" | null => (v === "User" ? "USER" : v === "Organization" ? "ORGANIZATION" : null);
 
-async function send(deps: ConnectDeps, url: string, init: RequestInit): Promise<{ status: number; json: unknown }> {
+type Sent = { status: number; json: unknown; headers: Headers };
+async function send(deps: ConnectDeps, url: string, init: RequestInit): Promise<Sent> {
   const ms = deps.timeoutMs ?? CONNECT_TIMEOUT_MS;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), ms);
@@ -59,10 +60,27 @@ async function send(deps: ConnectDeps, url: string, init: RequestInit): Promise<
     } catch {
       json = null;
     }
-    return { status: res.status, json };
+    return { status: res.status, json, headers: res.headers };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** A 403 or 429 that is GitHub's rate limiting (primary, secondary or abuse): the token is fine, the answer is only late. */
+export function isRateLimited(r: Sent): boolean {
+  if (r.status === 429) return true;
+  if (r.status !== 403) return false;
+  const message = String(obj(r.json)?.message ?? "");
+  return r.headers.get("x-ratelimit-remaining") === "0" || r.headers.has("retry-after") || /rate limit|abuse|secondary/i.test(message);
+}
+/**
+ * Does this answer say the person's TOKEN is dead? Only a 401, or a 403 that says so in words (bad credentials, a revoked token, SAML
+ * enforcement), counts. Rate limiting, any other 403, 5xx and network failures never do: they throw "unavailable" and the link survives.
+ */
+export function tokenIsDead(r: Sent): boolean {
+  if (r.status === 401) return true;
+  if (r.status !== 403 || isRateLimited(r)) return false;
+  return /bad credentials|revoked|saml|token (has )?expired|requires authentication/i.test(String(obj(r.json)?.message ?? ""));
 }
 
 const apiBase = (deps: ConnectDeps) => (deps.apiBase ?? githubApiBase()).replace(/\/+$/, "");
@@ -133,7 +151,7 @@ export async function revokeUserToken(config: Pick<GithubAppConfig, "clientId" |
 /** `GET /user`: who the token belongs to. Null when GitHub refuses the token. */
 export async function getUser(deps: ConnectDeps, token: string): Promise<GithubUser | null> {
   const r = await send(deps, `${apiBase(deps)}/user`, { headers: asUser(token) });
-  if (r.status === 401 || r.status === 403) return null;
+  if (tokenIsDead(r)) return null;
   if (r.status !== 200) throw unavailable("GitHub did not answer the user request.", r.status);
   const j = obj(r.json);
   const id = toId(j?.id);
@@ -145,7 +163,7 @@ export async function listUserInstallations(deps: ConnectDeps, token: string): P
   const out: UserInstallation[] = [];
   for (let page = 1; page <= MAX_INSTALLATION_PAGES; page++) {
     const r = await send(deps, `${apiBase(deps)}/user/installations?per_page=100&page=${page}`, { headers: asUser(token) });
-    if (r.status === 401 || r.status === 403) return null;
+    if (tokenIsDead(r)) return null;
     if (r.status !== 200) throw unavailable("GitHub did not answer the installations request.", r.status);
     const j = obj(r.json);
     const items = Array.isArray(j?.installations) ? (j.installations as unknown[]) : null;
@@ -192,7 +210,8 @@ export async function listUserInstallationRepositories(deps: ConnectDeps, token:
   const repos: UserInstallationRepo[] = [];
   for (let page = 1; page <= MAX_REPOSITORY_PAGES; page++) {
     const r = await send(deps, `${apiBase(deps)}/user/installations/${installationId}/repositories?per_page=100&page=${page}`, { headers: asUser(token) });
-    if (r.status === 401 || r.status === 403 || r.status === 404) return null;
+    if (isRateLimited(r) || r.status === 401) throw unavailable("GitHub did not answer the repositories request.", r.status); // late or dead token: not "no access"
+    if (r.status === 403 || r.status === 404) return null; // GitHub says this person cannot use that installation
     if (r.status !== 200) throw unavailable("GitHub did not answer the repositories request.", r.status);
     const j = obj(r.json);
     const items = Array.isArray(j?.repositories) ? (j.repositories as unknown[]) : null;

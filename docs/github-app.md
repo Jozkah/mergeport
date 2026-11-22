@@ -181,7 +181,12 @@ made under another key, does not open and the link then needs renewing. Without 
 GitHub App user tokens expire (about 8 hours, refresh token about 6 months: **unverified**, see below): the lifetimes are stored as dates
 taken from the token response, never assumed, and a token with no expiry in the answer is used until GitHub refuses it. Renewal is on demand and
 single flight (one in-process promise per person plus a row lock `FOR UPDATE` held for the exchange so two processes cannot spend one refresh
-token twice); GitHub rotates the refresh token and the new pair replaces the old one in the same update. A refresh token GitHub refuses (or that has
+token twice); GitHub rotates the refresh token and the new pair replaces the old one in the same update. **Only a GitHub-side refusal ends a link:**
+a 401, or a 403 whose body says bad credentials, a revoked token or SAML enforcement, is a dead token; rate limiting (403 with `x-ratelimit-remaining: 0`,
+`retry-after` or a "rate limit"/"abuse" message, and 429), any other 403, 5xx and network failures throw "unavailable" and change nothing (the job retries
+with backoff; cached rows age out but the link and the stored token survive). A ciphertext that does not open (a wrong or changed key, mid-deploy) is not a
+refusal either: the feature reports "unavailable", the row is left alone and a counter line (no values) is logged. A relink decision is taken inside the row lock and only when
+the row is still the version the run used. A refresh token GitHub refuses (or that has
 expired) sets `status = RELINK`, clears both ciphertexts, deletes the person's cached access and stops all checks until they link again (no loop);
 GitHub being unreachable changes nothing and is retried. Tokens live only in local variables: never in a log, an error message, a cookie, a URL or a
 page. The consequence of a crash after GitHub rotated a refresh token but before the row was written is a relink, which is safe.
@@ -198,6 +203,10 @@ rows to age out, reports `partial` and keeps `accessCheckedAt` old so the next t
 Triggers: right after linking; a page load that finds `accessCheckedAt` older than 10 minutes (`REFRESH_AFTER_MS`; queued, never awaited, at most once a minute per person);
 `reconcile.all` for every linked active person whose data is old (oldest first, 200 per run); "Check again" on Settings. Budget: `RateLimitState` key `user:<id>`, 12 refreshes per
 10 minutes per person; past it the job returns without calling GitHub.
+
+**Truncation.** A listing that hits the page cap (50 pages of 100 per installation), or a person with more than 5000 repositories, marks the check `accessTruncated` with
+`accessRepoCount`; Settings then says "Showing access for the first 5,000 repositories", and a counter line is logged. The viewer's list is ordered by `checkedAt` descending then GitHub id
+and capped at 5000. The freshness cutoff is passed to SQL as an ISO string cast to `timestamp(3)` (like `jobs.ts`), so a database session time zone cannot shift it.
 
 **Unlink** (`unlinkGithubAction`, the person themself, behind a confirmation): revokes the token at GitHub (best effort, `DELETE /applications/{client_id}/token`), then in one
 transaction deletes the token, the github `Identity` and every `GithubRepoAccess` row of the person, clears `githubId` and `githubLogin`, purges their stored digests in every workspace

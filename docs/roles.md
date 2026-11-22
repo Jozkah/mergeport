@@ -65,6 +65,21 @@ role string or an unknown action gets nothing.
   turn private, every unrevoked grant on it is revoked and an audit row `repository.visibility-flip` is written. Stored daily digests of
   the people who lose access are deleted (`purgeDigests`) on a revoked grant, an untracked repository, a removed member and that flip,
   so a snapshot never outlives the access it was made from.
+- **Capabilities.** `requireRepo` / `requireWorkItem` take `"read"` (the default and the only read), `"manageWork"` or `"review"`; there is no
+  capability that is both a read and usable for a change. Every action that queues a sync, shares or unshares a repository, maps a fork,
+  untracks, or records a backport check names `"manageWork"` (so a person who sees a repository only through GitHub is refused with "no grant to
+  change it"); reads, personal local-clone helpers (`mapLocalRoot`, `scanWorktrees`, `worktreesFor`), the upstream side of a fork action
+  and the visibility context of a review draft or manual waiting record use `"read"`.
+- **Stored digests are served only while they still match what the person can see.** Each digest carries a fingerprint of the repositories
+  the person could see when it was made (`DailyDigest.visibilityKey`); `getDigest` and `latestDigest` drop a digest whose fingerprint differs
+  from the current `repoWhere` result (either direction), and a digest without a fingerprint is never served. So a relink, an expired access
+  window, a failed refresh or a revoked grant cannot leave an old digest on screen, whether or not a purge ran. Relinking, unlinking,
+  removal and a refresh that removes access also delete the rows. Notifications are filtered by `repoWhere` at read time and saved filters
+  hold query text only, so neither keeps repository content after access is lost.
+- **Known limitation (GitHub login matching):** review queues, inbox, digest, review-request notifications and AI context still match a
+  person against GitHub data by LOGIN string (`ReviewRequest.reviewerRef`, assignees, `authorLogin`); only `WorkItem.authorGithubId` is stored by
+  number and it is not used for matching yet. To limit the harm of a login that was renamed and reused, `Viewer.githubLogin` is null unless
+  the link is working and was confirmed with GitHub within 24 hours, and it is cleared when the link needs renewing and on unlink.
 - **Known limitation:** `runDailyDigest` generates a workspace's digest only for its oldest member (unchanged behaviour); other members get
   theirs when they open the page and regenerate.
 - **GitHub identity is not the sign-in name.** `Viewer.githubLogin` is the person's GitHub login, or null without a linked GitHub account

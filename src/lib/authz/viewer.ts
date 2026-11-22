@@ -41,7 +41,10 @@ export function subjectOf(v: Partial<Pick<Viewer, "role" | "isAdmin">>): Subject
   return { role: v.role ?? (v.isAdmin ? "ADMIN" : "MEMBER") };
 }
 
-export type Capability = "view" | "manageWork" | "review";
+/** How long a hosted person's stored GitHub login stays usable for matching after their last successful check with GitHub. */
+export const LOGIN_TRUSTED_FOR_MS = 24 * 3600_000;
+
+export type Capability = "read" | "manageWork" | "review";
 
 /**
  * Loads the caller for ONE workspace. `workspaceId` is the active workspace (see resolveActiveWorkspaceId); the user must be an
@@ -59,15 +62,24 @@ export async function loadViewer(db: Db, userId: string, workspaceId?: string | 
   }
   if (!m) return null;
   const isAdmin = isAdminRole(m.role);
+  const now = opts.now ?? new Date();
+  // A hosted person's linked login is only trusted while their link is working and was confirmed with GitHub in the last 24 hours: a
+  // stale login (renamed on GitHub and reused by someone else, a link that needs renewing) must never match another person's queue.
+  // A legacy local user (githubId from `gh`, no token row, no stored login) falls back to `login`.
+  let githubLogin: string | null = null;
+  if (m.user.githubId !== null) {
+    const link = await db.githubUserToken.findUnique({ where: { userId }, select: { status: true, accessCheckedAt: true, updatedAt: true } });
+    if (!link) githubLogin = m.user.githubLogin ?? m.user.login;
+    else if (link.status === "OK" && now.getTime() - (link.accessCheckedAt ?? link.updatedAt).getTime() <= LOGIN_TRUSTED_FOR_MS) githubLogin = m.user.githubLogin;
+  }
   return {
     userId,
     memberId: m.id,
     workspaceId: m.workspaceId,
     login: m.user.login,
     githubId: m.user.githubId,
-    // The linked account's login. Only a legacy local user (whose githubId came from `gh`, so there is no stored login) falls back to `login`.
-    githubLogin: m.user.githubId === null ? null : (m.user.githubLogin ?? m.user.login),
-    githubRepoIds: isAdmin || m.user.githubId === null ? [] : await validRepoGithubIds(db, userId, m.workspaceId, opts.now),
+    githubLogin,
+    githubRepoIds: isAdmin || m.user.githubId === null ? [] : await validRepoGithubIds(db, userId, m.workspaceId, now),
     timezone: m.user.timezone,
     role: m.role,
     isAdmin,
@@ -83,7 +95,7 @@ export async function loadViewer(db: Db, userId: string, workspaceId?: string | 
  *  1. an explicit, unrevoked RepositoryGrant; or
  *  2. GitHub says they may read it: the repository is tracked through an installation (`installationId` set) and the viewer has a
  *     fresh GithubRepoAccess row for it (`viewer.githubRepoIds`, loaded by `loadViewer`; rows older than 30 minutes count for nothing).
- * A public repository is not visible by that fact alone, and a hand-built viewer without `githubRepoIds` has route 1 only. Untracked
+ * Being public grants nothing by itself, but an administrator-tracked public repository is listed by GitHub for a linked person (pull), so it shows through route 2 for them; an unlinked member needs a grant for it. A hand-built viewer without `githubRepoIds` has route 1 only. Untracked
  * (REMOVED) repositories are visible to nobody. Route 2 is read access only: changing things still needs a grant and a role that writes.
  *
  * The disjunction sits under `AND`, so a caller that spreads the result and adds its own `OR` (WorkListPage does) cannot replace it.
@@ -119,10 +131,10 @@ export function requireWrite(v: Partial<Pick<Viewer, "role" | "isAdmin">>, space
  * Throws NotFound (never Forbidden) when the repo is hidden, so hidden and nonexistent are indistinguishable.
  * Throws Forbidden only when the repo is visible but the capability is missing.
  */
-export async function requireRepo(db: Db, v: Viewer, repositoryId: string, cap: Capability = "view") {
+export async function requireRepo(db: Db, v: Viewer, repositoryId: string, cap: Capability = "read") {
   const repo = await db.repository.findFirst({ where: { id: repositoryId, ...repoWhere(v) }, include: { owner: true } });
   if (!repo) throw new NotFoundError();
-  if (cap === "view") return repo;
+  if (cap === "read") return repo;
   requireWrite(v);
   if (v.isAdmin) return repo;
   const g = await db.repositoryGrant.findFirst({
@@ -135,14 +147,14 @@ export async function requireRepo(db: Db, v: Viewer, repositoryId: string, cap: 
   return repo;
 }
 
-export async function requireWorkItem(db: Db, v: Viewer, workItemId: string, cap: Capability = "view") {
+export async function requireWorkItem(db: Db, v: Viewer, workItemId: string, cap: Capability = "read") {
   const item = await db.workItem.findFirst({ where: { id: workItemId, ...viaRepo(v) } });
   if (!item) throw new NotFoundError();
   await requireRepo(db, v, item.repositoryId, cap);
   return item;
 }
 
-export async function capabilitiesFor(db: Db, v: Viewer, repositoryId: string): Promise<Record<Capability, boolean>> {
+export async function capabilitiesFor(db: Db, v: Viewer, repositoryId: string): Promise<Record<"view" | "manageWork" | "review", boolean>> {
   if (!can(subjectOf(v), "write")) return { view: true, manageWork: false, review: false };
   if (v.isAdmin) return { view: true, manageWork: true, review: true };
   const g = await db.repositoryGrant.findFirst({ where: { memberId: v.memberId, repositoryId, revokedAt: null } });

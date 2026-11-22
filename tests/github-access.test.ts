@@ -24,7 +24,12 @@ import { setConnectOverridesForTests } from "@/lib/github/connect";
 import { FakeGitHubServer } from "@/lib/github/fake-server";
 import { refreshUserAccess, userBudgetKey, USER_BUDGET_MAX } from "@/lib/github/user-access";
 import { linkGithubAccount, unlinkGithubAccount } from "@/lib/github/user-link";
-import { tokenAad } from "@/lib/github/user-token";
+import { markRelink, markRelinkIfCurrent, tokenAad } from "@/lib/github/user-token";
+import { GithubAppError } from "@/lib/github/app-auth";
+import { requestAccessRefresh } from "@/lib/github/access-cache";
+import { generateDigest, getDigest, latestDigest } from "@/lib/services/digest";
+import { refreshForkAction, refreshRepositoryAction } from "@/app/actions";
+import { shareRepositoryAction, unshareRepositoryAction } from "@/app/team-actions";
 import { runOne } from "@/lib/jobs";
 
 /**
@@ -603,5 +608,245 @@ describe("the refresh job", () => {
     expect(await refresh(x.dave.user.id)).toBe("ok");
     expect(fake.calls.slice(calls).some((c) => c.includes("/repositories"))).toBe(false); // no active membership: nothing is listed
     expect(await db().githubRepoAccess.count({ where: { userId: x.dave.user.id } })).toBe(0);
+  });
+});
+
+// ---------- review fixes ----------
+
+const signInAs = async (userId: string, workspaceId: string) => {
+  const { token } = await createSession(db(), userId, new Date(), workspaceId);
+  state.jar.set(SESSION_COOKIE, { value: token, options: {} });
+};
+const form = (o: Record<string, string>) => {
+  const f = new FormData();
+  for (const [k, v] of Object.entries(o)) f.set(k, v);
+  return f;
+};
+
+describe("F1: seeing a repository through GitHub never allows a change", () => {
+  it("a GitHub-only member is Forbidden to share, unshare, refresh and refresh a fork; a granted member and an administrator are not", async () => {
+    const x = await world();
+    await db().forkMapping.create({ data: { forkRepoId: x.priv1.id, upstreamRepoId: x.pub.id, forkBranch: "main", upstreamBranch: "main" } });
+    const mapping = await db().forkMapping.findFirstOrThrow({});
+    const noGrant = /no grant to change it/;
+
+    await signInAs(x.alice.user.id, x.w.ws.id); // sees priv1 and pub through GitHub only
+    const r1 = await refreshRepositoryAction(form({ repositoryId: x.priv1.id }));
+    expect(!r1.ok && r1.error).toMatch(noGrant);
+    const r2 = await refreshForkAction(form({ mappingId: mapping.id }));
+    expect(!r2.ok && r2.error).toMatch(noGrant);
+    const r3 = await shareRepositoryAction(form({ repositoryId: x.priv1.id, spaceId: "any", confirm: "on" }));
+    expect(!r3.ok && r3.error).toMatch(noGrant);
+    const r4 = await unshareRepositoryAction(form({ repositoryId: x.priv1.id }));
+    expect(!r4.ok && r4.error).toMatch(noGrant);
+    expect(await db().job.count({ where: { type: { in: ["sync.repository", "sync.fork"] } } })).toBe(0);
+
+    // a member with a real grant (canManageWork) still works
+    await db().repositoryGrant.create({ data: { memberId: x.carol.member.id, repositoryId: x.priv1.id, grantedById: x.w.owner.id, canManageWork: true, canReview: true } });
+    await signInAs(x.carol.user.id, x.w.ws.id);
+    expect((await refreshRepositoryAction(form({ repositoryId: x.priv1.id }))).ok).toBe(true);
+    expect((await refreshForkAction(form({ mappingId: mapping.id }))).ok).toBe(true);
+    const shared = await shareRepositoryAction(form({ repositoryId: x.priv1.id, spaceId: "missing", confirm: "on" }));
+    expect(!shared.ok && shared.error).not.toMatch(noGrant); // got past the capability check (the space does not exist)
+
+    // an administrator works
+    await signInAs(x.w.owner.id, x.w.ws.id);
+    expect((await refreshRepositoryAction(form({ repositoryId: x.priv2.id }))).ok).toBe(true);
+    expect((await refreshForkAction(form({ mappingId: mapping.id }))).ok).toBe(true);
+  });
+
+  it("'read' is the only read capability and the default; every change names manageWork or review", async () => {
+    const x = await world();
+    const v = await x.as(x.alice.user.id);
+    expect((await requireRepo(db(), v, x.priv1.id)).id).toBe(x.priv1.id);
+    expect((await requireRepo(db(), v, x.priv1.id, "read")).id).toBe(x.priv1.id);
+    await expect(requireRepo(db(), v, x.priv1.id, "manageWork")).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(requireRepo(db(), v, x.priv1.id, "review")).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describe("F2: a stored digest is never served after the access it was made from is gone", () => {
+  const DAY = "2026-11-09";
+  it("an expired window, a failed refresh, a relink and a digest from before this rule are all not served", async () => {
+    const x = await world();
+    const v = await x.as(x.alice.user.id);
+    const made = await generateDigest(db(), v, { now: NOW, day: DAY });
+    expect(JSON.stringify(made.digest.payload)).toContain(PRIV1);
+    expect((await getDigest(db(), v, DAY))?.id).toBe(made.digest.id);
+    expect((await latestDigest(db(), v))?.id).toBe(made.digest.id);
+
+    // the window runs out (a refresh that keeps failing): the stored digest is dropped from view whether or not any purge ran
+    const pastWindow = new Date(Date.now() + VALID_FOR_MS + 60_000);
+    const later = await x.as(x.alice.user.id, pastWindow);
+    expect(await getDigest(db(), later, DAY)).toBeNull();
+    expect(await latestDigest(db(), later)).toBeNull();
+    fake.offline = true;
+    await expect(refresh(x.alice.user.id, pastWindow)).rejects.toBeInstanceOf(GithubAppError);
+    fake.offline = false;
+    expect(await getDigest(db(), later, DAY)).toBeNull();
+
+    // relink purges the row itself, and nothing is served
+    await generateDigest(db(), v, { now: NOW, day: DAY, replace: true });
+    expect(await getDigest(db(), v, DAY)).not.toBeNull();
+    await markRelink(db(), x.alice.user.id);
+    expect(await db().dailyDigest.count({ where: { userId: x.alice.user.id } })).toBe(0);
+    expect(await getDigest(db(), await x.as(x.alice.user.id), DAY)).toBeNull();
+
+    // a digest stored without a visibility key (made before this rule) is never served
+    await db().dailyDigest.create({ data: { workspaceId: x.w.ws.id, userId: x.carol.user.id, day: DAY, payload: { version: 1, secret: PRIV1 } as never } });
+    expect(await getDigest(db(), await x.as(x.carol.user.id), DAY)).toBeNull();
+    expect(await latestDigest(db(), await x.as(x.carol.user.id))).toBeNull();
+  });
+
+  it("when a refresh finds that GitHub no longer shows a repository, the person's digest is gone and the next one is built from what they see now", async () => {
+    const x = await world();
+    await generateDigest(db(), await x.as(x.alice.user.id), { now: NOW, day: DAY });
+    fake.revoke("acme", "priv1", "alice-gh");
+    await refresh(x.alice.user.id);
+    expect(await db().dailyDigest.count({ where: { userId: x.alice.user.id } })).toBe(0);
+    const again = await generateDigest(db(), await x.as(x.alice.user.id), { now: NOW, day: DAY });
+    expect(JSON.stringify(again.digest.payload)).not.toContain(PRIV1);
+  });
+
+  it("a stored digest also drops when what the person may see changes the other way (a grant arrives): it is rebuilt, never shown stale", async () => {
+    const x = await world();
+    await generateDigest(db(), await x.as(x.bob.user.id), { now: NOW, day: DAY });
+    await db().repositoryGrant.create({ data: { memberId: x.bob.member.id, repositoryId: x.priv2.id, grantedById: x.w.owner.id, canManageWork: false, canReview: false } });
+    expect(await getDigest(db(), await x.as(x.bob.user.id), DAY)).toBeNull();
+    await generateDigest(db(), await x.as(x.bob.user.id), { now: NOW, day: DAY });
+    expect(await getDigest(db(), await x.as(x.bob.user.id), DAY)).not.toBeNull();
+    expect(await db().dailyDigest.count({ where: { userId: x.bob.user.id } })).toBe(1); // replaced in place
+  });
+});
+
+describe("F3: only a dead token ends a link; rate limiting and outages never do", () => {
+  const link = (userId: string) => db().githubUserToken.findUniqueOrThrow({ where: { userId } });
+  it("a rate-limit 403 (primary or secondary), a 429, an unexplained 403 and a 5xx throw and keep the token, the cached rows and the stored login; the job backs off", async () => {
+    const x = await world();
+    const before = await link(x.alice.user.id);
+    const rows = await db().githubRepoAccess.count({ where: { userId: x.alice.user.id } });
+    fake.rateLimitedUntil = Date.now() + 3600_000;
+    await expect(refresh(x.alice.user.id)).rejects.toBeInstanceOf(GithubAppError);
+    fake.rateLimitedUntil = null;
+    fake.failNext(/^GET \/user$/, 403, "You have exceeded a secondary rate limit. Please wait a few minutes.");
+    await expect(refresh(x.alice.user.id)).rejects.toBeInstanceOf(GithubAppError);
+    fake.failNext(/^GET \/user$/, 429, "Too Many Requests");
+    await expect(refresh(x.alice.user.id)).rejects.toBeInstanceOf(GithubAppError);
+    fake.failNext(/^GET \/user$/, 403, "Forbidden");
+    await expect(refresh(x.alice.user.id)).rejects.toBeInstanceOf(GithubAppError);
+    fake.failNext(/^GET \/user\/installations\?/, 403, "API rate limit exceeded for user");
+    await expect(refresh(x.alice.user.id)).rejects.toBeInstanceOf(GithubAppError);
+    fake.failNext(/^GET \/user$/, 503, "unavailable");
+    await expect(refresh(x.alice.user.id)).rejects.toBeInstanceOf(GithubAppError);
+    const after = await link(x.alice.user.id);
+    expect(after.status).toBe("OK");
+    expect(after.accessEnc).toBe(before.accessEnc);
+    expect(after.accessCheckedAt!.getTime()).toBe(before.accessCheckedAt!.getTime());
+    expect(await db().githubRepoAccess.count({ where: { userId: x.alice.user.id } })).toBe(rows);
+    expect((await db().user.findUniqueOrThrow({ where: { id: x.alice.user.id } })).githubLogin).toBe("alice-gh");
+    // as a queued job the failure is a retry, not an end
+    fake.rateLimitedUntil = Date.now() + 3600_000;
+    await db().job.deleteMany({});
+    await requestAccessRefresh(db(), x.alice.user.id);
+    const { handlers } = await import("@/lib/local/handlers");
+    expect(await runOne(db(), { [ACCESS_JOB]: handlers[ACCESS_JOB] }, new Date(Date.now() + 1000))).toBe("retry");
+    fake.rateLimitedUntil = null;
+    expect((await link(x.alice.user.id)).status).toBe("OK");
+  });
+
+  it("a revoked token (401, or a 403 that says bad credentials) is dead: the link needs renewing", async () => {
+    const x = await world();
+    fake.failNext(/^GET \/user$/, 403, "Bad credentials", 2); // the first read and the one after the forced renewal
+    expect(await refresh(x.bob.user.id)).toBe("relink");
+    expect((await link(x.bob.user.id)).status).toBe("RELINK");
+    fake.revokeAllUserTokens("dave-gh");
+    expect(await refresh(x.dave.user.id)).toBe("relink");
+  });
+});
+
+describe("F5: a stored GitHub login is only trusted while the link is fresh", () => {
+  it("is cleared when the link needs renewing and on unlink, and ignored when the last check with GitHub is older than 24 hours", async () => {
+    const x = await world();
+    expect((await x.as(x.alice.user.id)).githubLogin).toBe("alice-gh");
+    const stale = new Date(Date.now() + 25 * 3600_000);
+    expect((await x.as(x.alice.user.id, stale)).githubLogin).toBeNull(); // not confirmed for a day: matches nobody's queue
+    await refresh(x.alice.user.id, stale);
+    expect((await x.as(x.alice.user.id, stale)).githubLogin).toBe("alice-gh");
+    await markRelink(db(), x.alice.user.id);
+    expect((await db().user.findUniqueOrThrow({ where: { id: x.alice.user.id } })).githubLogin).toBeNull();
+    expect((await x.as(x.alice.user.id)).githubLogin).toBeNull();
+    await unlinkGithubAccount(db(), { userId: x.dave.user.id, workspaceId: x.w.ws.id }, cfg());
+    expect((await x.as(x.dave.user.id)).githubLogin).toBeNull();
+  });
+});
+
+describe("F6: a listing that cannot be complete is marked truncated; the viewer's list has a stable order", () => {
+  it("more repositories than the page cap allows: marked truncated with a count, and the tracked repositories are still found", async () => {
+    const x = await world();
+    for (let i = 0; i < 5001; i++) {
+      fake.repos.set(`acme/bulk${i}`, { id: 100_000 + i, owner: "acme", name: `bulk${i}`, private: false, defaultBranch: "main", collaborators: new Map(), invitations: new Map(), objects: new Map(), refs: new Map() });
+    }
+    expect(await refresh(x.alice.user.id)).toBe("ok");
+    const row = await db().githubUserToken.findUniqueOrThrow({ where: { userId: x.alice.user.id } });
+    expect(row.accessTruncated).toBe(true);
+    expect(row.accessRepoCount).toBeGreaterThanOrEqual(5000);
+    expect(await names(await x.as(x.alice.user.id))).toEqual(["priv1", "pub"]);
+    for (let i = 0; i < 5001; i++) fake.repos.delete(`acme/bulk${i}`);
+    await refresh(x.alice.user.id);
+    expect((await db().githubUserToken.findUniqueOrThrow({ where: { userId: x.alice.user.id } })).accessTruncated).toBe(false);
+  }, 120_000);
+
+  it("the cutoff is exact at the boundary (compared as UTC text, so a server time zone cannot shift it)", async () => {
+    const x = await world();
+    const edge = Date.now() - VALID_FOR_MS;
+    await db().githubRepoAccess.updateMany({ where: { userId: x.alice.user.id }, data: { checkedAt: new Date(edge + 5_000) } });
+    expect((await validRepoGithubIds(db(), x.alice.user.id, x.w.ws.id)).length).toBe(2);
+    await db().githubRepoAccess.updateMany({ where: { userId: x.alice.user.id }, data: { checkedAt: new Date(edge - 5_000) } });
+    expect(await validRepoGithubIds(db(), x.alice.user.id, x.w.ws.id)).toEqual([]);
+  });
+});
+
+describe("F7: a refresh that started before an unlink and a new link cannot wipe the new link", () => {
+  it("markRelinkIfCurrent leaves a link that is not the version the caller used", async () => {
+    const x = await world();
+    const old = (await db().githubUserToken.findUniqueOrThrow({ where: { userId: x.alice.user.id } })).updatedAt;
+    await unlinkGithubAccount(db(), { userId: x.alice.user.id, workspaceId: x.w.ws.id }, null);
+    await linkUser(x.alice.user.id, x.w.ws.id, "alice-gh");
+    expect(await markRelinkIfCurrent(db(), x.alice.user.id, old)).toBe(false);
+    const current = (await db().githubUserToken.findUniqueOrThrow({ where: { userId: x.alice.user.id } })).updatedAt;
+    expect((await db().githubUserToken.findUniqueOrThrow({ where: { userId: x.alice.user.id } })).status).toBe("OK");
+    expect(await markRelinkIfCurrent(db(), x.alice.user.id, current)).toBe(true);
+  });
+
+  it("end to end: the old token is refused mid-refresh while the person unlinks and links again; the new link survives", async () => {
+    const x = await world();
+    let fired = false;
+    const base = fake.appFetch();
+    fake.revokeAllUserTokens("alice-gh"); // the token this refresh will use is dead at GitHub
+    setConnectOverridesForTests({
+      deps: {
+        fetch: (async (i: RequestInfo | URL, init?: RequestInit) => {
+          if (!fired && new URL(String(i)).pathname === "/user") {
+            fired = true;
+            await unlinkGithubAccount(db(), { userId: x.alice.user.id, workspaceId: x.w.ws.id }, null);
+            await linkUser(x.alice.user.id, x.w.ws.id, "alice-gh"); // a brand new link with a working token
+          }
+          return base(i, init);
+        }) as typeof fetch,
+      },
+    });
+    await refresh(x.alice.user.id);
+    const row = await db().githubUserToken.findUniqueOrThrow({ where: { userId: x.alice.user.id } });
+    expect(row.status).toBe("OK");
+    expect(row.accessEnc).not.toBeNull();
+  });
+});
+
+describe("the public-repository rule is as documented", () => {
+  it("a linked member sees an administrator-tracked public repository that GitHub lists for them; an unlinked member without a grant does not", async () => {
+    const x = await world();
+    const frank = await addMember(db(), x.w.ws.id, "frank@acme.test", "MEMBER");
+    expect(await names(await x.as(x.bob.user.id))).toEqual(["pub"]);
+    expect(await names((await frank.viewer()) as Viewer)).toEqual([]);
   });
 });

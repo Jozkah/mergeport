@@ -64,6 +64,14 @@ describe("Settings > GitHub account panel", () => {
     expect(container.textContent).not.toMatch(FORBIDDEN);
   });
 
+  it("a check that could not list everything says so", () => {
+    const { container } = body(view({ link: { login: "octo", state: "ok", checkedAt: new Date("2026-11-20T10:30:00Z"), truncated: true } }));
+    expect(container.textContent).toContain("Showing access for the first 5,000 repositories.");
+    cleanup();
+    const complete = body(view({ link: { login: "octo", state: "ok", checkedAt: new Date("2026-11-20T10:30:00Z"), truncated: false } }));
+    expect(complete.container.textContent).not.toContain("Showing access for the first");
+  });
+
   it("linked but never checked says so", () => {
     body(view({ link: { login: "octo", state: "ok", checkedAt: null } }));
     expect(screen.getByText("Access not checked yet")).toBeTruthy();

@@ -1466,6 +1466,8 @@ model DailyDigest {
   payload     Json
   generatedAt DateTime  @default(now())
   readAt      DateTime?
+  /// Fingerprint of the repositories the person could see when this digest was made. A stored digest is served only while it still matches what they can see now (null: never served).
+  visibilityKey String?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -1740,6 +1742,9 @@ model GithubUserToken {
   status           String    @default("OK")
   /// When the person's repository access was last listed completely from GitHub.
   accessCheckedAt  DateTime?
+  /// The last check could not list everything (a page cap) or more repositories than one request can use were found: the person sees access for the first part only.
+  accessTruncated  Boolean   @default(false)
+  accessRepoCount  Int       @default(0)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

@@ -104,7 +104,7 @@ export async function untrackRepositoryAction(fd: FormData): Promise<ActionResul
 export async function refreshRepositoryAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireWriter();
-    const repo = await requireRepo(db, viewer, str(fd, "repositoryId"));
+    const repo = await requireRepo(db, viewer, str(fd, "repositoryId"), "manageWork");
     // A person asking for a refresh gets a complete one: every page is listed again (unchanged items cost no detail requests), so a
     // repository whose earlier sync was cut short is repaired instead of only receiving what changed since.
     await enqueue(db, { type: "sync.repository", payload: { repositoryId: repo.id, full: true }, dedupeKey: `sync:${repo.id}` });
@@ -455,8 +455,8 @@ export async function deleteRuleAction(fd: FormData): Promise<ActionResult> {
 export async function mapForkAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireAdminViewer();
-    const fork = await requireRepo(db, viewer, str(fd, "forkRepoId"));
-    const up = await requireRepo(db, viewer, str(fd, "upstreamRepoId"));
+    const fork = await requireRepo(db, viewer, str(fd, "forkRepoId"), "manageWork");
+    const up = await requireRepo(db, viewer, str(fd, "upstreamRepoId"), "read");
     if (fork.id === up.id) throw new ValidationError("A repository cannot be its own upstream");
     const m = await db.forkMapping.upsert({
       where: { forkRepoId_upstreamRepoId_forkBranch_upstreamBranch: { forkRepoId: fork.id, upstreamRepoId: up.id, forkBranch: str(fd, "forkBranch") || fork.defaultBranch || "main", upstreamBranch: str(fd, "upstreamBranch") || up.defaultBranch || "main" } },
@@ -490,8 +490,8 @@ export async function refreshForkAction(fd: FormData): Promise<ActionResult> {
     const { viewer } = await requireWriter();
     const m = await db.forkMapping.findFirst({ where: { id: str(fd, "mappingId") } });
     if (!m) throw new NotFoundError();
-    await requireRepo(db, viewer, m.forkRepoId);
-    await requireRepo(db, viewer, m.upstreamRepoId);
+    await requireRepo(db, viewer, m.forkRepoId, "manageWork");
+    await requireRepo(db, viewer, m.upstreamRepoId, "read");
     await enqueue(db, { type: "sync.fork", payload: { mappingId: m.id }, dedupeKey: `fork:${m.id}` });
     return { ok: true, message: "Comparison queued" };
   });
@@ -503,7 +503,7 @@ export async function triageAction(fd: FormData): Promise<ActionResult> {
     const row = await db.upstreamIssueTriage.findFirst({ where: { id: str(fd, "id") }, include: { mapping: true } });
     if (!row) throw new NotFoundError();
     await requireRepo(db, viewer, row.mapping.forkRepoId, "manageWork");
-    await requireRepo(db, viewer, row.mapping.upstreamRepoId, "view");
+    await requireRepo(db, viewer, row.mapping.upstreamRepoId, "read");
     const status = z.enum(["UNTRIAGED", "WATCHING", "RELEVANT", "ADDRESSED", "IGNORED"]).parse(str(fd, "status"));
     await db.upstreamIssueTriage.update({ where: { id: row.id }, data: { status, note: str(fd, "note") || null, decidedById: viewer.userId } });
     await audit(db, viewer, "triage.set", { type: "UpstreamIssueTriage", id: row.id }, { status });
@@ -525,7 +525,7 @@ export async function triageManyAction(input: { ids: string[]; status: (typeof T
     if (rows.length !== ids.length) throw new NotFoundError();
     for (const m of new Map(rows.map((r) => [r.mappingId, r.mapping])).values()) {
       await requireRepo(db, viewer, m.forkRepoId, "manageWork");
-      await requireRepo(db, viewer, m.upstreamRepoId, "view");
+      await requireRepo(db, viewer, m.upstreamRepoId, "read");
     }
     const note = input.note === undefined ? undefined : (String(input.note ?? "").trim().slice(0, 500) || null);
     await db.upstreamIssueTriage.updateMany({ where: { id: { in: ids } }, data: { status, decidedById: viewer.userId, ...(note !== undefined ? { note } : {}) } });
@@ -545,7 +545,7 @@ export async function ackManyAction(input: { ids: string[] }): Promise<ActionRes
     if (rows.length !== ids.length) throw new NotFoundError();
     for (const m of new Map(rows.map((r) => [r.mappingId, r.mapping])).values()) {
       await requireRepo(db, viewer, m.forkRepoId, "manageWork");
-      await requireRepo(db, viewer, m.upstreamRepoId, "view");
+      await requireRepo(db, viewer, m.upstreamRepoId, "read");
     }
     await db.upstreamPrState.updateMany({ where: { id: { in: ids }, state: "merged", evidence: { not: "ANCESTRY_EXACT" } }, data: { ackedById: viewer.memberId, evidence: "MANUAL_ACK", evidenceNote: "Acknowledged manually by a person. This is a decision, not Git evidence." } });
     await audit(db, viewer, "upstream.ack", { type: "UpstreamPrState", id: ids[0] }, { count: ids.length });
@@ -560,7 +560,7 @@ export async function ackEvidenceAction(fd: FormData): Promise<ActionResult> {
     const row = await db.upstreamPrState.findFirst({ where: { id: str(fd, "id") }, include: { mapping: true } });
     if (!row) throw new NotFoundError();
     await requireRepo(db, viewer, row.mapping.forkRepoId, "manageWork");
-    await requireRepo(db, viewer, row.mapping.upstreamRepoId, "view");
+    await requireRepo(db, viewer, row.mapping.upstreamRepoId, "read");
     await db.upstreamPrState.update({ where: { id: row.id }, data: { ackedById: viewer.memberId, evidence: "MANUAL_ACK", evidenceNote: "Acknowledged manually by a person. This is a decision, not Git evidence." } });
     await audit(db, viewer, "upstream.ack", { type: "UpstreamPrState", id: row.id });
     revalidatePath("/forks");

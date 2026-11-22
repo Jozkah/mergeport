@@ -57,7 +57,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const ghActive = ghInstalls.filter((i) => i.status === "active").length;
   const poll = (await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } }))?.pollSeconds ?? 30;
   // The person's own GitHub link (hosted). The result code from the callback is looked up in a fixed table, never shown as given.
-  const tokenRow = hosted && !isDemo() ? await db.githubUserToken.findUnique({ where: { userId: user.id }, select: { status: true, accessCheckedAt: true } }) : null;
+  const tokenRow = hosted && !isDemo() ? await db.githubUserToken.findUnique({ where: { userId: user.id }, select: { status: true, accessCheckedAt: true, accessTruncated: true } }) : null;
   const linkCode = Array.isArray(sp.githublink) ? sp.githublink[0] : sp.githublink;
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
@@ -106,7 +106,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         )}
         {hosted && !isDemo() && (
           <GithubAccountPanel
-            view={{ available: githubAppConfigured() && userTokenKey() !== null, link: tokenRow ? { login: user.githubLogin, state: tokenRow.status === "OK" ? "ok" : "relink", checkedAt: tokenRow.accessCheckedAt } : null, timezone: user.timezone }}
+            view={{ available: githubAppConfigured() && userTokenKey() !== null, link: tokenRow ? { login: user.githubLogin, state: tokenRow.status === "OK" ? "ok" : "relink", checkedAt: tokenRow.accessCheckedAt, truncated: tokenRow.accessTruncated } : null, timezone: user.timezone }}
             result={isLinkResult(linkCode) ? LINK_MESSAGES[linkCode] : null}
           />
         )}

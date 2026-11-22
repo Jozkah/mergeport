@@ -160,7 +160,7 @@ export async function syncForkBranch(ctx: Ctx, mappingId: string, confirmed: { f
   const map = await ctx.db.forkMapping.findFirst({ where: { id: mappingId }, include: { fork: { include: { owner: true } }, upstream: true } });
   if (!map) throw new NotFoundError();
   const fork = await requireRepo(ctx.db, ctx.v, map.forkRepoId, "manageWork");
-  await requireRepo(ctx.db, ctx.v, map.upstreamRepoId, "view"); // upstream content must also be visible
+  await requireRepo(ctx.db, ctx.v, map.upstreamRepoId, "read"); // upstream content must also be visible
   const user = await ctx.db.user.findUniqueOrThrow({ where: { id: ctx.v.userId } });
   const port = ctx.port ?? (await portForWrite(ctx.db, user, fork));
   const [fb, ub] = await Promise.all([port.listBranches(fork.owner.login, fork.name), port.listBranches(map.upstream.fullName.split("/")[0], map.upstream.name)]);

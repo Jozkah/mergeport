@@ -1,6 +1,7 @@
 import { Banner, Panel, SimplePill } from "@/components/ui/primitives";
 import { KeyRound, Unplug } from "@/components/ui/icons";
 import { formatInstant } from "@/lib/format";
+import { MAX_VIEWER_REPO_IDS } from "@/lib/github/access-cache";
 import { LINK_PURPOSE, NO_KEY_TEXT, type LinkMessage } from "@/lib/github/link-messages";
 import { CheckAccessForm, LinkGithubForm, UnlinkGithubButton } from "./GithubLinkForms";
 
@@ -8,7 +9,7 @@ export type GithubAccountView = {
   /** The server can link accounts: the GitHub App is set up and an encryption key is configured. */
   available: boolean;
   /** Null: not linked. `relink`: GitHub no longer accepts the link. */
-  link: { login: string | null; state: "ok" | "relink"; checkedAt: Date | null } | null;
+  link: { login: string | null; state: "ok" | "relink"; checkedAt: Date | null; /** The last check could not list everything. */ truncated?: boolean } | null;
   timezone: string;
 };
 
@@ -32,6 +33,7 @@ export function GithubAccountBody({ view, result }: { view: GithubAccountView; r
             <SimplePill tone="ok">Linked</SimplePill>
           </p>
           <p className="text-ink-3">{link.checkedAt ? <>Access checked <span className="tnum">{formatInstant(link.checkedAt, view.timezone)}</span></> : "Access not checked yet"}</p>
+          {link.truncated && <p className="max-w-[70ch] text-ink-3 text-pretty">Showing access for the first {MAX_VIEWER_REPO_IDS.toLocaleString("en-US")} repositories.</p>}
           <p className="max-w-[70ch] text-ink-3 text-pretty">{LINK_PURPOSE}</p>
           <div className="flex flex-wrap items-center gap-2">
             <CheckAccessForm />

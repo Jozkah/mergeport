@@ -404,7 +404,7 @@ describe("account takeover is refused in both directions, and a refusal writes n
     await markRelink(db(), w.owner.id);
     expect(await linkAs(w.owner.id, w.ws.id, "octo-two")).toBe("other-account");
     const u = await db().user.findUniqueOrThrow({ where: { id: w.owner.id } });
-    expect(u.githubLogin).toBe("octo");
+    expect(u.githubLogin).toBeNull(); // the login is cleared when the link needs renewing (F5); the numeric id and identity stay
     expect(u.githubId).toBe(BigInt(fake.users.get("octo")!.id));
     expect(await db().identity.count({ where: { userId: w.owner.id, provider: "github" } })).toBe(1);
     // after unlinking, the other account can be linked
@@ -470,7 +470,7 @@ describe("the stored token: renewal, rotation, single flight, relinking", () => 
     const w = await linked();
     const calls = fake.calls.length;
     const t = await getUserAccessToken(db(), cfg(), w.owner.id, deps());
-    expect(t).toEqual({ kind: "ok", token: await plainOf(w.owner.id) });
+    expect(t).toMatchObject({ kind: "ok", token: await plainOf(w.owner.id) });
     expect(fake.calls.length).toBe(calls);
     expect(fake.refreshExchanges.ok).toBe(0);
   });
@@ -529,7 +529,7 @@ describe("the stored token: renewal, rotation, single flight, relinking", () => 
     expect(fake.calls.length).toBe(calls); // never loops
     expect(fake.refreshExchanges.refused).toBe(1);
     // the link itself (identity, githubId) stays so the person can renew it with the same account
-    expect((await db().user.findUniqueOrThrow({ where: { id: w.owner.id } })).githubLogin).toBe("octo");
+    expect((await db().user.findUniqueOrThrow({ where: { id: w.owner.id } })).githubLogin).toBeNull(); // cleared with the relink (F5); githubId and the identity stay so the same account can be linked again
   });
 
   it("an expired refresh token (by its stored date) is a relink without asking GitHub", async () => {
@@ -562,21 +562,28 @@ describe("the stored token: renewal, rotation, single flight, relinking", () => 
     expect((await getUserAccessToken(db(), cfg(), w.owner.id, deps())).kind).toBe("ok");
   });
 
-  it("without the encryption key nothing can be used; a ciphertext made under another key or copied to another person is useless (relink)", async () => {
+  it("without the encryption key, with another key, or with a ciphertext copied to another person, nothing can be used, but NOTHING is wiped: a key problem never relinks anyone", async () => {
     const w = await linked();
     const other = await addMember(db(), w.ws.id, "other@acme.test", "MEMBER");
+    const before = (await tokenRow(w.owner.id))!;
     vi.stubEnv("MERGEPORT_ENCRYPTION_KEY", "");
     expect(await getUserAccessToken(db(), cfg(), w.owner.id, deps())).toEqual({ kind: "no-key" });
-    vi.stubEnv("MERGEPORT_ENCRYPTION_KEY", "z".repeat(40)); // another key
-    expect(await getUserAccessToken(db(), cfg(), w.owner.id, deps())).toEqual({ kind: "relink" });
-    vi.stubEnv("MERGEPORT_ENCRYPTION_KEY", ENC_KEY);
-    // copy the owner's ciphertext into another person's row
-    fake.addUser("octo-b");
-    expect(await linkAs(w.owner.id, w.ws.id, "octo")).toBe("linked"); // renew after the relink above
+    vi.stubEnv("MERGEPORT_ENCRYPTION_KEY", "z".repeat(40)); // another key (a mistake in the middle of a deploy)
+    expect(await getUserAccessToken(db(), cfg(), w.owner.id, deps())).toEqual({ kind: "no-key" });
+    await db().githubUserToken.update({ where: { userId: w.owner.id }, data: { accessExpiresAt: new Date(Date.now() - 1000) } });
+    expect(await getUserAccessToken(db(), cfg(), w.owner.id, deps())).toEqual({ kind: "no-key" }); // the renewal path too
+    expect(logs.some((l) => l.includes("could not be opened"))).toBe(true); // counted, without any value
+    const during = (await tokenRow(w.owner.id))!;
+    expect(during).toMatchObject({ status: "OK", accessEnc: before.accessEnc, refreshEnc: before.refreshEnc });
+    expect((await db().user.findUniqueOrThrow({ where: { id: w.owner.id } })).githubLogin).toBe("octo");
+    vi.stubEnv("MERGEPORT_ENCRYPTION_KEY", ENC_KEY); // the right key is back: everything works again
+    expect((await getUserAccessToken(db(), cfg(), w.owner.id, deps())).kind).toBe("ok");
+    // a ciphertext copied into another person's row does not open there either, and leaves that row alone
     const mine = (await tokenRow(w.owner.id))!;
     await db().user.update({ where: { id: other.user.id }, data: { githubId: 424242n } });
     await db().githubUserToken.create({ data: { userId: other.user.id, accessEnc: mine.accessEnc, refreshEnc: mine.refreshEnc, accessExpiresAt: mine.accessExpiresAt, refreshExpiresAt: mine.refreshExpiresAt } });
-    expect(await getUserAccessToken(db(), cfg(), other.user.id, deps())).toEqual({ kind: "relink" });
+    expect(await getUserAccessToken(db(), cfg(), other.user.id, deps())).toEqual({ kind: "no-key" });
+    expect((await tokenRow(other.user.id))!.status).toBe("OK");
   });
 
   it("no token ever reaches a log, an error message, a cookie or a redirect", async () => {

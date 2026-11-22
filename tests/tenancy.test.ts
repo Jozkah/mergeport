@@ -8,7 +8,7 @@ import { aiEnabled, getAiView } from "@/lib/services/ai";
 import { approve, listPending, pendingCount, reject, status } from "@/lib/services/ai-approvals";
 import { acceptSuggestions, dismissSuggestions, listSuggestions } from "@/lib/services/ai-review";
 import { exportBackup, parseBackup, restoreBackup } from "@/lib/services/backup";
-import { getDigest } from "@/lib/services/digest";
+import { digestVisibilityKey, getDigest } from "@/lib/services/digest";
 import { gettingStarted } from "@/lib/services/getting-started";
 import { createColumnsForProject } from "@/lib/services/planning";
 import { planningBoard, roadmap } from "@/lib/services/planning-view";
@@ -70,7 +70,7 @@ async function world(name: string, githubId: bigint, login: string): Promise<Wor
   await db.gitCache.create({ data: { workspaceId: ws.id, key: "same-key", payload: { from: name }, bytes: 10 } });
   await db.discoveryCache.create({ data: { workspaceId: ws.id, key: "repos", payload: { from: name }, state: "FRESH" } });
   await db.reviewRule.create({ data: { workspaceId: ws.id, scope: "WORKSPACE", labels: [], reviewers: [], reason: "same rule" } });
-  await db.dailyDigest.create({ data: { workspaceId: ws.id, userId: user.id, day: "2026-10-31", payload: { version: 1, of: name } } });
+  await db.dailyDigest.create({ data: { workspaceId: ws.id, userId: user.id, day: "2026-10-31", payload: { version: 1, of: name }, visibilityKey: await digestVisibilityKey(db, viewer) } });
   return { ws: ws.id, viewer, userId: user.id, repoId: repo.id, projectId: project.id, prId: pr.id, issueId: issue.id, taskId: task.id, spaceId: space.id, suggestionId: suggestion.id, pendingId: pending.id, milestoneId: milestone.id };
 }
 
@@ -147,7 +147,7 @@ describe("lists, searches and counts return only the active workspace's rows", (
     expect(await aiEnabled(db, w1.ws)).toBe(false); // demo-mode env in tests: AI is off, whatever the row says
     expect((await getAiView(db, (await db.workspace.create({ data: { name: "empty" } })).id)).saved).toBe(false);
     expect((await getDigest(db, w1.viewer, "2026-10-31"))?.payload).toMatchObject({ of: "one" });
-    expect(await getDigest(db, { userId: w1.userId, workspaceId: w2.ws }, "2026-10-31")).toBeNull();
+    expect(await getDigest(db, { ...w1.viewer, workspaceId: w2.ws }, "2026-10-31")).toBeNull();
     expect((await syncCenter(db, w1.ws, 30)).map((s) => s.id)).toEqual([w1.spaceId]);
     expect((await syncCenter(db, w2.ws, 99)).map((s) => s.id)).toEqual([w2.spaceId]);
     const steps = await gettingStarted(db, w1.viewer);

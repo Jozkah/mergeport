@@ -5,7 +5,8 @@ import { GithubAppError } from "./app-auth";
 import type { GithubAppConfig } from "./app-config";
 import { listUserInstallationRepositories, listUserInstallations, getUser, type ConnectDeps, type GithubUser, type UserInstallationRepo } from "./connect-api";
 import { connectOverrides } from "./connect";
-import { getUserAccessToken, markRelink } from "./user-token";
+import { MAX_VIEWER_REPO_IDS } from "./access-cache";
+import { getUserAccessToken, markRelinkIfCurrent } from "./user-token";
 
 /**
  * The `github.access.refresh` job body: asks GitHub, with THIS person's own token, which repositories they can open, and caches the
@@ -42,15 +43,16 @@ export async function refreshUserAccess(db: Db, config: Pick<GithubAppConfig, "c
     if (t.kind !== "ok") return t.kind;
     me = await getUser(deps, t.token);
     if (!me) {
-      await markRelink(db, userId);
+      await markRelinkIfCurrent(db, userId, t.version); // only the version this run used: a newer link is never touched
       return "relink";
     }
   }
   if (me.id !== user.githubId) {
-    await markRelink(db, userId); // this token is not the linked person's: never use it
+    await markRelinkIfCurrent(db, userId, t.version); // this token is not the linked person's: never use it
     return "relink";
   }
   const token = t.token;
+  const version = t.version;
   const gh: GithubUser = me;
   if (gh.login !== user.githubLogin) await db.user.updateMany({ where: { id: userId, githubId: gh.id }, data: { githubLogin: gh.login } });
 
@@ -61,7 +63,7 @@ export async function refreshUserAccess(db: Db, config: Pick<GithubAppConfig, "c
 
   const listed = bound.length === 0 ? [] : await listUserInstallations(deps, token);
   if (listed === null) {
-    await markRelink(db, userId);
+    await markRelinkIfCurrent(db, userId, version);
     return "relink";
   }
   const mine = new Set(listed.map((i) => i.id));
@@ -97,8 +99,12 @@ export async function refreshUserAccess(db: Db, config: Pick<GithubAppConfig, "c
         for (const r of v.repos) rows.push({ userId, repositoryGithubId: r.id, installationId, permission: r.permission, checkedAt: now });
       }
       for (let i = 0; i < rows.length; i += 1000) await tx.githubRepoAccess.createMany({ data: rows.slice(i, i + 1000), skipDuplicates: true });
-      if (!failed) await tx.githubUserToken.updateMany({ where: { userId }, data: { accessCheckedAt: now } });
       const after = new Set((await tx.githubRepoAccess.findMany({ where: { userId }, select: { repositoryGithubId: true } })).map((r) => r.repositoryGithubId));
+      // The check counts as complete only when every listing succeeded. It is marked truncated when a listing hit its page cap or one person
+      // has more repositories than a request can use (the Settings panel says so).
+      const truncated = [...fresh.values()].some((v) => !v.complete) || after.size > MAX_VIEWER_REPO_IDS;
+      if (!failed) await tx.githubUserToken.updateMany({ where: { userId }, data: { accessCheckedAt: now, accessTruncated: truncated, accessRepoCount: after.size } });
+      if (truncated) console.warn("github access: a person's repository list was truncated");
       return { lost: before.filter((b) => !after.has(b.repositoryGithubId)).length };
     },
     { timeout: 30_000, maxWait: 10_000 },

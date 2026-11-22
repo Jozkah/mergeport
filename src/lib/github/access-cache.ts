@@ -32,12 +32,15 @@ export const accessJobKey = (userId: string) => `ghaccess:${userId}`;
  * person can open on GitHub.
  */
 export async function validRepoGithubIds(db: Db, userId: string, workspaceId: string, now: Date = new Date()): Promise<bigint[]> {
-  const cutoff = new Date(now.getTime() - VALID_FOR_MS);
+  // The cutoff goes in as an ISO string cast in SQL (the pattern of jobs.ts), never as a JS Date: a Date parameter would be compared as
+  // timestamptz against the TIMESTAMP(3) column and shift by the database session's time zone on a server that is not on UTC.
+  const cutoff = new Date(now.getTime() - VALID_FOR_MS).toISOString();
   const rows = await db.$queryRaw<{ id: bigint }[]>`
     SELECT a."repositoryGithubId" AS "id" FROM "GithubRepoAccess" a
     JOIN "Repository" r ON r."githubId" = a."repositoryGithubId" AND r."installationId" = a."installationId" AND r."workspaceId" = ${workspaceId}
-    WHERE a."userId" = ${userId} AND a."checkedAt" >= ${cutoff} AND a."permission" IN ('pull', 'triage', 'push', 'maintain', 'admin') AND r."trackingStatus" <> 'REMOVED'
-    ORDER BY a."repositoryGithubId" LIMIT ${MAX_VIEWER_REPO_IDS}`;
+    WHERE a."userId" = ${userId} AND a."checkedAt" >= ${cutoff}::timestamp(3) AND a."permission" IN ('pull', 'triage', 'push', 'maintain', 'admin') AND r."trackingStatus" <> 'REMOVED'
+    ORDER BY a."checkedAt" DESC, a."repositoryGithubId" LIMIT ${MAX_VIEWER_REPO_IDS}`;
+  if (rows.length >= MAX_VIEWER_REPO_IDS) console.warn("github access: a viewer's repository list hit the per-request cap");
   return rows.map((r) => BigInt(r.id));
 }
 
