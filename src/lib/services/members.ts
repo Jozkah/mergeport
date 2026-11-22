@@ -3,6 +3,7 @@ import type { Db } from "@/lib/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { can, isAdminRole, isAssignableRole, type Role } from "@/lib/authz/roles";
 import type { Viewer } from "@/lib/authz/viewer";
+import { purgeAccessAfterMembershipEnd } from "@/lib/github/access-cache";
 import { audit } from "./audit";
 import { purgeDigests } from "./digest-purge";
 
@@ -73,6 +74,7 @@ async function endMembership(tx: Tx, workspaceId: string, member: { id: string; 
   await tx.accessSpaceMember.deleteMany({ where: { memberId: member.id } });
   await tx.repositoryGrant.updateMany({ where: { memberId: member.id, revokedAt: null }, data: { revokedAt: now } });
   await purgeDigests(tx, workspaceId, [member.userId]); // a stored digest must not outlive the access it was made from
+  await purgeAccessAfterMembershipEnd(tx, member.userId, workspaceId); // nor the cached GitHub access that came through this workspace's installations
   await tx.session.updateMany({ where: { userId: member.userId, activeWorkspaceId: workspaceId }, data: { activeWorkspaceId: null } });
   await endFederationAccess(tx, workspaceId, member.userId, now, true);
 }

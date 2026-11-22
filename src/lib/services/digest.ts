@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { loadViewer, repoWhere, viaRepo, type Viewer } from "@/lib/authz/viewer";
@@ -340,9 +341,22 @@ const stored = (r: { id: string; day: string; generatedAt: Date; readAt: Date | 
   return p && p.version === 1 ? { id: r.id, day: r.day, generatedAt: r.generatedAt, readAt: r.readAt, payload: p } : null;
 };
 
-export async function getDigest(db: Db, v: Pick<Viewer, "userId" | "workspaceId">, day: string): Promise<StoredDigest | null> {
-  const r = await db.dailyDigest.findUnique({ where: { workspaceId_userId_day: { workspaceId: v.workspaceId, userId: v.userId, day } } });
-  return r ? stored(r) : null;
+/**
+ * A digest is a snapshot of titles taken while the person could see certain repositories. It is stored with a fingerprint of that set
+ * (`visibilityKey`) and served only while the fingerprint still matches what they can see NOW (grants, GitHub-derived access, untracking:
+ * everything `repoWhere` decides). Any change in either direction drops it from view, whatever caused it and whether or not a purge ran.
+ * A row without a key (made before this rule) is never served. The next regeneration replaces it.
+ */
+export async function digestVisibilityKey(db: Db, v: Viewer): Promise<string> {
+  const ids = (await db.repository.findMany({ where: repoWhere(v), select: { id: true }, orderBy: { id: "asc" } })).map((r) => r.id);
+  return createHash("sha256").update(`${v.workspaceId}|${v.userId}|${ids.join(",")}`).digest("hex");
+}
+
+const rawDigest = (db: Db, v: Pick<Viewer, "userId" | "workspaceId">, day: string) => db.dailyDigest.findUnique({ where: { workspaceId_userId_day: { workspaceId: v.workspaceId, userId: v.userId, day } } });
+
+export async function getDigest(db: Db, v: Viewer, day: string): Promise<StoredDigest | null> {
+  const r = await rawDigest(db, v, day);
+  return r && r.visibilityKey !== null && r.visibilityKey === (await digestVisibilityKey(db, v)) ? stored(r) : null;
 }
 
 /** Days that have a stored digest, newest first. */
@@ -356,11 +370,12 @@ export async function listDigestDays(db: Db, v: Pick<Viewer, "userId" | "workspa
 export async function latestDigest(db: Db, viewer: Viewer, now = new Date()): Promise<StoredDigest | null> {
   const newest = await db.dailyDigest.findFirst({ where: { workspaceId: viewer.workspaceId, userId: viewer.userId }, orderBy: { day: "desc" } });
   if (!newest && isDemo()) return (await generateDigest(db, viewer, { now })).digest;
-  return newest ? stored(newest) : null;
+  return newest && newest.visibilityKey !== null && newest.visibilityKey === (await digestVisibilityKey(db, viewer)) ? stored(newest) : null;
 }
 
-export async function unreadDigestCount(db: Db, v: Pick<Viewer, "userId" | "workspaceId">): Promise<number> {
-  return db.dailyDigest.count({ where: { workspaceId: v.workspaceId, userId: v.userId, readAt: null } });
+export async function unreadDigestCount(db: Db, v: Viewer): Promise<number> {
+  // Only digests this viewer may currently see: a hidden one must not show a badge with nothing behind it.
+  return db.dailyDigest.count({ where: { workspaceId: v.workspaceId, userId: v.userId, readAt: null, visibilityKey: await digestVisibilityKey(db, v) } });
 }
 
 export async function markDigestRead(db: Db, v: Pick<Viewer, "userId" | "workspaceId">, day: string, now = new Date()): Promise<void> {
@@ -376,17 +391,19 @@ export async function markDigestRead(db: Db, v: Pick<Viewer, "userId" | "workspa
 export async function generateDigest(db: Db, viewer: Viewer, opts: BuildOptions & { replace?: boolean } = {}): Promise<{ digest: StoredDigest; created: boolean }> {
   const now = opts.now ?? new Date();
   const day = opts.day ?? reportedDay(now, opts.tz ?? viewer.timezone).day;
-  const existing = await getDigest(db, viewer, day);
-  if (existing && !opts.replace) return { digest: existing, created: false };
+  const key = await digestVisibilityKey(db, viewer);
+  const existing = await rawDigest(db, viewer, day);
+  // An existing digest made under a different view of the repositories is not served: it is rebuilt now.
+  if (existing && !opts.replace && existing.visibilityKey === key) return { digest: stored(existing)!, created: false };
   const payload = await buildDigest(db, viewer, { ...opts, now, day });
   const json = payload as unknown as Prisma.InputJsonValue;
   if (existing) {
-    const row = await db.dailyDigest.update({ where: { id: existing.id, workspaceId: viewer.workspaceId }, data: { payload: json, generatedAt: now, readAt: null } });
+    const row = await db.dailyDigest.update({ where: { id: existing.id, workspaceId: viewer.workspaceId }, data: { payload: json, generatedAt: now, readAt: null, visibilityKey: key } });
     return { digest: stored(row)!, created: false };
   }
   let row;
   try {
-    row = await db.dailyDigest.create({ data: { workspaceId: viewer.workspaceId, userId: viewer.userId, day, payload: json, generatedAt: now } });
+    row = await db.dailyDigest.create({ data: { workspaceId: viewer.workspaceId, userId: viewer.userId, day, payload: json, generatedAt: now, visibilityKey: key } });
   } catch {
     const raced = await getDigest(db, viewer, day); // another caller stored it between our read and write
     if (raced) return { digest: raced, created: false };
@@ -410,7 +427,8 @@ export async function runDailyDigest(db: Db, workspaceId: string, now = new Date
   if (!viewer) return "no-profile";
   const { digest: settings } = await getPrefs(db, viewer.userId);
   const { day } = reportedDay(now, viewer.timezone);
-  const haveDay = (await db.dailyDigest.count({ where: { workspaceId: viewer.workspaceId, userId: viewer.userId, day } })) > 0;
+  // A stored digest the viewer cannot see (no key, or an old one) does not count: the day is generated again.
+  const haveDay = (await db.dailyDigest.count({ where: { workspaceId: viewer.workspaceId, userId: viewer.userId, day, visibilityKey: await digestVisibilityKey(db, viewer) } })) > 0;
   if (!settings.enabled) return "disabled";
   if (haveDay) return "have-it";
   if (!digestDue({ now, tz: viewer.timezone, settings, haveDay })) return "not-yet";

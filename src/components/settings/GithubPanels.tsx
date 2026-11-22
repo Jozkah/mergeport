@@ -4,7 +4,7 @@ import { Disclosure } from "@/components/ui/Disclosure";
 import { Banner, EmptyState, Panel, SimplePill } from "@/components/ui/primitives";
 import { Building2, Layers, ListChecks, Unplug, User } from "@/components/ui/icons";
 import { checkGithubInstallationAction, disconnectGithubInstallationAction } from "@/app/github-actions";
-import { formatDateOnly } from "@/lib/format";
+import { formatDateOnly, relativeTime } from "@/lib/format";
 import type { InstallationStatus } from "@/lib/github/binding";
 import type { ResultMessage } from "@/lib/github/connect-messages";
 import { ConnectGithubForm, UseExistingForm } from "./GithubConnectForms";
@@ -16,6 +16,8 @@ export type InstallationRow = {
   repositorySelection: "ALL" | "SELECTED";
   status: InstallationStatus;
   connectedAt: Date;
+  /** When GitHub last sent a message about this account (a verified webhook), if ever. */
+  lastWebhookAt?: Date | null;
 };
 
 export type GithubView = {
@@ -90,8 +92,15 @@ function InstallationItem({ row, manage }: { row: InstallationRow; manage: boole
   );
 }
 
+/** The latest message from GitHub across the workspace's accounts, as the "Live updates" line says it. */
+export function liveUpdatesText(configured: boolean, installations: InstallationRow[], now: Date): string {
+  const last = installations.reduce<Date | null>((a, r) => (r.lastWebhookAt && (!a || r.lastWebhookAt > a) ? r.lastWebhookAt : a), null);
+  if (last) return `On (last event ${relativeTime(last, now)}). Reconciles about hourly while events arrive.`;
+  return configured ? "Waiting for the first event from GitHub" : "Updates arrive about every 15 minutes";
+}
+
 /** The whole Settings > GitHub page body for one viewer. Pure data in, so it renders the same in tests. */
-export function GithubSettingsBody({ view, result }: { view: GithubView; result: ResultMessage | null }) {
+export function GithubSettingsBody({ view, result, now }: { view: GithubView; result: ResultMessage | null; now?: Date }) {
   const { configured, manage, installations } = view;
   return (
     <div className="flex flex-col gap-5">
@@ -121,6 +130,7 @@ export function GithubSettingsBody({ view, result }: { view: GithubView; result:
           <ul style={{ "--row-gap": "0px" } as React.CSSProperties} aria-label="Connected GitHub accounts">
             {installations.map((r) => <InstallationItem key={r.installationId} row={r} manage={manage} />)}
           </ul>
+          <p className="border-t border-line p-4 text-[12.5px] text-ink-2" id="gh-live"><span className="font-medium">Live updates:</span> {liveUpdatesText(configured, installations, now ?? new Date())}</p>
           {!manage && <p className="border-t border-line p-4 text-[12.5px] text-ink-3">Only the owner and administrators can connect or disconnect GitHub.</p>}
         </Panel>
       )}

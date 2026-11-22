@@ -4,7 +4,7 @@ import { HOST, ORIGIN, state } from "./auth-mocks";
 import { addMember, person, workspaceWithOwner } from "./roles-helpers";
 import { bind, hostedGithub, releaseApp, useApp } from "./github-hosted-helpers";
 import { createSession, SESSION_COOKIE } from "@/lib/auth/session";
-import { repoWhere, type Viewer } from "@/lib/authz/viewer";
+import { loadViewer, repoWhere, type Viewer } from "@/lib/authz/viewer";
 import { ForbiddenError } from "@/lib/errors";
 import { GithubNotConnectedError, GithubWritesDisabledError } from "@/lib/github/hosted";
 import { loadBoundInstallation } from "@/lib/github/binding";
@@ -15,7 +15,7 @@ import { trackInstallationRepos } from "@/lib/services/installation-repos";
 import { removeFromTracking, trackLocally, type RepoMeta } from "@/lib/services/repositories";
 import { revokeRepositories } from "@/lib/services/grants";
 import { removeMember } from "@/lib/services/members";
-import { getDigest, latestDigest, listDigestDays } from "@/lib/services/digest";
+import { digestVisibilityKey, getDigest, latestDigest, listDigestDays } from "@/lib/services/digest";
 import { reviewCapacity } from "@/lib/services/capacity";
 import { listWorkItems, searchGlobal } from "@/lib/services/queries";
 import { syncRepository } from "@/lib/sync/repository";
@@ -68,7 +68,7 @@ async function world() {
   const member = await addMember(db(), w.ws.id, "member@acme.test", "MEMBER");
   const [r] = await trackInstallationRepos(db(), w.viewer, [String(gh.server.repo("acme", "pub")!.id)]);
   const grant = (memberId: string) => db().repositoryGrant.create({ data: { memberId, repositoryId: r.id, grantedById: w.owner.id, canManageWork: true, canReview: true } });
-  const digest = (userId: string) => db().dailyDigest.create({ data: { workspaceId: w.ws.id, userId, day: "2026-11-09", payload: { version: 1, secret: "PRIVATE-TITLE" } as never } });
+  const digest = async (userId: string) => db().dailyDigest.create({ data: { workspaceId: w.ws.id, userId, day: "2026-11-09", payload: { version: 1, secret: "PRIVATE-TITLE" } as never, visibilityKey: await digestVisibilityKey(db(), (await loadViewer(db(), userId, w.ws.id))!) } });
   return { w, member, r, grant, digest, mv: await member.viewer() };
 }
 

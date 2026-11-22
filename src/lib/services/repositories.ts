@@ -89,7 +89,7 @@ export async function trackLocally(db: Db, v: Viewer, metas: RepoMeta[]) {
  */
 export async function removeFromTracking(db: Db, v: Viewer, repositoryId: string) {
   if (isHosted()) requireAdmin(v); // untracking revokes everyone's access: not a member's call (the local app has one person)
-  const repo = await requireRepo(db, v, repositoryId, "view");
+  const repo = await requireRepo(db, v, repositoryId, "manageWork");
   const holders = await db.repositoryGrant.findMany({ where: { repositoryId: repo.id, revokedAt: null }, select: { member: { select: { userId: true } } } });
   if (repo.spaceId) {
     const space = await db.space.findUnique({ where: { id: repo.spaceId, workspaceId: v.workspaceId } });
@@ -112,7 +112,7 @@ export async function removeFromTracking(db: Db, v: Viewer, repositoryId: string
  * coordination space. Everyone with access to that space will see it. Needs write access to the space.
  */
 export async function shareRepositoryToSpace(db: Db, v: Viewer, repositoryId: string, spaceId: string) {
-  const repo = await requireRepo(db, v, repositoryId, "view");
+  const repo = await requireRepo(db, v, repositoryId, "manageWork");
   const space = await db.space.findUnique({ where: { id: spaceId, workspaceId: v.workspaceId } });
   if (!space || space.access !== "OK") throw new NotFoundError();
   if (!space.canWrite) throw new ValidationError("You only have read access to that space.");
@@ -124,7 +124,7 @@ export async function shareRepositoryToSpace(db: Db, v: Viewer, repositoryId: st
 }
 
 export async function unshareRepository(db: Db, v: Viewer, repositoryId: string) {
-  const repo = await requireRepo(db, v, repositoryId, "view");
+  const repo = await requireRepo(db, v, repositoryId, "manageWork");
   if (!repo.spaceId) return;
   const space = await db.space.findUnique({ where: { id: repo.spaceId, workspaceId: v.workspaceId } });
   if (!space?.canWrite) throw new ValidationError("You only have read access to that space.");

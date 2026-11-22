@@ -1,9 +1,15 @@
 import { db } from "@/lib/db";
+import { ACCESS_JOB, REFRESH_AFTER_MS, requestAccessRefresh } from "@/lib/github/access-cache";
+import { githubAppConfig } from "@/lib/github/app-config";
+import { refreshUserAccess } from "@/lib/github/user-access";
 import * as budget from "@/lib/github/budget";
 import { SOURCE_BUDGET_KEY } from "@/lib/github/budget";
 import { portForSync } from "@/lib/github/factory";
 import { GithubNotConnectedError } from "@/lib/github/hosted";
 import { workspaceGithubStatus } from "@/lib/github/status";
+import { checkInstallationFromGithub } from "@/lib/github/installation-check";
+import { pruneGithubAppData } from "@/lib/github/webhook-maintenance";
+import { enqueueHostedReconcile } from "@/lib/github/webhook-pacing";
 import type { Handler, JobRow } from "@/lib/jobs";
 import { UPDATE_JOB, maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
 import { isHosted } from "@/lib/public-url";
@@ -112,8 +118,8 @@ const rawHandlers: Record<string, Handler> = {
       if (isHosted()) {
         // Only workspaces with a usable GitHub connection, and only repositories served by an installation. Others have nothing to reconcile.
         if (!(await workspaceGithubStatus(db, workspaceId)).bound) return;
-        const served = await db.repository.findMany({ where: { workspaceId, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false, installationId: { not: null } }, select: { id: true } });
-        for (const r of served) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}`, workspaceId });
+        // An installation that sends webhooks reconciles hourly instead (webhook-pacing.ts); anything unhealthy or silent still runs every time.
+        await enqueueHostedReconcile(db, workspaceId);
         return;
       }
       const repos = await db.repository.findMany({ where: { workspaceId, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
@@ -122,6 +128,35 @@ const rawHandlers: Record<string, Handler> = {
       const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases", mapping: { fork: { workspaceId } } }, select: { mappingId: true } });
       for (const w of watches) await maybeRequestReleaseCheck(db, w.mappingId);
     });
+    if (isHosted()) {
+      // The reconcile pacing also renews what GitHub says each linked person may open (their data is older than REFRESH_AFTER). One job per
+      // person (deduplicated), oldest first, capped; page loads trigger the same job for people who are active right now.
+      const stale = await db.githubUserToken.findMany({
+        where: { status: "OK", OR: [{ accessCheckedAt: null }, { accessCheckedAt: { lt: new Date(Date.now() - REFRESH_AFTER_MS) } }], user: { members: { some: { status: "ACTIVE" } } } },
+        select: { userId: true },
+        orderBy: { accessCheckedAt: { sort: "asc", nulls: "first" } },
+        take: 200,
+      });
+      for (const s of stale) await requestAccessRefresh(db, s.userId);
+    }
+  }) as Handler,
+  // Hosted only: asks GitHub, with THIS person's own token, which repositories they can open (one job per person, payload { userId }).
+  // It serves no single workspace (a person may belong to several), so its job row carries none. A failure to reach GitHub throws, so the job backs off.
+  [ACCESS_JOB]: (async (p: { userId: string }) => {
+    if (!isHosted() || typeof p?.userId !== "string") return;
+    const config = githubAppConfig();
+    if (!config) return;
+    const r = await refreshUserAccess(db, config, p.userId);
+    if (r === "ok" || r === "partial") (await import("@/lib/local/runtime")).notifyChange("state");
+  }) as Handler,
+  // Hosted: GitHub told us something happened to an installation (webhook); ask GitHub what is true now and record that. A system job per installation.
+  "github.installation.check": (async (p: { installationId: string }) => {
+    if (!/^\d{1,19}$/.test(String(p?.installationId))) return;
+    await checkInstallationFromGithub(db, BigInt(p.installationId));
+  }) as Handler,
+  // Hosted housekeeping (no GitHub, no network): old webhook delivery ids and expired install states. A system-wide job.
+  "github.maintenance": (async () => {
+    await pruneGithubAppData(db);
   }) as Handler,
   // Local only (no GitHub, no network): makes the daily digest once per local day, and catches up after the app was closed.
   "digest.daily": (async () => {

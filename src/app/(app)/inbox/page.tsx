@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { inbox, type InboxStatus } from "@/lib/services/inbox";
 import { formatInstant, formatInstantDated, relativeTime } from "@/lib/format";
-import { Banner, EmptyState, PageHeader, Panel, Segmented, StatusPill, Avatar, Time } from "@/components/ui/primitives";
+import { EmptyState, PageHeader, Panel, Segmented, StatusPill, Avatar, Time } from "@/components/ui/primitives";
+import { LinkGithubBanner } from "@/components/settings/LinkGithubBanner";
 import { RepoChip } from "@/components/ui/RepoChip";
 import { Inbox } from "@/components/ui/icons";
 import { itemHref } from "@/components/work/WorkTable";
@@ -31,7 +32,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         subtitle="Pull requests waiting on you. Done clears it for you only."
         actions={<ReadAllButton disabled={unread === 0} />}
       />
-      {viewer.githubLogin === null && <div className="mb-4"><Banner tone="info" title="Personal review queues need a linked GitHub account.">Review requests are matched to a GitHub account.</Banner></div>}
+      {viewer.githubLogin === null && <div className="mb-4"><LinkGithubBanner>Review requests are matched to a GitHub account.</LinkGithubBanner></div>}
       <div className="mb-4">
         <Segmented label="Inbox views" items={TABS.map((t) => ({ href: `/inbox?tab=${t.key}`, label: t.label, active: t.key === tab, count: counts[t.key] }))} />
       </div>

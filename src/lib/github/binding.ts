@@ -1,3 +1,4 @@
+import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { audit } from "@/lib/services/audit";
 import { makeBoundInstallation, type BoundInstallation } from "./bound-installation";
@@ -119,6 +120,7 @@ export async function listWorkspaceInstallations(db: Db, workspaceId: string) {
     repositorySelection: r.installation.repositorySelection,
     status: (r.installation.deletedAt ? "removed" : r.installation.suspendedAt ? "suspended" : "active") as InstallationStatus,
     connectedAt: r.createdAt,
+    lastWebhookAt: r.installation.lastWebhookAt,
   }));
 }
 
@@ -136,7 +138,7 @@ export async function listBoundInstallations(db: Db, workspaceId: string): Promi
  * (one installation, however many workspaces bound it), so every workspace sees the new state at once. Nothing else changes: bindings
  * and tracked repositories stay, and work again if the installation does.
  */
-export async function markInstallationState(db: Db, installationId: bigint, state: "active" | "suspended" | "deleted", now = new Date()): Promise<boolean> {
+export async function markInstallationState(db: Db | Prisma.TransactionClient, installationId: bigint, state: "active" | "suspended" | "deleted", now = new Date()): Promise<boolean> {
   // A loss is recorded once (the first time stamp is kept); "active" clears both.
   const where = state === "active" ? { installationId } : state === "suspended" ? { installationId, suspendedAt: null } : { installationId, deletedAt: null };
   const data = state === "active" ? { suspendedAt: null, deletedAt: null } : state === "suspended" ? { suspendedAt: now } : { deletedAt: now };

@@ -21,7 +21,7 @@ async function localDevice(db: Db, v: Viewer) {
 
 /** Maps a repository to a folder on this machine. The folder must be the top level of a git repository. */
 export async function mapLocalRoot(db: Db, v: Viewer, repositoryId: string, absolutePath: string) {
-  await requireRepo(db, v, repositoryId, "view");
+  await requireRepo(db, v, repositoryId, "read");
   let root: string;
   try {
     root = await validateRoot(absolutePath);
@@ -41,7 +41,7 @@ export async function unmapLocalRoot(db: Db, v: Viewer, repositoryId: string) {
 }
 
 export async function scanWorktrees(db: Db, v: Viewer, repositoryId: string, now = new Date()) {
-  await requireRepo(db, v, repositoryId, "view"); // a revoked repository can no longer be scanned
+  await requireRepo(db, v, repositoryId, "read"); // a revoked repository can no longer be scanned
   const dev = await localDevice(db, v);
   const map = await db.deviceRepoMapping.findFirst({ where: { deviceId: dev.id, repositoryId } });
   if (!map?.rootPath) throw new NotFoundError();
@@ -58,7 +58,7 @@ export async function scanWorktrees(db: Db, v: Viewer, repositoryId: string, now
 export type WorktreeView = { machine: string; capturedAt: Date; stale: boolean; rootPath: string | null; worktrees: Snapshot["worktrees"] };
 
 export async function worktreesFor(db: Db, v: Viewer, repositoryId: string, now = new Date()): Promise<WorktreeView | null> {
-  await requireRepo(db, v, repositoryId, "view");
+  await requireRepo(db, v, repositoryId, "read");
   const dev = await db.device.findFirst({ where: { userId: v.userId } });
   if (!dev) return null;
   const [snap, map] = await Promise.all([db.worktreeSnapshot.findFirst({ where: { deviceId: dev.id, repositoryId } }), db.deviceRepoMapping.findFirst({ where: { deviceId: dev.id, repositoryId } })]);

@@ -5,7 +5,7 @@ that workspace, and every query on tenant data names the workspace.
 
 ## Model classification
 
-79 models: 1 tenant anchor, 31 ROOT, 38 CHILD, 9 GLOBAL.
+81 models: 1 tenant anchor, 31 ROOT, 38 CHILD, 11 GLOBAL.
 
 **Tenant anchor.** `Workspace` is the tenant itself.
 
@@ -36,7 +36,7 @@ PlanEvent. Through Space: SyncEntity, OutboxOp, SyncConflict, HubRestore. Person
 NotificationPref, InboxState, SeenState, ReviewDraft, ViewedFile): owned by a person, and the work item or file ids inside them are
 cuids that only exist in one workspace.
 
-**GLOBAL (9), shared on purpose.**
+**GLOBAL (11), shared on purpose.**
 
 - `User`, `Session`, `Identity`, `MagicLink`: a person's account and how they sign in (see `docs/auth.md`). A user belongs to workspaces through `Member`. `Session.activeWorkspaceId` only chooses among the person's own memberships and is re-checked on every request.
 - `GithubOwner`: a public GitHub account (login, type, avatar) keyed by GitHub's immutable id. It holds nothing private and is the
@@ -48,13 +48,24 @@ cuids that only exist in one workspace.
   never reads another workspace's data through it: the cache is only read by server-side sync, which stores into the workspace's own rows.
 - `GithubInstallation`: one installation of the deployment's GitHub App on a GitHub account. The installation id is GitHub-global (one id, one
   account, however many workspaces use it), and the row holds only public account facts and state (login, type, repository selection,
-  suspended and deleted times), no token and no key. Tenants reach it only through `WorkspaceInstallation`, the binding table, which is the
+  suspended and deleted times, and `lastWebhookAt`, the last verified webhook), no token and no key. Tenants reach it only through `WorkspaceInstallation`, the binding table, which is the
   tenant record and is ROOT. Tokens are minted only for a `BoundInstallation` (`src/lib/github/bound-installation.ts`), which `loadBoundInstallation` issues only for a proved, non-suspended, non-deleted binding of the workspace. Never read an installation's repositories or mint its token without first proving the workspace has the binding.
+- `Repository.lastEventAt`: when a verified webhook last named the repository (at most once a minute); only paces the reconcile.
 - `GithubDelivery`: webhook delivery ids already handled (replay protection), with the event name and installation id. The id is GitHub's
-  and is unique across the deployment; the table holds no payload. Pruned by `receivedAt`.
+  and is unique across the deployment; the table holds no payload. Written only by the webhook route, in the same transaction as the handler's writes; pruned by `receivedAt` after 7 days. A webhook payload only FINDS rows: the installation must already exist, and repositories are matched only through `Repository.installationId` of a workspace binding (docs/github-app.md, "Webhooks").
+- `GithubUserToken`, `GithubRepoAccess`: a person's own GitHub link (docs/github-app.md, "Linking your GitHub account"). Both are keyed by `userId` (cascading
+  foreign key), like `User`, because a person's GitHub account is theirs and not a workspace's. `GithubUserToken` (one row per person) holds their GitHub token
+  as AES-256-GCM ciphertext bound to the person; `GithubRepoAccess` caches what GitHub said they can open (repository GitHub id, the installation it came
+  through, permission, `checkedAt`). Neither is ever read for anyone but the person: every query names the user id, and the only place the cache reaches a
+  tenant is `validRepoGithubIds` (`src/lib/github/access-cache.ts`), which joins it to the viewer's OWN workspace's installation-tracked `Repository` rows and
+  to the installation that serves them, so a row obtained through another workspace's installation grants nothing here. `repoWhere` then uses that list; stale
+  rows (older than 30 minutes) grant nothing. Removing a member deletes the rows that came through that workspace's installations (unless another workspace the
+  person still belongs to uses the same installation); unlinking deletes them all.
 - `RateLimitState`: GitHub's quota belongs to a credential or an IP, which every tenant behind it shares. The `source` key is the
   local app's single credential. A hosted repository's jobs spend from `installation:<id>` (`sourceBudgetKeyFor`), the quota of its
-  installation token: workspaces sharing one installation share that budget, and one installation running dry never stalls another.
+  installation token: workspaces sharing one installation share that budget, and one installation running dry never stalls another. `user:<id>` is the budget
+  of one person's own GitHub token (the access refresh job): installation-independent, so a person cannot spend GitHub requests faster than their own limit,
+  whatever workspaces they belong to.
 
 ## Hosted GitHub access
 
@@ -72,8 +83,10 @@ own `Repository` rows (unique on workspace and GitHub id), so each sees only wha
 `Job.workspaceId` is set on every per-tenant job (`sync.repository`, `sync.item`, `sync.fork`, upstream update and release checks).
 `enqueue` takes it from the caller or, when the payload names a repository or a fork mapping, from that row. It is NULL only for the
 three system-wide schedulers, `reconcile.all`, `digest.daily` and `ai.autopilot`: each runs once for the whole system and its handler
-loops over the workspaces, queueing work that carries the workspace. Claiming a job is system-wide on purpose (one worker serves
-all tenants).
+loops over the workspaces, queueing work that carries the workspace. The one other job without a workspace is `github.access.refresh`
+(payload `{ userId }`, dedupe key `ghaccess:<userId>`): it belongs to a person, who may be a member of several workspaces; its body reads and writes
+only that person's `GithubUserToken` and `GithubRepoAccess` rows and lists only installations bound to workspaces the person is an ACTIVE member of.
+Claiming a job is system-wide on purpose (one worker serves all tenants).
 
 ## Active workspace
 

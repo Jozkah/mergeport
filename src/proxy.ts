@@ -12,6 +12,8 @@ import { isHosted, isPublicHost } from "@/lib/public-url";
  * Pages additionally require the session cookie that only the launcher-opened browser receives.
  */
 const FEDERATION_S2S = new Set(["/api/federation/v1/token", "/api/federation/v1/revoke"]);
+/** GitHub's webhook delivery (docs/github-app.md): a server-to-server POST signed with the App's webhook secret, no cookie, no Origin. Exactly this path and method. */
+const GITHUB_WEBHOOK = "/api/github/webhook";
 const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
 
 /**
@@ -40,7 +42,8 @@ export function proxy(req: NextRequest) {
   const method = req.method.toUpperCase();
   // Federation's server-to-server POSTs (another instance, no browser, no cookies) carry no Origin and no Sec-Fetch-Site. They are
   // authorised by a PKCE code or a bearer token, never by a cookie, so the cross-site rule has nothing to protect there.
-  const serverToServer = isHosted() && FEDERATION_S2S.has(req.nextUrl.pathname);
+  // The GitHub webhook is the same kind of caller: it is authorised only by the HMAC of its body, checked in the route before anything else.
+  const serverToServer = isHosted() && (FEDERATION_S2S.has(req.nextUrl.pathname) || (method === "POST" && req.nextUrl.pathname === GITHUB_WEBHOOK));
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !serverToServer) {
     const origin = req.headers.get("origin");
     const site = req.headers.get("sec-fetch-site");

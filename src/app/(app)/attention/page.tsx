@@ -12,7 +12,8 @@ import { attentionFor } from "@/lib/services/request-cache";
 import { planningWhere, type DerivedItem } from "@/lib/services/queries";
 import { formatDuration, formatInstant } from "@/lib/format";
 import { listTasks } from "@/lib/services/tasks";
-import { Banner, EmptyState, Mono, PageHeader, Panel, Segmented, StatusPill, Time, Avatar } from "@/components/ui/primitives";
+import { LinkGithubBanner } from "@/components/settings/LinkGithubBanner";
+import { EmptyState, Mono, PageHeader, Panel, Segmented, StatusPill, Time, Avatar } from "@/components/ui/primitives";
 import { BellRing, Hourglass, ListChecks } from "@/components/ui/icons";
 import { RepoChip } from "@/components/ui/RepoChip";
 import { StageList } from "@/components/review/StageList";
@@ -108,7 +109,7 @@ export default async function Attention({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="My attention" subtitle="Who is expected to act, and since when." />
-      {viewer.githubLogin === null && <div className="mb-4"><Banner tone="info" title="Personal review queues need a linked GitHub account.">Team queues still show.</Banner></div>}
+      {viewer.githubLogin === null && <div className="mb-4"><LinkGithubBanner>Team queues still show.</LinkGithubBanner></div>}
       <AiShortcuts show={await aiEnabled(db, viewer.workspaceId)}><AiTool tool="focus" label="Where should I start?" hint="The AI reads these queues and tells you what to do first." /></AiShortcuts>
       <ScopeNote scope={scope} />
       <ViewBar scope="attention" views={await listViews(db, viewer, "attention")} />

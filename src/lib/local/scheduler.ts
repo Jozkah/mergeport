@@ -5,6 +5,7 @@ import { ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs"
 import { checkProfile } from "@/lib/local/identity";
 import { firstWorkspace } from "@/lib/local/profile";
 import { pollMode } from "@/lib/local/activity";
+import { MAINTENANCE_EVERY_MS } from "@/lib/github/webhook-maintenance";
 import { AI_AUTOPILOT_EVERY_MS, DIGEST_EVERY_MS, RECONCILE_EVERY_MS, handlers } from "@/lib/local/handlers";
 import { startRepoWatch, stopRepoWatch } from "@/lib/local/repo-watch";
 import { getEngine, notifyChange } from "@/lib/local/runtime";
@@ -86,6 +87,7 @@ export async function coordinate(now = Date.now()): Promise<number> {
     if (connected > 0) await paceReconcile("active", now, g.__mpScheduler?.startedAt ?? now);
     await ensureRecurring(db, { type: "digest.daily", key: "digest", intervalMs: DIGEST_EVERY_MS });
     await ensureRecurring(db, { type: "ai.autopilot", key: "ai-autopilot", intervalMs: AI_AUTOPILOT_EVERY_MS });
+    await ensureRecurring(db, { type: "github.maintenance", key: "github-maintenance", intervalMs: MAINTENANCE_EVERY_MS });
     await reclaimStuck(db);
     return 0;
   }

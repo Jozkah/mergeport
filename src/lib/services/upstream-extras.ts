@@ -125,7 +125,7 @@ export async function deleteBackport(db: Db, v: Viewer, id: string) {
  */
 export async function checkBackportLocally(db: Db, v: Viewer, input: { mappingId: string; upstreamNumber: number; targetBranch: string }): Promise<BackportCheck & { recorded: boolean }> {
   const m = await mappingFor(db, v, input.mappingId);
-  await requireRepo(db, v, m.forkRepoId, "view");
+  await requireRepo(db, v, m.forkRepoId, "manageWork");
   const pr = await db.upstreamPrState.findUnique({ where: { mappingId_number: { mappingId: input.mappingId, number: input.upstreamNumber } } });
   if (!pr?.mergeSha) return { result: "not-checked", reason: "This pull request has no merge commit known yet (it may not be merged).", recorded: false };
   const dev = await db.device.findFirst({ where: { userId: v.userId } });
