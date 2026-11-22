@@ -80,23 +80,17 @@ export async function processDelivery(db: Db, input: { deliveryId: string; event
     console.error(`[github webhook] shed: installation ${installationId} is over ${INSTALLATION_EVENTS_PER_MINUTE} events a minute`);
     return { kind: "shed" };
   }
-  // ON CONFLICT DO NOTHING: a repeated id is a no-op.
+  // A handled id is a no-op. The id is recorded only AFTER the jobs are queued, so a failure (or a crash) anywhere before that leaves
+  // nothing behind and a redelivery is processed. Queueing twice (a concurrent duplicate) is harmless: the jobs coalesce by their keys.
+  if ((await db.githubDelivery.count({ where: { deliveryId } })) > 0) return { kind: "duplicate" };
+
+  const stamp = !LIFECYCLE_EVENTS.has(event);
+  const plan = await planJobs(db, installationId, event, payload);
+  const queued: EnqueueInput[] = plan.jobs;
+  const repositoryRows: Touched[] = plan.touched;
+  for (const j of queued) await enqueue(db, j);
   const fresh = await db.githubDelivery.createMany({ data: [{ deliveryId, installationId, event, receivedAt: now }], skipDuplicates: true });
   if (fresh.count === 0) return { kind: "duplicate" };
-
-  let queued: EnqueueInput[] = [];
-  let repositoryRows: Touched[] = [];
-  const stamp = !LIFECYCLE_EVENTS.has(event);
-  try {
-    const plan = await planJobs(db, installationId, event, payload);
-    queued = plan.jobs;
-    repositoryRows = plan.touched;
-    for (const j of queued) await enqueue(db, j);
-  } catch (e) {
-    // Nothing is half-recorded: a redelivery of this id must be processed again (jobs that did get queued are coalesced by their keys).
-    await db.githubDelivery.deleteMany({ where: { deliveryId } }).catch(() => {});
-    throw e;
-  }
   if (stamp) await stampLive(db, installationId, repositoryRows, now).catch(() => {}); // a stamp is a status line, never a reason to fail a delivery
   return { kind: "accepted", jobs: queued.length };
 }

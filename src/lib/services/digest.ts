@@ -373,8 +373,9 @@ export async function latestDigest(db: Db, viewer: Viewer, now = new Date()): Pr
   return newest && newest.visibilityKey !== null && newest.visibilityKey === (await digestVisibilityKey(db, viewer)) ? stored(newest) : null;
 }
 
-export async function unreadDigestCount(db: Db, v: Pick<Viewer, "userId" | "workspaceId">): Promise<number> {
-  return db.dailyDigest.count({ where: { workspaceId: v.workspaceId, userId: v.userId, readAt: null } });
+export async function unreadDigestCount(db: Db, v: Viewer): Promise<number> {
+  // Only digests this viewer may currently see: a hidden one must not show a badge with nothing behind it.
+  return db.dailyDigest.count({ where: { workspaceId: v.workspaceId, userId: v.userId, readAt: null, visibilityKey: await digestVisibilityKey(db, v) } });
 }
 
 export async function markDigestRead(db: Db, v: Pick<Viewer, "userId" | "workspaceId">, day: string, now = new Date()): Promise<void> {
@@ -426,7 +427,8 @@ export async function runDailyDigest(db: Db, workspaceId: string, now = new Date
   if (!viewer) return "no-profile";
   const { digest: settings } = await getPrefs(db, viewer.userId);
   const { day } = reportedDay(now, viewer.timezone);
-  const haveDay = (await db.dailyDigest.count({ where: { workspaceId: viewer.workspaceId, userId: viewer.userId, day } })) > 0;
+  // A stored digest the viewer cannot see (no key, or an old one) does not count: the day is generated again.
+  const haveDay = (await db.dailyDigest.count({ where: { workspaceId: viewer.workspaceId, userId: viewer.userId, day, visibilityKey: await digestVisibilityKey(db, viewer) } })) > 0;
   if (!settings.enabled) return "disabled";
   if (haveDay) return "have-it";
   if (!digestDue({ now, tz: viewer.timezone, settings, haveDay })) return "not-yet";

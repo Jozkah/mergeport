@@ -43,13 +43,13 @@ export async function refreshUserAccess(db: Db, config: Pick<GithubAppConfig, "c
     if (t.kind !== "ok") return t.kind;
     me = await getUser(deps, t.token);
     if (!me) {
-      await markRelinkIfCurrent(db, userId, t.version); // only the version this run used: a newer link is never touched
-      return "relink";
+      // only the version this run used: a newer link is never touched, and then there is nothing to relink
+      return (await markRelinkIfCurrent(db, userId, t.version)) ? "relink" : "aborted";
     }
   }
   if (me.id !== user.githubId) {
-    await markRelinkIfCurrent(db, userId, t.version); // this token is not the linked person's: never use it
-    return "relink";
+    // this token is not the linked person's: never use it
+    return (await markRelinkIfCurrent(db, userId, t.version)) ? "relink" : "aborted";
   }
   const token = t.token;
   const version = t.version;
@@ -63,8 +63,7 @@ export async function refreshUserAccess(db: Db, config: Pick<GithubAppConfig, "c
 
   const listed = bound.length === 0 ? [] : await listUserInstallations(deps, token);
   if (listed === null) {
-    await markRelinkIfCurrent(db, userId, version);
-    return "relink";
+    return (await markRelinkIfCurrent(db, userId, version)) ? "relink" : "aborted";
   }
   const mine = new Set(listed.map((i) => i.id));
 
