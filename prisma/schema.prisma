@@ -302,6 +302,8 @@ model Repository {
   archived       Boolean        @default(false)
   permissions    Json? // permissions of the credential that last saw it
   trackingStatus TrackingStatus @default(ACTIVE)
+  /// When a verified webhook last named this repository (at most once a minute). Lets the reconcile run less often while events arrive.
+  lastEventAt    DateTime?
   statusDetail   String?
   isDemo         Boolean        @default(false)
   spaceId        String? // coordination space that declares (shares) this repository; null = local only
@@ -1664,6 +1666,8 @@ model GithubInstallation {
   repositorySelection InstallationRepositorySelection @default(SELECTED)
   suspendedAt         DateTime?
   deletedAt           DateTime?
+  /// When the last verified webhook for this installation was accepted. Drives the "Live updates" status and the slower reconcile cadence.
+  lastWebhookAt       DateTime?
   createdAt           DateTime                        @default(now())
   updatedAt           DateTime                        @updatedAt
 

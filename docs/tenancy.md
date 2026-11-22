@@ -48,10 +48,11 @@ cuids that only exist in one workspace.
   never reads another workspace's data through it: the cache is only read by server-side sync, which stores into the workspace's own rows.
 - `GithubInstallation`: one installation of the deployment's GitHub App on a GitHub account. The installation id is GitHub-global (one id, one
   account, however many workspaces use it), and the row holds only public account facts and state (login, type, repository selection,
-  suspended and deleted times), no token and no key. Tenants reach it only through `WorkspaceInstallation`, the binding table, which is the
+  suspended and deleted times, and `lastWebhookAt`, the last verified webhook), no token and no key. Tenants reach it only through `WorkspaceInstallation`, the binding table, which is the
   tenant record and is ROOT. Tokens are minted only for a `BoundInstallation` (`src/lib/github/bound-installation.ts`), which `loadBoundInstallation` issues only for a proved, non-suspended, non-deleted binding of the workspace. Never read an installation's repositories or mint its token without first proving the workspace has the binding.
+- `Repository.lastEventAt`: when a verified webhook last named the repository (at most once a minute); only paces the reconcile.
 - `GithubDelivery`: webhook delivery ids already handled (replay protection), with the event name and installation id. The id is GitHub's
-  and is unique across the deployment; the table holds no payload. Pruned by `receivedAt`.
+  and is unique across the deployment; the table holds no payload. Written only by the webhook route, in the same transaction as the handler's writes; pruned by `receivedAt` after 7 days. A webhook payload only FINDS rows: the installation must already exist, and repositories are matched only through `Repository.installationId` of a workspace binding (docs/github-app.md, "Webhooks").
 - `RateLimitState`: GitHub's quota belongs to a credential or an IP, which every tenant behind it shares. The `source` key is the
   local app's single credential. A hosted repository's jobs spend from `installation:<id>` (`sourceBudgetKeyFor`), the quota of its
   installation token: workspaces sharing one installation share that budget, and one installation running dry never stalls another.
