@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * Bad, revoked, expired and unknown tokens (and a removed member's) all get the same 401 with the same body.
  */
 const MAX_BODY = 256 * 1024;
-const MAX_BATCH = 20;
+const MAX_BATCH = 5;
 const REQUESTS_PER_MINUTE = 120;
 const BAD_TOKENS_PER_MINUTE = 20;
 
@@ -56,6 +56,10 @@ export async function POST(req: Request) {
   const items: unknown[] = Array.isArray(msg) ? msg : [msg];
   if (items.length === 0 || items.length > MAX_BATCH) return rpcError(400, -32600, "Invalid request");
 
+  // The request already cost one; every further message of a batch costs one more, so a batch cannot multiply the limit.
+  for (let i = 1; i < items.length; i++) {
+    if (!(await take(db, `mcp:req:${auth.tokenId}`, REQUESTS_PER_MINUTE, 60_000))) return json(429, { error: "slow down" }, { "retry-after": "60" });
+  }
   const ctx = hostedCtx(db, auth.viewer, { id: auth.tokenId, scope: auth.scope });
   const replies: Reply[] = [];
   for (const m of items) {

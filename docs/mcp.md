@@ -3,7 +3,7 @@
 A hosted Mergeport has an MCP server at `POST <MERGEPORT_PUBLIC_URL>/api/mcp`, so an AI app can read tasks, open a task and add a comment as you:
 "open a task on Mergeport to review the payments PR". (The local app's stdio server, `npm run mcp`, is separate and is for one computer.)
 
-Transport: MCP streamable HTTP, stateless. Each POST carries one JSON-RPC message (or a batch of up to 20) and is answered as `application/json`; a
+Transport: MCP streamable HTTP, stateless. Each POST carries one JSON-RPC message (or a batch of up to 5) and is answered as `application/json`; a
 notification is answered `202`. There are no sessions and no event streams, so `GET` and `DELETE` are `405`. Methods: `initialize`, `ping`,
 `tools/list`, `tools/call`. The handler is the same small protocol code as the stdio server (`src/lib/mcp/server.ts`); the hosted tools are in
 `src/lib/mcp/hosted.ts`, the route in `src/app/api/mcp/route.ts`. No SDK dependency.
@@ -47,6 +47,12 @@ private repositories are the app's rules. `create_task` runs the `mp task add` c
 "added this from an AI app over MCP"); `add_comment` runs `addComment`. Inputs are checked with zod (strict, size caps, no control characters). Answers are
 capped at 40,000 characters. Errors are tool errors without internals; an unexpected failure says "Something went wrong. Nothing was changed."
 
+## Untrusted text
+
+Titles, descriptions and comments are written by other people, so an answer can carry a prompt injection. Every object answer has a `notice` saying so, `get_task`
+wraps the description, checklist text and comment bodies as `{"untrusted":true,"text":...}`, and the server instructions tell the model to treat them as data
+and never create or comment because they ask. This lowers the risk; it cannot remove it, which is why writes need an explicit WRITE token.
+
 ## Writing
 
 A write needs both: the token's scope is `WRITE`, AND the person's role writes right now (`requireWrite`, project and space write checks inside the
@@ -55,7 +61,7 @@ services). A READ token never writes. A READER never writes, even with a WRITE t
 
 ## Limits
 
-- 120 requests per token and minute (`429` with `Retry-After`), 30 writes per token and minute (a tool error). Counters are in `RateLimitState`
+- 120 JSON-RPC messages per token and minute (a batch of n costs n; `429` with `Retry-After`), 30 writes per token and minute (a tool error). Counters are in `RateLimitState`
   (`mcp:req:<token>`, `mcp:w:<token>`).
 - 20 unknown but well-formed tokens per address and minute, then `429` (`mcp:bad:<hash of address>`). The address comes from MERGEPORT_TRUST_PROXY, like the webhook.
 - Request bodies over 256 KiB are `413`.
