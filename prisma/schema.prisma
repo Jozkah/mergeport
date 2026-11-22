@@ -171,6 +171,7 @@ model Workspace {
   jobs          Job[]
   installations WorkspaceInstallation[]
   githubAppStates GithubAppState[]
+  apiTokens ApiToken[]
   federationPolicy FederationPolicy?
   federationLinks  FederationLink[]
   federationGrants FederationGrant[]
@@ -205,6 +206,7 @@ model User {
   federationGrants FederationGrant[]
   githubUserToken  GithubUserToken?
   githubRepoAccess GithubRepoAccess[]
+  apiTokens ApiToken[]
 }
 
 model Session {
@@ -1772,4 +1774,31 @@ model GithubRepoAccess {
   @@unique([userId, repositoryGithubId])
   @@index([userId, checkedAt])
   @@index([installationId])
+}
+
+enum ApiTokenScope {
+  READ
+  WRITE
+}
+
+/// A personal access token for the hosted MCP endpoint (docs/mcp.md). ROOT: bound to ONE workspace and acting as ONE user there; the viewer is loaded fresh for
+/// (userId, workspaceId) on every call, so role changes, removal and restricted spaces apply at once. Only the sha256 of the secret is stored (`tokenHash`); `prefix` is the
+/// first characters, for display. The secret is shown once, when it is created.
+model ApiToken {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  name        String
+  tokenHash   String        @unique
+  prefix      String
+  scope       ApiTokenScope @default(READ)
+  createdAt   DateTime      @default(now())
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId])
 }

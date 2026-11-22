@@ -13,7 +13,17 @@ import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
  * The propose_* tools are the one way to ask for a change on GitHub, and they only ASK: the request waits in Mergeport, with its exact
  * text, until the person approves it there. An AI app cannot approve its own request.
  */
-export type ToolCtx = { db: Db; viewer: Viewer; now?: () => Date };
+export type ToolCtx = {
+  db: Db;
+  viewer: Viewer;
+  now?: () => Date;
+  /** The hosted endpoint (src/lib/mcp/hosted.ts) brings its own tool list, instructions and token; the stdio server uses TOOLS. */
+  tools?: Tool[];
+  instructions?: string;
+  /** Never put an error's text in an answer (hosted: it may name internals). */
+  quietErrors?: boolean;
+  token?: { id: string; scope: "READ" | "WRITE" };
+};
 export type ToolResult = { text: string; isError?: boolean };
 
 type Prop = { type: "string" | "boolean" | "integer" | "array"; description: string; items?: { type: "string" }; enum?: string[] };

@@ -20,7 +20,11 @@ import { planAutoSetup } from "@/lib/services/auto-setup";
 import { db } from "@/lib/db";
 import { Bell, Building2, Globe, Newspaper, Users, Wand2 } from "@/components/ui/icons";
 import { listWorkspaceInstallations } from "@/lib/github/binding";
-import { isHosted } from "@/lib/public-url";
+import { isHosted, publicOrigin } from "@/lib/public-url";
+import { ConnectAiPanel, type ConnectAiView } from "@/components/settings/ConnectAiPanel";
+import { listApiTokens } from "@/lib/services/api-tokens";
+import { can } from "@/lib/authz/roles";
+import { subjectOf } from "@/lib/authz/viewer";
 import { federationState } from "@/lib/federation/config";
 import Link from "next/link";
 import { RoleChip } from "@/components/ui/identity";
@@ -59,6 +63,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   // The person's own GitHub link (hosted). The result code from the callback is looked up in a fixed table, never shown as given.
   const tokenRow = hosted && !isDemo() ? await db.githubUserToken.findUnique({ where: { userId: user.id }, select: { status: true, accessCheckedAt: true, accessTruncated: true } }) : null;
   const linkCode = Array.isArray(sp.githublink) ? sp.githublink[0] : sp.githublink;
+  // Connect AI (hosted): personal access tokens for the MCP endpoint, docs/mcp.md.
+  const origin = publicOrigin();
+  const connectAi: ConnectAiView | null = hosted && !isDemo() && origin ? { connectorUrl: `${origin.origin}/api/mcp`, canWrite: can(subjectOf(viewer), "write"), admin: viewer.isAdmin, tokens: await listApiTokens(db, viewer) } : null;
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
     <>
@@ -96,6 +103,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </div>
           </Panel>
         )}
+        {connectAi && <ConnectAiPanel view={connectAi} now={new Date()} />}
         {hosted && viewer.isAdmin && federationState().kind !== "absent" && (
           <Panel title={<>Linked instances (<span className="tnum">{linkCount}</span>)</>} icon={Globe} id="linked-instances" summary={`${linkCount} link${linkCount === 1 ? "" : "s"}`}>
             <div className="p-4 text-[13px]">

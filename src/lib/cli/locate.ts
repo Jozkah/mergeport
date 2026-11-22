@@ -7,12 +7,9 @@ import { mergeportHome, profileDbPath } from "@/lib/local/profile";
 import { readActive } from "@/lib/local/registry";
 import { savedProfiles } from "@/lib/local/saved-profiles";
 
-/** A problem with the environment the command runs in (no profile, no user). Printed as is; exit code 1. */
-export class CliError extends Error {
-  constructor(message: string, readonly candidates?: string[]) {
-    super(message);
-  }
-}
+import { CliError } from "./errors";
+
+export { CliError };
 
 export type Located = { file: string; expectedGithubId: bigint | null };
 

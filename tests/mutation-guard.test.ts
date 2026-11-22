@@ -52,6 +52,8 @@ const ALLOW: Allow[] = [
   { file: "src/app/github-link-actions.ts", fn: "startGithubLinkAction", reason: "The caller's OWN GitHub link, any role (a reader links too). Writes only a single-use state row bound to the caller; the link itself is made by the callback, behind state, nonce, PKCE and GitHub's own answer." },
   { file: "src/app/github-link-actions.ts", fn: "unlinkGithubAction", reason: "Removes the caller's OWN link, token, cached access and digests, whatever their role now is. Touches nobody else." },
   { file: "src/app/github-link-actions.ts", fn: "checkGithubAccessAction", reason: "Asks for a refresh of the caller's OWN cached GitHub access (a queued job keyed by the caller's id, rate limited per person). Reads nothing of anyone else." },
+  { file: "src/app/api-token-actions.ts", fn: "createApiTokenAction", reason: "Creates a personal access token for the CALLER only, any role; createApiToken limits a READER to a read-only token. Hosted only. The secret is returned once." },
+  { file: "src/app/api-token-actions.ts", fn: "revokeApiTokenAction", reason: "Revokes the caller's own token, or any token of the workspace for an administrator; revokeApiToken decides and answers NotFound / Forbidden otherwise." },
   { file: "src/app/federation-actions.ts", fn: "unlinkAction", reason: "Your own link (any role, even after a downgrade to READER); unlink() lets only an administrator end someone else's." },
   { file: "src/app/federation-actions.ts", fn: "approveFederationAction", reason: "The person's own consent to share what they themselves can see, read-only; any role may. Session CSRF token and policy are re-checked in the action and service." },
   { file: "src/app/federation-actions.ts", fn: "denyFederationAction", reason: "Declining a link request; changes nothing but the redirect. Session CSRF token checked." },
@@ -142,6 +144,7 @@ const ROUTE_ALLOW: { file: string; reason: string }[] = [
   { file: "src/app/auth/magic/request/route.ts", reason: "Sign-in: asks for a link before any session exists." },
   { file: "src/app/api/federation/v1/token/route.ts", reason: "Server to server: a one-time PKCE code is the credential; there is no session or viewer. 404 unless federation is on." },
   { file: "src/app/api/github/webhook/route.ts", reason: "Server to server: GitHub signs the body with the App's webhook secret (HMAC checked before anything else); there is no session or viewer. 404 unless hosted and the App is configured. It only queues refreshes and records installation state of installations we already hold." },
+  { file: "src/app/api/mcp/route.ts", reason: "Server to client AI apps: a personal access token (Bearer) is the credential, bound to one workspace and person; the viewer is loaded fresh per call and every write tool checks the token scope AND requireWrite (tests/mcp-hosted.test.ts). 404 unless hosted." },
   { file: "src/app/api/federation/v1/revoke/route.ts", reason: "Server to server: the bearer token being revoked is the credential; it only ever ends that token." },
 ];
 const ROUTE_ALLOW_PREFIX = [{ prefix: "src/app/api/local/", reason: "Local app routes: loopback only, 404 when hosted, no workspace viewer." }];

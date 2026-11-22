@@ -5,11 +5,11 @@ that workspace, and every query on tenant data names the workspace.
 
 ## Model classification
 
-81 models: 1 tenant anchor, 31 ROOT, 38 CHILD, 11 GLOBAL.
+82 models: 1 tenant anchor, 32 ROOT, 38 CHILD, 11 GLOBAL.
 
 **Tenant anchor.** `Workspace` is the tenant itself.
 
-**ROOT (31).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
+**ROOT (32).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
 starts with it (a unique key that starts with it counts). Every query on a ROOT model must name the workspace.
 
 | Model | Notes |
@@ -26,6 +26,7 @@ starts with it (a unique key that starts with it counts). Every query on a ROOT 
 | GitCache, DiscoveryCache | Primary key is (workspaceId, key). The git cache holds private repository content, and discovery lists come from one person's credential, so neither may be shared across tenants. |
 | WorkspaceInstallation | Which GitHub App installations a workspace uses (docs/github-app.md). Unique on (workspaceId, installationId). This row is the tenant record: access to an installation, and so to its repositories, exists only through it. A row exists only once control was proved: `verifiedAt`, `verifiedGithubUserId` (the GitHub user whose token proved it) and `proofMethod` (for example `user-installations`) are NOT NULL, and `connectedByUserId` (SET NULL) records who in Mergeport connected it. `Repository.installationId` (nullable, indexed) names the installation that serves a repository; local `gh` and demo repositories stay null. It is tied to the bindings by a composite foreign key `Repository (workspaceId, installationId)` to `WorkspaceInstallation (workspaceId, installationId)` (MATCH SIMPLE, so null is unchecked; NO ACTION, checked at the end of the statement so deleting a workspace still cascades through both tables). A binding cannot be deleted while a repository uses it: `unbindInstallation` nulls the repositories first. Only `src/lib/github/binding.ts` writes the column and creates or removes bindings (`bindInstallation`, `unbindInstallation`; the connect flow in `src/lib/github/connect.ts` calls them after proof; `tests/github-app-bindings.test.ts` scans for the column writes), and the sync entity upserts never touch it. The same installation may be bound by several workspaces, each with its own proof row. |
 | GithubAppState | Short-lived, single-use install and OAuth state (hash only, user, kind, expiry, used time), issued to one user for one workspace: workspaceId with a cascading foreign key and an index that starts with it. The state value is `<workspaceId>.<random>`; the callback reads the workspace id from the front (untrusted), hashes the whole value and claims it with `claimAppState` (one conditional UPDATE on workspace, hash, `usedAt` null and `expiresAt` in the future, count must be 1), so concurrent callbacks have one winner and an expired or used state claims nothing. The connect flow issues kinds `connect` and `connect-existing[:account]`, bound to the starting person; the callback also requires the same signed-in person, the browser nonce cookie (`nonceHash`) and an ACTIVE membership with the `manageGithub` right in that workspace. |
+| ApiToken | Personal access token for the hosted MCP endpoint (docs/mcp.md): bound to one workspace and one user, only the sha256 of the secret stored (`tokenHash`, unique). Found by that hash (an allowlisted `findUnique`: the secret names the tenant); the row then supplies the workspace for `loadViewer` and everything after. |
 | Job | `workspaceId` is nullable, see below. |
 
 **CHILD (38).** Scoped through a foreign key to a ROOT parent; no column. Through Repository: ProjectRepository, RepositoryGrant,

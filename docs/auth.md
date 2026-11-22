@@ -187,3 +187,7 @@ that as a disabled state instead of an error toast. Server actions report both m
 
 GitHub OAuth/App sign-in (`github` identity provider is reserved) and per-workspace GitHub
 credentials, SSO/SAML, a limit on how many workspaces one person may create, and email change.
+
+## Personal access tokens
+
+Besides the session cookie, a hosted workspace accepts a personal access token (`Authorization: Bearer mp_pat_...`) on `/api/mcp` only. It is bound to one workspace and one person, hashed at rest, and the person's membership is re-checked on every call. See docs/mcp.md.

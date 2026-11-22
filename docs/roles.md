@@ -143,3 +143,7 @@ the migration created them for old workspaces; `ensureCommonSpace` repairs a mis
 
 Workspace deletion UI, per-repository access through spaces (repositories still use grants), SSO/SAML, GitHub-based roles, and changing
 the OWNER's email. The sync `Space` (GitHub/hub) is unrelated and still scheduled for deletion.
+
+## AI apps
+
+A personal access token for the hosted MCP endpoint acts as its owner with the owner's role, checked on every call; a READER can only hold a read-only token and can never write through it. See docs/mcp.md.
