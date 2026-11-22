@@ -171,7 +171,7 @@ describe("who may change what", () => {
     const owner = await db.githubOwner.create({ data: { githubId: 5n, login: "o" } });
     const repo = await db.repository.create({ data: { workspaceId: t.ws.id, githubId: 1n, ownerId: owner.id, name: "r", fullName: "o/r", htmlUrl: "https://github.com/o/r", visibility: "PRIVATE" } });
     await db.repositoryGrant.create({ data: { memberId: t.reader.member.id, repositoryId: repo.id, canManageWork: true, canReview: true, grantedById: t.ownerMember.id } });
-    await requireRepo(db, v, repo.id, "view");
+    await requireRepo(db, v, repo.id, "read");
     await expect(requireRepo(db, v, repo.id, "manageWork")).rejects.toThrow(ForbiddenError); // even with the grant flag set
     await expect(requireRepo(db, v, repo.id, "review")).rejects.toThrow(ForbiddenError);
   });

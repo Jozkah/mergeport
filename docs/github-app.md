@@ -18,7 +18,7 @@ App on their GitHub account or organisation; Mergeport then acts through short-l
 | Webhook route (`/api/github/webhook`): signed deliveries queue refreshes and record installation lifecycle changes; daily pruning; slower reconcile for live installations | Implemented (not yet run against live GitHub, see "Needs a live check") |
 | Read-only data access: `portForSync` / `portForDiscovery` use the repository's (workspace's) installation token; `GET /installation/repositories` listing and admin tracking on "Connect repositories"; sync, reconcile and budgets per installation; private repositories visible by grant only | Implemented (this phase) |
 | Writes to GitHub (`portForWrite`) | Off: "GitHub writes are not enabled yet" |
-| User OAuth and identity linking (`Viewer.githubLogin` stays null for email users until then) | Later task |
+| Per-person GitHub link and GitHub-verified repository access (`user-link.ts`, `user-token.ts`, `user-access.ts`, `access-cache.ts`; Settings > GitHub account; migration `20261124100000_github_user_link`) | Implemented (not yet run against live GitHub, see "Needs a live check"). "Sign in with GitHub" (login) is NOT part of it |
 
 A workspace with a proved binding syncs through its installation; one without stays on "GitHub is not connected yet". Setting the variables
 below only validates at startup; what a workspace can read still depends on its bindings.
@@ -35,7 +35,7 @@ who in the workspace sees a private repository is Mergeport's decision (docs/rol
 GitHub, Settings (or the organisation's Settings), Developer settings, GitHub Apps, New GitHub App.
 
 - **Homepage URL**: your public URL, `<public url>` below (the value of `MERGEPORT_PUBLIC_URL`).
-- **Callback URL**: `<public url>/api/github/app/callback`. **Tick "Request user authorization (OAuth) during installation"**: the install page then returns a `code` that proves who the installer is. Leave "Expire user authorization tokens" on (the default).
+- **Callback URLs** (GitHub allows several): `<public url>/api/github/app/callback` (connecting a workspace) and `<public url>/api/github/link/callback` (people linking their own GitHub account). **Tick "Request user authorization (OAuth) during installation"**: the install page then returns a `code` that proves who the installer is. Leave "Expire user authorization tokens" on (the default).
 - **Webhook**: active, URL `<public url>/api/github/webhook`, and a random secret of at least 16 characters (use 32 or more).
 - **Where can this App be installed**: "Any account" if customers install it on their own accounts, otherwise "Only on this account".
 - **Organization permissions**: Members, Read-only. The connect flow asks GitHub whether the person is an owner of the organization they connect (see "Needs a live check"); without this permission that check is refused and nobody can connect an organization.
@@ -61,6 +61,7 @@ accept the change; this document and the manifest list are updated together.
 | `MERGEPORT_GITHUB_APP_CLIENT_ID` | The App's client ID. |
 | `MERGEPORT_GITHUB_APP_CLIENT_SECRET` | The App's client secret; at least 20 characters. |
 | `MERGEPORT_GITHUB_APP_SLUG` | The App's URL name: lowercase letters, digits, hyphens, at most 39 characters. |
+| `MERGEPORT_ENCRYPTION_KEY` | Also required for people to link their own GitHub account: it encrypts their GitHub token (same variable and format as in `docs/federation.md`). Without it the link is unavailable and Settings says so. **Rotating it makes every stored token undecryptable: people must link again.** |
 | `MERGEPORT_GITHUB_API_BASE` | Tests and local development only: replaces `https://api.github.com`. Honoured only when `NODE_ENV` is `test` or `development`, and only for https or http on a loopback name. **A hosted deployment refuses to start with it set.** |
 
 Rules:
@@ -193,6 +194,78 @@ counters (not the GitHub budget rows), in batches of 1000. A repository that an 
 - **Uncertainty is refusal**: unexpected GitHub answers, timeouts, oversize bodies, a membership answer that is not a clear "active admin", or an unreadable
   suspension time never produce a binding.
 
+## Linking your GitHub account
+
+A signed-in hosted person (any role, a reader included) can link THEIR GitHub account. Mergeport then asks GitHub, with that person's own
+token, which repositories they can open, and uses the answer as one of the two ways a MEMBER or READER sees a repository (the exact rule is in
+`docs/roles.md`, "Repository visibility"). Mergeport does not post anything on their behalf with it; the App's permissions stay read-only. Local
+mode is untouched (no route, no panel).
+
+**Flow** (`src/lib/github/user-link.ts`; same pattern as the connect flow, whose helpers it reuses: `claimAppState`, the nonce hash, the PKCE
+challenge, `connect-api.ts`):
+
+1. `startGithubLinkAction` (`src/app/github-link-actions.ts`, any signed-in role; hosted only; needs the App and `MERGEPORT_ENCRYPTION_KEY`)
+   writes a single-use `GithubAppState` of kind `link` (hash only, the person and the active workspace, 10 minutes), sets an HttpOnly
+   SameSite=Lax nonce cookie `mp_gh_link` limited to path `/api/github/link`, and answers with GitHub's `login/oauth/authorize` address
+   (`redirect_uri` is `<public url>/api/github/link/callback`, PKCE S256 with the nonce as verifier, no secret, `allow_signup=false`). Ten starts
+   per ten minutes per person. Refused while a working link exists.
+2. `GET /api/github/link/callback`: session required (without one nothing is consumed), the state is claimed once (shape, expiry, same
+   person, kind `link`, nonce cookie in constant time, still an ACTIVE member of the workspace it was made in), the code is exchanged
+   (`exchangeCodeForTokens`, with the PKCE verifier), and `GET /user` says which GitHub account the token belongs to (numeric id and login). The
+   answer is a redirect to `/settings?githublink=<code>`: one of the fixed codes in `link-messages.ts`, looked up in a table, never a query value.
+3. **Refusals** (nothing is written, the token of the attempt is revoked at GitHub, a fixed message is shown): that GitHub id is already
+   linked to a DIFFERENT Mergeport person (`github-taken`); this person already has a DIFFERENT GitHub account linked (`other-account`: unlink
+   first). Accounts are never matched or merged by email, name or anything in the query. Two people linking the same id at the same moment: the
+   unique keys (`User.githubId`, `Identity (provider, subject)`) let exactly one transaction commit; the other gets `github-taken`.
+4. On success, in one transaction: `Identity(provider github, subject = numeric id)`, `User.githubId`, `User.githubLogin`, the encrypted token
+   (`GithubUserToken`) and an audit row `github.link`; then the first `github.access.refresh` job is queued.
+
+**Token storage** (`user-token.ts`): `GithubUserToken` (GLOBAL like `User`, one row per person). Both the access and the refresh token are
+AES-256-GCM ciphertext (`encryptSecret`, key `MERGEPORT_ENCRYPTION_KEY`, AAD `ghusertoken:<userId>`), so a ciphertext copied to another row, or
+made under another key, does not open and the link then needs renewing. Without the key linking and the checks are unavailable and say so.
+GitHub App user tokens expire (about 8 hours, refresh token about 6 months: **unverified**, see below): the lifetimes are stored as dates
+taken from the token response, never assumed, and a token with no expiry in the answer is used until GitHub refuses it. Renewal is on demand and
+single flight (one in-process promise per person plus a row lock `FOR UPDATE` held for the exchange so two processes cannot spend one refresh
+token twice); GitHub rotates the refresh token and the new pair replaces the old one in the same update. **Only a GitHub-side refusal ends a link:**
+a 401, or a 403 whose body says bad credentials, a revoked token or SAML enforcement, is a dead token; rate limiting (403 with `x-ratelimit-remaining: 0`,
+`retry-after` or a "rate limit"/"abuse" message, and 429), any other 403, 5xx and network failures throw "unavailable" and change nothing (the job retries
+with backoff; cached rows age out but the link and the stored token survive). A ciphertext that does not open (a wrong or changed key, mid-deploy) is not a
+refusal either: the feature reports "unavailable", the row is left alone and a counter line (no values) is logged. A relink decision is taken inside the row lock and only when
+the row is still the version the run used. A refresh token GitHub refuses (or that has
+expired) sets `status = RELINK`, clears both ciphertexts, deletes the person's cached access and stops all checks until they link again (no loop);
+GitHub being unreachable changes nothing and is retried. Tokens live only in local variables: never in a log, an error message, a cookie, a URL or a
+page. The consequence of a crash after GitHub rotated a refresh token but before the row was written is a relink, which is safe.
+
+**Access cache and refresh job** (`access-cache.ts`, `user-access.ts`): `GithubRepoAccess (userId, repositoryGithubId, installationId, permission, checkedAt)`,
+unique on (user, repository), GLOBAL and keyed by user (every read names the user id; nothing reads another person's rows). Job `github.access.refresh`
+(payload `{ userId }`, dedupe key `ghaccess:<userId>`, no workspace: it serves a person who may belong to several), whose body takes one user id and uses
+only that person's token:
+`GET /user` (must be the linked numeric id, else the link needs renewing; also refreshes `User.githubLogin`), `GET /user/installations`, and for each installation
+that is bound to a workspace the person is an ACTIVE member of (and neither suspended nor deleted) `GET /user/installations/{id}/repositories`
+(100 per page, at most 50 pages). Rows of an installation are replaced in one transaction only when it was listed completely; a failed or cut-off listing leaves its
+rows to age out, reports `partial` and keeps `accessCheckedAt` old so the next trigger tries again. The write transaction re-checks that the link is still the same
+(token row locked, status OK, same GitHub id), so an unlink that lands mid-refresh wins. When a refresh removes rows, the person's stored digests are purged.
+Triggers: right after linking; a page load that finds `accessCheckedAt` older than 10 minutes (`REFRESH_AFTER_MS`; queued, never awaited, at most once a minute per person);
+`reconcile.all` for every linked active person whose data is old (oldest first, 200 per run); "Check again" on Settings. Budget: `RateLimitState` key `user:<id>`, 12 refreshes per
+10 minutes per person; past it the job returns without calling GitHub.
+
+**Truncation.** A listing that hits the page cap (50 pages of 100 per installation), or a person with more than 5000 repositories, marks the check `accessTruncated` with
+`accessRepoCount`; Settings then says "Showing access for the first 5,000 repositories", and a counter line is logged. The viewer's list is ordered by `checkedAt` descending then GitHub id
+and capped at 5000. The freshness cutoff is passed to SQL as an ISO string cast to `timestamp(3)` (like `jobs.ts`), so a database session time zone cannot shift it.
+
+**Unlink** (`unlinkGithubAction`, the person themself, behind a confirmation): revokes the token at GitHub (best effort, `DELETE /applications/{client_id}/token`), then in one
+transaction deletes the token, the github `Identity` and every `GithubRepoAccess` row of the person, clears `githubId` and `githubLogin`, purges their stored digests in every workspace
+and writes an audit row; repeating it does nothing more. Removing a member (or a member leaving) deletes the cached access that came through that workspace's installations
+(kept where another workspace they still belong to uses the same installation) and their digests.
+
+**Revocation lag.** Mergeport asks GitHub; nothing pushes a change to it yet (webhooks arrive in another task). After access is removed on GitHub the person keeps seeing the
+repository until the next refresh of their data lands and, at the latest, until their last good check is `VALID_FOR_MS` (30 minutes) old. Stale rows grant nothing.
+
+**Security notes.** State, nonce and PKCE are single use, expire in 10 minutes and are bound to the person; the callback without a session consumes nothing; the callback target
+is always a path on this site; the start, unlink and check actions are server actions behind Next's same-origin check and `proxy.ts`'s Origin rules (a cross-site POST gets 403); the
+three actions act on the caller's own link only and are listed with reasons in `tests/mutation-guard.test.ts`; the job isolation, the per-user budgets and all the refusals above are
+covered by `tests/github-link.test.ts` and `tests/github-access.test.ts`; the UI by `tests/github-link-ui.test.tsx`. The webhook route and its proxy exemptions are not touched.
+
 ## Known limitations
 
 - A binding is proved once, at connect time. It is not re-proven if the connecting person later loses access (leaves the organization, is demoted). Follow-up: webhook-driven
@@ -229,3 +302,17 @@ Everything above is tested against the fake only. Before relying on it, run the 
 16. That a deletion of a repository (`repository` `deleted`) leads to a DISCONNECTED repository through the 404 in the job, and that `archived` only flags it.
 17. That the reverse proxy forwards the body unchanged (no re-encoding, compression or size rewrite) and keeps `X-Hub-Signature-256`, and that 1 MiB is enough for every subscribed event.
 18. That `GET /repos/<owner>/<repo>` with an installation token answers 404 (or 403) for a repository that was removed from the installation but still exists, which is what turns a removed repository DISCONNECTED; and that `GET /app/installations/<id>` answers 404 after an uninstall and carries `suspended_at` while suspended.
+
+### Linking your GitHub account (user token and access cache)
+
+19. **User token lifetimes and refresh.** Does the App's token response carry `expires_in` (about 28800) and `refresh_token_expires_in` (about 15811200)? Does a refresh with
+    `grant_type=refresh_token` return a NEW refresh token and make the old one stop working, and what does it answer for a revoked or expired one (the code relinks only on `error: bad_refresh_token`
+    and treats any other refusal as a temporary problem)? Does the old access token keep working after a refresh (the fake revokes it)? Is "expire user authorization tokens" switched on for the App (if it is off the
+    token has no expiry and no refresh token, which the code accepts)?
+20. **`GET /user/installations/{id}/repositories` for a GitHub App user token.** Does it list public repositories of the installation for a person who is not a collaborator, and with which `permissions`
+    (the code needs a true `pull` and treats a repository without a `permissions` object as no access)? Does it list private repositories only for people with access, and does an organization that restricts
+    third-party access (or an App not yet approved by the organization) answer 403 or 404 or an empty list? Is the answer consistent for an organization owner? Is the 100 per page cap and the `link` pagination behaviour as assumed?
+21. **PKCE on the App's authorize URL** used by this flow (`/login/oauth/authorize` with `code_challenge`, S256) and `code_verifier` at the token endpoint, with `/api/github/link/callback` registered as one of the App's
+    callback URLs (the registration steps must list it next to `/api/github/app/callback`).
+22. That the nonce cookie `mp_gh_link` (SameSite=Lax, path `/api/github/link`) survives the redirect back from github.com in Safari and Firefox, and that the callback's cookie deletion is merged into the redirect (as for item 8).
+23. That `DELETE /applications/{client_id}/token` ends the stored user token on unlink, and that revoking it does not also remove the person's installation access to anything else.

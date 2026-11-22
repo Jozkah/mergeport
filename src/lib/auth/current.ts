@@ -2,6 +2,8 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
+import { maybeRequestAccessRefresh } from "@/lib/github/access-cache";
+import { isHosted } from "@/lib/public-url";
 import { WORKSPACE_COOKIE, resolveActiveWorkspaceId } from "@/lib/authz/active-workspace";
 import { loadViewer, requireWrite, type Viewer } from "@/lib/authz/viewer";
 import { SESSION_COOKIE, findSession } from "./session";
@@ -15,6 +17,8 @@ export const getAuth = cache(async () => {
   // (older sessions), else the oldest. Each candidate is only a choice among memberships the person still has.
   const workspaceId = await resolveActiveWorkspaceId(db, { id: s.userId }, s.activeWorkspaceId ?? jar.get(WORKSPACE_COOKIE)?.value);
   const viewer = workspaceId ? await loadViewer(db, s.userId, workspaceId) : null;
+  // A linked person whose GitHub access data is getting old: ask for a refresh. Queued and never awaited, so no page waits for GitHub.
+  if (viewer && viewer.githubId !== null && isHosted()) void maybeRequestAccessRefresh(db, s.userId).catch(() => {});
   return { user: s.user, session: s, viewer };
 });
 

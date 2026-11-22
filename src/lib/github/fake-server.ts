@@ -35,6 +35,15 @@ export class FakeGitHubServer {
   private app: { appId: string; publicKeyPem: string } | null = null;
   private instTokens = new Map<string, { installationId: number; expiresAt: number }>();
   private userTokens = new Map<string, string>();
+  /** Expiry (epoch ms) of the user tokens that expire, as GitHub's App user tokens do (about 8 hours). A token without an entry never expires. */
+  private userTokenExpiry = new Map<string, number>();
+  private refreshTokens = new Map<string, { login: string; expiresAt: number }>();
+  /** Lifetimes of user tokens issued by the OAuth exchange (GitHub: 8 hours and about 6 months, unverified here). `expiringUserTokens = false` simulates an App without expiring tokens. */
+  expiringUserTokens = true;
+  userTokenTtlMs = 8 * 3_600_000;
+  refreshTokenTtlMs = 15_811_200_000;
+  /** Test helper: how many refresh-token exchanges reached the fake, and how many were refused. */
+  refreshExchanges = { ok: 0, refused: 0 };
   private oauthCodes = new Map<string, { login: string; redirectUri: string; challenge: string | null; used: boolean }>();
   private oauthClient: { clientId: string; clientSecret: string } | null = null;
   /** Test helper: every OAuth code exchange that reached the fake (the secret is not recorded), and the user tokens revoked so far. */
@@ -91,7 +100,8 @@ export class FakeGitHubServer {
       id: r.id, name: r.name, full_name: `${r.owner}/${r.name}`, private: r.private, visibility: r.private ? "private" : "public", fork: false, archived: false, default_branch: r.defaultBranch,
       html_url: `https://github.com/${r.owner}/${r.name}`, description: null,
       owner: { id: (this.users.get(r.owner) ?? this.orgs.get(r.owner))?.id ?? 0, login: r.owner, type: this.orgs.has(r.owner) ? "Organization" : "User" },
-      permissions: { pull: p !== "none", push: p === "push" || p === "admin", admin: p === "admin" },
+      // Anyone can pull a public repository, as on GitHub.
+      permissions: { pull: p !== "none" || !r.private, push: p === "push" || p === "admin", admin: p === "admin" },
     };
   }
 
@@ -343,6 +353,26 @@ export class FakeGitHubServer {
     this.userTokens.set(t, login);
     return t;
   }
+  /** The login a user token belongs to, or undefined when it is unknown, revoked or expired. */
+  private liveUser(bearer: string | undefined): string | undefined {
+    if (!bearer) return undefined;
+    const exp = this.userTokenExpiry.get(bearer);
+    if (exp !== undefined && exp <= this.clock()) return undefined;
+    return this.userTokens.get(bearer);
+  }
+  /** Test helper: makes every user token of `login` expire now (the person's refresh token keeps working). */
+  expireUserTokens(login: string) {
+    for (const [t, l] of this.userTokens) if (l === login) this.userTokenExpiry.set(t, this.clock() - 1);
+  }
+  /** Test helper: GitHub no longer accepts any refresh token of `login` (revoked authorization, expired refresh token). */
+  invalidateRefreshTokens(login: string) {
+    for (const [t, r] of this.refreshTokens) if (r.login === login) this.refreshTokens.delete(t);
+  }
+  /** Test helper: GitHub revokes every user token of `login` (the person removed the App's authorization). */
+  revokeAllUserTokens(login: string) {
+    for (const [t, l] of [...this.userTokens]) if (l === login) this.userTokens.delete(t);
+    this.invalidateRefreshTokens(login);
+  }
   /** Seconds an installation token lives (GitHub: one hour). */
   installationTokenTtlMs = 3_600_000;
   /** Test helper: the installation token strings handed out so far. */
@@ -524,7 +554,7 @@ export class FakeGitHubServer {
       if (i.suspended) return json(403, { message: "This installation has been suspended" });
       return this.page(this.instRepos(i), url, "repositories", (r) => this.repoJson(r, r.owner));
     }
-    const me = bearer ? this.userTokens.get(bearer) : undefined;
+    const me = this.liveUser(bearer);
     if (method === "GET" && path === "/user") {
       const u = me ? this.users.get(me) : undefined;
       return me && u ? json(200, { id: u.id, login: u.login, type: "User" }) : json(401, { message: "Bad credentials" });
@@ -555,6 +585,18 @@ export class FakeGitHubServer {
       return json(200, { error });
     };
     if (!this.oauthClient || b?.client_id !== this.oauthClient.clientId || b?.client_secret !== this.oauthClient.clientSecret) return refuse("incorrect_client_credentials");
+    if (b?.grant_type === "refresh_token") {
+      // Refresh: the refresh token is single use (the answer carries a new one) and a refusal is a 200 with `bad_refresh_token`, as GitHub does.
+      const r = this.refreshTokens.get(String(b?.refresh_token ?? ""));
+      if (!r || r.expiresAt <= this.clock()) {
+        this.refreshExchanges.refused++;
+        return json(200, { error: "bad_refresh_token", error_description: "The refresh token passed is incorrect or expired." });
+      }
+      this.refreshTokens.delete(String(b.refresh_token));
+      for (const [t, l] of [...this.userTokens]) if (l === r.login) this.userTokens.delete(t); // the old access token stops working
+      this.refreshExchanges.ok++;
+      return json(200, this.tokenAnswer(r.login));
+    }
     const c = this.oauthCodes.get(String(b?.code ?? ""));
     if (!c || c.used) return refuse("bad_verification_code");
     c.used = true;
@@ -564,7 +606,17 @@ export class FakeGitHubServer {
       if (!v || createHash("sha256").update(v).digest("base64url") !== c.challenge) return refuse("bad_verification_code");
     }
     record(true);
-    return json(200, { access_token: this.issueUserToken(c.login), token_type: "bearer", scope: "" });
+    return json(200, this.tokenAnswer(c.login));
+  }
+
+  /** The body of a successful token answer: with the lifetimes (in seconds) and a refresh token when tokens expire. */
+  private tokenAnswer(login: string) {
+    const access = this.issueUserToken(login);
+    if (!this.expiringUserTokens) return { access_token: access, token_type: "bearer", scope: "" };
+    this.userTokenExpiry.set(access, this.clock() + this.userTokenTtlMs);
+    const refresh = `ghr_${randomBytes(18).toString("hex")}`;
+    this.refreshTokens.set(refresh, { login, expiresAt: this.clock() + this.refreshTokenTtlMs });
+    return { access_token: access, expires_in: Math.floor(this.userTokenTtlMs / 1000), refresh_token: refresh, refresh_token_expires_in: Math.floor(this.refreshTokenTtlMs / 1000), token_type: "bearer", scope: "" };
   }
 
   private putObj(r: FakeRepo, o: Obj): string {

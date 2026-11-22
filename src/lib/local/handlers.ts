@@ -1,4 +1,7 @@
 import { db } from "@/lib/db";
+import { ACCESS_JOB, REFRESH_AFTER_MS, requestAccessRefresh } from "@/lib/github/access-cache";
+import { githubAppConfig } from "@/lib/github/app-config";
+import { refreshUserAccess } from "@/lib/github/user-access";
 import * as budget from "@/lib/github/budget";
 import { SOURCE_BUDGET_KEY } from "@/lib/github/budget";
 import { portForSync } from "@/lib/github/factory";
@@ -125,6 +128,26 @@ const rawHandlers: Record<string, Handler> = {
       const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases", mapping: { fork: { workspaceId } } }, select: { mappingId: true } });
       for (const w of watches) await maybeRequestReleaseCheck(db, w.mappingId);
     });
+    if (isHosted()) {
+      // The reconcile pacing also renews what GitHub says each linked person may open (their data is older than REFRESH_AFTER). One job per
+      // person (deduplicated), oldest first, capped; page loads trigger the same job for people who are active right now.
+      const stale = await db.githubUserToken.findMany({
+        where: { status: "OK", OR: [{ accessCheckedAt: null }, { accessCheckedAt: { lt: new Date(Date.now() - REFRESH_AFTER_MS) } }], user: { members: { some: { status: "ACTIVE" } } } },
+        select: { userId: true },
+        orderBy: { accessCheckedAt: { sort: "asc", nulls: "first" } },
+        take: 200,
+      });
+      for (const s of stale) await requestAccessRefresh(db, s.userId);
+    }
+  }) as Handler,
+  // Hosted only: asks GitHub, with THIS person's own token, which repositories they can open (one job per person, payload { userId }).
+  // It serves no single workspace (a person may belong to several), so its job row carries none. A failure to reach GitHub throws, so the job backs off.
+  [ACCESS_JOB]: (async (p: { userId: string }) => {
+    if (!isHosted() || typeof p?.userId !== "string") return;
+    const config = githubAppConfig();
+    if (!config) return;
+    const r = await refreshUserAccess(db, config, p.userId);
+    if (r === "ok" || r === "partial") (await import("@/lib/local/runtime")).notifyChange("state");
   }) as Handler,
   // Hosted: GitHub told us something happened to an installation (webhook); ask GitHub what is true now and record that. A system job per installation.
   "github.installation.check": (async (p: { installationId: string }) => {

@@ -6,12 +6,12 @@ import { plainText } from "@/lib/inputs";
 import { startGithubConnectAction } from "@/app/github-actions";
 
 /** The address the action asked to go to, when it is a plain https one; anything else is never opened. */
-function redirectOf(r: ActionResult): string | null {
+export function redirectOf(r: ActionResult): string | null {
   const to = r.ok ? r.data?.redirect : null;
   return typeof to === "string" && /^https:\/\//i.test(to) ? to : null;
 }
 
-function go(r: ActionResult): boolean {
+export function go(r: ActionResult): boolean {
   const to = redirectOf(r);
   if (to) window.location.assign(to);
   return r.ok && Boolean(to);

@@ -181,6 +181,8 @@ model Workspace {
 model User {
   id        String   @id @default(cuid())
   githubId  BigInt?  @unique // null for people who signed in with email or OIDC and have not linked GitHub
+  /// The GitHub login of the linked account, set when the person links GitHub and refreshed whenever their GitHub token is used. Null for legacy local users whose githubId came from `gh` (their `login` is the GitHub login).
+  githubLogin String?
   login     String
   name      String?
   avatarUrl String?
@@ -201,6 +203,8 @@ model User {
   connectedInstallations WorkspaceInstallation[] @relation("WorkspaceInstallationConnectedBy")
   federationLinks  FederationLink[]
   federationGrants FederationGrant[]
+  githubUserToken  GithubUserToken?
+  githubRepoAccess GithubRepoAccess[]
 }
 
 model Session {
@@ -1464,6 +1468,8 @@ model DailyDigest {
   payload     Json
   generatedAt DateTime  @default(now())
   readAt      DateTime?
+  /// Fingerprint of the repositories the person could see when this digest was made. A stored digest is served only while it still matches what they can see now (null: never served).
+  visibilityKey String?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -1726,4 +1732,41 @@ model GithubAppState {
 
   @@index([workspaceId, expiresAt])
   @@index([expiresAt])
+}
+
+/// A person's OWN GitHub user-to-server token (hosted, docs/github-app.md "Linking your GitHub account"). GLOBAL like User: one row per person, keyed by `userId`. Both tokens are AES-256-GCM
+/// ciphertext (AAD `ghusertoken:<userId>`); the lifetimes come from GitHub's token response. `status` is OK or RELINK (GitHub refused the refresh token: both ciphertexts are then cleared and checks stop until the person links again).
+model GithubUserToken {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  accessEnc        String?
+  refreshEnc       String?
+  accessExpiresAt  DateTime?
+  refreshExpiresAt DateTime?
+  status           String    @default("OK")
+  /// When the person's repository access was last listed completely from GitHub.
+  accessCheckedAt  DateTime?
+  /// The last check could not list everything (a page cap) or more repositories than one request can use were found: the person sees access for the first part only.
+  accessTruncated  Boolean   @default(false)
+  accessRepoCount  Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// What GitHub said one person may open: a repository (GitHub id) reached through one installation, with the person's permission. GLOBAL, keyed by user, never readable across users. Rows older than the validity window grant nothing (fail closed).
+model GithubRepoAccess {
+  id                 String   @id @default(cuid())
+  userId             String
+  repositoryGithubId BigInt
+  installationId     BigInt
+  permission         String
+  checkedAt          DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryGithubId])
+  @@index([userId, checkedAt])
+  @@index([installationId])
 }
