@@ -86,8 +86,8 @@ export function ConsentForm({ req, csrf, workspaces, wantsWrite, defaultWorkspac
           <label className={`flex min-h-11 items-start gap-3 rounded-[8px] border border-line px-3 py-2 text-[13px] has-[:checked]:border-line-strong has-[:checked]:bg-subtle ${canWrite ? "cursor-pointer" : "opacity-60"}`}>
             <input type="radio" name="scope" value="WRITE" checked={effective === "WRITE"} disabled={!canWrite} onChange={() => setScope("WRITE")} className="mt-0.5" />
             <span>
-              <span className="font-medium">Read, open tasks and comment</span>
-              <span className="block text-[12px] text-ink-3">{canWrite ? (wantsWrite ? "This app asked for this." : "Not editing, moving or deleting.") : "Your role here is read-only."}</span>
+              <span className="font-medium">Read and change tasks</span>
+              <span className="block text-[12px] text-ink-3">{canWrite ? (wantsWrite ? "This app asked for this." : "Create, comment, edit, move and complete. Never delete.") : "Your role here is read-only."}</span>
             </span>
           </label>
         </div>

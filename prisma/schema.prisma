@@ -1818,6 +1818,8 @@ model ApiToken {
   kind        ApiTokenKind  @default(PAT)
   grantId     String?
   audience    String?
+  /// WRITE alone means create and comment. Editing, moving and completing (docs/mcp.md) also needs this, set only for tokens made after that power existed. An OAUTH token follows its grant's value.
+  editAllowed Boolean       @default(false)
 
   workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1856,6 +1858,8 @@ model OAuthGrant {
   createdAt   DateTime      @default(now())
   lastUsedAt  DateTime?
   revokedAt   DateTime?
+  /// Same meaning as ApiToken.editAllowed: false for grants made before edit tools existed, true for a WRITE consent given after.
+  editAllowed Boolean       @default(false)
 
   workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
