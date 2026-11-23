@@ -2,6 +2,8 @@
 
 Source: the audit of commit `51efcb3` (12 findings, 32 ideas, 5 follow-up questions). This file records what is done, how it was verified, and what is left. It is the continuation point: resume from the first row that is not "done".
 
+Historical record. Everything it says about team spaces and their sync engine (shared entities, the sync centre, team switching, the per-person access preview), local worktrees and branch links, the local backport check, the upstream auto-updater and the `gh` sign-in describes code that was removed when non-hosted mode went away; those rows are kept as history only and their counts below no longer apply.
+
 Verification state at the last commit: `tsc --noEmit` clean, `eslint .` clean, `vitest run` 457 passed / 5 skipped (live GitHub tests are skipped by design), `npm run build` succeeded, each phase checked in the rendered demo. Nothing was run against real GitHub.
 
 ## Phase 1 findings

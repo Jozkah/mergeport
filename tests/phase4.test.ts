@@ -1,19 +1,12 @@
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { FakeGithub } from "@/lib/github/fake";
 import { GithubError } from "@/lib/github/port";
 import { syncRepository } from "@/lib/sync/repository";
 import { compareFilesView, pullFilesView } from "@/lib/services/git-view";
 import { addDraft, deleteDraft, discardDrafts, listDrafts, pullOwnersView, reviewThreads, submitDrafts } from "@/lib/services/review-extras";
 import { addMapping, deleteMapping, labelFilter, taxonomy } from "@/lib/services/label-taxonomy";
-import { checkBackportLocally, createAdoption, createSubscription, deleteBackport, deleteSubscription, listBackports, listSubscriptions, previewAdoption, recordBackport, setSubscriptionMuted, upstreamRelevance } from "@/lib/services/upstream-extras";
-import { knownWorktreePath, linksForPull, linksForTask, setTaskBranch } from "@/lib/services/work-links";
+import { createAdoption, createSubscription, deleteBackport, deleteSubscription, listBackports, listSubscriptions, previewAdoption, recordBackport, setSubscriptionMuted, upstreamRelevance } from "@/lib/services/upstream-extras";
 import { listWorkItems } from "@/lib/services/queries";
-import { createTask } from "@/lib/services/tasks";
-import { mapLocalRoot } from "@/lib/services/worktrees";
 import { freshSeed } from "./helpers";
 
 let S: Awaited<ReturnType<typeof freshSeed>>;
@@ -193,13 +186,7 @@ describe("upstream subscriptions", () => {
   });
 });
 
-describe("backport records and local evidence", () => {
-  const dirs: string[] = [];
-  afterAll(() => {
-    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
-  });
-  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" }).trim();
-
+describe("backport records", () => {
   it("keeps evidence and decision apart: manual never overwrites verified evidence", async () => {
     const { db, admin, ids } = S;
     const base = { mappingId: ids.map.id, upstreamNumber: 102, targetBranch: "main" };
@@ -215,31 +202,6 @@ describe("backport records and local evidence", () => {
     expect(await listBackports(db, admin, ids.map.id)).toEqual([]);
   });
 
-  it("verifies a cherry-pick in the mapped local clone and records it as possible equivalence, not as done", async () => {
-    const { db, admin, ids } = S;
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), "mp-bp-"));
-    dirs.push(d);
-    git(d, "init", "-q", "-b", "main");
-    fs.writeFileSync(path.join(d, "a.txt"), ["one", "two", ""].join(NL));
-    git(d, "add", "."); git(d, "commit", "-qm", "base");
-    git(d, "checkout", "-q", "-b", "up");
-    fs.writeFileSync(path.join(d, "a.txt"), ["one", "TWO", ""].join(NL));
-    git(d, "commit", "-qam", "fix");
-    const fix = git(d, "rev-parse", "HEAD");
-    git(d, "checkout", "-q", "main");
-    fs.writeFileSync(path.join(d, "x.txt"), "x" + NL);
-    git(d, "add", "."); git(d, "commit", "-qm", "fork work");
-    git(d, "cherry-pick", fix);
-    await db.upstreamPrState.update({ where: { mappingId_number: { mappingId: ids.map.id, number: 102 } }, data: { mergeSha: fix } });
-    const none = await checkBackportLocally(db, admin, { mappingId: ids.map.id, upstreamNumber: 102, targetBranch: "main" });
-    expect(none).toMatchObject({ result: "not-checked", recorded: false }); // no folder mapped yet
-    await mapLocalRoot(db, admin, ids.map.forkRepoId, d);
-    const r = await checkBackportLocally(db, admin, { mappingId: ids.map.id, upstreamNumber: 102, targetBranch: "main" });
-    expect(r).toMatchObject({ result: "patch-equivalent", recorded: true });
-    expect((await listBackports(db, admin, ids.map.id))[0]).toMatchObject({ evidence: "patch-equivalent", state: "planned" });
-    await db.upstreamPrState.update({ where: { mappingId_number: { mappingId: ids.map.id, number: 102 } }, data: { mergeSha: null } });
-    expect((await checkBackportLocally(db, admin, { mappingId: ids.map.id, upstreamNumber: 102, targetBranch: "main" })).reason).toMatch(/no merge commit/);
-  });
 });
 
 describe("adoption planner", () => {
@@ -260,47 +222,5 @@ describe("adoption planner", () => {
     expect(await db.planningItem.count({ where: { milestoneId: r.milestoneId } })).toBe(3);
     expect(await db.planningLink.count({ where: { toId: r.finalTaskId, kind: "blocks" } })).toBe(2);
     expect((await listBackports(db, admin, ids.map.id)).map((b) => [b.upstreamNumber, b.targetBranch, b.state])).toEqual([[101, "release/1.4", "planned"], [102, "release/1.4", "planned"]]);
-  });
-});
-
-describe("branch and worktree links", () => {
-  async function snapshot(repositoryId: string, userId: string, worktrees: object[]) {
-    const { db } = S;
-    const dev = await db.device.create({ data: { userId, name: "This computer" } });
-    await db.deviceRepoMapping.create({ data: { deviceId: dev.id, repositoryId, rootPath: "C:/code/web" } });
-    await db.worktreeSnapshot.create({ data: { deviceId: dev.id, repositoryId, capturedAt: new Date(), data: { worktrees } as never } });
-  }
-
-  it("matches a PR by its head branch and a task by its branch name or its PR, with facts and no guessing", async () => {
-    const { db, admin, ids } = S;
-    const wi = await db.workItem.findUniqueOrThrow({ where: { id: ids.items.web9.id } });
-    await db.workItem.update({ where: { id: wi.id }, data: { headRef: "fix-login" } });
-    await snapshot(wi.repositoryId, admin.userId, [
-      { path: "C:/code/web-fix", branch: "fix-login", head: "b2", dirty: { staged: 1, unstaged: 0, untracked: 2 }, aheadBy: 0, aheadBehind: { ahead: 2, behind: 0 } },
-      { path: "C:/code/web", branch: "main", head: "a1", dirty: { staged: 0, unstaged: 0, untracked: 0 } },
-    ]);
-    const pr = await linksForPull(db, admin, wi.id);
-    expect(pr.branch).toBe("fix-login");
-    expect(pr.matches.map((m) => m.worktree.path)).toEqual(["C:/code/web-fix"]);
-    expect(pr.matches[0].worktree).toMatchObject({ dirtyTotal: 3, ahead: 2 });
-    const t = await createTask(db, admin, { projectId: ids.projects.atlas.id, title: "Follow up" });
-    expect((await linksForTask(db, admin, t.id)).matches).toEqual([]);
-    await expect(setTaskBranch(db, admin, t.id, "bad..name")).rejects.toThrow(/branch name/);
-    await setTaskBranch(db, admin, t.id, "refs/heads/main");
-    expect((await db.planningItem.findUniqueOrThrow({ where: { id: t.id } })).branchRef).toBe("main");
-    const tl = await linksForTask(db, admin, t.id);
-    expect(tl.branch).toBe("main");
-    expect(tl.matches.map((m) => m.repository).length).toBeGreaterThan(0);
-    // a path is only openable if it is one of this computer's own worktrees
-    expect(await knownWorktreePath(db, admin, wi.repositoryId, "C:/code/web-fix")).toBe("C:/code/web-fix");
-    await expect(knownWorktreePath(db, admin, wi.repositoryId, "C:/Windows/System32")).rejects.toThrow();
-  });
-
-  it("another person's computer never contributes to what you see", async () => {
-    const { db, admin, a, ids } = S;
-    const wi = await db.workItem.findUniqueOrThrow({ where: { id: ids.items.web9.id } });
-    await db.workItem.update({ where: { id: wi.id }, data: { headRef: "fix-login" } });
-    await snapshot(wi.repositoryId, admin.userId, [{ path: "C:/admin/web", branch: "fix-login", head: "b2" }]);
-    expect((await linksForPull(db, a, wi.id)).matches).toEqual([]);
   });
 });

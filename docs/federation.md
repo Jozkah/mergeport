@@ -102,7 +102,7 @@ only the default https port outside development (no port scanning through error 
 
 ## What is NOT shared
 
-Email addresses, GitHub credentials or data, hub and sync state, sessions, settings, other workspaces, other people's accounts, projects
+Email addresses, GitHub credentials or data, sessions, settings, other workspaces, other people's accounts, projects
 the granting person cannot see (including restricted spaces they are not in), and any ability to change anything. Also out of scope:
 write-through edits, pushing snapshots to colleagues, server-to-server instance trust, GitHub data federation, push updates (the
 linked pages poll every 45 s while open).

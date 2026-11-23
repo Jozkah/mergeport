@@ -65,9 +65,9 @@ role string or an unknown action gets nothing.
   the people who lose access are deleted (`purgeDigests`) on a revoked grant, an untracked repository, a removed member and that flip,
   so a snapshot never outlives the access it was made from.
 - **Capabilities.** `requireRepo` / `requireWorkItem` take `"read"` (the default and the only read), `"manageWork"` or `"review"`; there is no
-  capability that is both a read and usable for a change. Every action that queues a sync, shares or unshares a repository, maps a fork,
-  untracks, or records a backport check names `"manageWork"` (so a person who sees a repository only through GitHub is refused with "no grant to
-  change it"); reads, personal local-clone helpers (`mapLocalRoot`, `scanWorktrees`, `worktreesFor`), the upstream side of a fork action
+  capability that is both a read and usable for a change. Every action that queues a sync, maps a fork,
+  untracks, or records a backport names `"manageWork"` (so a person who sees a repository only through GitHub is refused with "no grant to
+  change it"); reads, the upstream side of a fork action
   and the visibility context of a review draft or manual waiting record use `"read"`.
 - **Stored digests are served only while they still match what the person can see.** Each digest carries a fingerprint of the repositories
   the person could see when it was made (`DailyDigest.visibilityKey`); `getDigest` and `latestDigest` drop a digest whose fingerprint differs
@@ -90,7 +90,7 @@ role string or an unknown action gets nothing.
   theirs when they open the page and regenerate.
 - **GitHub identity is not the sign-in name.** `Viewer.githubLogin` is the person's GitHub login, or null without a linked GitHub account
   (`login` is the mailbox local part for an email user). It comes from the link (`User.githubLogin`, set when the person links GitHub
-  and refreshed whenever their GitHub token is used); only a legacy local user whose `githubId` came from `gh` and has no stored login falls
+  and refreshed whenever their GitHub token is used); a user with a `githubId` but no stored login falls
   back to `login`. Review queues, the inbox, the digest, review-request notifications and AI context match GitHub data on the GitHub identity (`githubId`, `githubLogin`)
   only, so an email user named "alice" never inherits the GitHub user "alice"'s reviews. People without a linked account see "Personal review
   queues need a linked GitHub account" with a **Link GitHub** button on My attention and Inbox (where linking exists), and a
@@ -123,7 +123,7 @@ everyone sees their own role and Leave.
 
 ## Spaces as access lists
 
-`AccessSpace` (not the GitHub/hub sync `Space`, which is scheduled for removal and untouched): kind COMMON or RESTRICTED, and
+`AccessSpace` (not the legacy `Space` table of the removed team-space sync, which no code reads or writes any more): kind COMMON or RESTRICTED, and
 `AccessSpaceMember(spaceId, memberId, canWrite)`. Every workspace gets one COMMON space on creation (a partial unique index keeps it one;
 the migration created them for old workspaces; `ensureCommonSpace` repairs a missing one). A project lives in one space
 (`Project.accessSpaceId`, null means COMMON).
@@ -141,7 +141,7 @@ the migration created them for old workspaces; `ensureCommonSpace` repairs a mis
 ## Not done
 
 Workspace deletion UI, per-repository access through spaces (repositories still use grants), SSO/SAML, GitHub-based roles, and changing
-the OWNER's email. The sync `Space` (GitHub/hub) is unrelated and still scheduled for deletion.
+the OWNER's email. The legacy `Space` table is unrelated and unused.
 
 ## AI apps
 

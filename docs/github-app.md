@@ -1,8 +1,7 @@
 # GitHub App (hosted)
 
 A hosted Mergeport deployment talks to GitHub through ONE GitHub App, registered by the operator. Workspaces connect by installing the
-App on their GitHub account or organisation; Mergeport then acts through short-lived installation tokens instead of any server-side
-`gh` login. See `docs/tenancy.md` for how installations map to workspaces.
+App on their GitHub account or organisation; Mergeport then acts through short-lived installation tokens instead of any credential of the server's own. See `docs/tenancy.md` for how installations map to workspaces.
 
 ## What exists now, and what comes later
 
@@ -39,11 +38,11 @@ GitHub, Settings (or the organisation's Settings), Developer settings, GitHub Ap
 - **Webhook**: active, URL `<public url>/api/github/webhook`, and a random secret of at least 16 characters (use 32 or more).
 - **Where can this App be installed**: "Any account" if customers install it on their own accounts, otherwise "Only on this account".
 - **Organization permissions**: Members, Read-only. The connect flow asks GitHub whether the person is an owner of the organization they connect (see "Needs a live check"); without this permission that check is refused and nobody can connect an organization.
-- **Repository permissions**, all Read-only (the same list the hub App manifest uses, `src/lib/hub/github-app-manifest.ts`):
+- **Repository permissions**, all Read-only:
   Issues, Pull requests, Checks, Commit statuses, Metadata (always on). Add Contents (read) if branches and commits should refresh from events.
 - **Subscribe to events**: Issues, Issue comment, Pull request, Pull request review, Pull request review comment, Pull request review thread,
   Check run, Check suite, Status. With Contents: Push, Create, Delete.
-  (The event names come from `BASE_EVENTS` / `CONTENT_EVENTS` in `src/lib/hub/github-app-manifest.ts`. `installation` and `installation_repositories` are always delivered to an App; `repository`, `label` and `milestone` are optional extras that are handled when subscribed.)
+  (`installation` and `installation_repositories` are always delivered to an App; `repository`, `label` and `milestone` are optional extras that are handled when subscribed.)
 - Generate a **private key** (PEM) and a **client secret**. Note the **App ID**, **Client ID** and the **slug** (the last part of
   `https://github.com/apps/<slug>`).
 

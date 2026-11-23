@@ -1,7 +1,7 @@
 # Accounts and sign-in (hosted)
 
 A hosted deployment lets people without GitHub sign in by **email link** or **OpenID Connect** (Google, Microsoft, any standard
-provider). The local app keeps its GitHub CLI sign-in; nothing here changes it.
+provider). The only other way in is the demo (`npm run demo`), which signs in synthetic people on a loopback run.
 
 ## Turning it on
 
@@ -20,8 +20,7 @@ Hosted mode means:
 - `src/proxy.ts` accepts **only** the public host. A loopback Host is refused (a reverse proxy can forward a client's own
   `Host: 127.0.0.1`).
 - Every `/api/local/*` route answers 404 (in the proxy and again in each route handler), except `POST /api/local/signout`. The
-  local gh sign-in and demo sign-in do not exist on a hosted server. `/api/local/signin` also requires a
-  loopback Host with the right port even in the local app.
+  demo sign-in (`/api/local/demo`) does not exist on a hosted server.
 - `/sign-in` shows the account page; session cookies are `Secure` when the URL is https; redirects and links use the public URL.
 - `serverActions.allowedOrigins` in `next.config.ts` names the public host, so the onboarding, workspace-switcher and sign-out-everywhere
   forms work behind a proxy that rewrites `Host` (the browser's Origin is the public host; Next compares it with the host it sees).
@@ -42,7 +41,6 @@ without SMTP it says email sign-in is not set up and creates no link.
 - `MagicLink`: lowercased address, SHA-256 of the token and of the requesting browser's value (neither is stored raw), `expiresAt`
   (15 min, indexed), `consumedAt`, hashed IP.
 - Rate limits are rows in `RateLimitState` with an `auth:` key prefix and hashed values, one atomic statement per check.
-- Code that assumed every user has a GitHub id (local profile, runner binding, discovery) now selects only users that do.
 
 ## Email flow
 
@@ -104,7 +102,7 @@ data. A magic link also verifies a holder's address, which is safe because openi
 
 Sessions are opaque and server-side (only the SHA-256 of the cookie is stored). **Hosted: 30 days idle (`MERGEPORT_SESSION_DAYS`),
 sliding**: a session in use is extended to now + the window, at most once an hour, and never past 180 days after sign-in. The browser
-cookie is set for 180 days so the server's sliding expiry is what decides. **Local app: fixed 180 days, unchanged.** Cookies: HttpOnly,
+cookie is set for 180 days so the server's sliding expiry is what decides. **Demo (no public URL): fixed 180 days.** Cookies: HttpOnly,
 SameSite=Lax (the email and OIDC arrivals are top-level cross-site navigations and Strict would drop the cookie on the next request),
 Secure when the public URL is https. Every login creates a new token and destroys the session the browser arrived with (fixation).
 `POST /auth/signout` deletes the row; the top bar's "All devices" button (`signOutEverywhereAction`) deletes every session of the person.
@@ -150,20 +148,16 @@ An OWNER or ADMIN invites an address from Settings > Members (`/settings/members
   (set by the browser, not by page script); cross-site, same-site, none and absent are refused.
 - Audit: `invitation.created/resent/revoked/accepted`.
 
-## Hosted: GitHub access (fail-closed list, and the one open door)
+## GitHub access
 
-The server's `gh` login belongs to whoever installed it, not to a workspace, so a hosted deployment never uses it. The only way a hosted
-workspace reaches GitHub is its own GitHub App installation (docs/github-app.md, docs/tenancy.md "Hosted GitHub access"), read-only.
-`GithubNotConnectedError` ("GitHub is not connected yet...") is thrown, or the path returns nothing, at:
+Mergeport holds no GitHub credential of its own. The only way a workspace reaches GitHub is its own GitHub App installation
+(docs/github-app.md, docs/tenancy.md "Hosted GitHub access"), read-only. `GithubNotConnectedError` ("GitHub is not connected yet...")
+is thrown, or the path returns nothing, where a repository or workspace has no usable binding:
 
-- the gh process runner itself (`exec.ts`: no process is ever spawned), `currentGhStatus`, `credentialHelper`, `assertActiveAccount`, the sign-in "start gh login" action;
-- the profile runner and `profileFetch` (both transports) and `ghPort`;
-- `portForSync` and `portForDiscovery` for a repository or workspace WITHOUT a usable binding (with one they return the installation-backed port);
-- remote git (`clone`, `fetch`, `push`) in the updater's git writer;
-- `localActor()` returns null, so no sync engine or team service is built; `checkProfile()` answers `hosted` (never asks gh, never shows the server owner's login);
-- scheduler: `upstream.update` and release checks finish as no-ops (job DONE, not failed or retried); `sync.repository`, `sync.item`, `sync.fork` and
-  `reconcile.all` run for repositories with a binding and finish as no-ops for the rest; the coordination lane schedules `reconcile.all` (every
-  15 minutes) once any workspace is connected, plus the local-only digest and AI jobs.
+- `portForSync` for a repository WITHOUT a usable binding (with one it returns the installation-backed port);
+- scheduler: `sync.repository`, `sync.item`, `sync.fork` and `reconcile.all` run for repositories with a binding and finish as no-ops
+  for the rest (job DONE, not failed or retried); the coordination lane schedules `reconcile.all` (every 15 minutes) once any workspace
+  is connected, plus the digest, AI and maintenance jobs.
 
 `portForWrite` throws `GithubWritesDisabledError` ("GitHub writes are not enabled yet"): the App holds read permissions only, and the UI shows
 that as a disabled state instead of an error toast. Server actions report both messages instead of "something went wrong".

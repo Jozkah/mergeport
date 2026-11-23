@@ -1,14 +1,12 @@
 import type { Db } from "@/lib/db";
-import { repoWhere, requireRepo, type Viewer } from "@/lib/authz/viewer";
+import { repoWhere, type Viewer } from "@/lib/authz/viewer";
 import { cleanCriteria, hasCriteria, matchAll, type Criteria, type Match, type Subscription } from "@/lib/domain/relevance";
 import { NotFoundError, ValidationError } from "@/lib/errors";
-import { checkBackport, type BackportCheck } from "@/lib/local/backport-check";
-import { validateRoot } from "@/lib/local/git";
 import { audit } from "./audit";
 import { addDependency } from "./planning";
 import { createTask } from "./tasks";
 
-/** Upstream relevance subscriptions, explicit backport records with verified local evidence, and the adoption planner. */
+/** Upstream relevance subscriptions, explicit backport records, and the adoption planner. */
 
 async function mappingFor(db: Db, v: Viewer, mappingId: string) {
   const m = await db.forkMapping.findFirst({ where: { id: mappingId, fork: repoWhere(v), upstream: repoWhere(v) }, include: { fork: { include: { owner: true } }, upstream: { include: { owner: true } } } });
@@ -97,7 +95,7 @@ export async function listBackports(db: Db, v: Viewer, mappingId: string): Promi
 
 const branchOk = (b: string) => /^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}$/.test(b) && !b.includes("..");
 
-/** A person's own record. Evidence can only be "manual" (their decision) or "unknown" here; verified evidence comes only from checkBackportLocally. */
+/** A person's own record. Evidence can only be "manual" (their decision) or "unknown" here. */
 export async function recordBackport(db: Db, v: Viewer, input: { mappingId: string; upstreamNumber: number; targetBranch: string; state: "planned" | "done"; evidence?: "manual" | "unknown"; note?: string }) {
   await mappingFor(db, v, input.mappingId);
   if (!Number.isInteger(input.upstreamNumber) || input.upstreamNumber < 1) throw new ValidationError("Enter the upstream number");
@@ -117,34 +115,6 @@ export async function deleteBackport(db: Db, v: Viewer, id: string) {
   if (!r) throw new NotFoundError();
   await mappingFor(db, v, r.mappingId);
   await db.backportRecord.delete({ where: { id } });
-}
-
-/**
- * Looks in the person's own local clone (the one mapped on this computer) for Git evidence that an upstream pull request's change is
- * on the target branch, and records the result with its kind. Possible equivalence never marks the work done by itself.
- */
-export async function checkBackportLocally(db: Db, v: Viewer, input: { mappingId: string; upstreamNumber: number; targetBranch: string }): Promise<BackportCheck & { recorded: boolean }> {
-  const m = await mappingFor(db, v, input.mappingId);
-  await requireRepo(db, v, m.forkRepoId, "manageWork");
-  const pr = await db.upstreamPrState.findUnique({ where: { mappingId_number: { mappingId: input.mappingId, number: input.upstreamNumber } } });
-  if (!pr?.mergeSha) return { result: "not-checked", reason: "This pull request has no merge commit known yet (it may not be merged).", recorded: false };
-  const dev = await db.device.findFirst({ where: { userId: v.userId } });
-  const map = dev ? await db.deviceRepoMapping.findFirst({ where: { deviceId: dev.id, repositoryId: m.forkRepoId } }) : null;
-  if (!map?.rootPath) return { result: "not-checked", reason: "Map this repository to a folder on this computer first (Branches page).", recorded: false };
-  let root: string;
-  try {
-    root = await validateRoot(map.rootPath);
-  } catch {
-    return { result: "not-checked", reason: "The mapped folder is no longer a Git repository.", recorded: false };
-  }
-  const c = await checkBackport(root, pr.mergeSha, input.targetBranch);
-  if (c.result === "not-checked") return { ...c, recorded: false };
-  const evidence = c.result === "ancestor" ? "ancestry" : c.result === "patch-equivalent" ? "patch-equivalent" : "unknown";
-  const key = { mappingId_upstreamNumber_targetBranch: { mappingId: input.mappingId, upstreamNumber: input.upstreamNumber, targetBranch: input.targetBranch } };
-  const existing = await db.backportRecord.findUnique({ where: key });
-  const state = c.result === "ancestor" ? "done" : (existing?.state ?? "planned");
-  await db.backportRecord.upsert({ where: key, create: { ...key.mappingId_upstreamNumber_targetBranch, state, evidence, localSha: c.localSha ?? null, note: c.reason.slice(0, 300), byLogin: v.login }, update: { state, evidence: existing?.evidence === "manual" && c.result === "not-found" ? "manual" : evidence, localSha: c.localSha ?? null, note: c.reason.slice(0, 300) } });
-  return { ...c, recorded: true };
 }
 
 // ---------- adoption planner ----------

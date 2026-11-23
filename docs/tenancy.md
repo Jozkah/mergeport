@@ -31,7 +31,7 @@ starts with it (a unique key that starts with it counts). Every query on a ROOT 
 | Job | `workspaceId` is nullable, see below. |
 
 **CHILD (38).** Scoped through a foreign key to a ROOT parent; no column. Through Repository: ProjectRepository, RepositoryGrant,
-WorkItem, WorkItemComment, ReviewRequest, Branch, MilestoneRepoLink, DeviceRepoMapping, WorktreeSnapshot, ForkMapping and its
+WorkItem, WorkItemComment, ReviewRequest, Branch, MilestoneRepoLink, ForkMapping and its
 children (UpstreamUpdateConfig, UpstreamUpdateRun, ForkComparison, UpstreamPrState, UpstreamIssueTriage, BackportRecord). Through
 Project: ProjectMember, PlanningColumn, PlanningItem, TaskComment, TaskCheckItem, PlanningLink, PlanBoard, Epic, Iteration,
 PlanEvent. Through Space: SyncEntity, OutboxOp, SyncConflict, HubRestore. Personal state keyed by `userId` (Device, SavedFilter,
@@ -45,7 +45,7 @@ cuids that only exist in one workspace.
 - `GithubOwner`: a public GitHub account (login, type, avatar) keyed by GitHub's immutable id. It holds nothing private and is the
   same for every tenant.
 - `PublicCacheEntry`: ETag cache of GitHub API answers, keyed by request. The unprefixed keys are the shared cache and hold only
-  answers any caller may see: the public port, and the local app's own single credential (`ghPort`, not used on a hosted deployment).
+  answers any caller may see (the public port).
   Everything fetched with an installation token is stored under the prefix `inst:<installationId>:` (`dbCache(db, installationCachePrefix(id))`), so
   a private body can never be answered to a request made with another credential (tests/github-budget-cache.test.ts). A workspace
   never reads another workspace's data through it: the cache is only read by server-side sync, which stores into the workspace's own rows.
@@ -64,8 +64,7 @@ cuids that only exist in one workspace.
   to the installation that serves them, so a row obtained through another workspace's installation grants nothing here. `repoWhere` then uses that list; stale
   rows (older than 30 minutes) grant nothing. Removing a member deletes the rows that came through that workspace's installations (unless another workspace the
   person still belongs to uses the same installation); unlinking deletes them all.
-- `RateLimitState`: GitHub's quota belongs to a credential or an IP, which every tenant behind it shares. The `source` key is the
-  local app's single credential. A hosted repository's jobs spend from `installation:<id>` (`sourceBudgetKeyFor`), the quota of its
+- `RateLimitState`: GitHub's quota belongs to a credential or an IP, which every tenant behind it shares. A repository's jobs spend from `installation:<id>` (`sourceBudgetKeyFor`), the quota of its
   installation token: workspaces sharing one installation share that budget, and one installation running dry never stalls another. `user:<id>` is the budget
   of one person's own GitHub token (the access refresh job): installation-independent, so a person cannot spend GitHub requests faster than their own limit,
   whatever workspaces they belong to.
@@ -107,16 +106,7 @@ Project visibility has two layers: `projectWhere` / `planningWhere` (membership 
 filter `accessSpaceWhere`, applied to everyone including administrators: a project in a RESTRICTED space is invisible to anyone not
 listed in it (see docs/roles.md).
 
-Request paths always pass `viewer.workspaceId`: discovery lists (`readCached`), the sync engine and team service (cached per workspace in
-`getEngine(workspaceId)` / `getTeamService(workspaceId)`), the hub coverage caches, the hub login vault, watch settings and leaving a team
-(`leaveTeamLocally(db, workspaceId)` requires it, and the action requires an administrator).
-
-Code with no viewer (the local scheduler, repository watcher, hub link and its ports, discovery retries) uses `firstWorkspace(db)`.
-It FAILS CLOSED: it throws when the database holds more than one workspace, so these paths refuse to run multi-tenant instead of
-silently serving the oldest tenant. Fail-closed paths today: the hub live link (it also refuses to start for any workspace but the
-only one), `hubSessionPort`, `getHubTeamService`, the background discovery refresh and retry, the repository watcher, desktop toasts,
-and an engine or team service built without a workspace. `tests/tenancy-scope.test.ts` allows `firstWorkspace(` only in the files
-listed in `FIRST_WORKSPACE_ALLOWLIST`, each with a reason. This local code is scheduled for removal; a hosted deployment does
+Request paths always pass `viewer.workspaceId`. Code with no viewer (the worker's scheduler and job handlers) takes the workspace from the job row or fans out per workspace (`forEachWorkspace`); nothing relies on "the one workspace of this database" any more. The `firstWorkspace` helper and its allowlist went away with the single-profile code.
 not use it.
 
 The fan-out jobs (`reconcile.all`, `digest.daily`, `ai.autopilot`) run each workspace in id order inside its own try/catch; a failing
@@ -148,10 +138,8 @@ Known blind spots of this regex scan (no type information):
 
 ## Known gaps (later phases)
 
-- The credential vault key (`keyFileFor`) is one file per install, shared by every workspace's `HubSession` and `AiSettings` cipher.
+- The credential vault key (`vaultKeyFile`, `src/lib/hub/session-vault.ts`) is one file per install, shared by every workspace's `AiSettings` cipher.
   A hosted deployment needs a key per workspace or a KMS.
-- `SavedFilter` is per person, not per workspace, and its shared-view sync lists the profile's first user.
-- Local-app `ghPort` answers still use the unprefixed `PublicCacheEntry` keys and the `source` budget (one credential per profile; not used hosted).
-- The hub link (`src/lib/hub`), discovery caches and the in-process scheduler serve one workspace per process.
+- `SavedFilter` is per person, not per workspace.
 - Deleting a workspace cascades through every ROOT model. `PlanningItem.columnId` and `createdById` became
   `NO ACTION DEFERRABLE INITIALLY DEFERRED` so the cascade can remove cards, columns and members in one statement.

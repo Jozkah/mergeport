@@ -17,7 +17,6 @@
     "db:migrate": "prisma migrate deploy",
     "db:dev": "node --import tsx scripts/dev-db.ts",
     "db:seed": "tsx prisma/seed.ts",
-    "test:live": "vitest run tests/live",
     "worker": "node --import tsx scripts/worker.ts"
   },
   "dependencies": {

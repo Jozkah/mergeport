@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { ownersFor, parseCodeowners, parseOwner, patternToRegExp, routeFiles } from "@/lib/domain/codeowners";
 import { conceptOf, conflicts, families, parseScoped, previewMapping, spellingsOf, type Mapping } from "@/lib/domain/labels";
 import { cleanCriteria, matchAll, matchSubscription, pathMatches } from "@/lib/domain/relevance";
-import { describeWorktree, worktreesOnBranch } from "@/lib/domain/worktree-links";
 
 const NL = String.fromCharCode(10);
 
@@ -116,24 +115,5 @@ describe("upstream relevance", () => {
     const subs = [sub({ labels: ["security"] }, { id: "a", mappingId: "m1" }), sub({ labels: ["docs"] }, { id: "b", mappingId: null })];
     expect(matchAll(subs, facts, "m2").map((m) => m.subscriptionId)).toEqual(["b"]);
     expect(matchAll(subs, facts, "m1").map((m) => m.subscriptionId)).toEqual(["a", "b"]);
-  });
-});
-
-describe("worktree links", () => {
-  const wts = [
-    { path: "C:/code/app", branch: "main", head: "a1", dirty: { staged: 0, unstaged: 0, untracked: 0 }, aheadBehind: { ahead: 0, behind: 0 } },
-    { path: "C:/code/app-fix", branch: "refs/heads/fix-login", head: "b2", dirty: { staged: 1, unstaged: 2, untracked: 0 }, aheadBehind: { ahead: 3, behind: 1 } },
-    { path: "C:/code/app-detached", branch: null, head: "c3", detached: true },
-  ];
-  it("matches by branch name only, never detached trees", () => {
-    expect(worktreesOnBranch(wts, "fix-login").map((w) => w.path)).toEqual(["C:/code/app-fix"]);
-    expect(worktreesOnBranch(wts, "refs/heads/main").map((w) => w.path)).toEqual(["C:/code/app"]);
-    expect(worktreesOnBranch(wts, null)).toEqual([]);
-    expect(worktreesOnBranch(wts, "nope")).toEqual([]);
-  });
-  it("describes facts without advice", () => {
-    const [a] = worktreesOnBranch(wts, "fix-login");
-    expect(describeWorktree(a)).toBe("3 uncommitted changes, 3 ahead, 1 behind");
-    expect(describeWorktree(worktreesOnBranch(wts, "main")[0])).toBe("clean, in step with its upstream");
   });
 });

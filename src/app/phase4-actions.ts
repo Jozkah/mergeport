@@ -4,11 +4,9 @@ import { revalidatePath } from "next/cache";
 import { run, type ActionResult } from "@/lib/action-result";
 import { requireWriter } from "@/lib/auth/current";
 import { db } from "@/lib/db";
-import { openLocal } from "@/lib/local/open-local";
 import { addMapping, deleteMapping } from "@/lib/services/label-taxonomy";
 import { addDraft, deleteDraft, discardDrafts, submitDrafts } from "@/lib/services/review-extras";
-import { checkBackportLocally, createAdoption, createSubscription, deleteBackport, deleteSubscription, recordBackport, setSubscriptionMuted } from "@/lib/services/upstream-extras";
-import { knownWorktreePath, setTaskBranch } from "@/lib/services/work-links";
+import { createAdoption, createSubscription, deleteBackport, deleteSubscription, recordBackport, setSubscriptionMuted } from "@/lib/services/upstream-extras";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const csv = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
@@ -92,11 +90,6 @@ export async function backportAction(fd: FormData): Promise<ActionResult> {
       revalidatePath("/forks");
       return { ok: true };
     }
-    if (op === "check") {
-      const r = await checkBackportLocally(db, viewer, base);
-      revalidatePath("/forks");
-      return { ok: true, message: r.reason, data: { result: r.result } };
-    }
     await recordBackport(db, viewer, { ...base, state: op === "done" ? "done" : "planned", note: str(fd, "note") });
     revalidatePath("/forks");
     return { ok: true, message: op === "done" ? "Marked as addressed (your decision, recorded as manual)" : "Planned" };
@@ -112,25 +105,5 @@ export async function adoptionAction(fd: FormData): Promise<ActionResult> {
     revalidatePath("/tasks");
     revalidatePath("/forks");
     return { ok: true, message: `Plan created with ${r.taskIds.length} task${r.taskIds.length === 1 ? "" : "s"} and a final sync step`, data: { milestoneId: r.milestoneId } };
-  });
-}
-
-// ---------- worktrees ----------
-
-export async function taskBranchAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireWriter();
-    await setTaskBranch(db, viewer, str(fd, "taskId"), str(fd, "branch") || null);
-    revalidatePath(`/tasks/${str(fd, "taskId")}`);
-    return { ok: true, message: "Saved" };
-  });
-}
-
-export async function openWorktreeAction(input: { repositoryId: string; path: string; how: "folder" | "editor" }): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireWriter();
-    const path = await knownWorktreePath(db, viewer, input.repositoryId, input.path);
-    const r = await openLocal(path, input.how === "editor" ? "editor" : "folder");
-    return r.ok ? { ok: true } : { ok: false, error: r.error };
   });
 }

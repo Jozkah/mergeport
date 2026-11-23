@@ -79,7 +79,7 @@ One implementation each; do not hand-roll these in a page.
 - **`ConfirmSheet`**: every action that removes, revokes or hands over something. It names the consequence, has an explicit Cancel next to the danger button, and a toast confirms.
 - **`Disclosure`**: the one wrapper for `<details>`: 40 px row, chevron turns via `group-open`, focus ring.
 - **Hosted consent**: one form with Approve and Deny, same size, one pending state; the full origin with scheme sits under the heading, a non-https origin (loopback excepted) adds a warning banner; the 30-day expiry is a normal-contrast list item.
-- **Hosted wording**: nothing says "this computer", "gh" or "GitHub CLI" in a hosted workspace (`tests/hosted-access-ui.test.ts` renders pages and components with the hosted flag). Desktop-only routes show "This page is for the desktop app". GitHub not being connected is a dismissible warning banner with no development-phase wording.
+- **Hosted wording**: nothing says "this computer", "gh" or "GitHub CLI" in a hosted workspace (`tests/hosted-access-ui.test.ts` renders pages and components with the hosted flag). GitHub not being connected is a dismissible warning banner with no development-phase wording.
 - **Navigation**: sidebar links use `prefetch={false}` (pages are `force-dynamic`), and member or account actions revalidate the pages they change, not the root layout.
 
 ## Second review round (rules)
