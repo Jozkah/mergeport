@@ -10,6 +10,11 @@ import { db } from "../src/lib/db";
 import { startLocalScheduler, stopLocalScheduler } from "../src/lib/local/scheduler";
 import { HEARTBEAT_EVERY_MS, beat } from "../src/lib/worker-heartbeat";
 
+// The fake GitHub addresses (docs/dev-github-fake.md) are honoured only when NODE_ENV is development or test: without it this process quietly talks to the real github.com.
+if ((process.env.MERGEPORT_GITHUB_API_BASE || process.env.MERGEPORT_GITHUB_WEB_BASE) && process.env.NODE_ENV !== "development" && process.env.NODE_ENV !== "test") {
+  console.warn("MERGEPORT_GITHUB_API_BASE / MERGEPORT_GITHUB_WEB_BASE are set but ignored: set NODE_ENV=development to use the fake GitHub.");
+}
+
 startLocalScheduler(5000);
 console.log(`Mergeport worker started (pid ${process.pid}). Ctrl+C to stop.`);
 

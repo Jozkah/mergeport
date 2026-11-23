@@ -5,10 +5,15 @@ import type { ActionResult } from "@/lib/action-result";
 import { plainText } from "@/lib/inputs";
 import { startGithubConnectAction } from "@/app/github-actions";
 
-/** The address the action asked to go to, when it is a plain https one; anything else is never opened. */
+/**
+ * The address the action asked to go to, when it is a plain https one; anything else is never opened. In development only, a loopback
+ * http address is accepted too, so the local fake GitHub (docs/dev-github-fake.md) works. NODE_ENV is fixed at build time, so a
+ * production build never opens one.
+ */
+const OPENABLE = process.env.NODE_ENV === "production" ? /^https:\/\//i : /^(?:https:\/\/|http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])[:/])/i;
 export function redirectOf(r: ActionResult): string | null {
   const to = r.ok ? r.data?.redirect : null;
-  return typeof to === "string" && /^https:\/\//i.test(to) ? to : null;
+  return typeof to === "string" && OPENABLE.test(to) ? to : null;
 }
 
 export function go(r: ActionResult): boolean {

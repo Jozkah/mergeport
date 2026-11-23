@@ -42,6 +42,10 @@ Run each long-lived command in its own terminal, from the repository root.
    MERGEPORT_PUBLIC_URL="http://127.0.0.1:3100"
    MERGEPORT_TRUST_PROXY="true"
 
+   # REQUIRED for the worker and the fake: the fake GitHub addresses below are ignored unless NODE_ENV is development (`next dev` sets it
+   # itself; `npm run worker` does not, and without it renewing a linked account's token silently goes to the real github.com and fails).
+   NODE_ENV="development"
+
    # The fake GitHub (development only).
    MERGEPORT_GITHUB_API_BASE="http://127.0.0.1:4010"
    MERGEPORT_GITHUB_WEB_BASE="http://127.0.0.1:4010"
@@ -88,6 +92,10 @@ Run each long-lived command in its own terminal, from the repository root.
 
 ## Notes
 
+- "Connect GitHub" and "Link" send the browser to the fake with a plain navigation. The settings page opens an `http://127.0.0.1` or
+  `http://localhost` address only outside a production build (`redirectOf` in `GithubConnectForms.tsx`); a production build opens https only.
+- Symptom of a missing `NODE_ENV=development` in the worker's environment: the job `github.access.refresh` fails with "GitHub did not renew the
+  sign-in", no repository access rows are written, and "Also create a GitHub issue" is never offered. The worker prints a warning at start.
 - State lives in the fake's memory: restarting it reseeds everything (installation and repository ids stay the same, so a bound workspace still
   works; issues you created are gone). Restart it freely.
 - The fake's `devuser` is the only person the authorize page approves. It is an organisation owner, which is what the connect proof needs.
