@@ -24,8 +24,8 @@ async function probe(): Promise<Result> {
     const timeout = new Promise<never>((_, rej) => {
       timer = setTimeout(() => rej(new Error("timeout")), DB_TIMEOUT_MS);
     });
-    await Promise.race([db.$queryRaw`SELECT 1`, timeout]);
-    return { ok: true, worker: await workerStatus(db) };
+    // Both queries sit inside the race: a stalled heartbeat read must not hang the probe any more than a stalled SELECT 1.
+    return await Promise.race([db.$queryRaw`SELECT 1`.then(async (): Promise<Result> => ({ ok: true, worker: await workerStatus(db) })), timeout]);
   } catch {
     return { ok: false };
   } finally {

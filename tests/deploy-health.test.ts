@@ -87,6 +87,18 @@ describe("the proxy in the local app", () => {
   });
 });
 
+describe("container health check target", () => {
+  it("probes loopback unless a specific address was bound", async () => {
+    const { probeUrl } = await import("../scripts/healthcheck.mjs");
+    expect(probeUrl({})).toBe("http://127.0.0.1:3000/api/health");
+    for (const h of ["0.0.0.0", "::", "[::]", " "]) expect(probeUrl({ HOST: h, PORT: "8080" }), h).toBe("http://127.0.0.1:8080/api/health");
+    expect(probeUrl({ HOST: "10.0.0.7", PORT: "8080" })).toBe("http://10.0.0.7:8080/api/health");
+    expect(probeUrl({ HOST: "0.0.0.0", MERGEPORT_HOST: "10.0.0.7", MERGEPORT_PORT: "4000", PORT: "8080" })).toBe("http://10.0.0.7:4000/api/health");
+    expect(probeUrl({ HOST: "::1" })).toBe("http://[::1]:3000/api/health");
+    expect(probeUrl({ HOST: "[::1]" })).toBe("http://[::1]:3000/api/health");
+  });
+});
+
 describe("worker heartbeat", () => {
   it("is unknown without a beat, fresh after one, stale after four missed", async () => {
     const db = state.db!;
@@ -163,6 +175,17 @@ describe("GET /api/health", () => {
     const text = await r.text();
     expect(JSON.parse(text)).toEqual({ ok: false });
     expect(text).not.toMatch(/ECONNREFUSED|hunter2|10\.1\.2\.3/);
+  });
+
+  it("answers 503 within the timeout when the heartbeat read stalls, instead of hanging", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    tick();
+    state.db = { $queryRaw: async () => [{ "?column?": 1 }], rateLimitState: { findUnique: () => new Promise(() => {}) } } as never;
+    const pending = call();
+    await vi.advanceTimersByTimeAsync(3_100);
+    const r = await pending;
+    expect(r.status).toBe(503);
+    expect(await r.json()).toEqual({ ok: false });
   });
 
   it("reports worker unknown, still 200, when only the heartbeat read fails", async () => {
