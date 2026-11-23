@@ -21,7 +21,13 @@ export function hostedConfigProblems(): string[] {
   }
   const hops = process.env.MERGEPORT_TRUSTED_PROXY_HOPS;
   if (hops !== undefined && hops !== "" && !/^(?:[1-9]|10)$/.test(hops)) problems.push("MERGEPORT_TRUSTED_PROXY_HOPS must be a whole number from 1 to 10.");
-  if ((process.env.MERGEPORT_GITHUB_API_BASE ?? "").trim() !== "") problems.push("MERGEPORT_GITHUB_API_BASE is for tests and local development only and is refused on a hosted deployment: unset it.");
+  // A local hosted-mode DEVELOPMENT run (`next dev`, NODE_ENV=development) may point at the fake GitHub (docs/dev-github-fake.md). Anything else
+  // (production, test, NODE_ENV unset) refuses: the address replaces github.com for the whole App, so it must never be set on a real deployment.
+  if (process.env.NODE_ENV !== "development") {
+    for (const name of ["MERGEPORT_GITHUB_API_BASE", "MERGEPORT_GITHUB_WEB_BASE"]) {
+      if ((process.env[name] ?? "").trim() !== "") problems.push(`${name} is for tests and local development only and is refused on a hosted deployment: unset it.`);
+    }
+  }
   problems.push(...githubAppConfigProblems());
   const writesProblem = githubWritesSettingProblem(process.env.MERGEPORT_GITHUB_WRITES, (process.env.MERGEPORT_ENCRYPTION_KEY ?? "").trim().length >= 32);
   if (writesProblem) problems.push(writesProblem);

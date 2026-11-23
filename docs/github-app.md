@@ -65,7 +65,8 @@ accept the change; this document and the manifest list are updated together. The
 | `MERGEPORT_GITHUB_APP_SLUG` | The App's URL name: lowercase letters, digits, hyphens, at most 39 characters. |
 | `MERGEPORT_ENCRYPTION_KEY` | Also required for people to link their own GitHub account: it encrypts their GitHub token (same variable and format as in `docs/federation.md`). Without it the link is unavailable and Settings says so. **Rotating it makes every stored token undecryptable: people must link again.** |
 | `MERGEPORT_GITHUB_WRITES` | `on` or `off` (default `off`). The deployment ceiling for the two opt-in GitHub writes (create an issue from a task, comment), made with each person's own token. Needs `MERGEPORT_ENCRYPTION_KEY` and a per-workspace switch in Settings, GitHub. Any other value is a startup problem. See "Writing to GitHub as you". |
-| `MERGEPORT_GITHUB_API_BASE` | Tests and local development only: replaces `https://api.github.com`. Honoured only when `NODE_ENV` is `test` or `development`, and only for https or http on a loopback name. **A hosted deployment refuses to start with it set.** |
+| `MERGEPORT_GITHUB_API_BASE` | Tests and local development only: replaces `https://api.github.com`. Honoured only when `NODE_ENV` is `test` or `development`, and only for https or http on a loopback name. **A hosted deployment refuses to start with it set**, except a local `next dev` run (`NODE_ENV=development`): see `docs/dev-github-fake.md`. |
+| `MERGEPORT_GITHUB_WEB_BASE` | Tests and local development only: replaces `https://github.com` for the authorize, install and OAuth token addresses (the fake GitHub, `docs/dev-github-fake.md`). Honoured only when `NODE_ENV` is `test` or `development`, and only for http(s) on a loopback name. Refused on a hosted deployment exactly like the API base. |
 
 Rules:
 

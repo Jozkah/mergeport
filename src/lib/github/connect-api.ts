@@ -14,6 +14,26 @@ import type { InstallationFacts } from "./binding";
  */
 
 export const GITHUB_WEB_BASE = "https://github.com";
+
+/**
+ * The github.com (web) base: authorize, install and OAuth token pages. `MERGEPORT_GITHUB_WEB_BASE` (the local fake GitHub, docs/dev-github-fake.md)
+ * is honoured ONLY when NODE_ENV is `test` or `development` and ONLY for http(s) on a loopback name, so a production deployment (or one with
+ * NODE_ENV unset) can never send people or secrets to another host. A hosted deployment refuses to start with it set unless NODE_ENV is
+ * `development` (hosted-config).
+ */
+export function githubWebBase(env: Record<string, string | undefined> = process.env): string {
+  const o = (env.MERGEPORT_GITHUB_WEB_BASE ?? "").trim();
+  if (o && (env.NODE_ENV === "test" || env.NODE_ENV === "development")) {
+    try {
+      const u = new URL(o);
+      const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
+      if ((u.protocol === "http:" || u.protocol === "https:") && loopback && !u.username && !u.password) return o.replace(/\/+$/, "");
+    } catch {
+      // fall through to the constant
+    }
+  }
+  return GITHUB_WEB_BASE;
+}
 export const CONNECT_TIMEOUT_MS = 10_000;
 /** `GET /user/installations` is read this many pages at most (100 per page): a person with more installations than this is not served. */
 export const MAX_INSTALLATION_PAGES = 20;
@@ -33,7 +53,7 @@ export type ConnectDeps = {
  */
 export function oauthAuthorizeUrl(config: Pick<GithubAppConfig, "clientId">, input: { redirectUri: string; state: string; nonce: string }): string {
   const q = new URLSearchParams({ client_id: config.clientId, redirect_uri: input.redirectUri, state: input.state, code_challenge: createHash("sha256").update(input.nonce).digest("base64url"), code_challenge_method: "S256", allow_signup: "false" });
-  return `${GITHUB_WEB_BASE}/login/oauth/authorize?${q.toString()}`;
+  return `${githubWebBase()}/login/oauth/authorize?${q.toString()}`;
 }
 
 export type GithubUser = { id: bigint; login: string };
@@ -94,7 +114,7 @@ export function tokenIsDead(r: Sent): boolean {
 }
 
 const apiBase = (deps: ConnectDeps) => (deps.apiBase ?? githubApiBase()).replace(/\/+$/, "");
-const oauthBase = (deps: ConnectDeps) => (deps.oauthBase ?? GITHUB_WEB_BASE).replace(/\/+$/, "");
+const oauthBase = (deps: ConnectDeps) => (deps.oauthBase ?? githubWebBase()).replace(/\/+$/, "");
 const asUser = (token: string): Record<string, string> => ({ authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "mergeport" });
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
