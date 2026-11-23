@@ -76,7 +76,7 @@ export async function PromotePanel({ db, viewer, taskId, linked, promoteTo }: { 
                 danger={false}
                 trigger={<button type="button" className="btn btn-primary">Create the issue…</button>}
               >
-                <input type="hidden" name="taskId" value={taskId} /><input type="hidden" name="repositoryId" value={preview.destination.id} />
+                <input type="hidden" name="taskId" value={taskId} /><input type="hidden" name="repositoryId" value={preview.destination.id} /><input type="hidden" name="previewHash" value={preview.fingerprint} />
                 <p className="text-[12.5px] text-ink-3">{preview.destination.fullName}</p>
                 <p className="mt-1 text-[13px] font-medium">{preview.title}</p>
                 <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-[10px] border border-line p-3 text-[12.5px] text-ink-2">{preview.body}</pre>

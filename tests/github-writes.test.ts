@@ -18,6 +18,7 @@ import { createTask } from "@/lib/services/tasks";
 import { githubWritesView, setWorkspaceGithubWrites } from "@/lib/services/github-writes-setting";
 import { issueDestinationsByProject, linkPendingTasks, previewPromotion, promoteTask } from "@/lib/services/task-promotion";
 import { addComment } from "@/lib/services/work-actions";
+import { updateTask } from "@/lib/services/tasks";
 
 /**
  * Opt-in GitHub writes made as the person (docs/github-app.md, "Writing to GitHub as you"), against the in-memory GitHub. The fake
@@ -102,6 +103,12 @@ const refused = async (p: Promise<unknown>, reason: string) => {
   expect((e as Error).message).toBe(REFUSAL_MESSAGES[reason as keyof typeof REFUSAL_MESSAGES]);
 };
 
+/** What the confirm sheet does: preview, then confirm with the fingerprint of what was shown. */
+const promote = async (v: Viewer, taskId: string, repositoryId: string) => {
+  const p = await previewPromotion(db(), v, taskId, repositoryId);
+  return promoteTask(db(), v, taskId, repositoryId, undefined, p.fingerprint);
+};
+
 describe("create an issue from a task", () => {
   it("happy path: as the person, with the footer, audited, linked, and a sync queued; never the installation token", async () => {
     const W: World = await world();
@@ -113,7 +120,7 @@ describe("create an issue from a task", () => {
     expect(preview.body.endsWith("---\nCreated from Mergeport")).toBe(true);
     expect(server.userWrites).toEqual([]); // previewing writes nothing
 
-    const done = await promoteTask(db(), v, t.id, W.repo.id);
+    const done = await promote(v, t.id, W.repo.id);
     expect(server.userWrites).toHaveLength(1);
     expect(server.userWrites[0]).toMatchObject({ login: "alice", route: "POST /repos/acme/web/issues", tokenPrefix: "ghu_" });
     expect(server.userWrites[0].body.title).toBe("Rotate the keys");
@@ -139,7 +146,7 @@ describe("create an issue from a task", () => {
     const alice = await W.member("alice");
     const v = await alice.viewer();
     const t = await W.task(v);
-    const { number } = await promoteTask(db(), v, t.id, W.repo.id);
+    const { number } = await promote(v, t.id, W.repo.id);
     expect((await db().planningItem.findUniqueOrThrow({ where: { id: t.id } })).workItemId).toBeNull(); // the user token cannot read in the fake: the mirror has not got it
     const wi = await db().workItem.create({ data: { repositoryId: W.repo.id, githubId: 777n, number, type: "ISSUE", title: "Rotate the keys", htmlUrl: "https://github.com/acme/web/issues/" + number, createdAtGh: new Date(), updatedAtGh: new Date(), state: "OPEN" } });
     await linkPendingTasks(db(), W.repo.id, number);
@@ -150,10 +157,10 @@ describe("create an issue from a task", () => {
     const W = await world();
     const v = await (await W.member("alice")).viewer();
     const t = await W.task(v);
-    const both = await Promise.allSettled([promoteTask(db(), v, t.id, W.repo.id), promoteTask(db(), v, t.id, W.repo.id)]);
+    const both = await Promise.allSettled([promote(v, t.id, W.repo.id), promote(v, t.id, W.repo.id)]);
     expect(both.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(server.userWrites).toHaveLength(1);
-    await expect(promoteTask(db(), v, t.id, W.repo.id)).rejects.toThrow(/already follows/);
+    await expect(promote(v, t.id, W.repo.id)).rejects.toThrow(/already follows/);
     expect(server.userWrites).toHaveLength(1);
   });
 
@@ -161,10 +168,76 @@ describe("create an issue from a task", () => {
     const W = await world();
     const v = await (await W.member("alice")).viewer();
     const bad = await W.task(v, "ok", "a" + String.fromCharCode(7) + "b");
-    await expect(promoteTask(db(), v, bad.id, W.repo.id)).rejects.toBeInstanceOf(ValidationError);
+    await expect(promote(v, bad.id, W.repo.id)).rejects.toBeInstanceOf(ValidationError);
     const long = await W.task(v, "long", "x".repeat(20_001));
-    await expect(promoteTask(db(), v, long.id, W.repo.id)).rejects.toThrow(/at most/);
+    await expect(promote(v, long.id, W.repo.id)).rejects.toThrow(/at most/);
     expect(server.userWrites).toEqual([]);
+  });
+});
+
+describe("review fixes", () => {
+  it("linkPendingTasks never links a task of another workspace that tracks the same repository id and issue number", async () => {
+    const W = await world();
+    const v = await (await W.member("alice")).viewer();
+    const mine = await W.task(v);
+    const other = await workspaceWithOwner(db(), "other@elsewhere.test", "Elsewhere");
+    const org = await db().githubOwner.findFirstOrThrow();
+    const theirRepo = await db().repository.create({ data: { workspaceId: other.ws.id, githubId: W.repo.githubId, ownerId: org.id, name: "web", fullName: "acme/web", htmlUrl: "https://github.com/acme/web", visibility: "PRIVATE", defaultBranch: "main" } });
+    const theirProject = await db().project.create({ data: { workspaceId: other.ws.id, name: "Theirs", slug: "theirs" } });
+    await createColumnsForProject(db(), theirProject.id);
+    const theirMember = await db().member.findFirstOrThrow({ where: { workspaceId: other.ws.id, userId: other.owner.id } });
+    await db().projectMember.create({ data: { projectId: theirProject.id, memberId: theirMember.id } });
+    const theirs = await createTask(db(), other.viewer, { projectId: theirProject.id, title: "theirs" });
+    for (const id of [mine.id, theirs.id]) await db().planningItem.update({ where: { id }, data: { workRepoGithubId: W.repo.githubId, workNumber: 7 } });
+    const wi = await db().workItem.create({ data: { repositoryId: W.repo.id, githubId: 1234n, number: 7, type: "ISSUE", title: "x", htmlUrl: "https://github.com/acme/web/issues/7", createdAtGh: new Date(), updatedAtGh: new Date(), state: "OPEN" } });
+    await linkPendingTasks(db(), W.repo.id, 7);
+    expect((await db().planningItem.findUniqueOrThrow({ where: { id: mine.id } })).workItemId).toBe(wi.id);
+    expect((await db().planningItem.findUniqueOrThrow({ where: { id: theirs.id } })).workItemId).toBeNull();
+    expect(theirRepo.id).not.toBe(W.repo.id);
+  });
+
+  it("posts what the sheet showed: an edit between preview and confirm is refused, a fresh preview works, a missing hash is refused", async () => {
+    const W = await world();
+    const v = await (await W.member("alice")).viewer();
+    const t = await W.task(v);
+    const shown = await previewPromotion(db(), v, t.id, W.repo.id);
+    await updateTask(db(), v, t.id, { description: "changed after the preview" });
+    await expect(promoteTask(db(), v, t.id, W.repo.id, undefined, shown.fingerprint)).rejects.toThrow("The task changed. Review it again.");
+    await expect(promoteTask(db(), v, t.id, W.repo.id)).rejects.toThrow("The task changed. Review it again.");
+    expect(server.userWrites).toEqual([]);
+    const again = await previewPromotion(db(), v, t.id, W.repo.id);
+    expect(again.fingerprint).not.toBe(shown.fingerprint);
+    await promoteTask(db(), v, t.id, W.repo.id, undefined, again.fingerprint);
+    expect(server.userWrites[0].body.body).toContain("changed after the preview");
+  });
+
+  it("a network failure may have landed: the lock stays, a retry is a duplicate, and the message says to check GitHub", async () => {
+    const W = await world();
+    const v = await (await W.member("alice")).viewer();
+    const t = await W.task(v);
+    server.loseResponseNext(/POST \/repos\/acme\/web\/issues$/);
+    await expect(promote(v, t.id, W.repo.id)).rejects.toThrow(/could not confirm.*Check GitHub before retrying/);
+    expect(server.userWrites).toHaveLength(1); // it was applied, the answer was lost
+    await refused(promote(v, t.id, W.repo.id), "duplicate");
+    expect(server.userWrites).toHaveLength(1);
+    // a comment behaves the same
+    const wi = await W.item(5);
+    server.loseResponseNext(/POST \/repos\/acme\/web\/issues\/5\/comments$/);
+    await expect(addComment({ db: db(), v }, wi.id, "hello")).rejects.toThrow(/could not confirm/);
+    await refused(addComment({ db: db(), v }, wi.id, "hello"), "duplicate");
+    expect(server.userWrites).toHaveLength(2);
+  });
+
+  it("the task is linked right after GitHub created the issue, so a later failure cannot leave it unlinked or allow a second issue", async () => {
+    const W = await world();
+    const v = await (await W.member("alice")).viewer();
+    const t = await W.task(v);
+    vi.spyOn(db().taskComment, "create").mockRejectedValueOnce(new Error("db went away"));
+    await expect(promote(v, t.id, W.repo.id)).rejects.toThrow("db went away");
+    expect(server.userWrites).toHaveLength(1);
+    expect((await db().planningItem.findUniqueOrThrow({ where: { id: t.id } })).workNumber).not.toBeNull();
+    await expect(promote(v, t.id, W.repo.id)).rejects.toThrow(/already follows/);
+    expect(server.userWrites).toHaveLength(1);
   });
 });
 
@@ -175,7 +248,7 @@ describe("refusals", () => {
     const t = await W.task(v);
     vi.stubEnv("MERGEPORT_GITHUB_WRITES", "off");
     expect(githubWritesCeiling()).toBe(false);
-    await refused(promoteTask(db(), v, t.id, W.repo.id), "ceiling-off");
+    await refused(promote(v, t.id, W.repo.id), "ceiling-off");
     expect(REFUSAL_MESSAGES["ceiling-off"]).toBe("GitHub writes are not enabled yet");
     expect(await issueDestinationsByProject(db(), v, [W.project.id])).toEqual({});
     const wi = await W.item(5);
@@ -188,7 +261,7 @@ describe("refusals", () => {
     const v = await (await W.member("alice")).viewer();
     const t = await W.task(v);
     await db().workspace.update({ where: { id: W.w.ws.id }, data: { githubWritesEnabled: false } });
-    await refused(promoteTask(db(), v, t.id, W.repo.id), "workspace-off");
+    await refused(promote(v, t.id, W.repo.id), "workspace-off");
     expect(server.userWrites).toEqual([]);
   });
 
@@ -313,7 +386,7 @@ describe("GitHub's own answers", () => {
     const v = await (await W.member("alice")).viewer();
     const t = await W.task(v);
     server.appLacksWritePermission = true;
-    const e = await promoteTask(db(), v, t.id, W.repo.id).then(() => null, (x: unknown) => x);
+    const e = await promote(v, t.id, W.repo.id).then(() => null, (x: unknown) => x);
     expect(e).toBeInstanceOf(GithubWriteError);
     expect((e as Error).message).toMatch(/accept the new permissions/);
     const failed = await db().auditLog.findMany({ where: { action: "github.write.issue.create.failed" } });
@@ -321,7 +394,7 @@ describe("GitHub's own answers", () => {
     expect(failed[0].meta).toMatchObject({ repository: "acme/web", reason: "forbidden", status: 403 });
     expect((await db().planningItem.findUniqueOrThrow({ where: { id: t.id } })).workNumber).toBeNull();
     server.appLacksWritePermission = false;
-    expect((await promoteTask(db(), v, t.id, W.repo.id)).number).toBeGreaterThan(0); // the lock was released by the failure
+    expect((await promote(v, t.id, W.repo.id)).number).toBeGreaterThan(0); // the lock was released by the failure
   });
 
   it.each([
@@ -343,7 +416,7 @@ describe("GitHub's own answers", () => {
     const v = await (await W.member("alice")).viewer();
     const t = await W.task(v);
     server.failNext(/POST \/repos\/acme\/web\/issues$/, 410, "Issues are disabled for this repo");
-    await expect(promoteTask(db(), v, t.id, W.repo.id)).rejects.toThrow(/Issues are turned off/);
+    await expect(promote(v, t.id, W.repo.id)).rejects.toThrow(/Issues are turned off/);
   });
 
   it("a person who lost access on GitHub gets GitHub's 404, explained", async () => {

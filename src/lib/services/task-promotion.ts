@@ -8,6 +8,7 @@ import { addCheckItems } from "./checklist";
 import { createIssue } from "./work-actions";
 import { githubWrite, validateWriteText, withFooter, writeRefusal, type RefusalReason } from "@/lib/github/writes";
 import { syncItem } from "@/lib/sync/repository";
+import { sha256 } from "@/lib/crypto";
 import { createTask, loadTask, loadTaskForWrite } from "./tasks";
 
 /** Starting a task from a built-in template, and turning a local task into a GitHub issue without losing its identity. */
@@ -22,7 +23,7 @@ export async function createTaskFromTemplate(db: Db, v: Viewer, input: { project
   return task;
 }
 
-export type PromotionPreview = { destination: { id: string; fullName: string }; title: string; body: string; labels: string[]; keeps: string[]; note: string; /** Why this person cannot create it right now (turned off, GitHub not linked, ...), or null. */ refusal: RefusalReason | null };
+export type PromotionPreview = { destination: { id: string; fullName: string }; title: string; body: string; labels: string[]; keeps: string[]; note: string; /** What the confirmation sheet showed, as a hash: the confirm sends it back and promoteTask refuses if the task changed since. */ fingerprint: string; /** Why this person cannot create it right now (turned off, GitHub not linked, ...), or null. */ refusal: RefusalReason | null };
 
 const body = (t: { description: string | null; checklist: { text: string; done: boolean }[] }) => {
   const nl = String.fromCharCode(10);
@@ -73,7 +74,10 @@ export async function previewPromotion(db: Db, v: Viewer, taskId: string, reposi
   // Labels are never sent to a real repository: this change writes an issue and nothing else on GitHub.
   const labels = repo.isDemo && Array.isArray(t.labels) ? (t.labels as string[]) : [];
   const refusal = await writeRefusal(db, v, repo);
-  return { destination: dest, title: t.title, body: body({ description: t.description, checklist }), labels, refusal, keeps: ["The same task: its comments, checklist, assignee, board position and history", "A link to the new issue, so it is never created twice"], note: "Creates one issue on GitHub as you. The task stays on the board and follows the issue afterwards." };
+  const text = body({ description: t.description, checklist });
+  const nl = String.fromCharCode(10);
+  const fingerprint = sha256([t.title, text, checklist.map((c) => `${c.done ? 1 : 0}${c.text}`).join(nl)].join(nl));
+  return { destination: dest, title: t.title, body: text, labels, refusal, fingerprint, keeps: ["The same task: its comments, checklist, assignee, board position and history", "A link to the new issue, so it is never created twice"], note: "Creates one issue on GitHub as you. The task stays on the board and follows the issue afterwards." };
 }
 
 /**
@@ -81,11 +85,13 @@ export async function previewPromotion(db: Db, v: Viewer, taskId: string, reposi
  * identity. A task that already follows an item cannot be promoted twice, and a double submit creates one issue (a one-shot lock per
  * task, released only if GitHub refused). A real repository goes through the write gate (src/lib/github/writes.ts).
  */
-export async function promoteTask(db: Db, v: Viewer, taskId: string, repositoryId: string, port?: GithubPort) {
+export async function promoteTask(db: Db, v: Viewer, taskId: string, repositoryId: string, port?: GithubPort, previewed?: string) {
   await loadTaskForWrite(db, v, taskId); // links the shared card to the new issue, so a read-only project must refuse before anything is created on GitHub
   const preview = await previewPromotion(db, v, taskId, repositoryId);
   const repo = await requireRepo(db, v, repositoryId, "manageWork");
   validateWriteText({ title: preview.title, body: preview.body }, { titleRequired: true });
+  // A real write posts exactly what the confirmation sheet showed: the title, text and checklist are re-read here and must still hash the same.
+  if (!repo.isDemo && !port && previewed !== preview.fingerprint) throw new ValidationError("The task changed. Review it again.");
   let number: number;
   if (repo.isDemo || port) {
     number = (await createIssue({ db, v, port }, repositoryId, { title: preview.title, body: preview.body, labels: preview.labels })).number;
@@ -98,6 +104,8 @@ export async function promoteTask(db: Db, v: Viewer, taskId: string, repositoryI
         dedupeKey: `ghwrite:issue:${taskId}`,
         call: async (p) => {
           const created = await p.createIssue(repo.owner.login, repo.name, { title: preview.title, body: preview.body });
+          // The issue exists now: link the task at once, so nothing after this point can leave it unlinked (and tempt a second issue). Best effort here; the update below repeats it.
+          await db.planningItem.update({ where: { id: taskId }, data: { workRepoGithubId: repo.githubId, workNumber: created.number, version: { increment: 1 } } }).catch(() => undefined);
           await syncItem(db, p, repo.id, created.number).catch(() => false); // best effort, as the person who just made it; sync.item follows from the queue
           return created;
         },
@@ -106,7 +114,7 @@ export async function promoteTask(db: Db, v: Viewer, taskId: string, repositoryI
     ).number;
   }
   const wi = await db.workItem.findUnique({ where: { repositoryId_number: { repositoryId, number } } });
-  await db.planningItem.update({ where: { id: taskId }, data: { workItemId: wi?.id ?? null, workRepoGithubId: repo.githubId, workNumber: number, version: { increment: 1 } } });
+  await db.planningItem.update({ where: { id: taskId }, data: { workItemId: wi?.id ?? null, workRepoGithubId: repo.githubId, workNumber: number } });
   await db.taskComment.create({ data: { itemId: taskId, authorLogin: v.login, kind: "EVENT", body: `promoted this to ${repo.fullName}#${number}` } });
   await audit(db, v, "task.promote", { type: "PlanningItem", id: taskId }, { repository: repo.fullName, number });
   return { number, workItemId: wi?.id ?? null };
@@ -114,7 +122,7 @@ export async function promoteTask(db: Db, v: Viewer, taskId: string, repositoryI
 
 /** The mirror just learned about issue #number: tasks that were linked to it by number (created before the mirror had it) now point at the work item. */
 export async function linkPendingTasks(db: Db, repositoryId: string, number: number): Promise<void> {
-  const wi = await db.workItem.findUnique({ where: { repositoryId_number: { repositoryId, number } }, include: { repository: { select: { githubId: true } } } });
+  const wi = await db.workItem.findUnique({ where: { repositoryId_number: { repositoryId, number } }, include: { repository: { select: { githubId: true, workspaceId: true } } } });
   if (!wi) return;
-  await db.planningItem.updateMany({ where: { workItemId: null, workRepoGithubId: wi.repository.githubId, workNumber: number }, data: { workItemId: wi.id } });
+  await db.planningItem.updateMany({ where: { workItemId: null, workRepoGithubId: wi.repository.githubId, workNumber: number, project: { workspaceId: wi.repository.workspaceId } }, data: { workItemId: wi.id } });
 }

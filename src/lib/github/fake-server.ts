@@ -415,7 +415,13 @@ export class FakeGitHubServer {
       } catch {
         body = undefined;
       }
-      return this.appRoute(method, url, bearer, { body, basic: /^Basic (.+)$/i.exec(auth)?.[1], headers });
+      const res = this.appRoute(method, url, bearer, { body, basic: /^Basic (.+)$/i.exec(auth)?.[1], headers });
+      const li = this.lose.findIndex((re) => re.test(label));
+      if (li >= 0) {
+        this.lose.splice(li, 1);
+        throw new TypeError("fetch failed"); // applied above; the response never arrives
+      }
+      return res;
     }) as typeof fetch;
   }
 

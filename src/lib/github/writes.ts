@@ -101,7 +101,7 @@ export function explain(e: GithubError, kind: WriteKind): string {
     case "sso":
       return e.message;
     case "network":
-      return "Could not reach GitHub. Nothing was written. Try again.";
+      return "We could not confirm it was sent: the connection to GitHub failed. Check GitHub before retrying.";
     case "forbidden":
       return "GitHub refused this. Your GitHub account may not be allowed to write here, the conversation may be locked, or the Mergeport GitHub App has not been given permission to write issues and pull requests yet: an owner of the GitHub account has to accept the new permissions (see docs/github-app.md).";
     case "not-found":
@@ -185,7 +185,8 @@ export async function githubWrite<T>(ctx: { db: Db; v: Viewer }, o: WriteOpts<T>
       }
     } catch (e) {
       if (e instanceof GithubError) {
-        await unclaim();
+        // A request that never got an answer may have landed: keep the lock until it expires so a retry cannot create a second issue or comment.
+        if (e.kind !== "network") await unclaim();
         await audit(db, v, `github.write.${o.kind}.failed`, o.target, { repository: o.repo.fullName, reason: e.kind, ...(e.status ? { status: e.status } : {}) });
         throw new GithubWriteError(explain(e, o.kind), e.kind, e.status);
       }
@@ -197,7 +198,7 @@ export async function githubWrite<T>(ctx: { db: Db; v: Viewer }, o: WriteOpts<T>
     await enqueue(db, { type: "sync.item", payload: { repositoryId: o.repo.id, number }, dedupeKey: `item:${o.repo.id}:${number}`, workspaceId: v.workspaceId }).catch(() => undefined);
     return result;
   } catch (e) {
-    if (e instanceof GithubWriteRefusedError || !(e instanceof GithubWriteError)) await unclaim();
+    if (!(e instanceof GithubWriteError)) await unclaim();
     throw e;
   }
 }
