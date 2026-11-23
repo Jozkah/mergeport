@@ -247,29 +247,10 @@ export async function seedDemo(db: Db, base = new Date()) {
     data: { workspaceId: ws.id, workItemId: api16.id, source: "MANUAL", reviewerKind: "USER", reviewerRef: "maintainer-demo", reason: "Needs the maintainer's decision on the response format", startedAt: at(-2 * D) },
   });
 
-  // Local connector: member A has a paired device with a snapshot
-  const dev = await db.device.create({ data: { userId: uA.id, name: "This computer (synthetic)", lastSeenAt: at(-2 * 60_000) } });
-  await db.deviceRepoMapping.create({ data: { deviceId: dev.id, repositoryId: rApi.id } });
-  await db.worktreeSnapshot.create({
-    data: {
-      deviceId: dev.id,
-      repositoryId: rApi.id,
-      capturedAt: at(-2 * 60_000),
-      data: {
-        capturedAt: at(-2 * 60_000).toISOString(),
-        worktrees: [
-          { path: "C:\\work\\atlas-api", branch: "main", head: "a0000001", detached: false, locked: false, prunable: false, dirty: { staged: 0, unstaged: 2, untracked: 1, conflicted: 0 }, tracking: { upstream: "origin/main", ahead: 0, behind: 2 } },
-          { path: "C:\\work\\atlas-api-fix", branch: "fix/token-refresh", head: "a0000044", detached: false, locked: false, prunable: false, dirty: { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 }, tracking: { upstream: "origin/fix/token-refresh", ahead: 3, behind: 0 } },
-          { path: "C:\\work\\atlas-api-detached", branch: null, head: "a0000077", detached: true, locked: true, prunable: false },
-        ],
-      },
-    },
-  });
-
   return {
     ws, users: { admin: uAdmin, a: uA, b: uB, ext: uExt }, members: { admin: mAdmin, a: mA, b: mB },
     repos: { api: rApi, web: rWeb, core: rCore, fork: rFork, internal: rInternal, sandbox: rSandbox },
     projects: { atlas: pAtlas, dash: pDash }, items: { api12, api14, api15, api16, web7, web8, web9, web10, core101, core102, core103 },
-    milestone: ms, cards: { cApiPr, cApiPr2, cWeb, cDraft }, device: dev, map,
+    milestone: ms, cards: { cApiPr, cApiPr2, cWeb, cDraft }, map,
   };
 }

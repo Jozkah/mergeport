@@ -13,9 +13,7 @@ import { gettingStarted } from "@/lib/services/getting-started";
 import { createColumnsForProject } from "@/lib/services/planning";
 import { planningBoard, roadmap } from "@/lib/services/planning-view";
 import { getWorkItemDetail, listNotifications, listProjects, listRepositories, listWorkItems, searchGlobal, unreadNotificationCount } from "@/lib/services/queries";
-import { syncCenter } from "@/lib/services/sync-center";
 import { createTask, deleteTask, listTasks, loadTask, taskCounts, updateTask } from "@/lib/services/tasks";
-import { leaveTeamLocally } from "@/lib/team/leave";
 import { createTestPrisma } from "./pg";
 
 /**
@@ -33,7 +31,6 @@ type World = {
   prId: string;
   issueId: string;
   taskId: string;
-  spaceId: string;
   suggestionId: string;
   pendingId: string;
   milestoneId: string;
@@ -60,8 +57,6 @@ async function world(name: string, githubId: bigint, login: string): Promise<Wor
   const issue = await db.workItem.create({ data: { repositoryId: repo.id, githubId: 5002n, number: 2, type: "ISSUE", title: "Fix login", htmlUrl: "https://github.com/acme/api/issues/2", createdAtGh: at, updatedAtGh: at } });
   const viewer = (await loadViewer(db, user.id, ws.id))!;
   const task = await createTask(db, viewer, { projectId: project.id, title: "Ship it", assigneeLogin: login });
-  const space = await db.space.create({ data: { workspaceId: ws.id, remoteId: "s1", teamRemoteId: "t1", kind: "COMMON", name: "Team", repoOwner: "acme", repoName: "coord", canWrite: true } });
-  await db.teamConfig.create({ data: { workspaceId: ws.id, mode: "TEAM", teamRemoteId: "t1", name: "Team", commonSpaceId: space.id, pollSeconds: name === "one" ? 30 : 99 } });
   await db.aiSettings.create({ data: { workspaceId: ws.id, baseUrl: `https://ai.${name}.example/v1` } });
   const suggestion = await db.aiSuggestion.create({ data: { workspaceId: ws.id, sourceKey: "same-key", title: `Suggestion of ${name}`, reason: "because", payload: { href: "/x" } } });
   const pending = await db.aiPendingAction.create({ data: { workspaceId: ws.id, kind: "comment", workItemId: pr.id, summary: `Comment of ${name}`, payload: { body: "hi" } } });
@@ -71,7 +66,7 @@ async function world(name: string, githubId: bigint, login: string): Promise<Wor
   await db.discoveryCache.create({ data: { workspaceId: ws.id, key: "repos", payload: { from: name }, state: "FRESH" } });
   await db.reviewRule.create({ data: { workspaceId: ws.id, scope: "WORKSPACE", labels: [], reviewers: [], reason: "same rule" } });
   await db.dailyDigest.create({ data: { workspaceId: ws.id, userId: user.id, day: "2026-10-31", payload: { version: 1, of: name }, visibilityKey: await digestVisibilityKey(db, viewer) } });
-  return { ws: ws.id, viewer, userId: user.id, repoId: repo.id, projectId: project.id, prId: pr.id, issueId: issue.id, taskId: task.id, spaceId: space.id, suggestionId: suggestion.id, pendingId: pending.id, milestoneId: milestone.id };
+  return { ws: ws.id, viewer, userId: user.id, repoId: repo.id, projectId: project.id, prId: pr.id, issueId: issue.id, taskId: task.id, suggestionId: suggestion.id, pendingId: pending.id, milestoneId: milestone.id };
 }
 
 beforeAll(async () => {
@@ -148,8 +143,6 @@ describe("lists, searches and counts return only the active workspace's rows", (
     expect((await getAiView(db, (await db.workspace.create({ data: { name: "empty" } })).id)).saved).toBe(false);
     expect((await getDigest(db, w1.viewer, "2026-10-31"))?.payload).toMatchObject({ of: "one" });
     expect(await getDigest(db, { ...w1.viewer, workspaceId: w2.ws }, "2026-10-31")).toBeNull();
-    expect((await syncCenter(db, w1.ws, 30)).map((s) => s.id)).toEqual([w1.spaceId]);
-    expect((await syncCenter(db, w2.ws, 99)).map((s) => s.id)).toEqual([w2.spaceId]);
     const steps = await gettingStarted(db, w1.viewer);
     expect(steps.find((s) => s.key === "repos")?.done).toBe(true);
   });
@@ -202,13 +195,7 @@ describe("another workspace's ids give the existing non-leaking not-found", () =
 });
 
 describe("per-workspace singletons, caches and jobs", () => {
-  it("TeamConfig, AiSettings, GitCache and DiscoveryCache hold one row per workspace", async () => {
-    expect((await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: w1.ws } })).pollSeconds).toBe(30);
-    expect((await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: w2.ws } })).pollSeconds).toBe(99);
-    await expect(db.teamConfig.create({ data: { workspaceId: w1.ws } })).rejects.toThrow(); // unique workspaceId
-    await db.teamConfig.update({ where: { workspaceId: w1.ws }, data: { pollSeconds: 45 } });
-    expect((await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: w2.ws } })).pollSeconds).toBe(99);
-    await db.teamConfig.update({ where: { workspaceId: w1.ws }, data: { pollSeconds: 30 } });
+  it("GitCache and DiscoveryCache hold one row per workspace", async () => {
     expect((await db.gitCache.findUniqueOrThrow({ where: { workspaceId_key: { workspaceId: w1.ws, key: "same-key" } } })).payload).toEqual({ from: "one" });
     expect((await db.gitCache.findUniqueOrThrow({ where: { workspaceId_key: { workspaceId: w2.ws, key: "same-key" } } })).payload).toEqual({ from: "two" });
     expect((await db.discoveryCache.findUniqueOrThrow({ where: { workspaceId_key: { workspaceId: w2.ws, key: "repos" } } })).payload).toEqual({ from: "two" });
@@ -223,21 +210,11 @@ describe("per-workspace singletons, caches and jobs", () => {
     expect(await db.job.count({ where: { workspaceId: w1.ws } })).toBe(1);
   });
 
-  it("leaving a team in one workspace leaves the other's spaces and team untouched", async () => {
-    const extra = await world("three", 55n, "erin");
-    await leaveTeamLocally(db, extra.ws);
-    expect(await db.space.count({ where: { workspaceId: extra.ws } })).toBe(0);
-    expect((await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: extra.ws } })).mode).toBe("PERSONAL");
-    expect(await db.space.count({ where: { workspaceId: w1.ws } })).toBe(1);
-    expect((await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: w2.ws } })).mode).toBe("TEAM");
-    expect(await db.discoveryCache.count({ where: { workspaceId: w1.ws } })).toBe(1);
-  });
-
   it("deleting a workspace deletes what it owns and nothing else (ON DELETE CASCADE)", async () => {
     const doomed = await world("four", 66n, "frank");
     await enqueue(db, { type: "sync.repository", payload: { repositoryId: doomed.repoId }, dedupeKey: `sync:${doomed.repoId}` });
     await db.workspace.delete({ where: { id: doomed.ws } });
-    for (const n of await Promise.all([db.repository.count({ where: { workspaceId: doomed.ws } }), db.project.count({ where: { workspaceId: doomed.ws } }), db.space.count({ where: { workspaceId: doomed.ws } }), db.teamConfig.count({ where: { workspaceId: doomed.ws } }), db.aiSettings.count({ where: { workspaceId: doomed.ws } }), db.aiSuggestion.count({ where: { workspaceId: doomed.ws } }), db.gitCache.count({ where: { workspaceId: doomed.ws } }), db.discoveryCache.count({ where: { workspaceId: doomed.ws } }), db.job.count({ where: { workspaceId: doomed.ws } }), db.dailyDigest.count({ where: { workspaceId: doomed.ws } }), db.reviewRule.count({ where: { workspaceId: doomed.ws } })]))
+    for (const n of await Promise.all([db.repository.count({ where: { workspaceId: doomed.ws } }), db.project.count({ where: { workspaceId: doomed.ws } }), db.aiSettings.count({ where: { workspaceId: doomed.ws } }), db.aiSuggestion.count({ where: { workspaceId: doomed.ws } }), db.gitCache.count({ where: { workspaceId: doomed.ws } }), db.discoveryCache.count({ where: { workspaceId: doomed.ws } }), db.job.count({ where: { workspaceId: doomed.ws } }), db.dailyDigest.count({ where: { workspaceId: doomed.ws } }), db.reviewRule.count({ where: { workspaceId: doomed.ws } })]))
       expect(n).toBe(0);
     expect(await db.repository.count({ where: { workspaceId: w1.ws } })).toBe(1);
     expect(await db.planningItem.count({ where: { id: doomed.taskId } })).toBe(0);

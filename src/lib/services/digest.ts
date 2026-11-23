@@ -10,8 +10,6 @@ import { wantsInApp } from "@/lib/domain/notify-prefs";
 import { inbox } from "./inbox";
 import { getPrefs } from "./notification-prefs";
 import { attention, planningWhere, type AttentionQueues } from "./queries";
-import { RELEASE_ATTENTION_DAYS } from "@/lib/domain/upstream-update";
-import { upstreamUpdateAttention } from "./upstream-update";
 
 /**
  * The daily digest: what was done yesterday, what was left undone, and what needs the person's attention or other people's.
@@ -200,9 +198,6 @@ async function mineEntries(ctx: DigestContext, q: AttentionQueues): Promise<Dige
   const unread = (await inbox(db, v, { now: ctx.now, queues: q })).unread;
   if (unread > 0) out.push(entry(ctx, { key: "inbox", title: `${unread} unread inbox item${unread === 1 ? "" : "s"}`, repo: null, href: "/inbox", reason: "New since you last looked" }));
 
-  const conflicts = await db.syncConflict.count({ where: { status: "OPEN" } });
-  if (conflicts > 0) out.push(entry(ctx, { key: "sync-conflicts", title: `${conflicts} sync conflict${conflicts === 1 ? "" : "s"} to resolve`, repo: null, href: "/sync", reason: "Your edit and a teammate's disagree" }));
-
   const repos = await db.repository.findMany({ where: { AND: [repoWhere(v), { OR: [{ syncError: { not: null } }, { trackingStatus: "DISCONNECTED" }] }] }, orderBy: { fullName: "asc" } });
   for (const r of repos) out.push(entry(ctx, { key: `repo:${r.id}`, title: r.fullName, repo: r.fullName, href: "/repositories", reason: r.trackingStatus === "DISCONNECTED" ? `Disconnected${r.statusDetail ? `: ${r.statusDetail}` : ""}` : `Sync is failing: ${r.syncError}`, since: r.lastSyncedAt }));
   return out;
@@ -266,32 +261,6 @@ function section(entries: DigestEntry[], order: ((a: DigestEntry, b: DigestEntry
   return { entries: unique.slice(0, cap), total: unique.length, more: Math.max(0, unique.length - cap) };
 }
 
-const UPDATE_LOOKBACK_DAYS = 7;
-const UPDATE_REASON: Record<string, string> = {
-  conflict: "Upstream update stopped on a merge conflict",
-  "verify-failed": "Upstream update failed its verification",
-  failed: "Upstream update failed",
-  "pr-opened": "Upstream update is waiting for review",
-  "merged-untested": "Upstream update is waiting for review (not verified)",
-};
-/**
- * Upstream auto-update runs that need the person: the latest settled run of each fork, when it is a problem or a pull request to review,
- * and every release warning (`release-found`) not yet looked at. A release warning drops out once the Forks page was opened (`seenAt`) or
- * after RELEASE_ATTENTION_DAYS days, whichever comes first; the 7-day lookback above is for merge runs only.
- */
-const upstreamUpdateSource: DigestSource = async (ctx) => {
-  const since = new Date(ctx.end.getTime() - UPDATE_LOOKBACK_DAYS * 86_400_000);
-  const releaseSince = new Date(ctx.end.getTime() - RELEASE_ATTENTION_DAYS * 86_400_000);
-  const runs = await upstreamUpdateAttention(ctx.db, ctx.viewer, { since, releaseSince });
-  return {
-    mine: runs.map((r) =>
-      r.state === "release-found" && r.release
-        ? entry(ctx, { key: `upstream-release:${r.id}`, title: `${r.upstream} for ${r.fork}`, repo: r.fork, href: "/forks", reason: `New upstream release ${r.release.tag}${r.release.more ? ` (+${r.release.more} more)` : ""}`, since: r.finishedAt })
-        : entry(ctx, { key: `upstream-update:${r.mappingId}`, title: `${r.upstream} into ${r.fork}`, repo: r.fork, href: "/forks", reason: UPDATE_REASON[r.state] ?? "Upstream update needs you", since: r.finishedAt }),
-    ),
-  };
-};
-
 export type BuildOptions = { now?: Date; tz?: string; /** The local day to report; default: the day before `now`. */ day?: string; cap?: number; sources?: DigestSource[] };
 
 export async function buildDigest(db: Db, viewer: Viewer, opts: BuildOptions = {}): Promise<DigestPayload> {
@@ -303,7 +272,7 @@ export async function buildDigest(db: Db, viewer: Viewer, opts: BuildOptions = {
   const q = await attention(db, viewer, { now });
   const [done, undone, mine, others] = await Promise.all([doneEntries(ctx), undoneEntries(ctx), mineEntries(ctx, q), othersEntries(ctx)]);
   const extra: Record<DigestKind, DigestEntry[]> = { done: [], undone: [], mine: [], others: [] };
-  for (const source of [upstreamUpdateSource, ...registry.values(), ...(opts.sources ?? [])]) {
+  for (const source of [...registry.values(), ...(opts.sources ?? [])]) {
     try {
       const r = await source(ctx);
       for (const k of Object.keys(extra) as DigestKind[]) extra[k].push(...(r[k] ?? []));

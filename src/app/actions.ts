@@ -1,7 +1,5 @@
 "use server";
 
-import { commonSpaceIdForSharing } from "@/lib/services/project-sharing";
-import { applyAutoSetup } from "@/lib/services/auto-setup";
 import { setProjectReviewers } from "@/lib/services/project-reviewers";
 import { notifyChange } from "@/lib/local/runtime";
 import { revalidatePath } from "next/cache";
@@ -14,19 +12,14 @@ import { NotFoundError, ValidationError } from "@/lib/errors";
 import { assertProjectWritable, requireAdmin, requireRepo, projectWhere } from "@/lib/authz/viewer";
 import { removeFromTracking, trackLocally, upsertRepository, type RepoMeta } from "@/lib/services/repositories";
 import * as work from "@/lib/services/work-actions";
-import { addDependency, assertSameAudience, createCard, moveCard, requestManualReview, resolveManualReview, createColumnsForProject } from "@/lib/services/planning";
-import { mapLocalRoot, scanWorktrees, unmapLocalRoot } from "@/lib/services/worktrees";
+import { addDependency, createCard, moveCard, requestManualReview, resolveManualReview, createColumnsForProject } from "@/lib/services/planning";
 import { audit } from "@/lib/services/audit";
-import { portForDiscovery, publicPort } from "@/lib/github/factory";
 import { trackInstallationRepos } from "@/lib/services/installation-repos";
 import { isHosted } from "@/lib/public-url";
-import { applyWatchlist } from "@/lib/services/watchlist";
-import { readCached } from "@/lib/local/discovery";
-import type { Discovery } from "@/lib/github/port";
+import { publicPort } from "@/lib/github/factory";
 import { GithubError } from "@/lib/github/port";
 import { enqueue } from "@/lib/jobs";
 import { slugify } from "@/lib/slug";
-import { parseOptional, parseWatchMaxRepos, parseWatchSeconds, readWatchConfig, saveWatchSettings } from "@/lib/local/watch-settings";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const strs = (fd: FormData, k: string) => fd.getAll(k).map(String).filter(Boolean);
@@ -54,25 +47,6 @@ export async function importPublicAction(fd: FormData): Promise<ActionResult> {
     await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id, full: true }, dedupeKey: `sync:${r.id}` });
     revalidatePath("/repositories");
     return { ok: true, message: `${meta.fullName} is tracked on this computer. It is not shared with teammates.` };
-  });
-}
-
-/** Tracks repositories the person's own GitHub access can list. Tracking is local; it neither grants GitHub access nor publishes anything. */
-export async function trackSelectedAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireWriter();
-    const ids = new Set(strs(fd, "repo"));
-    if (ids.size === 0) throw new ValidationError("Select at least one repository");
-    // Selected from the saved list: no live GitHub call, so this works offline and never waits on a stalled CLI.
-    const saved = await readCached<Discovery>(db, "repos", new Date(), undefined, viewer.workspaceId);
-    if (!saved.payload) throw new ValidationError("The repository list has not been loaded yet. Use Check again, then select.");
-    const found = saved.payload.repos.filter((r) => ids.has(r.githubId.toString()));
-    if (found.length !== ids.size) throw new ValidationError("Some selected repositories are no longer available to your GitHub account");
-    const rows = await trackLocally(db, viewer, found);
-    for (const r of rows) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id, full: true }, dedupeKey: `sync:${r.id}` });
-    notifyChange("state");
-    revalidatePath("/repositories");
-    return { ok: true, message: `${found.length} repositor${found.length === 1 ? "y is" : "ies are"} tracked on this computer. Nothing was shared.` };
   });
 }
 
@@ -288,27 +262,12 @@ export async function createProjectAction(fd: FormData): Promise<ActionResult> {
     const { viewer } = await requireAdminViewer();
     const name = str(fd, "name");
     if (!name) throw new ValidationError("Name the project");
-    // Resolved before anything is created, so a share that cannot happen never leaves a half-made project behind.
-    const spaceId = str(fd, "share") ? await commonSpaceIdForSharing(db, viewer.workspaceId) : null;
-    const p = await db.project.create({ data: { workspaceId: viewer.workspaceId, name, slug: slugify(name), description: str(fd, "description") || null, spaceId } });
+    const p = await db.project.create({ data: { workspaceId: viewer.workspaceId, name, slug: slugify(name), description: str(fd, "description") || null } });
     await createColumnsForProject(db, p.id);
     if (str(fd, "reviewers")) await setProjectReviewers(db, viewer.workspaceId, p.id, p.name, str(fd, "reviewers"));
     await audit(db, viewer, "project.create", { type: "Project", id: p.id });
     revalidatePath("/admin/projects");
-    return { ok: true, message: spaceId ? "Project created and shared with the team" : "Project created" };
-  });
-}
-
-export async function autoSetupAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireAdminViewer();
-    const ids = strs(fd, "step");
-    if (ids.length === 0) throw new ValidationError("Select at least one change to apply");
-    const done = await applyAutoSetup(db, viewer, ids, { clonesFolder: str(fd, "folder") || null });
-    await audit(db, viewer, "workspace.autosetup", { type: "Workspace", id: viewer.workspaceId }, { steps: done.map((d) => d.id) });
-    for (const p of ["/settings", "/admin/projects", "/admin/rules", "/forks", "/attention", "/"]) revalidatePath(p);
-    notifyChange("state");
-    return { ok: true, message: `${done.length} change${done.length === 1 ? "" : "s"} applied on this computer. Nothing was sent to GitHub.` };
+    return { ok: true, message: "Project created" };
   });
 }
 
@@ -335,7 +294,6 @@ export async function setProjectReposAction(fd: FormData): Promise<ActionResult>
     const ids = strs(fd, "repo");
     const repos = await db.repository.findMany({ where: { id: { in: ids }, workspaceId: viewer.workspaceId } });
     if (repos.length !== ids.length) throw new ValidationError("Unknown repository");
-    await assertSameAudience(db, viewer.workspaceId, p.spaceId, ids);
     await db.$transaction([db.projectRepository.deleteMany({ where: { projectId } }), db.projectRepository.createMany({ data: ids.map((repositoryId) => ({ projectId, repositoryId })) })]);
     await audit(db, viewer, "project.repos", { type: "Project", id: projectId }, { repositoryIds: ids });
     revalidatePath("/admin/projects");
@@ -469,22 +427,6 @@ export async function mapForkAction(fd: FormData): Promise<ActionResult> {
   });
 }
 
-/** Many repositories at once: one address tracks it and its parent, two addresses ("fork upstream") map them. */
-export async function watchlistAction(input: { text: string }): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireAdminViewer();
-    // Hosted: repositories read through this workspace's GitHub connection are chosen on Connect repositories. Tracking by address would
-    // create repositories nothing can read (no installation), which would sit there silently stale.
-    if (isHosted()) throw new ValidationError("Adding by address is not available for this workspace. Choose repositories on Connect repositories.");
-    const port = await portForDiscovery(db, { id: (viewer.githubId ?? 0n).toString(), login: viewer.login }, { workspaceId: viewer.workspaceId });
-    const results = await applyWatchlist(db, viewer, port, String(input.text ?? ""));
-    revalidatePath("/forks");
-    revalidatePath("/repositories");
-    const ok = results.filter((r) => r.ok).length;
-    return { ok: true, message: `${ok} of ${results.length} added. Comparisons are queued.`, data: { results } };
-  });
-}
-
 export async function refreshForkAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireWriter();
@@ -577,36 +519,6 @@ export async function syncForkBranchAction(fd: FormData): Promise<ActionResult> 
   });
 }
 
-// ---------- local worktrees ----------
-
-export async function mapRootAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireWriter();
-    await mapLocalRoot(db, viewer, str(fd, "repositoryId"), str(fd, "path"));
-    await scanWorktrees(db, viewer, str(fd, "repositoryId"));
-    revalidatePath("/branches");
-    return { ok: true, message: "Folder mapped and scanned. Only branch names and counts of changed files are read; nothing leaves this computer." };
-  });
-}
-
-export async function scanRootAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireWriter();
-    const snap = await scanWorktrees(db, viewer, str(fd, "repositoryId"));
-    revalidatePath("/branches");
-    return { ok: true, message: `Scanned ${snap.worktrees.length} worktree(s)` };
-  });
-}
-
-export async function unmapRootAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireWriter();
-    await unmapLocalRoot(db, viewer, str(fd, "repositoryId"));
-    revalidatePath("/branches");
-    return { ok: true, message: "Folder forgotten" };
-  });
-}
-
 // ---------- settings ----------
 
 export async function setTimezoneAction(fd: FormData): Promise<ActionResult> {
@@ -621,29 +533,6 @@ export async function setTimezoneAction(fd: FormData): Promise<ActionResult> {
     await db.user.update({ where: { id: user.id }, data: { timezone: tz } });
     revalidatePath("/", "layout");
     return { ok: true, message: "Timezone saved" };
-  });
-}
-
-/**
- * Auto-sync of repositories without webhooks (repo-watch.ts). The unchecked switch is simply absent from the form. A blank
- * number means "use the default (environment or built-in)" and clears the saved value; only fields that changed are written.
- */
-export async function setRepoWatchAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireWriter();
-    const enabled = fd.get("enabled") === "on" || fd.get("enabled") === "true";
-    const seconds = parseOptional(fd.get("seconds"), parseWatchSeconds);
-    const maxRepos = parseOptional(fd.get("max"), parseWatchMaxRepos);
-    const cur = await readWatchConfig(db, viewer.workspaceId);
-    await saveWatchSettings(db, {
-      enabled: enabled !== cur.enabled ? enabled : undefined,
-      seconds: seconds !== cur.stored.seconds ? seconds : undefined,
-      maxRepos: maxRepos !== cur.stored.maxRepos ? maxRepos : undefined,
-    }, viewer.workspaceId);
-    revalidatePath("/settings");
-    revalidatePath("/repositories");
-    const now = await readWatchConfig(db, viewer.workspaceId);
-    return { ok: true, message: now.enabled ? `Checking up to ${now.maxRepos} repositories every ${now.seconds} seconds while Mergeport is open` : "Automatic checks are off. Repositories still refresh every 15 minutes." };
   });
 }
 

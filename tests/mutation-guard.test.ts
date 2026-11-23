@@ -32,7 +32,6 @@ const ALLOW: Allow[] = [
   { file: "src/app/account-actions.ts", fn: "switchWorkspaceAction", reason: "Chooses among the caller's own ACTIVE memberships; selectWorkspace re-checks membership." },
   { file: "src/app/invite/actions.ts", fn: "acceptInviteAction", reason: "The caller is not a member yet; acceptInvitation checks the token and the verified address." },
   { file: "src/app/invite/actions.ts", fn: "acceptPendingInviteAction", reason: "Same as acceptInviteAction: the caller is not a member yet; the invitation is listed to their verified address and accepted by id under the same checks." },
-  { file: "src/app/sign-in/actions.ts", fn: "startGhLoginAction", reason: "Local app sign-in, before any session exists." },
   { file: "src/app/workspace-actions.ts", fn: "leaveWorkspaceAction", reason: "A reader may leave too; leaveWorkspace refuses the owner and re-reads the membership." },
   { file: "src/app/actions.ts", fn: "setTimezoneAction", reason: "The caller's own timezone." },
   { file: "src/app/actions.ts", fn: "saveFilterAction", reason: "The caller's own saved filter (per person, not per workspace)." },
@@ -47,7 +46,6 @@ const ALLOW: Allow[] = [
   { file: "src/app/notify-actions.ts", fn: "savePrefsAction", reason: "The caller's own notification preferences." },
   { file: "src/app/palette-actions.ts", fn: "previewQuickAction", reason: "Preview only: computes what applyQuickAction would do and writes nothing." },
   { file: "src/app/scope-actions.ts", fn: "setScopeAction", reason: "Remembers the caller's working scope in a cookie." },
-  { file: "src/app/upstream-update-actions.ts", fn: "markReleasesSeenAction", reason: "The caller's own seen marker." },
   { file: "src/app/github-link-actions.ts", fn: "startGithubLinkAction", reason: "The caller's OWN GitHub link, any role (a reader links too). Writes only a single-use state row bound to the caller; the link itself is made by the callback, behind state, nonce, PKCE and GitHub's own answer." },
   { file: "src/app/github-link-actions.ts", fn: "unlinkGithubAction", reason: "Removes the caller's OWN link, token, cached access and digests, whatever their role now is. Touches nobody else." },
   { file: "src/app/github-link-actions.ts", fn: "checkGithubAccessAction", reason: "Asks for a refresh of the caller's OWN cached GitHub access (a queued job keyed by the caller's id, rate limited per person). Reads nothing of anyone else." },
@@ -118,13 +116,8 @@ describe("every exported server action passes a role guard", () => {
     for (const a of ALLOW) expect(a.reason.length).toBeGreaterThan(15);
   });
 
-  it("inline server actions only delegate to guarded actions", () => {
-    // tasks/[id]/page.tsx defines saveDetailsAction inline and calls updateTaskAction and taskBranchAction, both guarded above.
-    expect(inline.sort()).toEqual(["src/app/(app)/tasks/[id]/page.tsx"]);
-    const src = fs.readFileSync(path.join(root, "src/app/(app)/tasks/[id]/page.tsx"), "utf8");
-    expect(src).toMatch(/updateTaskAction\(fd\)/);
-    expect(fns.find((f) => f.name === "updateTaskAction")?.guarded).toBe(true);
-    expect(fns.find((f) => f.name === "taskBranchAction")?.guarded).toBe(true);
+  it("there are no inline server actions", () => {
+    expect(inline.sort()).toEqual([]);
   });
 
   it("every member and space administration action is guarded", () => {
@@ -135,13 +128,12 @@ describe("every exported server action passes a role guard", () => {
 });
 
 /**
- * Route handlers: a POST, PUT, PATCH or DELETE under src/app must pass the same guard, or be listed with a reason. The local app's own
+ * Route handlers: a POST, PUT, PATCH or DELETE under src/app must pass the same guard, or be listed with a reason. The demo's own
  * routes (src/app/api/local) are loopback-only, answer 404 on a hosted server and have no workspace viewer.
  */
 const ROUTE_ALLOW: { file: string; reason: string }[] = [
   { file: "src/app/api/backup/preview/route.ts", reason: "Read-only preview; previewRestore refuses non-administrators and writes nothing." },
   { file: "src/app/api/backup/restore/route.ts", reason: "restoreBackup refuses non-administrators (an administrator always writes), and applies the space ACL." },
-  { file: "src/app/api/sync/visibility/route.ts", reason: "Local app: reports whether the tab is visible to the scheduler; authorized by the launch token, changes no workspace data." },
   { file: "src/app/auth/magic/request/route.ts", reason: "Sign-in: asks for a link before any session exists." },
   { file: "src/app/api/federation/v1/token/route.ts", reason: "Server to server: a one-time PKCE code is the credential; there is no session or viewer. 404 unless federation is on." },
   { file: "src/app/api/github/webhook/route.ts", reason: "Server to server: GitHub signs the body with the App's webhook secret (HMAC checked before anything else); there is no session or viewer. 404 unless hosted and the App is configured. It only queues refreshes and records installation state of installations we already hold." },
@@ -150,7 +142,7 @@ const ROUTE_ALLOW: { file: string; reason: string }[] = [
   { file: "src/app/api/oauth/token/route.ts", reason: "OAuth token endpoint: the credential is a single-use authorization code with its PKCE verifier, or a rotating refresh token; there is no session. It only issues tokens for a grant a signed-in person consented to, and re-loads that person's membership. 404 unless hosted." },
   { file: "src/app/api/federation/v1/revoke/route.ts", reason: "Server to server: the bearer token being revoked is the credential; it only ever ends that token." },
 ];
-const ROUTE_ALLOW_PREFIX = [{ prefix: "src/app/api/local/", reason: "Local app routes: loopback only, 404 when hosted, no workspace viewer." }];
+const ROUTE_ALLOW_PREFIX = [{ prefix: "src/app/api/local/", reason: "Demo sign-in and sign-out: loopback only, 404 when hosted, no workspace viewer." }];
 
 function routeHandlers() {
   const out: { file: string; method: string; guarded: boolean }[] = [];

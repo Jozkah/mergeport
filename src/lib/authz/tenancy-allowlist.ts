@@ -17,7 +17,6 @@ export const TENANCY_ALLOWLIST: TenancyAllow[] = [
   { file: "src/lib/local/scheduler.ts", models: ["workspaceInstallation"], reason: "System-wide scheduler (no workspace): counts whether ANY workspace has a usable GitHub connection, to decide whether to pace `reconcile.all`. Reads no tenant data; the handler fans out per workspace." },
   { file: "src/lib/github/webhook-maintenance.ts", models: ["githubAppState"], reason: "Daily housekeeping (a system job, no workspace): deletes install / OAuth states past their expiry in every workspace. Expired states are useless to everyone and hold only hashes." },
   { file: "src/lib/github/budget.ts", models: ["repository"], reason: "sourceBudgetKeyFor reads only the installationId of the repository a job names (the job carries its workspace); it picks which rate-limit budget the job spends from." },
-  { file: "src/lib/local/discovery.ts", models: ["discoveryCache"], ops: ["updateMany"], reason: "Crash recovery: an attempt interrupted by a restart is reset in every workspace, because the process that ran it served all of them." },
   { file: "src/lib/github/demo.ts", reason: "Demo mode: the seeded database is one synthetic workspace; DemoPort only serves repositories flagged isDemo." },
   { file: "src/lib/github/factory.ts", models: ["repository"], reason: "portForSync loads a repository by an id taken from a job payload or from a caller that already scoped it (requireRepo / job.workspaceId); it decides demo vs real credential and, hosted, which installation serves it (the binding is then loaded with the repository's own workspaceId, never a caller's)." },
   { file: "src/lib/sync/repository.ts", reason: "Source sync internals run for one repository id taken from a job (or a webhook already matched to it); every row they touch hangs off that repository, so it is the tenant boundary." },
@@ -28,22 +27,4 @@ export const TENANCY_ALLOWLIST: TenancyAllow[] = [
   { file: "src/lib/services/oauth.ts", models: ["member"], reason: "The consent page lists the caller's OWN active memberships (filtered by userId): the workspaces they may authorize an app for, across workspaces by design." },
   { file: "scripts/demo.ts", reason: "`npm run demo`: refuses a database that holds real repositories, seeds the demo workspace when the database has no users. Dev tool, no request, no tenant." },
   { file: "prisma/seed.ts", reason: "Seed script: refuses to run when real data exists and wipes the whole demo database." },
-];
-
-/**
- * Files that may call `firstWorkspace(db)`: single-profile plumbing with no workspace of its own. `firstWorkspace` FAILS CLOSED
- * (it throws when the database holds more than one workspace), so these paths refuse to run multi-tenant instead of silently
- * serving the oldest tenant. Request paths with a viewer must pass `viewer.workspaceId` instead and are not listed here.
- * tests/tenancy-scope.test.ts fails on any other file and on an entry that no longer calls it.
- */
-export const FIRST_WORKSPACE_ALLOWLIST: { file: string; reason: string }[] = [
-  { file: "src/lib/local/profile.ts", reason: "Defines it, and ensureLocalProfile bootstraps the profile's one workspace." },
-  { file: "src/lib/sync/engine.ts", reason: "Default workspace of an engine built without one (local profile); the runtime always passes it." },
-  { file: "src/lib/team/service.ts", reason: "Default workspace of a TeamService built without an engine or workspace (local profile)." },
-  { file: "src/lib/local/runtime.ts", reason: "Process singletons of the local app: default workspace when a caller names none, and the hub-link guard." },
-  { file: "src/lib/local/scheduler.ts", reason: "The in-process local scheduler dispatches desktop toasts for the profile's one workspace." },
-  { file: "src/lib/local/discovery.ts", reason: "Discovery cache of the profile; callers with a viewer pass the workspace, the retry scheduler has none." },
-  { file: "src/lib/local/discovery-jobs.ts", reason: "Space lookup for the background invitation-status refresh started by the local scheduler." },
-  { file: "src/lib/local/repo-watch.ts", reason: "The local repository watcher runs in the scheduler process for the profile's one workspace." },
-  { file: "src/lib/local/watch-settings.ts", reason: "Default workspace when the caller (the watcher) has no viewer; the settings action passes the viewer's." },
 ];

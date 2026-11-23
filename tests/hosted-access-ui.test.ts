@@ -1,6 +1,5 @@
 import { createElement } from "react";
 import { TooltipProvider } from "@/components/ui/Tooltip";
-import { DesktopOnly } from "@/components/ui/DesktopOnly";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestPrisma } from "./pg";
@@ -220,8 +219,6 @@ describe("hosted mode shows no desktop-only wording", () => {
     digest: () => import("@/app/(app)/digest/page").then((m) => m.default({ searchParams: Promise.resolve({}) } as never)),
     settings: () => import("@/app/(app)/settings/page").then((m) => m.default({ searchParams: Promise.resolve({}) })),
     "settings/members": () => import("@/app/(app)/settings/members/page").then((m) => m.default()),
-    "desktop-only (team)": () => import("@/app/(app)/team/page").then(async () => text(await DesktopOnly())),
-    "desktop-only (branches)": () => import("@/app/(app)/branches/page").then(async () => text(await DesktopOnly())),
   });
 
   it("none of the banned phrases appears on the key pages", async () => {
@@ -231,15 +228,6 @@ describe("hosted mode shows no desktop-only wording", () => {
     for (const [name, t] of rendered) {
       expect(t.length, `${name} rendered something`).toBeGreaterThan(20);
       for (const phrase of BANNED) expect(t, `${name} must not say "${phrase}"`).not.toContain(phrase);
-    }
-  });
-
-  it("the desktop-only pages say so and point back, instead of a 404", async () => {
-    await signedIn();
-    for (const path of ["team", "branches"]) {
-      const el = (await (await import(`@/app/(app)/${path}/page`)).default({ searchParams: Promise.resolve({}) })) as { type: unknown };
-      expect(el.type, path).toBe(DesktopOnly); // the page IS the explanation, not a 404
-      expect(text(DesktopOnly()).toLowerCase(), path).toContain("this page is for the desktop app");
     }
   });
 
@@ -259,7 +247,6 @@ describe("hosted mode shows no desktop-only wording", () => {
       renderToStaticMarkup(createElement(BackupPanel, { hosted: true })),
       renderToStaticMarkup(createElement(DigestActions, { day: "2026-01-01", read: false, hosted: true })),
       ...states.map((s) => markup(createElement(SyncBadge, { state: s, hosted: true }))),
-      text(DesktopOnly()),
     ];
     try {
       html.push(renderToStaticMarkup(createElement(NotificationSettings, { initial: prefs, hosted: true })));
@@ -285,21 +272,6 @@ describe("hosted mode shows no desktop-only wording", () => {
     expect(t).not.toContain("HIDDEN-SPACE-NAME");
     expect(t).not.toContain("Shared with the workspace"); // one phrase for the state
     expect(t).not.toContain("Save sharing");
-    // and the local app keeps its legacy Sharing section
-    vi.stubEnv("MERGEPORT_PUBLIC_URL", "");
-    const local = text(await (await import("@/app/(app)/admin/projects/page")).default());
-    expect(local).toContain("Save sharing");
-    expect(local).toContain("only on this computer");
     expect(project.id).toBeTruthy();
-  });
-
-  it("the local wording is unchanged when not hosted", async () => {
-    const { task } = await signedIn();
-    vi.stubEnv("MERGEPORT_PUBLIC_URL", "");
-    const help = text(await (await import("@/app/(app)/help/page")).default()).toLowerCase();
-    expect(help).toContain("this computer");
-    expect(help).toContain("gh auth login");
-    const t = text(await (await import("@/app/(app)/tasks/[id]/page")).default({ params: Promise.resolve({ id: task.id }), searchParams: Promise.resolve({}) })).toLowerCase();
-    expect(t).toContain("shared with your team. folder paths never are");
   });
 });

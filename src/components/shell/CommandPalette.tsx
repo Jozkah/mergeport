@@ -16,7 +16,7 @@ type Entry = { id: string; label: string; hint?: string; run: () => void };
 const PAGES: [string, string, string?][] = [
   ["Overview", "/"], ["Inbox", "/inbox"], ["My attention", "/attention"], ["Tasks", "/tasks"], ["Pull requests", "/pull-requests"], ["Issues", "/issues"],
   ["Planning board", "/planning"], ["Epics", "/planning?view=epics"], ["Iterations", "/planning?view=iterations"], ["Release readiness", "/planning?view=release"], ["Dependency map", "/planning?view=map"], ["Delivery analytics", "/planning?view=insights"],
-  ["Activity", "/activity"], ["AI assistant", "/ai"], ["AI: stand-up and briefings", "/ai?tab=brief"], ["AI: review my workspace", "/ai?tab=review"], ["AI: ask about a pull request", "/ai?tab=ask"], ["AI: draft tasks from notes", "/ai?tab=tasks"], ["Repositories", "/repositories"], ["Forks", "/forks"], ["Branches", "/branches"], ["Team", "/team"], ["Review capacity", "/capacity"], ["Sync status", "/sync"],
+  ["Activity", "/activity"], ["AI assistant", "/ai"], ["AI: stand-up and briefings", "/ai?tab=brief"], ["AI: review my workspace", "/ai?tab=review"], ["AI: ask about a pull request", "/ai?tab=ask"], ["AI: draft tasks from notes", "/ai?tab=tasks"], ["Repositories", "/repositories"], ["Forks", "/forks"], ["Review capacity", "/capacity"], ["Sync status", "/sync"],
   ["Who reviews what", "/admin/rules"], ["Label taxonomy", "/admin/labels"], ["Settings", "/settings"], ["Help", "/help"],
 ];
 

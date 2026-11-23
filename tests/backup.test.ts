@@ -4,13 +4,12 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { type Db } from "@/lib/db";
 import { createTestPrisma } from "./pg";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
-import { ensureLocalProfile } from "@/lib/local/profile";
 import { BACKUP_VERSION, exportBackup, parseBackup, previewRestore, restoreBackup } from "@/lib/services/backup";
 import { upsertRepository } from "@/lib/services/repositories";
 import { createTask } from "@/lib/services/tasks";
 import { setPrefs } from "@/lib/services/notification-prefs";
 import { saveView } from "@/lib/services/views";
-import { freshSeed } from "./helpers";
+import { freshSeed, makeProfile } from "./helpers";
 
 let S: Awaited<ReturnType<typeof freshSeed>>;
 const files: string[] = [];
@@ -19,7 +18,7 @@ async function target(withRepos: boolean): Promise<{ db: Db; v: Viewer }> {
   const file = path.resolve(".data", `restore-${process.pid}-${n++}.db`);
   files.push(file);
   const db = createTestPrisma(file);
-  const p = await ensureLocalProfile(db, { id: 9001n, login: "restorer", name: "Restorer", avatarUrl: null, host: "github.com" });
+  const p = await makeProfile(db, { id: 9001n, login: "restorer", name: "Restorer" });
   if (withRepos) {
     for (const r of await S.db.repository.findMany({ where: { isDemo: false }, include: { owner: true } })) {
       await upsertRepository(db, p.workspace.id, { githubId: r.githubId, fullName: r.fullName, name: r.name, htmlUrl: r.htmlUrl, visibility: "PRIVATE", isFork: r.isFork, defaultBranch: r.defaultBranch, archived: false, owner: { githubId: r.owner.githubId, login: r.owner.login, type: "ORGANIZATION" } });
@@ -94,18 +93,15 @@ describe("backup and restore", () => {
     await tdb.$disconnect();
   });
 
-  it("restores unsent edits only into a team space that exists there, and keeps them pending", async () => {
+  it("reads the unsent team-space edits of an old backup and ignores them", async () => {
     const { db, admin } = S;
-    const space = await db.space.create({ data: { workspaceId: admin.workspaceId, remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
-    await db.outboxOp.create({ data: { id: "op-1", spaceId: space.id, entityType: "card", entityId: "c1", kind: "UPSERT", data: { a: 1 }, status: "FAILED" } });
-    const text = await exportBackup(db, admin);
-    const b = parseBackup(text);
-    expect(b.source.unsentEdits).toBe(1);
+    const b = parseBackup(await exportBackup(db, admin));
+    expect(b.source.unsentEdits).toBe(0);
+    expect(b.outbox).toEqual([]);
+    const old = { ...b, outbox: [{ id: "op-1", entityType: "card", entityId: "c1", kind: "UPSERT", data: { a: 1 }, baseVersion: 0, status: "FAILED", space: "space-1" }] };
     const { db: tdb, v } = await target(true);
-    expect((await restoreBackup(tdb, v, b, { confirmed: true })).outbox).toEqual({ restorable: 0, skipped: 1 });
-    await tdb.space.create({ data: { workspaceId: v.workspaceId, remoteId: "space-1", teamRemoteId: "t1", kind: "COMMON", name: "x", repoOwner: "o", repoName: "r" } });
-    expect((await restoreBackup(tdb, v, b, { confirmed: true })).outbox).toEqual({ restorable: 1, skipped: 0 });
-    expect((await tdb.outboxOp.findUniqueOrThrow({ where: { id: "op-1" } })).status).toBe("PENDING");
+    expect((await restoreBackup(tdb, v, parseBackup(JSON.stringify(old)), { confirmed: true })).outbox).toEqual({ restorable: 0, skipped: 1 });
+    expect(await tdb.outboxOp.count()).toBe(0);
     await tdb.$disconnect();
   });
 

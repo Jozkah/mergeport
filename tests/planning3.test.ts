@@ -181,9 +181,6 @@ describe("dependencies across projects", () => {
     await removeDependency(db, admin, ids.cards.cWeb.id, dashCard.id);
     await addDependency(db, admin, ids.cards.cWeb.id, dashCard.id, "related");
     expect(await blockedByCount(db, dashCard.id)).toBe(0);
-    // projects shared with different audiences cannot be linked
-    await db.project.update({ where: { id: ids.projects.dash.id }, data: { spaceId: "some-space" } });
-    await expect(addDependency(db, admin, ids.cards.cWeb.id, dashCard.id, "blocks")).rejects.toThrow(/different audiences/);
   });
 
   it("a blocker that follows a PR closed without merging keeps blocking, in planning and in attention", async () => {

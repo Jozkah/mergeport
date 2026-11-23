@@ -6,11 +6,11 @@ import { useEffect, useRef, useState } from "react";
 
 /**
  * Keyboard operation for the whole app, without a mouse:
- *   ?  this list        g then i/a/t/p/b/f/s  go to Inbox / Attention / Tasks / Planning / Branches / Forks / Sync
+ *   ?  this list        g then i/a/t/p/f/s  go to Inbox / Attention / Tasks / Planning / Forks / Sync
  *   j / k  next or previous row in a list     Enter  open the focused row     Ctrl or ⌘ + K  command palette
  * Shortcuts never fire while you type in a field, and never with a modifier held.
  */
-const GO: Record<string, [string, string]> = { i: ["Inbox", "/inbox"], a: ["My attention", "/attention"], t: ["Tasks", "/tasks"], p: ["Planning", "/planning"], b: ["Branches", "/branches"], f: ["Forks", "/forks"], s: ["Sync status", "/sync"], o: ["Overview", "/"] };
+const GO: Record<string, [string, string]> = { i: ["Inbox", "/inbox"], a: ["My attention", "/attention"], t: ["Tasks", "/tasks"], p: ["Planning", "/planning"], f: ["Forks", "/forks"], s: ["Sync status", "/sync"], o: ["Overview", "/"] };
 
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || !!t.closest('[role="dialog"]'));
 

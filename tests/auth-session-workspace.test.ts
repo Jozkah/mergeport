@@ -76,7 +76,6 @@ describe("first sign-in and onboarding", () => {
     expect((await db().session.findUniqueOrThrow({ where: { id: session.id } })).activeWorkspaceId).toBe(ws.id);
     const a = await getAuth();
     expect(a?.viewer).toMatchObject({ workspaceId: ws.id, userId, isAdmin: true, githubId: null });
-    expect(await db().teamConfig.count({ where: { workspaceId: ws.id } })).toBe(1);
   });
 
   it("rejects an empty or oversized name and creates nothing", async () => {

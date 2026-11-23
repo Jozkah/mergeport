@@ -29,7 +29,6 @@ import { GithubAppError } from "@/lib/github/app-auth";
 import { requestAccessRefresh } from "@/lib/github/access-cache";
 import { generateDigest, getDigest, latestDigest } from "@/lib/services/digest";
 import { refreshForkAction, refreshRepositoryAction } from "@/app/actions";
-import { shareRepositoryAction, unshareRepositoryAction } from "@/app/team-actions";
 import { runOne } from "@/lib/jobs";
 
 /**
@@ -516,15 +515,6 @@ describe("the refresh job", () => {
     expect(await runOne(db(), { [ACCESS_JOB]: handlers[ACCESS_JOB] }, new Date(Date.now() + 1000))).toMatch(/done|requeued/);
   });
 
-  it("does nothing when the server is not hosted", async () => {
-    const x = await world();
-    const { handlers } = await import("@/lib/local/handlers");
-    await db().githubRepoAccess.deleteMany({});
-    vi.stubEnv("MERGEPORT_PUBLIC_URL", "");
-    await handlers[ACCESS_JOB]({ userId: x.alice.user.id } as never, {} as never);
-    expect(await db().githubRepoAccess.count()).toBe(0);
-  });
-
   it("has a generous per-person budget (key user:<id>): past it the job asks GitHub for nothing, and another person's budget is their own", async () => {
     const x = await world();
     await db().rateLimitState.deleteMany({});
@@ -624,7 +614,7 @@ const form = (o: Record<string, string>) => {
 };
 
 describe("F1: seeing a repository through GitHub never allows a change", () => {
-  it("a GitHub-only member is Forbidden to share, unshare, refresh and refresh a fork; a granted member and an administrator are not", async () => {
+  it("a GitHub-only member is Forbidden to refresh a repository and to refresh a fork; a granted member and an administrator are not", async () => {
     const x = await world();
     await db().forkMapping.create({ data: { forkRepoId: x.priv1.id, upstreamRepoId: x.pub.id, forkBranch: "main", upstreamBranch: "main" } });
     const mapping = await db().forkMapping.findFirstOrThrow({});
@@ -635,10 +625,6 @@ describe("F1: seeing a repository through GitHub never allows a change", () => {
     expect(!r1.ok && r1.error).toMatch(noGrant);
     const r2 = await refreshForkAction(form({ mappingId: mapping.id }));
     expect(!r2.ok && r2.error).toMatch(noGrant);
-    const r3 = await shareRepositoryAction(form({ repositoryId: x.priv1.id, spaceId: "any", confirm: "on" }));
-    expect(!r3.ok && r3.error).toMatch(noGrant);
-    const r4 = await unshareRepositoryAction(form({ repositoryId: x.priv1.id }));
-    expect(!r4.ok && r4.error).toMatch(noGrant);
     expect(await db().job.count({ where: { type: { in: ["sync.repository", "sync.fork"] } } })).toBe(0);
 
     // a member with a real grant (canManageWork) still works
@@ -646,8 +632,6 @@ describe("F1: seeing a repository through GitHub never allows a change", () => {
     await signInAs(x.carol.user.id, x.w.ws.id);
     expect((await refreshRepositoryAction(form({ repositoryId: x.priv1.id }))).ok).toBe(true);
     expect((await refreshForkAction(form({ mappingId: mapping.id }))).ok).toBe(true);
-    const shared = await shareRepositoryAction(form({ repositoryId: x.priv1.id, spaceId: "missing", confirm: "on" }));
-    expect(!shared.ok && shared.error).not.toMatch(noGrant); // got past the capability check (the space does not exist)
 
     // an administrator works
     await signInAs(x.w.owner.id, x.w.ws.id);

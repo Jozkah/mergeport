@@ -5,13 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { refreshRepositoryAction, untrackRepositoryAction } from "@/app/actions";
-import { shareRepositoryAction, unshareRepositoryAction } from "@/app/team-actions";
 import { ActionMenu } from "@/components/ui/ActionMenu";
 import { Avatar } from "@/components/ui/Avatar";
 import { PendingLabel } from "@/components/ui/PendingLabel";
-import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/ToastProvider";
-import { Building2, GitFork, Globe, Lock, Search, Unplug, User, Users, X } from "@/components/ui/icons";
+import { Building2, GitFork, Globe, Lock, Search, Unplug, User, X } from "@/components/ui/icons";
 import { ctx } from "@/lib/ctx";
 import { plainText } from "@/lib/inputs";
 
@@ -34,16 +32,9 @@ export type RepoRow = {
   synced: string;
   /** Exact last-sync time, for the tooltip. */
   syncedAt?: string | null;
-  spaceId: string | null;
-  spaceName: string | null;
-  canUnshare: boolean;
   projects: string[];
-  /** Polled by the auto-sync watcher (no webhooks for this repository), with the words for the pill. */
-  watch: { label: string; title: string } | null;
 };
-export type SpaceOpt = { id: string; name: string; everyone: boolean };
-
-type Filter = "all" | "problems" | "private" | "forks" | "archived" | "shared";
+type Filter = "all" | "problems" | "private" | "forks" | "archived";
 const PAGE = 30;
 
 const fd = (o: Record<string, string>) => {
@@ -53,17 +44,17 @@ const fd = (o: Record<string, string>) => {
 };
 
 /**
- * One calm line per repository: who it belongs to, whether it is healthy, who it is shared with, and one button. Everything else
- * (refresh, share, stop tracking, open on GitHub) is in the row's menu, and the choices that matter get a short confirmation.
+ * One calm line per repository: who it belongs to, whether it is healthy, and one button. Everything else
+ * (refresh, stop tracking, open on GitHub) is in the row's menu, and the choices that matter get a short confirmation.
  */
-export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; writable: SpaceOpt[]; hosted?: boolean }) {
+export function RepoList({ rows }: { rows: RepoRow[] }) {
   const router = useRouter();
   const { show } = useToast();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [limit, setLimit] = useState(PAGE);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [dialog, setDialog] = useState<{ kind: "share" | "untrack"; ids: string[] } | null>(null);
+  const [dialog, setDialog] = useState<{ ids: string[] } | null>(null);
   const [pending, start] = useTransition();
 
   const counts = useMemo(
@@ -73,16 +64,13 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
       private: rows.filter((r) => r.visibility !== "PUBLIC").length,
       forks: rows.filter((r) => r.fork).length,
       archived: rows.filter((r) => r.archived).length,
-      shared: rows.filter((r) => r.spaceId).length,
     }),
     [rows],
   );
-  const match = (r: RepoRow) => (filter === "all" ? !r.archived : filter === "problems" ? r.status !== "ok" : filter === "private" ? r.visibility !== "PUBLIC" : filter === "forks" ? !!r.fork : filter === "archived" ? r.archived : !!r.spaceId);
+  const match = (r: RepoRow) => (filter === "all" ? !r.archived : filter === "problems" ? r.status !== "ok" : filter === "private" ? r.visibility !== "PUBLIC" : filter === "forks" ? !!r.fork : r.archived);
   const needle = q.trim().toLowerCase();
-  const visible = rows.filter((r) => match(r) && (!needle || `${r.fullName} ${r.projects.join(" ")} ${r.spaceName ?? ""}`.toLowerCase().includes(needle)));
+  const visible = rows.filter((r) => match(r) && (!needle || `${r.fullName} ${r.projects.join(" ")}`.toLowerCase().includes(needle)));
   const shown = visible.slice(0, limit);
-  // The "Shared with" column only earns its space when at least one repository is shared.
-  const anyShared = counts.shared > 0;
   const allPicked = shown.length > 0 && shown.every((r) => picked.has(r.id));
 
   const run = (label: string, jobs: Promise<{ ok: boolean; error?: string }>[]) =>
@@ -101,7 +89,6 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
     { key: "problems", label: "Needs attention" },
     { key: "private", label: "Private" },
     { key: "forks", label: "Forks" },
-    { key: "shared", label: "Shared" },
     { key: "archived", label: "Archived" },
   ];
 
@@ -126,7 +113,7 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
         <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-line bg-canvas px-3 py-2 text-[12.5px]" role="region" aria-label="Selected repositories">
           <strong className="font-medium">{picked.size} selected</strong>
           <button type="button" className="btn !h-7 !px-2.5 !text-[12.5px]" aria-disabled={pending || undefined} aria-busy={pending} data-loading={pending} onClick={() => { if (!pending) refresh([...picked]); }}><PendingLabel mode={pending ? "pending" : "idle"} pending="Refreshing…" size={12}>Refresh</PendingLabel></button>
-          <button type="button" className="btn text-blocked !h-7 !px-2.5 !text-[12.5px]" disabled={pending} aria-busy={pending} onClick={() => setDialog({ kind: "untrack", ids: [...picked] })}>Stop tracking</button>
+          <button type="button" className="btn text-blocked !h-7 !px-2.5 !text-[12.5px]" disabled={pending} aria-busy={pending} onClick={() => setDialog({ ids: [...picked] })}>Stop tracking</button>
           <button type="button" className="ml-auto text-ink-3 hover:text-ink" onClick={() => setPicked(new Set())}>Clear</button>
         </div>
       )}
@@ -139,7 +126,6 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
             <input type="checkbox" aria-label="Select all shown" checked={allPicked} onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((r) => r.id)) : new Set())} />
             <span className="min-w-0 flex-1">Repository</span>
             <span className="hidden w-44 md:block">Status</span>
-            {anyShared && <span className="hidden w-48 lg:block">Shared with</span>}
             <span className="hidden w-40 xl:block">Projects</span>
             <span className="w-10 text-right md:w-[8.5rem]"><span className="sr-only">Actions</span></span>
           </li>
@@ -153,7 +139,6 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
                     <Link href={`/repositories/${r.id}/code`} className="truncate text-[14px] font-medium text-ink hover:underline">{r.name}</Link>
                     <span title={r.visibility === "PUBLIC" ? "Public" : "Private"} className="inline-flex shrink-0 items-center text-ink-3">{r.visibility === "PUBLIC" ? <Globe size={12} aria-label="Public" /> : <Lock size={12} aria-label="Private" />}</span>
                     {r.archived && <span className="pill pill-unknown">Archived</span>}
-                    {r.watch && <span className="pill pill-unknown" title={r.watch.title}>{r.watch.label}</span>}
                   </p>
                   <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-ink-3">
                     <span className="inline-flex items-center gap-1" title={r.ownerType === "ORGANIZATION" ? "Organization account" : r.ownerType === "USER" ? "Personal account" : "Account type unknown"}>{r.ownerType === "ORGANIZATION" ? <Building2 size={11} aria-hidden /> : <User size={11} aria-hidden />}{r.ownerLogin}</span>
@@ -170,9 +155,6 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
                   <span className="text-[11.5px] text-ink-3">· {r.synced}</span>
                 </p>
               </div>
-              {anyShared && <div className="hidden w-48 shrink-0 text-[12.5px] lg:block">
-                {r.spaceId ? <span className="inline-flex items-center gap-1.5 text-ink-2"><Users size={13} aria-hidden className="text-ink-3" /><span className="truncate">{r.spaceName ?? "a team space"}</span></span> : <span className="text-ink-3">{hosted ? "Shared with the workspace" : "Only on this computer"}</span>}
-              </div>}
               <div className="hidden w-40 shrink-0 text-[12.5px] xl:block">
                 {r.projects.length === 0 ? <span className="text-ink-3">No project</span> : <span className="flex flex-wrap gap-1">{r.projects.slice(0, 2).map((p) => <span key={p} className="rounded-full border border-line px-2 py-0.5 text-[11.5px]">{p}</span>)}{r.projects.length > 2 && <span className="text-ink-3">+{r.projects.length - 2}</span>}</span>}
               </div>
@@ -184,9 +166,7 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
                     { label: "Refresh now", onSelect: () => refresh([r.id]) },
                     { label: "Open on GitHub", href: `https://github.com/${r.fullName}`, external: true },
                     "sep",
-                    r.spaceId ? { label: "Stop sharing", disabled: !r.canUnshare, onSelect: () => run("No longer shared.", [unshareRepositoryAction(fd({ repositoryId: r.id })) as Promise<{ ok: boolean; error?: string }>]) } : { label: "Share with my team…", disabled: writable.length === 0, onSelect: () => setDialog({ kind: "share", ids: [r.id] }) },
-                    "sep",
-                    { label: "Stop tracking…", danger: true, onSelect: () => setDialog({ kind: "untrack", ids: [r.id] }) },
+                    { label: "Stop tracking…", danger: true, onSelect: () => setDialog({ ids: [r.id] }) },
                   ]}
                 />
               </div>
@@ -194,13 +174,11 @@ export function RepoList({ rows, writable, hosted = false }: { rows: RepoRow[]; 
           ))}
         </ul>
       )}
-      {!anyShared && !hosted && visible.length > 0 && <p className="text-[12px] text-ink-3">All repositories are only on this computer.</p>}
       {visible.length > shown.length && <button type="button" className="btn self-start" onClick={() => setLimit((l) => l + PAGE)}>Show {Math.min(PAGE, visible.length - shown.length)} more <span className="text-ink-3">of {visible.length - shown.length} left</span></button>}
 
-      <Dialog open={dialog?.kind === "untrack"} onClose={() => setDialog(null)} title={dialog && dialog.ids.length > 1 ? `Stop tracking ${dialog.ids.length} repositories?` : "Stop tracking this repository?"} description={`Stopping tracking removes it from the dashboard ${hosted ? "of this workspace" : "on this computer"} only. Nothing is deleted or changed on GitHub, and you can connect it again later.`}>
+      <Dialog open={dialog !== null} onClose={() => setDialog(null)} title={dialog && dialog.ids.length > 1 ? `Stop tracking ${dialog.ids.length} repositories?` : "Stop tracking this repository?"} description={`Stopping tracking removes it from the dashboard of this workspace only. Nothing is deleted or changed on GitHub, and you can connect it again later.`}>
         <button type="button" className="btn btn-danger" onClick={() => { const ids = dialog!.ids; setDialog(null); run(ids.length === 1 ? "Removed from tracking." : `${ids.length} repositories removed from tracking.`, ids.map((id) => untrackRepositoryAction(fd({ repositoryId: id })) as Promise<{ ok: boolean; error?: string }>)); }}>Stop tracking</button>
       </Dialog>
-      <ShareDialog open={dialog?.kind === "share"} id={dialog?.ids[0]} name={rows.find((r) => r.id === dialog?.ids[0])?.fullName ?? ""} spaces={writable} onClose={() => setDialog(null)} onDone={(msg) => { setDialog(null); show("ok", msg); router.refresh(); }} onError={(m) => show("error", m)} />
     </div>
   );
 }
@@ -223,53 +201,6 @@ function Dialog({ open, onClose, title, description, children }: { open: boolean
           <div className="flex justify-end gap-2">
             <D.Close className="btn">Cancel</D.Close>
             {children}
-          </div>
-        </D.Content>
-      </D.Portal>
-    </D.Root>
-  );
-}
-
-function ShareDialog({ open, id, name, spaces, onClose, onDone, onError }: { open: boolean; id?: string; name: string; spaces: SpaceOpt[]; onClose: () => void; onDone: (m: string) => void; onError: (m: string) => void }) {
-  const [space, setSpace] = useState("");
-  const [busy, setBusy] = useState(false);
-  const chosen = space || spaces[0]?.id || "";
-  return (
-    <D.Root open={open} onOpenChange={(o) => !o && onClose()}>
-      <D.Portal>
-        <D.Overlay className="scrim fixed inset-0 z-40 bg-scrim" />
-        <D.Content className="sheet fixed left-1/2 top-1/2 z-50 w-[min(460px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-[14px] border border-line bg-surface p-5 shadow-pop">
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <D.Title className="text-[16px] font-medium">Share {name}</D.Title>
-              <D.Description className="mt-1 text-[13px] text-ink-3">Everyone with access to the space you pick will see this repository&apos;s name and its planning data (tasks, boards). Your code stays on GitHub with GitHub&apos;s own permissions.</D.Description>
-            </div>
-            <D.Close className="btn btn-quiet btn-icon -mr-1.5" aria-label="Close"><X size={16} aria-hidden /></D.Close>
-          </div>
-          <label className="label" htmlFor="share-space">Share with</label>
-          <Select id="share-space" value={chosen} onChange={(e) => setSpace(e.target.value)} className="select">
-            {spaces.map((s) => <option key={s.id} value={s.id}>{s.name}{s.everyone ? " (everyone on the team)" : ""}</option>)}
-          </Select>
-          <div className="mt-5 flex justify-end gap-2">
-            <D.Close className="btn">Cancel</D.Close>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={!chosen || !id}
-              aria-disabled={busy || undefined}
-              aria-busy={busy}
-              data-loading={busy}
-              onClick={async () => {
-                if (busy) return;
-                setBusy(true);
-                const r = await shareRepositoryAction(fd({ repositoryId: id!, spaceId: chosen, confirm: "on" }));
-                setBusy(false);
-                if (r.ok) onDone("Shared. It reaches everyone in that space on their next sync.");
-                else onError(r.error);
-              }}
-            >
-              <PendingLabel mode={busy ? "pending" : "idle"} pending="Sharing…">Share</PendingLabel>
-            </button>
           </div>
         </D.Content>
       </D.Portal>

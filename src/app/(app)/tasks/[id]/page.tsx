@@ -13,11 +13,6 @@ import { Select } from "@/components/ui/Select";
 import { Avatar, LabelChip, PageHeader, Panel, Time } from "@/components/ui/primitives";
 import { ArrowLeft, ExternalLink, ListChecks, MessageSquare, Pencil, Trash2 } from "@/components/ui/icons";
 import { Checklist } from "@/components/tasks/Checklist";
-import { WorktreePanel } from "@/components/work/WorktreePanel";
-import { linksForTask } from "@/lib/services/work-links";
-import { isHosted } from "@/lib/public-url";
-import { taskBranchAction } from "@/app/phase4-actions";
-import type { ActionResult } from "@/lib/action-result";
 import { PromotePanel } from "@/components/tasks/TemplatePanels";
 import { TaskFields } from "@/components/tasks/TaskFields";
 import { addCommentAction, deleteCommentAction, deleteTaskAction, editCommentAction, updateTaskAction } from "@/app/task-actions";
@@ -44,18 +39,6 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const labels = task.labels as string[];
   const canDelete = !task.workItemId && (viewer.isAdmin || task.authorLogin?.toLowerCase() === viewer.login.toLowerCase() || task.createdById === viewer.memberId);
   const dueValue = task.dueDate ? task.dueDate.toISOString().slice(0, 10) : "";
-  // Hosted: there is no "this computer", so no worktree panel and no branch-to-folder field.
-  const hosted = isHosted();
-  const worktreeLinks = hosted ? null : await linksForTask(db, viewer, task.id);
-
-  /** One Save for the whole Details form: the task fields first, then the branch, each through its own unchanged action. */
-  async function saveDetailsAction(fd: FormData): Promise<ActionResult> {
-    "use server";
-    const saved = await updateTaskAction(fd);
-    if (!saved.ok) return saved;
-    return fd.has("branch") ? taskBranchAction(fd) : saved;
-  }
-
   return (
     <>
       <p className="mb-2"><Link href="/tasks" className="inline-flex items-center gap-1 text-[12.5px] text-ink-3 hover:text-ink"><ArrowLeft size={13} aria-hidden /> Tasks</Link></p>
@@ -102,10 +85,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         </div>
 
         <aside className="flex min-w-0 flex-col gap-5 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-          {worktreeLinks && <WorktreePanel links={worktreeLinks} tz={viewer.timezone} repositoryId={full.workItem?.repositoryId ?? ""} note="Set the branch in Details to match this task to a folder on your computer." defaultOpen={worktreeLinks.mapped} summary={!worktreeLinks.branch ? "No branch set" : worktreeLinks.mapped ? undefined : "Repository not mapped"} />}
           <PromotePanel db={db} viewer={viewer} taskId={task.id} linked={!!task.workItemId} promoteTo={promote} />
           <Panel title="Details">
-            <ActionForm action={saveDetailsAction} submitLabel="Save changes" pendingLabel="Saving…" resetOnSuccess={false} className="p-4">
+            <ActionForm action={updateTaskAction} submitLabel="Save changes" pendingLabel="Saving…" resetOnSuccess={false} className="p-4">
               <input type="hidden" name="id" value={task.id} />
               <input type="hidden" name="taskId" value={task.id} />
               <div className="flex flex-col gap-3">
@@ -130,9 +112,6 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                   <Select id="s-status" name="status" className="select" defaultValue={task.column.key}>{columns.map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}</Select></div>
                 {openItems > 0 && <label className="flex items-start gap-2 text-[12.5px] text-ink-2"><input type="checkbox" name="tickOpen" className="mt-0.5" /> <span>If I move this to Done, also check the {openItems} open checklist item{openItems === 1 ? "" : "s"}.</span></label>}
                 <TaskFields people={people} me={viewer.login} values={{ assignee: task.assigneeLogin ?? "", priority: task.priority, due: dueValue, labels: labels.join(", ") }} />
-                {!hosted && <div><label className="label" htmlFor="tb-branch">Branch</label>
-                  <input id="tb-branch" name="branch" className="input font-mono" defaultValue={task.branchRef ?? ""} placeholder="fix-login" aria-describedby="tb-branch-help" />
-                  <p id="tb-branch-help" className="mt-1 text-[12px] text-ink-3">Shared with your team. Folder paths never are.</p></div>}
               </div>
             </ActionForm>
           </Panel>
@@ -140,7 +119,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
           {canDelete && (
             <ConfirmSheet
               title="Delete this task?"
-              consequence={`The task, its discussion and its history are removed for everyone in the ${hosted ? "workspace" : "team"}. This cannot be undone.`}
+              consequence={`The task, its discussion and its history are removed for everyone in the workspace. This cannot be undone.`}
               action={deleteTaskAction}
               submitLabel="Delete task"
               pendingLabel="Deleting…"
