@@ -2,7 +2,6 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { SESSION_COOKIE, findSession } from "@/lib/auth/session";
 import { bus, dataVersion } from "@/lib/local/runtime";
-import { markBrowserSeen } from "@/lib/local/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,10 +19,8 @@ export async function GET(req: Request) {
       const onChange = (e: unknown) => send(e);
       bus.on("change", onChange);
       const ka = setInterval(() => {
-        markBrowserSeen();
         controller.enqueue(enc.encode(`: keepalive\n\n`));
       }, 25_000);
-      markBrowserSeen();
       cleanup = () => {
         bus.off("change", onChange);
         clearInterval(ka);

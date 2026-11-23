@@ -79,7 +79,6 @@ export function LiveRefresh() {
       };
     };
     const report = () => {
-      void fetch("/api/sync/visibility", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ visible: document.visibilityState === "visible" }) }).catch(() => {});
       if (document.visibilityState === "visible" && stale.current) refreshNow();
     };
     connect();

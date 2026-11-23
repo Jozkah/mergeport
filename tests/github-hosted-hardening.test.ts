@@ -7,7 +7,6 @@ import { createSession, SESSION_COOKIE } from "@/lib/auth/session";
 import { loadViewer, repoWhere, type Viewer } from "@/lib/authz/viewer";
 import { ForbiddenError } from "@/lib/errors";
 import { GithubNotConnectedError, GithubWritesDisabledError } from "@/lib/github/hosted";
-import { loadBoundInstallation } from "@/lib/github/binding";
 import { portForSync } from "@/lib/github/factory";
 import { guardSourceBudget } from "@/lib/github/budget";
 import { GithubError } from "@/lib/github/port";
@@ -200,18 +199,6 @@ describe("F5: capacity is by GitHub account", () => {
     expect(rows.find((r) => r.login === "alice")!.queued).toBe(0);
     expect(rows.find((r) => r.login === "carol")!.queued).toBe(1);
     expect(alice.user.id).toBeTruthy();
-  });
-});
-
-describe("F6: the hosted watchlist", () => {
-  it("says it is not available instead of tracking repositories nothing can read", async () => {
-    const x = await world();
-    await signIn(x.w.owner.id, x.w.ws.id);
-    const { watchlistAction } = await import("@/app/actions");
-    const r = await watchlistAction({ text: "https://github.com/acme/pub" });
-    expect(r).toEqual(expect.objectContaining({ ok: false, error: expect.stringMatching(/Connect repositories/) }));
-    expect(await db().repository.count({ where: { workspaceId: x.w.ws.id } })).toBe(1); // only the one tracked through the connection
-    expect(await loadBoundInstallation(db(), x.w.ws.id, BigInt(inst.id))).not.toBeNull();
   });
 });
 

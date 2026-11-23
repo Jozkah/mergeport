@@ -7,7 +7,7 @@ import { enqueue, runOne } from "@/lib/jobs";
 import { loadBoundInstallation } from "@/lib/github/binding";
 import { resetInstallationTokenCache } from "@/lib/github/app-auth";
 import { GithubNotConnectedError, GithubWritesDisabledError } from "@/lib/github/hosted";
-import { installationBudgetKey, installationCachePrefix, portForDiscovery, portForSync, portForWrite } from "@/lib/github/factory";
+import { installationBudgetKey, installationCachePrefix, portForSync, portForWrite } from "@/lib/github/factory";
 import { workspaceGithubStatus } from "@/lib/github/status";
 import { listInstallationRepos, trackInstallationRepos } from "@/lib/services/installation-repos";
 import { ForbiddenError, ValidationError } from "@/lib/errors";
@@ -138,7 +138,6 @@ describe("a workspace without a connection stays 'not connected'", () => {
     const owner = await db().githubOwner.create({ data: { githubId: 99n, login: "acme" } });
     const repo = await db().repository.create({ data: { workspaceId: w.ws.id, githubId: 7n, ownerId: owner.id, name: "priv", fullName: "acme/priv", htmlUrl: "https://github.com/acme/priv", visibility: "PRIVATE", defaultBranch: "main" } });
     await expect(portForSync(db(), repo.id)).rejects.toBeInstanceOf(GithubNotConnectedError);
-    await expect(portForDiscovery(db(), { id: "1", login: "x" }, { workspaceId: w.ws.id })).rejects.toBeInstanceOf(GithubNotConnectedError);
     await enqueue(db(), { type: "sync.repository", payload: { repositoryId: repo.id }, dedupeKey: "s", workspaceId: w.ws.id });
     expect(await drain()).toEqual(["done"]);
     expect(await db().workItem.count()).toBe(0);

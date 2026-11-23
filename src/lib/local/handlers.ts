@@ -11,15 +11,11 @@ import { checkInstallationFromGithub } from "@/lib/github/installation-check";
 import { pruneGithubAppData } from "@/lib/github/webhook-maintenance";
 import { enqueueHostedReconcile } from "@/lib/github/webhook-pacing";
 import type { Handler, JobRow } from "@/lib/jobs";
-import { UPDATE_JOB, maybeRequestUpdate, updateHandlers } from "@/lib/local/upstream-updater-job";
-import { isHosted } from "@/lib/public-url";
-import { RELEASES_JOB, maybeRequestReleaseCheck, runReleaseCheck } from "@/lib/services/upstream-releases";
 import { setStatus, syncFork, syncItem, syncRepository } from "@/lib/sync/repository";
 
 /**
- * Jobs for SOURCE repositories (issues, PRs, comments, reviews, branches), fetched with the signed-in person's own
- * access. Their rate-limit budget ("source") is tracked separately from coordination-space sync, so a burst of source
- * refreshes can never starve shared-state sync, and vice versa.
+ * Jobs for SOURCE repositories (issues, PRs, comments, reviews, branches), fetched through each repository's own GitHub App
+ * installation. Their rate-limit budget is tracked per installation (budget.ts).
  */
 
 export const RECONCILE_EVERY_MS = 15 * 60_000;
@@ -91,74 +87,45 @@ const rawHandlers: Record<string, Handler> = {
         await recordRate(port.lastRate(), budget);
       }
     }
-    if (isHosted()) return; // the auto-update (clone and push) and the release watch stay off for hosted workspaces
-    await maybeRequestUpdate(db, p.mappingId); // opt-in upstream auto-update, when the fork is now known to be behind
-    await maybeRequestReleaseCheck(db, p.mappingId); // opt-in release watch (its own 15-minute cap), whether or not the fork is behind
-  }) as Handler,
-  ...updateHandlers(db),
-  // Release watch: reads the upstream's releases through the GitHub API only (no clone, no git, no command), within the same rate-limit budget.
-  [RELEASES_JOB]: (async (p: { mappingId: string; manual?: boolean }) => {
-    const m = await db.forkMapping.findUnique({ where: { id: p.mappingId } });
-    if (!m) return;
-    await guardSourceBudget();
-    const port = await portForSync(db, m.forkRepoId);
-    if (!port) return;
-    try {
-      await runReleaseCheck(db, port, p.mappingId, { manual: p.manual === true });
-    } finally {
-      await recordRate(port.lastRate());
-      (await import("@/lib/local/runtime")).notifyChange("state"); // redraw open pages: the history may have changed
-    }
   }) as Handler,
   // Recurrence is owned by the runner (ensureRecurring), never by this handler.
   // A system-wide job (no workspace): it fans out over the workspaces and everything it queues belongs to exactly one of them.
   "reconcile.all": (async () => {
-    const { enqueue } = await import("@/lib/jobs");
     await forEachWorkspace(db, "reconcile.all", async (workspaceId) => {
-      if (isHosted()) {
-        // Only workspaces with a usable GitHub connection, and only repositories served by an installation. Others have nothing to reconcile.
-        if (!(await workspaceGithubStatus(db, workspaceId)).bound) return;
-        // An installation that sends webhooks reconciles hourly instead (webhook-pacing.ts); anything unhealthy or silent still runs every time.
-        await enqueueHostedReconcile(db, workspaceId);
-        return;
-      }
-      const repos = await db.repository.findMany({ where: { workspaceId, trackingStatus: { in: ["ACTIVE", "DISCONNECTED"] }, isDemo: false }, select: { id: true } });
-      for (const r of repos) await enqueue(db, { type: "sync.repository", payload: { repositoryId: r.id }, dedupeKey: `sync:${r.id}`, workspaceId });
-      // A fork that is NOT behind never reaches an update request, so release watches are asked for here as well (each capped to one check per ~15 minutes).
-      const watches = await db.upstreamUpdateConfig.findMany({ where: { enabled: true, mode: "releases", mapping: { fork: { workspaceId } } }, select: { mappingId: true } });
-      for (const w of watches) await maybeRequestReleaseCheck(db, w.mappingId);
+      // Only workspaces with a usable GitHub connection, and only repositories served by an installation. Others have nothing to reconcile.
+      if (!(await workspaceGithubStatus(db, workspaceId)).bound) return;
+      // An installation that sends webhooks reconciles hourly instead (webhook-pacing.ts); anything unhealthy or silent still runs every time.
+      await enqueueHostedReconcile(db, workspaceId);
     });
-    if (isHosted()) {
-      // The reconcile pacing also renews what GitHub says each linked person may open (their data is older than REFRESH_AFTER). One job per
-      // person (deduplicated), oldest first, capped; page loads trigger the same job for people who are active right now.
-      const stale = await db.githubUserToken.findMany({
-        where: { status: "OK", OR: [{ accessCheckedAt: null }, { accessCheckedAt: { lt: new Date(Date.now() - REFRESH_AFTER_MS) } }], user: { members: { some: { status: "ACTIVE" } } } },
-        select: { userId: true },
-        orderBy: { accessCheckedAt: { sort: "asc", nulls: "first" } },
-        take: 200,
-      });
-      for (const s of stale) await requestAccessRefresh(db, s.userId);
-    }
+    // The reconcile pacing also renews what GitHub says each linked person may open (their data is older than REFRESH_AFTER). One job per
+    // person (deduplicated), oldest first, capped; page loads trigger the same job for people who are active right now.
+    const stale = await db.githubUserToken.findMany({
+      where: { status: "OK", OR: [{ accessCheckedAt: null }, { accessCheckedAt: { lt: new Date(Date.now() - REFRESH_AFTER_MS) } }], user: { members: { some: { status: "ACTIVE" } } } },
+      select: { userId: true },
+      orderBy: { accessCheckedAt: { sort: "asc", nulls: "first" } },
+      take: 200,
+    });
+    for (const s of stale) await requestAccessRefresh(db, s.userId);
   }) as Handler,
-  // Hosted only: asks GitHub, with THIS person's own token, which repositories they can open (one job per person, payload { userId }).
+  // Asks GitHub, with THIS person's own token, which repositories they can open (one job per person, payload { userId }).
   // It serves no single workspace (a person may belong to several), so its job row carries none. A failure to reach GitHub throws, so the job backs off.
   [ACCESS_JOB]: (async (p: { userId: string }) => {
-    if (!isHosted() || typeof p?.userId !== "string") return;
+    if (typeof p?.userId !== "string") return;
     const config = githubAppConfig();
     if (!config) return;
     const r = await refreshUserAccess(db, config, p.userId);
     if (r === "ok" || r === "partial") (await import("@/lib/local/runtime")).notifyChange("state");
   }) as Handler,
-  // Hosted: GitHub told us something happened to an installation (webhook); ask GitHub what is true now and record that. A system job per installation.
+  // GitHub told us something happened to an installation (webhook); ask GitHub what is true now and record that. A system job per installation.
   "github.installation.check": (async (p: { installationId: string }) => {
     if (!/^\d{1,19}$/.test(String(p?.installationId))) return;
     await checkInstallationFromGithub(db, BigInt(p.installationId));
   }) as Handler,
-  // Hosted housekeeping (no GitHub, no network): old webhook delivery ids and expired install states. A system-wide job.
+  // Housekeeping (no GitHub, no network): old webhook delivery ids and expired install states. A system-wide job.
   "github.maintenance": (async () => {
     await pruneGithubAppData(db);
   }) as Handler,
-  // Local only (no GitHub, no network): makes the daily digest once per local day, and catches up after the app was closed.
+  // No GitHub, no network: makes the daily digest once per local day, and catches up after the worker was down.
   "digest.daily": (async () => {
     const { runDailyDigest } = await import("@/lib/services/digest");
     await forEachWorkspace(db, "digest.daily", async (workspaceId) => {
@@ -175,15 +142,13 @@ const rawHandlers: Record<string, Handler> = {
 };
 
 /**
- * Jobs that reach GitHub. Hosted, there is no server credential to use: the source-sync jobs (sync.repository, sync.item, sync.fork)
- * and reconcile.all run through the repository's own installation (portForSync). A repository without a usable connection has
+ * Jobs that reach GitHub run through the repository's own installation (portForSync). A repository without a usable connection has
  * nothing to do, so its job finishes as a no-op (DONE, not failed and retried: a connection that went away is recorded once, and a
- * retry would only repeat it). A rate limit still fails the job so it backs off until the reset. The upstream auto-update (clone and
- * push) and the release watch stay off for hosted workspaces. digest.daily and ai.autopilot never touch GitHub and keep running.
+ * retry would only repeat it). A rate limit still fails the job so it backs off until the reset. digest.daily and ai.autopilot never
+ * touch GitHub.
  */
 const HOSTED_SOURCE_JOBS = new Set(["sync.repository", "sync.item", "sync.fork", "reconcile.all"]);
-const HOSTED_OFF_JOBS = new Set([UPDATE_JOB, RELEASES_JOB]);
-const hostedAware = (h: Handler): Handler =>
+const notConnectedIsNoop = (h: Handler): Handler =>
   (async (...a: Parameters<Handler>) => {
     try {
       return await h(...a);
@@ -192,9 +157,6 @@ const hostedAware = (h: Handler): Handler =>
       throw e;
     }
   }) as Handler;
-const skipWhenHosted = (h: Handler): Handler => ((...a: Parameters<Handler>) => (isHosted() ? Promise.resolve() : h(...a))) as Handler;
-export const handlers: Record<string, Handler> = Object.fromEntries(
-  Object.entries(rawHandlers).map(([k, h]) => [k, HOSTED_OFF_JOBS.has(k) ? skipWhenHosted(h) : HOSTED_SOURCE_JOBS.has(k) ? hostedAware(h) : h]),
-);
+export const handlers: Record<string, Handler> = Object.fromEntries(Object.entries(rawHandlers).map(([k, h]) => [k, HOSTED_SOURCE_JOBS.has(k) ? notConnectedIsNoop(h) : h]));
 
 export { setStatus };

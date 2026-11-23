@@ -9,8 +9,6 @@ export type ActionResult = { ok: true; message?: string; data?: Record<string, u
 export async function run(fn: () => Promise<ActionResult | void>): Promise<ActionResult> {
   try {
     const r = await fn();
-    // A successful action may have changed shared data: send it to the team now instead of at the next poll.
-    if (!r || r.ok) void import("@/lib/local/runtime").then((m) => m.syncSoon()).catch(() => {});
     return r ?? { ok: true };
   } catch (e) {
     // redirect()/notFound() work by throwing: let Next handle them (an ended session must reach sign-in, not become a message).
