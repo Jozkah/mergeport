@@ -1,9 +1,9 @@
-import { db, resolveDbFile } from "@/lib/db";
+import { db } from "@/lib/db";
 import { requireWrite } from "@/lib/authz/viewer";
 import { withViewerStream } from "@/lib/api-post";
 import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
-import { keyFileFor, openVault } from "@/lib/hub/session-vault";
+import { vaultKeyFile, openVault } from "@/lib/hub/session-vault";
 import { loadAiConfig, rememberModel } from "@/lib/services/ai";
 import { analyzeWorkspace, listSuggestions, saveSuggestions } from "@/lib/services/ai-review";
 
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   return withViewerStream(req, async (v, _body, step) => {
     requireWrite(v); // saves suggestions and settings: a reader only looks
     if (isDemo()) throw new ValidationError("The demo does not send anything to an AI endpoint.");
-    const cfg = await loadAiConfig(db, v.workspaceId, openVault(keyFileFor(resolveDbFile())));
+    const cfg = await loadAiConfig(db, v.workspaceId, openVault(vaultKeyFile()));
     if (!cfg) throw new ValidationError("Set up the AI endpoint in Settings first.");
     const r = await analyzeWorkspace(db, v, cfg, { step });
     step("Saving the suggestions");

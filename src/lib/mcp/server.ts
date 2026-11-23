@@ -1,8 +1,8 @@
 import { TOOLS, type ToolCtx } from "./tools";
 
 /**
- * A small Model Context Protocol server over stdio: one JSON message per line in, one per line out. Any MCP-capable app can use
- * it (Claude Code and Desktop, opencode, Cursor and others). It offers tools only. Pure: `handle` takes a message and returns the reply.
+ * A small Model Context Protocol server core: tools only. Pure: `handle` takes one JSON-RPC message and returns the reply. The hosted
+ * endpoint (src/app/api/mcp/route.ts, docs/mcp.md) carries it over HTTP.
  */
 export const SERVER_INFO = { name: "mergeport", version: "0.1.0" };
 const SUPPORTED = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -41,34 +41,4 @@ export async function handle(msg: Msg, ctx: ToolCtx): Promise<Reply | null> {
       // notifications such as notifications/initialized need no answer; an unknown request does
       return notification ? null : err(id, -32601, `Method not found: ${method}`);
   }
-}
-
-/** Reads lines from `input`, answers on `write`. Resolves when input ends. */
-export async function serve(input: AsyncIterable<string | Buffer>, write: (line: string) => void, ctx: ToolCtx): Promise<void> {
-  let buf = "";
-  const pending: Promise<void>[] = [];
-  const one = async (line: string) => {
-    let msg: Msg | Msg[];
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      write(JSON.stringify(err(null, -32700, "Parse error")));
-      return;
-    }
-    for (const m of Array.isArray(msg) ? msg : [msg]) {
-      const r = await handle(m, ctx);
-      if (r) write(JSON.stringify(r));
-    }
-  };
-  for await (const chunk of input) {
-    buf += chunk.toString();
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (line) pending.push(one(line));
-    }
-  }
-  if (buf.trim()) pending.push(one(buf.trim()));
-  await Promise.all(pending);
 }

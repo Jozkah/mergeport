@@ -26,7 +26,7 @@ export function isPublicHost(host: string | null | undefined): boolean {
   return Boolean(p && host && host === p.host);
 }
 
-/** Routes that belong to the local app (gh sign-in, launcher links, demo, hub connect) do not exist on a hosted deployment. */
+/** Routes that belong to the local app (gh sign-in, demo) do not exist on a hosted deployment. */
 export function refuseWhenHosted(): Response | null {
   return isHosted() ? new Response("Not found", { status: 404 }) : null;
 }

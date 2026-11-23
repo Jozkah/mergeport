@@ -5,7 +5,7 @@ import { portForWrite } from "@/lib/github/factory";
 import { getGhRunner } from "@/lib/github/gh";
 import { IdentityError, ghExecutable } from "@/lib/github/exec";
 import { enqueue, type Handler } from "@/lib/jobs";
-import { mergeportHome } from "@/lib/local/profile";
+import path from "node:path";
 import { runUpdate, type UpdaterDeps } from "@/lib/local/upstream-updater";
 
 /**
@@ -86,7 +86,7 @@ export function productionDeps(db: Db, signal?: AbortSignal): UpdaterDeps {
   for (const k of ["GH_CONFIG_DIR", "XDG_CONFIG_HOME", "APPDATA", "LOCALAPPDATA"] as const) if (process.env[k]) remoteEnv[k] = process.env[k]!; // where the CLI keeps its sign-in; no token
   return {
     db,
-    home: mergeportHome(env().MERGEPORT_HOME),
+    home: path.resolve(process.cwd(), ".data"), // private clones go under .data/updater/<mapping>/ (gitignored)
     host,
     port: async () => {
       const user = await db.user.findFirstOrThrow({ where: { isDemo: false }, orderBy: { createdAt: "asc" } });

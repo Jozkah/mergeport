@@ -6,14 +6,8 @@ import { z } from "zod";
  * live in the GitHub CLI's own store (OS keyring by default) and are never read by this application.
  */
 const schema = z.object({
-  /** Where profiles live. Default: ~/.mergeport */
-  MERGEPORT_HOME: z.string().optional(),
-  /** SQLite file of the active profile. Set by the launcher; defaults to ./.data/dev.db for development. */
-  MERGEPORT_DB: z.string().optional(),
   MERGEPORT_HOST: z.string().default("github.com"),
   MERGEPORT_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  /** One-time token the launcher puts in the URL it opens, to bind the browser to this process. */
-  MERGEPORT_LAUNCH_TOKEN: z.string().optional(),
   /** Optional override of the GitHub CLI command, JSON array, e.g. ["node","fake-gh.mjs"]. Used by tests. */
   MERGEPORT_GH_CMD: z.string().optional(),
   DEMO_MODE: z.enum(["true", "false"]).default("false"),

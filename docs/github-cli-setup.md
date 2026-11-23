@@ -1,6 +1,6 @@
 # GitHub access through the GitHub CLI
 
-Mergeport has no GitHub App, no OAuth client and no server holding secrets. Each person signs in to GitHub with the official [GitHub CLI](https://cli.github.com/), and Mergeport asks `gh` to make every request as that person.
+This page covers the **development sign-in** (a non-hosted run of the app, `npm run dev`, with no `MERGEPORT_PUBLIC_URL`): the person signs in to GitHub with the official [GitHub CLI](https://cli.github.com/), and Mergeport asks `gh` to make every request as that person. A hosted deployment does not use `gh` at all: it reads GitHub through the GitHub App (`docs/github-app.md`).
 
 ## Set up
 
@@ -8,23 +8,24 @@ Mergeport has no GitHub App, no OAuth client and no server holding secrets. Each
 winget install GitHub.cli          # Windows. macOS: brew install gh. Linux: see cli.github.com
 gh auth login --hostname github.com --web --git-protocol https --scopes repo,read:org
 gh auth status
-npm run local
+npm run db:dev        # a native dev Postgres (separate terminal); then: npx prisma migrate deploy
+npm run dev           # open http://127.0.0.1:3000/sign-in and continue as your gh account
 ```
 
-`npm run local` prints the same login command if you are not signed in. For GitHub Enterprise Server set `MERGEPORT_HOST` (for example `ghe.example.com`) and use the same `gh auth login --hostname`.
+The sign-in page shows the same login command if you are not signed in. For GitHub Enterprise Server set `MERGEPORT_HOST` (for example `ghe.example.com`) and use the same `gh auth login --hostname`.
 
 ## What Mergeport does with the credential
 
 - It never stores your token and never writes it to a log, a file, a shared repository or a response to the browser. It **does** read it transiently: for each profile it runs `gh auth token --hostname <host> --user <login>` once, verifies with that token that it belongs to the profile's numeric user id (`GET /user`), keeps it in memory, and gives it to every `gh api` call through the child process's environment (`GH_TOKEN`, or `GH_ENTERPRISE_TOKEN` for another host), never as an argument. Tokens inherited from the environment (`GH_TOKEN`, `GITHUB_TOKEN`, enterprise forms) are removed from every child. `gh` itself keeps the token in your operating system's credential store where one is available.
 - **Every call is bound to the profile's account.** Because the token is chosen by account and verified by numeric id, `gh auth switch` (before, during or after a call) cannot change who a call runs as: the one in flight, the next one, a queued retry, repository creation, an invitation, a sync, a conflict resolution. If the account is not signed in to the CLI, its id no longer matches (a renamed or recycled login), or the CLI is too old to name an account (`gh` 2.40 or newer is needed), the call is blocked with a reason you can act on (`gh auth login --hostname <host>`, then reconnect). A 401 from GitHub drops the remembered token so the next call verifies from scratch.
-- Each `(host, user id)` has its own database, caches and unsent edits. If another account is selected in the CLI, Mergeport shows a note, keeps acting only as the profile's own account, and sends nothing as the other one.
+- One database holds one GitHub account (point `DATABASE_URL` at another database for another account). If another account is selected in the CLI, Mergeport shows a note, keeps acting only as the profile's own account, and sends nothing as the other one.
 - Public repositories can be read without `gh` through the public REST API with caching, pagination and rate-limit handling. Nothing is scraped.
 
 ## Windows
 
 - `gh.exe` is found on `PATH`, then in the usual install folders (`Program Files\GitHub CLI`, `Program Files (x86)\GitHub CLI`, `%LOCALAPPDATA%\Programs\GitHub CLI`), so a copy installed after Mergeport started is still found. `MERGEPORT_GH_CMD` overrides it (a JSON array, for example `["C:\\Tools\\gh.exe"]`).
 - Arguments are passed to the process as an array with no shell, so paths and values containing spaces, quotes, `&`, `|`, `%`, `$` and Unicode arrive unchanged. `.cmd` and `.bat` shims need a shell and are refused with a message rather than run unsafely; point `MERGEPORT_GH_CMD` at `gh.exe`.
-- Timeouts and cancellation kill the whole process tree (`taskkill /T /F`), so a credential helper started by `gh` does not outlive it. Ctrl+C in the console that runs `npm run local` stops the server and every `gh` process it started (exercised on Windows: while idle, and while a `gh` call was hung; see the verification record). In `cmd.exe` Windows may then ask "Terminate batch job (Y/N)?" from npm's own wrapper; the app has already ended. **Forced termination** (Task Manager "End task", `taskkill /F`, a crash, power loss) cannot run any cleanup code, so nothing can be guaranteed after it: a `gh` call in flight may be left to finish or time out on its own, and a refresh that was running stays marked "retrying" until the next start marks it interrupted. SQLite remains consistent and unsent edits are kept (tested after a forced kill).
+- Timeouts and cancellation kill the whole process tree (`taskkill /T /F`), so a credential helper started by `gh` does not outlive it. Ctrl+C in the console that runs the dev server stops it and every `gh` process it started (exercised on Windows: while idle, and while a `gh` call was hung; see the verification record). In `cmd.exe` Windows may then ask "Terminate batch job (Y/N)?" from npm's own wrapper; the app has already ended. **Forced termination** (Task Manager "End task", `taskkill /F`, a crash, power loss) cannot run any cleanup code, so nothing can be guaranteed after it: a `gh` call in flight may be left to finish or time out on its own, and a refresh that was running stays marked "retrying" until the next start marks it interrupted. SQLite remains consistent and unsent edits are kept (tested after a forced kill).
 
 ## Scopes, honestly
 

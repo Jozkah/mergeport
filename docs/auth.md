@@ -18,9 +18,9 @@ provider). The local app keeps its GitHub CLI sign-in; nothing here changes it.
 Hosted mode means:
 
 - `src/proxy.ts` accepts **only** the public host. A loopback Host is refused (a reverse proxy can forward a client's own
-  `Host: 127.0.0.1`); the one exception is the launcher's `GET /api/local/ready` probe.
+  `Host: 127.0.0.1`).
 - Every `/api/local/*` route answers 404 (in the proxy and again in each route handler), except `POST /api/local/signout`. The
-  local gh sign-in, launcher links, demo sign-in and hub connect do not exist on a hosted server. `/api/local/signin` also requires a
+  local gh sign-in and demo sign-in do not exist on a hosted server. `/api/local/signin` also requires a
   loopback Host with the right port even in the local app.
 - `/sign-in` shows the account page; session cookies are `Secure` when the URL is https; redirects and links use the public URL.
 - `serverActions.allowedOrigins` in `next.config.ts` names the public host, so the onboarding, workspace-switcher and sign-out-everywhere

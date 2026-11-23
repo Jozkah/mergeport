@@ -7,7 +7,6 @@ import { requireViewer } from "@/lib/authz-page";
 import { isDemo } from "@/lib/env";
 import { getEngine, getTeamService } from "@/lib/local/runtime";
 import { KEY_CANDIDATES, KEY_INVITATIONS, cached, keyInvitationStatus, refreshing, teamWithDeadline } from "@/lib/local/discovery-jobs";
-import { ContextsPanel } from "@/components/team/ContextsPanel";
 import { AccessPreviewPanel } from "@/components/team/AccessPreviewPanel";
 import { accessPreview } from "@/lib/services/access-preview";
 import { Freshness } from "@/components/sync/Freshness";
@@ -76,7 +75,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
       <div className="mb-5">
         <Banner title={demo ? "Demo mode" : cfg?.mode === "TEAM" ? `Team mode: ${cfg.name}` : "Personal mode"}>
           {demo
-            ? <>Teams need your real GitHub account. Run <span className="mono">npm run local</span> to create or join one.</>
+            ? <>Teams need a real GitHub account, so they are not available in demo mode.</>
             : cfg?.mode === "TEAM"
               ? `A teammate's change reaches you within about ${delay.typical} seconds while both apps are open (up to ${Math.round(delay.worst / 60)} minutes when idle). If GitHub is unreachable, edits queue here. Sync runs only while this app runs.`
               : "Create a team to share planning, or join one you were invited to."}
@@ -138,7 +137,6 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
         </div>
       )}
 
-      <div className="mb-5"><ContextsPanel tz={viewer.timezone} /></div>
       {team && (
         <details className="mb-5 rounded-[10px] border border-line p-3 text-[13px]">
           <summary className="cursor-pointer font-medium">Stop using this team on this computer</summary>

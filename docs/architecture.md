@@ -71,25 +71,9 @@ The common space is `mergeport-<team>-workspace`; a restricted space is `mergepo
 
 **Source access** is separate: seeing a shared repository does not give a teammate its issues. Where a person cannot read the source repository the UI says "Source repository access required".
 
-## Workspaces and profiles
+## Workspaces
 
-A **profile** is one SQLite file for one `(host, GitHub account id, backend)`. `backend` is `github` or `hub-<fingerprint>`, where the fingerprint is the first 16 hex chars of SHA-256 over the normalized hub origin (`src/lib/local/backends.ts`; `http://` only for loopback). GitHub profiles keep their old folder name (`<host>-<accountId>`); a hub profile adds `-<backend>`. Two backends therefore never share a database, cache or outbox.
-
-Two small registry files live in the Mergeport home (`src/lib/local/registry.ts`, atomic temp-file-then-rename writes). Neither holds tokens or sessions.
-
-- `active.json`: `{ host, accountId, backend }`, the profile the launcher opens next.
-- `hubs.json`: known servers, `{ origin, teamName, lastSignedInAs, addedAt }[]`, used by the switcher.
-
-**Supervisor and control channel** (`src/lib/local/supervisor.ts`, driven by `scripts/start-local.ts`). The launcher owns the app child process. It listens on a loopback control port; the app gets the address through `MERGEPORT_CONTROL_URL` and authenticates each request with its own `MERGEPORT_LAUNCH_TOKEN`, which the supervisor compares (constant time) with the current child's token and refuses with 403 otherwise, so a previous child or anything that captured an old token cannot switch. Switching is fire-and-poll:
-
-1. The app POSTs `/switch` `{ backend }` to the control channel. The supervisor first checks `resolveTarget`; a failure there is a 409 and nothing is killed. Otherwise it generates the one-time token and replies **202** `{ launchUrl, previousBootId }`, waits `killDelayMs` (default 400) so the response reaches the browser, kills the old child, then starts the new one. A different switch already running is also 409. `/api/local/switch` maps every launcher refusal to 409.
-2. A boot failure AFTER the 202 has no HTTP error. The supervisor restores the previous child, so the browser sees a new `bootId` with a different backend and the overlay returns to `/`. If no child can be started at all, the overlay times out after 60 s with a banner. The launcher logs the failure through the supervisor's `switch-failed` event and exits when no child is left. If the old child cannot be killed (kill times out), the supervisor keeps its handle and refuses further switches ("The previous workspace did not stop") rather than start a second child.
-3. The launcher, not the app, writes `active.json` in its `onSwitched` callback once the new child is up. Because that happens after the switch, `currentBackend()` and the switcher prefer `MERGEPORT_BACKEND` (set by the launcher for every child, including the first) and fall back to `active.json` only when it is unset (no launcher).
-4. `SwitchingOverlay` (a portal over the current page, not a separate `/switching` route) polls `GET /api/local/ready`, which returns `{ bootId, backend }`. A new `bootId` with the target backend navigates to `launchUrl` (the new app consumes that one-time launch link); a new `bootId` with another backend returns to `/`. With `previousBootId` null, the first success before any error counts as the old process and a success after an error as the new one. While the old process is gone the poll simply fails and retries; after 60 s the overlay shows the timeout banner.
-
-**Backend isolation.** `assertBackendMatch(config, space)` (`src/lib/local/backend-guard.ts`) refuses to open a `GITHUB` space in a hub profile and the reverse.
-
-`SyncEngine` still calls the backend guard before every pull and push of a space; a mismatch is recorded as that space's sync error (shown on the Sync page) and is not retried in a loop.
+A hosted deployment holds many workspaces in one Postgres database; see `docs/tenancy.md` for how every query is scoped to one. The local launcher, its per-account SQLite profiles, the supervisor and the workspace switcher between profiles were removed.
 
 ## Sync
 
@@ -166,13 +150,9 @@ An opt-in, per-mapping updater for forks (`src/lib/local/upstream-updater.ts`, s
 
 `src/lib/authz/viewer.ts` is the single place visibility is defined. `repoWhere(viewer)` is a SQL filter evaluated per request, not a cached list. Locally a person always has full capabilities over what they track; for repositories that arrived through a space, access derives from that space's membership. Missing and hidden both produce the same `NotFoundError`; `ForbiddenError` is used only when the item is visible and the capability is not. Planning cards linked to a GitHub item inherit that repository's visibility; a hidden blocker still blocks and appears as an opaque marker.
 
-## Agents and the command line
+## Agents
 
-`scripts/mp.ts` is a thin shell around `runMp(argv, { db, viewer, now, out })` in `src/lib/cli/mp.ts`. It finds the profile database without network or gh (`MERGEPORT_DB`, else `MERGEPORT_HOME/active.json` honoring the active team context, else the only saved github.com profile), refuses to run when there is no profile or the stored user is not the expected account, and builds the Viewer with `loadViewer` for the profile's own non-demo user. All reads and writes go through the existing services (`createTask`, `updateTask`, `listTasks`, `assigneeCandidates`), so authorization (`projectWhere`/`planningWhere`), validation limits, task history and audit entries are identical to the UI; the CLI only adds a history line "from the command line". It never reads credentials and never calls GitHub.
-
-The app and the CLI share one SQLite file (WAL). The driver waits up to 10 s for a lock; `withBusyRetry` adds spaced retries on SQLITE_BUSY for reads and idempotent updates, and task creation checks for a half-written card before retrying. No endpoint is added: the running app's `SyncEngine.capture()` diffs the local read model on its next scheduler tick, so a task created here reaches a team space at that tick, not instantly, and an open browser page shows it after its next navigation or refresh.
-
-The agent skill lives in `docs/agent-skill/mergeport/SKILL.md`; `npm run skill:install` (`src/lib/cli/skill-install.ts`) copies it into the global skills folders of Claude, Codex, `~/.agents` and Gemini without overwriting differing files unless `--force`.
+AI apps reach Mergeport through the hosted MCP endpoint (`src/lib/mcp`, `POST /api/mcp`, personal access tokens and OAuth; see `docs/mcp.md`). The task commands it runs live in `src/lib/cli/mp.ts`. The old `npm run mp` command line and the stdio MCP server read a local profile database, and were removed with the local launcher.
 
 ## Local worktrees
 

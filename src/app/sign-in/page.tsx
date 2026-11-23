@@ -2,7 +2,7 @@ import { AuthShell } from "@/components/ui/AuthShell";
 import { SubmitButton } from "@/components/forms/SubmitButton";
 import { AccountSignIn } from "@/components/forms/AccountSignIn";
 import { isHosted } from "@/lib/public-url";
-import { env, isDemo } from "@/lib/env";
+import { isDemo } from "@/lib/env";
 import { currentGhStatus } from "@/lib/local/identity";
 import { loginCommand, REQUIRED_SCOPES } from "@/lib/github/gh";
 import { Banner } from "@/components/ui/primitives";
@@ -17,7 +17,7 @@ const ERRORS: Record<string, string> = {
   "gh-login": "gh is not signed in to GitHub yet. Sign in with the button below, then try again.",
   "gh-error": "gh could not reach GitHub. Check your connection and try again.",
   mismatch: "gh is signed in as a different account than this profile belongs to. Switch with gh auth switch, or start Mergeport again to use that account's own profile.",
-  "demo-unseeded": "Demo data has not been seeded. Run npm run local:demo, then reload this page.",
+  "demo-unseeded": "Demo data has not been seeded. Run npm run demo, then reload this page.",
 };
 
 export default async function SignIn({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string; next?: string; email?: string }> }) {
@@ -26,7 +26,6 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
   if (isHosted()) return <AccountSignIn error={sp.error} sent={sp.sent === "1"} next={sp.next} email={sp.email} />;
   const demo = isDemo();
   const st = demo ? null : await currentGhStatus(true);
-  const launched = Boolean(env().MERGEPORT_LAUNCH_TOKEN);
   return (
     <AuthShell
       title="Sign in with GitHub"
@@ -77,11 +76,7 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
           {st?.state === "ok" && (
             <div className="mt-3 flex flex-col gap-3 text-[13px]">
               <p>gh is signed in as <strong>@{st.identity.login}</strong> (GitHub id {st.identity.id.toString()}). Your data is stored only in a profile for this exact account on this computer.</p>
-              {launched ? (
-                <p className="text-ink-3">Open Mergeport with the link the launcher opened (<span className="mono">npm run local</span>). That one-time link ties this browser to this process.</p>
-              ) : (
-                <form action="/api/local/signin" method="post"><SubmitButton className="btn btn-primary btn-lg w-full" pendingLabel="Signing in…">Continue as @{st.identity.login}</SubmitButton></form>
-              )}
+              <form action="/api/local/signin" method="post"><SubmitButton className="btn btn-primary btn-lg w-full" pendingLabel="Signing in…">Continue as @{st.identity.login}</SubmitButton></form>
             </div>
           )}
       </>

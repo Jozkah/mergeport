@@ -2,7 +2,7 @@ import "dotenv/config";
 import { createPrisma } from "../src/lib/db";
 import { seedDemo, truncateAll } from "../src/lib/demo/seed";
 
-/** Seeds synthetic demo data into the database named by MERGEPORT_DB (default ./.data/dev.db). Requires DEMO_MODE=true. */
+/** Seeds synthetic demo data into the database named by DATABASE_URL. Requires DEMO_MODE=true. `npm run demo` does this and starts the dev server. */
 async function main() {
   if (process.env.DEMO_MODE !== "true") {
     console.error("Refusing to seed: set DEMO_MODE=true. Demo data is synthetic and must stay separate from real profiles.");

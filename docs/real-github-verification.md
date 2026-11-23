@@ -1,6 +1,6 @@
 # Verification against a real GitHub account (read-only)
 
-Run on 2026-10-29 with `npm run local` (not demo mode) against one real personal account, signed in through the GitHub CLI (`gh` 2.102, one account, keyring storage, scopes `repo`, `read:org`, `gist`, `workflow`). Only reads were made. Every `gh` call went through a pass-through shim that logged the HTTP method: **0 non-GET requests** in the whole session. No comment, review, merge, label change, push, repository creation, invitation, team space or coordination repository was made.
+Run on 2026-10-29 with the local launcher (since removed; the equivalent today is `npm run dev` with gh sign-in, not demo mode) against one real personal account, signed in through the GitHub CLI (`gh` 2.102, one account, keyring storage, scopes `repo`, `read:org`, `gist`, `workflow`). Only reads were made. Every `gh` call went through a pass-through shim that logged the HTTP method: **0 non-GET requests** in the whole session. No comment, review, merge, label change, push, repository creation, invitation, team space or coordination repository was made.
 
 ## Identity and onboarding
 

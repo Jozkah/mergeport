@@ -18,7 +18,7 @@ const checked = (fd: FormData, k: string) => fd.get(k) === "on" || fd.get(k) ===
 
 async function team(workspaceId: string) {
   const t = await getTeamService(workspaceId);
-  if (!t) throw new ValidationError("GitHub sign-in is not available in demo mode. Run npm run local to use teams.");
+  if (!t) throw new ValidationError("GitHub sign-in is not available in demo mode.");
   return t;
 }
 async function engine(workspaceId: string) {

@@ -32,7 +32,7 @@ describe("loopback-only guard", () => {
 
 describe("redirects", () => {
   it("stay on the host the browser used, so the session cookie and form-action policy still apply", () => {
-    const r = redirectTo(new Request("http://localhost:3100/api/local/launch", { headers: { host: "127.0.0.1:3100" } }), "/", 303);
+    const r = redirectTo(new Request("http://localhost:3100/api/local/signin", { headers: { host: "127.0.0.1:3100" } }), "/", 303);
     expect(r.status).toBe(303);
     expect(r.headers.get("location")).toBe("http://127.0.0.1:3100/");
   });

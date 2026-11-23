@@ -1,13 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { db, resolveDbFile } from "@/lib/db";
+import { db } from "@/lib/db";
 import { run, type ActionResult } from "@/lib/action-result";
 import { requireWriter } from "@/lib/auth/current";
 import { requireAdmin } from "@/lib/authz/viewer";
 import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
-import { keyFileFor, openVault } from "@/lib/hub/session-vault";
+import { vaultKeyFile, openVault } from "@/lib/hub/session-vault";
 import { createTask } from "@/lib/services/tasks";
 import { acceptSuggestions, dismissSuggestions } from "@/lib/services/ai-review";
 import { approve, reject } from "@/lib/services/ai-approvals";
@@ -16,7 +16,7 @@ import { listModelInfo, loadAiConfig, saveAiSettings, normalizeBaseUrl, DEFAULT_
 // Drafting tasks and answering questions are streamed from /api/ai/draft and /api/ai/ask so the page can show progress.
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
-const vault = () => openVault(keyFileFor(resolveDbFile()));
+const vault = () => openVault(vaultKeyFile());
 const noDemo = () => {
   if (isDemo()) throw new ValidationError("The demo does not send anything to an AI endpoint.");
 };

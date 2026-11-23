@@ -9,7 +9,7 @@ import { isHosted, isPublicHost } from "@/lib/public-url";
  * send requests to that address, so we refuse:
  *  - any Host that is not the loopback name we serve (blocks DNS rebinding);
  *  - state-changing requests whose Origin / Sec-Fetch-Site is not this same origin (blocks cross-site forms and fetches).
- * Pages additionally require the session cookie that only the launcher-opened browser receives.
+ * Pages additionally require the session cookie.
  */
 const FEDERATION_S2S = new Set(["/api/federation/v1/token", "/api/federation/v1/revoke"]);
 /** GitHub's webhook delivery (docs/github-app.md): a server-to-server POST signed with the App's webhook secret, no cookie, no Origin. Exactly this path and method. */
@@ -33,13 +33,12 @@ export function cacheControlFor(pathname: string): string {
 export function proxy(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
   // Local app: loopback names only. Hosted (MERGEPORT_PUBLIC_URL): ONLY the public host. A reverse proxy can forward a client's own
-  // "Host: 127.0.0.1" header, so loopback names are no proof of a local caller there; only the launcher's readiness probe keeps them.
+  // "Host: 127.0.0.1" header, so loopback names are no proof of a local caller there.
   if (isHosted()) {
-    const probe = req.nextUrl.pathname === "/api/local/ready" && LOOPBACK.test(host);
-    if (!isPublicHost(host) && !probe) return new NextResponse("Forbidden host", { status: 403 });
-    // The local app's routes do not exist here, except sign-out and the launcher's own readiness probe (loopback only, checked above).
+    if (!isPublicHost(host)) return new NextResponse("Forbidden host", { status: 403 });
+    // The local app's routes do not exist here, except sign-out.
     const p = req.nextUrl.pathname;
-    if (p.startsWith("/api/local/") && p !== "/api/local/signout" && !(p === "/api/local/ready" && probe)) return new NextResponse("Not found", { status: 404 });
+    if (p.startsWith("/api/local/") && p !== "/api/local/signout") return new NextResponse("Not found", { status: 404 });
   } else if (!LOOPBACK.test(host)) return new NextResponse("Forbidden host", { status: 403 });
 
   const method = req.method.toUpperCase();

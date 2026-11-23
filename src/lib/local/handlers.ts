@@ -167,9 +167,9 @@ const rawHandlers: Record<string, Handler> = {
   }) as Handler,
   // Sends to the AI endpoint set in Settings, and only when the autopilot there is on. Writes local tasks and suggestions, never GitHub.
   "ai.autopilot": (async () => {
-    const [{ runAutopilot }, { openVault, keyFileFor }, { resolveDbFile }] = await Promise.all([import("@/lib/services/ai-review"), import("@/lib/hub/session-vault"), import("@/lib/db")]);
+    const [{ runAutopilot }, { openVault, vaultKeyFile }] = await Promise.all([import("@/lib/services/ai-review"), import("@/lib/hub/session-vault")]);
     await forEachWorkspace(db, "ai.autopilot", async (workspaceId) => {
-      if ((await runAutopilot(db, workspaceId, openVault(keyFileFor(resolveDbFile())))) === "done") (await import("@/lib/local/runtime")).notifyChange("state");
+      if ((await runAutopilot(db, workspaceId, openVault(vaultKeyFile()))) === "done") (await import("@/lib/local/runtime")).notifyChange("state");
     });
   }) as Handler,
 };

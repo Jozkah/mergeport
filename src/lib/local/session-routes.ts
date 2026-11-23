@@ -3,7 +3,9 @@ import { db } from "@/lib/db";
 import { createSession, SESSION_COOKIE } from "@/lib/auth/session";
 import { ensureLocalProfile, AccountMismatchError } from "@/lib/local/profile";
 import { currentGhStatus } from "@/lib/local/identity";
-import { looksOffline } from "@/lib/local/saved-profiles";
+
+/** True when `gh api user` failed for want of a network or an exhausted API budget (a rate limit says nothing about who is signed in), as opposed to being signed out or refused. */
+const looksOffline = (message: string) => /connect|network|internet|ENOTFOUND|ETIMEDOUT|ECONN|timed? ?out|unreachable|rate limit/i.test(message) && !/HTTP 401|bad credentials|not logged in/i.test(message);
 
 /** Mints the browser session for the local profile after confirming WHO gh is signed in as. */
 export async function startLocalSession(): Promise<{ ok: true } | { ok: false; error: string }> {
