@@ -49,6 +49,8 @@ export function createOctokit(auth: string | undefined, fetchImpl?: typeof fetch
 }
 
 const date = (s: string | null | undefined) => (s ? new Date(s) : null);
+/** A GitHub numeric user id from a payload, or null when it is missing or not a positive integer (never throws on odd webhook data). */
+const ghId = (v: unknown): bigint | null => (typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? BigInt(v) : null);
 
 function mapError(e: any): GithubError {
   const status: number | undefined = e?.status;
@@ -268,10 +270,11 @@ export class OctokitPort implements GithubPort {
       state: merged ? "MERGED" : i.state === "closed" ? "CLOSED" : "OPEN",
       draft: !!i.draft,
       authorLogin: i.user?.login ?? null,
-      authorGithubId: i.user?.id ? BigInt(i.user.id) : null,
+      authorGithubId: ghId(i.user?.id),
       authorAvatar: i.user?.avatar_url ?? null,
       labels: (i.labels ?? []).map((l: any) => (typeof l === "string" ? { name: l, color: "ededed" } : { name: l.name, color: l.color ?? "ededed" })),
       assignees: (i.assignees ?? []).map((a: any) => a.login),
+      assigneeGithubIds: (i.assignees ?? []).map((a: any) => ghId(a?.id)),
       milestoneNumber: i.milestone?.number ?? null,
       milestoneTitle: i.milestone?.title ?? null,
       htmlUrl: i.html_url,
@@ -312,7 +315,7 @@ export class OctokitPort implements GithubPort {
 
   /** A REST issue comment (or the `comment` object of an `issue_comment` webhook). */
   static toComment(c: any): RemoteComment {
-    return { githubId: BigInt(c.id), login: c.user?.login ?? null, body: c.body ?? null, createdAt: new Date(c.created_at), updatedAt: new Date(c.updated_at) };
+    return { githubId: BigInt(c.id), login: c.user?.login ?? null, userGithubId: ghId(c.user?.id), body: c.body ?? null, createdAt: new Date(c.created_at), updatedAt: new Date(c.updated_at) };
   }
 
   /** A REST pull request review comment (or the `comment` object of a `pull_request_review_comment` webhook). */
@@ -332,7 +335,7 @@ export class OctokitPort implements GithubPort {
 
   async listReviews(owner: string, repo: string, number: number): Promise<RemoteReview[]> {
     const rows = await this.paginate<any>("GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews", { owner, repo, pull_number: number });
-    return rows.map((r) => ({ githubId: BigInt(r.id), login: r.user?.login ?? null, state: r.state as RemoteReview["state"], body: r.body ?? null, commitSha: r.commit_id ?? null, submittedAt: new Date(r.submitted_at ?? Date.now()) }));
+    return rows.map((r) => ({ githubId: BigInt(r.id), login: r.user?.login ?? null, userGithubId: ghId(r.user?.id), state: r.state as RemoteReview["state"], body: r.body ?? null, commitSha: r.commit_id ?? null, submittedAt: new Date(r.submitted_at ?? Date.now()) }));
   }
 
   async listIssueComments(owner: string, repo: string, number: number): Promise<RemoteComment[]> {
@@ -347,7 +350,7 @@ export class OctokitPort implements GithubPort {
 
   async listRequestedReviewers(owner: string, repo: string, number: number): Promise<RemoteRequested> {
     const { data } = await this.get<any>("GET /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers", { owner, repo, pull_number: number });
-    return { users: (data.users ?? []).map((u: any) => u.login), teams: (data.teams ?? []).map((t: any) => t.slug) };
+    return { users: (data.users ?? []).map((u: any) => u.login), userGithubIds: (data.users ?? []).map((u: any) => ghId(u?.id)), teams: (data.teams ?? []).map((t: any) => t.slug) };
   }
 
   /**
@@ -439,7 +442,7 @@ export class OctokitPort implements GithubPort {
 
   async createReviewComment(owner: string, repo: string, number: number, i: { body: string; commitSha: string; path: string; line: number; side: "LEFT" | "RIGHT" }): Promise<RemoteComment> {
     const c = await this.send<any>("POST /repos/{owner}/{repo}/pulls/{pull_number}/comments", { owner, repo, pull_number: number, body: i.body, commit_id: i.commitSha, path: i.path, line: i.line, side: i.side });
-    return { githubId: BigInt(c.id), login: c.user?.login ?? null, body: c.body, createdAt: new Date(c.created_at), updatedAt: new Date(c.updated_at), path: c.path, line: c.line ?? null, commitSha: c.commit_id ?? null };
+    return { githubId: BigInt(c.id), login: c.user?.login ?? null, userGithubId: ghId(c.user?.id), body: c.body, createdAt: new Date(c.created_at), updatedAt: new Date(c.updated_at), path: c.path, line: c.line ?? null, commitSha: c.commit_id ?? null };
   }
 
   async listPullCommits(owner: string, repo: string, number: number) {
@@ -509,7 +512,7 @@ export class OctokitPort implements GithubPort {
   }
   async createComment(owner: string, repo: string, number: number, body: string): Promise<RemoteComment> {
     const c = await this.send<any>("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", { owner, repo, issue_number: number, body });
-    return { githubId: BigInt(c.id), login: c.user?.login ?? null, body: c.body, createdAt: new Date(c.created_at), updatedAt: new Date(c.updated_at) };
+    return { githubId: BigInt(c.id), login: c.user?.login ?? null, userGithubId: ghId(c.user?.id), body: c.body, createdAt: new Date(c.created_at), updatedAt: new Date(c.updated_at) };
   }
   async setLabels(owner: string, repo: string, number: number, labels: string[]) {
     await this.send("PUT /repos/{owner}/{repo}/issues/{issue_number}/labels", { owner, repo, issue_number: number, labels });

@@ -76,16 +76,23 @@ role string or an unknown action gets nothing.
   window, a failed refresh or a revoked grant cannot leave an old digest on screen, whether or not a purge ran. Relinking, unlinking,
   removal and a refresh that removes access also delete the rows. Notifications are filtered by `repoWhere` at read time and saved filters
   hold query text only, so neither keeps repository content after access is lost.
-- **Known limitation (GitHub login matching):** review queues, inbox, digest, review-request notifications and AI context still match a
-  person against GitHub data by LOGIN string (`ReviewRequest.reviewerRef`, assignees, `authorLogin`); only `WorkItem.authorGithubId` is stored by
-  number and it is not used for matching yet. To limit the harm of a login that was renamed and reused, `Viewer.githubLogin` is null unless
-  the link is working and was confirmed with GitHub within 24 hours, and it is cleared when the link needs renewing and on unlink.
+- **GitHub people are matched by numeric id, the login is only a fallback.** Sync stores GitHub's numeric user id next to every login it
+  records: `ReviewRequest.reviewerGithubId` (requested reviewers), `WorkItem.assigneeIds` (an index like the login one), `WorkItem.authorGithubId`
+  and `WorkItemComment.authorGithubId` (review and comment authors). Review queues, the inbox, the digest, review-request and
+  changes-requested notifications and AI context compare the viewer's `User.githubId` with those ids (`src/lib/domain/identity.ts`): a person
+  who renamed their GitHub login keeps their queue, and someone who later takes a released login does not inherit it. A request follows a
+  rename in place (same row, same wait time). Only where one side has no id does the login decide: older rows stored before ids were
+  recorded (they gain ids the next time the item is synced after it changes), local and demo items, a person without a stored id, and
+  items where GitHub gave an id for only some assignees. A migration adds the columns as nullable or empty, so nothing needs a backfill.
+  What still compares logins: routing and waiting rules and manual waiting records (an administrator types a login), team membership
+  lists, and the free-text assignee and author filters. In addition `Viewer.githubLogin` (and with it the id) is null unless the link is
+  working and was confirmed with GitHub within 24 hours, and is cleared when the link needs renewing and on unlink.
 - **Known limitation:** `runDailyDigest` generates a workspace's digest only for its oldest member (unchanged behaviour); other members get
   theirs when they open the page and regenerate.
 - **GitHub identity is not the sign-in name.** `Viewer.githubLogin` is the person's GitHub login, or null without a linked GitHub account
   (`login` is the mailbox local part for an email user). It comes from the link (`User.githubLogin`, set when the person links GitHub
   and refreshed whenever their GitHub token is used); only a legacy local user whose `githubId` came from `gh` and has no stored login falls
-  back to `login`. Review queues, the inbox, the digest, review-request notifications and AI context match GitHub data on `githubLogin`
+  back to `login`. Review queues, the inbox, the digest, review-request notifications and AI context match GitHub data on the GitHub identity (`githubId`, `githubLogin`)
   only, so an email user named "alice" never inherits the GitHub user "alice"'s reviews. People without a linked account see "Personal review
   queues need a linked GitHub account" with a **Link GitHub** button on My attention and Inbox (where linking exists), and a
   "GitHub account" panel on Settings (docs/github-app.md, "Linking your GitHub account").

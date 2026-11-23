@@ -1,3 +1,4 @@
+import { samePerson } from "@/lib/domain/identity";
 import type { Db } from "@/lib/db";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { requireRepo, requireWorkItem, type Viewer } from "@/lib/authz/viewer";
@@ -87,7 +88,7 @@ export async function requestReview(ctx: Ctx, workItemId: string, users: string[
 export async function submitReview(ctx: Ctx, workItemId: string, event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES", body: string) {
   const { item, repo, port, owner, name } = await load(ctx, workItemId, "review");
   if (item.type !== "PULL_REQUEST" || item.state !== "OPEN") throw new ValidationError("Only open pull requests can be reviewed");
-  if (item.authorLogin?.toLowerCase() === ctx.v.login.toLowerCase() && event === "APPROVE") throw new ValidationError("You cannot approve your own pull request");
+  if (samePerson({ login: item.authorLogin, id: item.authorGithubId }, { login: ctx.v.githubLogin ?? ctx.v.login, id: ctx.v.githubId }) && event === "APPROVE") throw new ValidationError("You cannot approve your own pull request");
   if (event !== "APPROVE" && !body.trim()) throw new ValidationError("Add a comment to explain the review");
   await port.submitReview(owner, name, item.number, { event, body: body.trim() || undefined, commitSha: item.headSha ?? undefined });
   await refresh(ctx, port, repo.id, item.number);

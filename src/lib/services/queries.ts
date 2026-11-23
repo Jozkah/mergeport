@@ -8,6 +8,7 @@ import { resolveRule, type RuleRow } from "@/lib/domain/rules";
 import { applyWaitingRules, matchingWaitingRules, type WaitingRuleRow } from "@/lib/domain/waiting-rules";
 import { isOverdue, todayIn } from "@/lib/domain/planning";
 import { indexNeedle } from "@/lib/domain/text-index";
+import { viewerWho } from "@/lib/domain/identity";
 import { deriveStages, type StageEntry } from "@/lib/domain/stages";
 import { blockerFinished } from "@/lib/domain/deps";
 import { labelFilter } from "./label-taxonomy";
@@ -76,7 +77,7 @@ async function loadRuleContext(db: Db, v: Viewer) {
   return { ruleRows, waitingRows, internalLogins, projectsByRepo, blockers };
 }
 
-const slimComments = { select: { kind: true, authorLogin: true, reviewState: true, commitSha: true, createdAtGh: true, updatedAtGh: true } } as const;
+const slimComments = { select: { kind: true, authorLogin: true, authorGithubId: true, reviewState: true, commitSha: true, createdAtGh: true, updatedAtGh: true } } as const;
 type PrRow = Prisma.WorkItemGetPayload<{ include: { repository: { include: { owner: true } }; comments: typeof slimComments; reviewRequests: true; waiting: true } }>;
 
 export type DerivedItem = {
@@ -101,19 +102,20 @@ function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<type
   });
   const reviews = row.comments
     .filter((c) => c.kind === "REVIEW" && c.authorLogin && c.reviewState)
-    .map((c) => ({ reviewer: c.authorLogin!, state: c.reviewState!, commitSha: c.commitSha, submittedAt: c.createdAtGh }));
+    .map((c) => ({ reviewer: c.authorLogin!, reviewerId: c.authorGithubId, state: c.reviewState!, commitSha: c.commitSha, submittedAt: c.createdAtGh }));
   const manualWaiting = row.waiting.filter((w) => w.status === "PENDING" && w.source === "MANUAL");
   const input: ReviewInput = {
     type: row.type,
     state: row.state,
     draft: row.draft,
     authorLogin: row.authorLogin,
+    authorGithubId: row.authorGithubId,
     headSha: row.headSha,
     checksState: row.checksState,
     mergeable: row.mergeable,
     reviews,
-    requests: row.reviewRequests.filter((r) => !r.removedAt && r.kind !== "EXTERNAL_ROLE").map((r) => ({ kind: r.kind as "USER" | "TEAM", ref: r.reviewerRef, requestedAt: r.requestedAt })),
-    cancelledRequests: row.reviewRequests.filter((r) => r.removedAt && r.kind !== "EXTERNAL_ROLE").map((r) => ({ kind: r.kind as "USER" | "TEAM", ref: r.reviewerRef, requestedAt: r.requestedAt })),
+    requests: row.reviewRequests.filter((r) => !r.removedAt && r.kind !== "EXTERNAL_ROLE").map((r) => ({ kind: r.kind as "USER" | "TEAM", ref: r.reviewerRef, requestedAt: r.requestedAt, githubId: r.reviewerGithubId })),
+    cancelledRequests: row.reviewRequests.filter((r) => r.removedAt && r.kind !== "EXTERNAL_ROLE").map((r) => ({ kind: r.kind as "USER" | "TEAM", ref: r.reviewerRef, requestedAt: r.requestedAt, githubId: r.reviewerGithubId })),
     rule: res.kind === "rule" ? res.rule : null,
     readyAt: row.createdAtGh,
     internalLogins: rc.internalLogins,
@@ -123,7 +125,7 @@ function deriveFor(row: PrRow, v: Viewer, now: Date, rc: Awaited<ReturnType<type
   };
   const matched = matchingWaitingRules(rc.waitingRows, { repositoryId: row.repositoryId, ownerLogin: row.repository.owner.login, projectIds: rc.projectsByRepo.get(row.repositoryId) ?? [], labels, authorLogin: row.authorLogin, type: row.type, draft: row.draft });
   // GitHub identity only: for an email user `login` is the mailbox name and must never match a GitHub user of the same name.
-  const derivation = applyWaitingRules(deriveReview(input, v.githubLogin), input, matched, v.githubLogin);
+  const derivation = applyWaitingRules(deriveReview(input, viewerWho(v)), input, matched, v.githubLogin);
   const stages = deriveStages({ derivation, input, matched, manual: row.waiting.map((w) => ({ stage: w.stage, reviewerKind: w.reviewerKind, reviewerRef: w.reviewerRef, reason: w.reason, startedAt: w.startedAt, status: w.status, source: w.source })), now });
   return { item: row, derivation, ruleConflict: res.kind === "conflict" ? res.message : null, manualWaiting, stages, dependencyBlockers: input.blockedByDependencies ?? 0 };
 }

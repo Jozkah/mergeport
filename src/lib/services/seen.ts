@@ -1,6 +1,7 @@
 import type { Db } from "@/lib/db";
 import type { Viewer } from "@/lib/authz/viewer";
 import { NotFoundError } from "@/lib/errors";
+import { viewerWho } from "@/lib/domain/identity";
 import { changesSince, takeSnapshot, type Change, type Snapshot } from "@/lib/domain/changes";
 import { viaRepo } from "@/lib/authz/viewer";
 
@@ -17,7 +18,7 @@ async function load(db: Db, v: Viewer, workItemId: string) {
 
 export async function sinceLastLooked(db: Db, v: Viewer, workItemId: string): Promise<{ changes: Change[]; seenAt: Date | null }> {
   const item = await load(db, v, workItemId);
-  const cur = takeSnapshot(item, v.githubLogin);
+  const cur = takeSnapshot(item, viewerWho(v));
   const key = { userId_workItemId: { userId: v.userId, workItemId } };
   const prev = await db.seenState.findUnique({ where: key });
   if (!prev) {
@@ -29,6 +30,6 @@ export async function sinceLastLooked(db: Db, v: Viewer, workItemId: string): Pr
 
 export async function markSeen(db: Db, v: Viewer, workItemId: string) {
   const item = await load(db, v, workItemId);
-  const snapshot = takeSnapshot(item, v.githubLogin) as never;
+  const snapshot = takeSnapshot(item, viewerWho(v)) as never;
   await db.seenState.upsert({ where: { userId_workItemId: { userId: v.userId, workItemId } }, create: { userId: v.userId, workItemId, snapshot }, update: { snapshot, seenAt: new Date() } });
 }

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
-import { inbox, type InboxStatus } from "@/lib/services/inbox";
+import { viewerWho } from "@/lib/domain/identity";
+import { inbox, myRequestAt, type InboxStatus } from "@/lib/services/inbox";
 import { formatInstant, formatInstantDated, relativeTime } from "@/lib/format";
 import { EmptyState, PageHeader, Panel, Segmented, StatusPill, Avatar, Time } from "@/components/ui/primitives";
 import { LinkGithubBanner } from "@/components/settings/LinkGithubBanner";
@@ -44,8 +45,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         ) : (
           <ul className="divide-y divide-line">
             {entries.map((e) => {
-              const me = (viewer.githubLogin ?? "").toLowerCase();
-              const requested = e.item.reviewRequests.filter((r) => !r.removedAt && r.kind === "USER" && r.reviewerRef.toLowerCase() === me).reduce((m, r) => Math.max(m, r.requestedAt.getTime()), 0);
+              const requested = myRequestAt(e.item, viewerWho(viewer));
               const at = (d: Date) => <Time value={d} formatted={formatInstantDated(d, viewer.timezone, now)} />;
               return (
               <li key={e.item.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">

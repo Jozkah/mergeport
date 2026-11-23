@@ -1,5 +1,6 @@
 import type { Db } from "@/lib/db";
 import type { Viewer } from "@/lib/authz/viewer";
+import { samePerson, viewerWho, type WhoLike } from "@/lib/domain/identity";
 import { attention, type AttentionQueues, type DerivedItem } from "./queries";
 
 /**
@@ -17,13 +18,16 @@ export type InboxEntry = { item: DerivedItem["item"]; derived: DerivedItem; reas
 
 const SUBJECT = "work-item";
 
-/** `login` is the viewer's GitHub login (Viewer.githubLogin); null for someone without a linked account, who has no review requests of their own. */
-export function itemVersion(d: DerivedItem, login: string | null): string {
-  const me = (login ?? "\u0000no-github-login").toLowerCase();
-  const others = d.item.comments.filter((c) => c.authorLogin?.toLowerCase() !== me);
+/** When the person was last asked to review (epoch ms, 0 = never): matched by GitHub id where the request has one, else by login. */
+export function myRequestAt(item: DerivedItem["item"], me: WhoLike): number {
+  return item.reviewRequests.filter((r) => !r.removedAt && r.kind === "USER" && samePerson({ login: r.reviewerRef, id: r.reviewerGithubId }, me)).reduce((m, r) => Math.max(m, r.requestedAt.getTime()), 0);
+}
+
+/** `me` is the viewer's GitHub identity (`viewerWho(viewer)`); null for someone without a linked account, who has no review requests of their own. */
+export function itemVersion(d: DerivedItem, me: WhoLike): string {
+  const others = d.item.comments.filter((c) => !samePerson({ login: c.authorLogin, id: c.authorGithubId }, me));
   const lastOther = others.reduce((m, c) => Math.max(m, c.updatedAtGh.getTime(), c.createdAtGh.getTime()), 0);
-  const myRequest = d.item.reviewRequests.filter((r) => !r.removedAt && r.kind === "USER" && r.reviewerRef.toLowerCase() === me).reduce((m, r) => Math.max(m, r.requestedAt.getTime()), 0);
-  return `${d.item.headSha ?? "-"}|${lastOther}|${myRequest}`;
+  return `${d.item.headSha ?? "-"}|${lastOther}|${myRequestAt(d.item, me)}`;
 }
 
 export async function inbox(db: Db, v: Viewer, opts: { now?: Date; status?: InboxStatus; projectId?: string | null; repositoryIds?: string[]; queues?: AttentionQueues } = {}): Promise<{ entries: InboxEntry[]; counts: Record<InboxStatus, number>; unread: number }> {
@@ -39,7 +43,7 @@ export async function inbox(db: Db, v: Viewer, opts: { now?: Date; status?: Inbo
 
   const all: InboxEntry[] = [];
   for (const { d, reasons } of byId.values()) {
-    const version = itemVersion(d, v.githubLogin);
+    const version = itemVersion(d, viewerWho(v));
     const s = states.get(d.item.id);
     const done = !!s && s.doneVersion === version;
     const snoozed = !done && !!s?.snoozeUntil && s.snoozeUntil > now && s.snoozeVersion === version;

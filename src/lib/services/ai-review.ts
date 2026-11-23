@@ -7,7 +7,7 @@ import { formatDuration } from "@/lib/format";
 import { extractJson, loadAiConfig, rememberModel, withModel, chat, type AiConfig, type Fetch, type Step } from "./ai";
 import { attention, listProjects, type DerivedItem } from "./queries";
 import { createTask, listTasks, priorityName } from "./tasks";
-import { indexNeedle, sameLogin } from "@/lib/domain/text-index";
+import { asWho, assignedTo, authoredBy, samePerson, viewerWho, type WhoLike } from "@/lib/domain/identity";
 
 /**
  * The AI looks at everything Mergeport knows for you (review queues, blocked and waiting pull requests, your tasks, repositories that
@@ -32,10 +32,11 @@ export type Snapshot = { text: string; refs: Map<string, Ref>; projects: { id: s
 const kindOf = (ref: string): Kind | null => (ref[0] === "R" ? "review" : ref[0] === "C" ? "changes" : ref[0] === "B" ? "blocked" : null);
 
 /** Whether a pull request is the person's business: they wrote it, are assigned, or were asked to review. Everything else in a tracked repository is only watched. */
-export function involvesMe(d: DerivedItem, login: string | null): boolean {
-  if (!login) return false;
+export function involvesMe(d: DerivedItem, me: WhoLike): boolean {
+  const w = asWho(me);
+  if (!w.login && w.id === null) return false;
   const i = d.item;
-  return sameLogin(i.authorLogin, login) || i.assigneeLogins.includes(indexNeedle(login)) || i.reviewRequests.some((r) => !r.removedAt && r.kind !== "EXTERNAL_ROLE" && sameLogin(r.reviewerRef, login));
+  return authoredBy(i, w) || assignedTo(i, w) || i.reviewRequests.some((r) => !r.removedAt && r.kind !== "EXTERNAL_ROLE" && samePerson({ login: r.reviewerRef, id: r.reviewerGithubId }, w));
 }
 
 function line(ref: string, d: DerivedItem, extra = ""): string {
@@ -60,8 +61,9 @@ export async function buildSnapshot(db: Db, v: Viewer, now = new Date()): Promis
   };
   // Only what involves the person is listed as work. Mergeport also tracks repositories the person merely watches: their blocked or
   // waiting pull requests are counted at the end and are never the person's to act on.
-  const mine = (items: DerivedItem[]) => items.filter((d) => involvesMe(d, v.githubLogin));
-  const yours = (d: DerivedItem) => (sameLogin(d.item.authorLogin, v.githubLogin) ? " (yours)" : "");
+  const me = viewerWho(v);
+  const mine = (items: DerivedItem[]) => items.filter((d) => involvesMe(d, me));
+  const yours = (d: DerivedItem) => (authoredBy(d.item, me) ? " (yours)" : "");
   section("Waiting for your review (a review was requested from you)", "R", att.needsMyReview, "review", 8);
   section("Your pull requests with changes requested", "C", att.changesRequested, "changes", 6);
   const blocked = mine(att.blocked);
@@ -73,9 +75,9 @@ export async function buildSnapshot(db: Db, v: Viewer, now = new Date()): Promis
       out.push(line(key, d, yours(d)));
     });
   }
-  const waiting = att.waitingExternal.filter((d) => sameLogin(d.item.authorLogin, v.githubLogin));
+  const waiting = att.waitingExternal.filter((d) => authoredBy(d.item, me));
   if (waiting.length) out.push("", `Your own pull requests waiting on other people (${waiting.length}): ${waiting.slice(0, 5).map((d) => `${d.item.repository.fullName}#${d.item.number}`).join(", ")}`);
-  const watched = att.blocked.filter((d) => !involvesMe(d, v.githubLogin)).length + att.waitingExternal.filter((d) => !sameLogin(d.item.authorLogin, v.githubLogin) && !involvesMe(d, v.githubLogin)).length;
+  const watched = att.blocked.filter((d) => !involvesMe(d, me)).length + att.waitingExternal.filter((d) => !authoredBy(d.item, me) && !involvesMe(d, me)).length;
   if (watched) out.push("", `Not yours: ${watched} other pull request${watched === 1 ? " is" : "s are"} blocked or waiting in repositories you only watch. They are listed on purpose only as a count; the person is not responsible for them.`);
 
   const today = todayIn(v.timezone, now);

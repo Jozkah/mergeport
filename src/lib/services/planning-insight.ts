@@ -1,3 +1,4 @@
+import { samePerson } from "@/lib/domain/identity";
 import type { Db } from "@/lib/db";
 import { requireProject, type Viewer } from "@/lib/authz/viewer";
 import { agingWip, cycleTimes, recordingSince, scopeAdded, type Aging, type CycleTime } from "@/lib/domain/analytics";
@@ -79,13 +80,13 @@ export async function deliveryAnalytics(db: Db, v: Viewer, projectId: string, no
   const open = await db.planningItem.findMany({ where: { id: { in: visibleIds } }, select: { id: true, column: { select: { key: true } } } });
   const { aging, unrecorded } = agingWip(open.map((i) => ({ id: i.id, columnKey: i.column.key })), evs, now);
 
-  const cards = await db.planningItem.findMany({ where: { id: { in: visibleIds }, workItemId: { not: null } }, select: { workItem: { select: { id: true, type: true, reviewRequests: { select: { reviewerRef: true, requestedAt: true, kind: true } }, comments: { where: { kind: "REVIEW" }, select: { authorLogin: true, createdAtGh: true } } } } } });
+  const cards = await db.planningItem.findMany({ where: { id: { in: visibleIds }, workItemId: { not: null } }, select: { workItem: { select: { id: true, type: true, reviewRequests: { select: { reviewerRef: true, reviewerGithubId: true, requestedAt: true, kind: true } }, comments: { where: { kind: "REVIEW" }, select: { authorLogin: true, authorGithubId: true, createdAtGh: true } } } } } });
   const waits: number[] = [];
   for (const c of cards) {
     const w = c.workItem;
     if (!w || w.type !== "PULL_REQUEST") continue;
     for (const r of w.reviewRequests.filter((x) => x.kind === "USER")) {
-      const first = w.comments.filter((x) => x.authorLogin?.toLowerCase() === r.reviewerRef.toLowerCase() && x.createdAtGh >= r.requestedAt).sort((a, b) => a.createdAtGh.getTime() - b.createdAtGh.getTime())[0];
+      const first = w.comments.filter((x) => samePerson({ login: x.authorLogin, id: x.authorGithubId }, { login: r.reviewerRef, id: r.reviewerGithubId }) && x.createdAtGh >= r.requestedAt).sort((a, b) => a.createdAtGh.getTime() - b.createdAtGh.getTime())[0];
       if (first) waits.push(first.createdAtGh.getTime() - r.requestedAt.getTime());
     }
   }
