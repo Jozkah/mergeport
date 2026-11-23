@@ -334,6 +334,8 @@ Tests: `tests/github-writes.test.ts` against the fake GitHub (`FakeGitHubServer.
 
 ## Needs a live check
 
+Step-by-step instructions for running these checks against real GitHub are in `docs/live-github-runbook.md`.
+
 Everything above is tested against the fake only. Before relying on it, run the flow once against GitHub itself with a real App and write down the answers:
 
 1. `GET /user/memberships/orgs/<org>` with a GitHub App user-to-server token: does it answer 200 with `role: admin`, `state: active` for an organization owner, and
