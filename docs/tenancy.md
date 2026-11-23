@@ -41,7 +41,7 @@ cuids that only exist in one workspace.
 **GLOBAL (12), shared on purpose.**
 
 - `OAuthClient`: an app that registered itself (RFC 7591, public client: name and exact redirect addresses, no secret). It names no workspace and holds nothing private; a person authorizes it for one workspace through an `OAuthGrant`. Capped (1000 rows, unused ones older than a day are forgotten when full).
-- `User`, `Session`, `Identity`, `MagicLink`: a person's account and how they sign in (see `docs/auth.md`). A user belongs to workspaces through `Member`. `Session.activeWorkspaceId` only chooses among the person's own memberships and is re-checked on every request.
+- `User`, `Session`, `Identity`, `MagicLink`, `GithubSigninState`: a person's account and how they sign in (see `docs/auth.md`). A user belongs to workspaces through `Member`. `Session.activeWorkspaceId` only chooses among the person's own memberships and is re-checked on every request.
 - `GithubOwner`: a public GitHub account (login, type, avatar) keyed by GitHub's immutable id. It holds nothing private and is the
   same for every tenant.
 - `PublicCacheEntry`: ETag cache of GitHub API answers, keyed by request. The unprefixed keys are the shared cache and hold only

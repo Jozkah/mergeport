@@ -10,8 +10,8 @@ import { requestAccessRefresh } from "./access-cache";
 import { GithubAppError } from "./app-auth";
 import type { GithubAppConfig } from "./app-config";
 import { claimAppState } from "./app-state";
-import { STATE_SHAPE, STATE_TTL_MS, challengeOf, connectOverrides, nonceHashOf } from "./connect";
-import { GITHUB_WEB_BASE, exchangeCodeForTokens, getUser, revokeUserToken, type ConnectDeps, type GithubUser, type UserTokens } from "./connect-api";
+import { STATE_SHAPE, STATE_TTL_MS, connectOverrides, nonceHashOf } from "./connect";
+import { exchangeCodeForTokens, getUser, oauthAuthorizeUrl, revokeUserToken, type ConnectDeps, type GithubUser, type UserTokens } from "./connect-api";
 import { NO_KEY_TEXT, type LinkResult } from "./link-messages";
 import { storeUserTokens, tokenAad, userTokenKey } from "./user-token";
 
@@ -53,8 +53,7 @@ export async function startLink(db: Db, input: { viewer: LinkViewer; config: Git
   const state = `${viewer.workspaceId}.${randomToken(32)}`;
   await db.githubAppState.deleteMany({ where: { workspaceId: viewer.workspaceId, userId: viewer.userId, kind: "link", expiresAt: { lt: new Date(now.getTime() - 24 * 3600_000) } } });
   await db.githubAppState.create({ data: { workspaceId: viewer.workspaceId, userId: viewer.userId, kind: "link", stateHash: sha256(state), nonceHash: nonceHashOf(nonce), expiresAt: new Date(now.getTime() + STATE_TTL_MS) } });
-  const q = new URLSearchParams({ client_id: config.clientId, redirect_uri: input.redirectUri, state, code_challenge: challengeOf(nonce), code_challenge_method: "S256", allow_signup: "false" });
-  return { url: `${GITHUB_WEB_BASE}/login/oauth/authorize?${q.toString()}`, nonce, maxAgeSeconds: Math.floor(STATE_TTL_MS / 1000) };
+  return { url: oauthAuthorizeUrl(config, { redirectUri: input.redirectUri, state, nonce }), nonce, maxAgeSeconds: Math.floor(STATE_TTL_MS / 1000) };
 }
 
 // ---------- callback ----------

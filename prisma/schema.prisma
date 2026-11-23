@@ -1744,6 +1744,19 @@ model GithubAppState {
   @@index([expiresAt])
 }
 
+/// "Sign in with GitHub" (docs/github-app.md): the single-use state of a sign-in that has no person or workspace yet. Only hashes are stored. GLOBAL like MagicLink.
+model GithubSigninState {
+  id        String    @id @default(cuid())
+  stateHash String    @unique
+  nonceHash String
+  /// Where to land after signing in (a relative path, already checked by safeReturnTo).
+  next      String    @default("/")
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([expiresAt])
+}
+
 /// A person's OWN GitHub user-to-server token (hosted, docs/github-app.md "Linking your GitHub account"). GLOBAL like User: one row per person, keyed by `userId`. Both tokens are AES-256-GCM
 /// ciphertext (AAD `ghusertoken:<userId>`); the lifetimes come from GitHub's token response. `status` is OK or RELINK (GitHub refused the refresh token: both ciphertexts are then cleared and checks stop until the person links again).
 model GithubUserToken {

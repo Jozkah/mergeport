@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { GithubAppError, githubApiBase, readCapped, signAppJwt } from "./app-auth";
 import type { GithubAppConfig } from "./app-config";
 import type { InstallationFacts } from "./binding";
@@ -25,6 +26,15 @@ export type ConnectDeps = {
   oauthBase?: string;
   timeoutMs?: number;
 };
+
+/**
+ * The github.com authorization address of the App's user-to-server OAuth, as the link and sign-in flows use it: PKCE S256 (the browser
+ * nonce is the verifier), no sign-up on GitHub's side. `state` is whatever single-use value the caller stored.
+ */
+export function oauthAuthorizeUrl(config: Pick<GithubAppConfig, "clientId">, input: { redirectUri: string; state: string; nonce: string }): string {
+  const q = new URLSearchParams({ client_id: config.clientId, redirect_uri: input.redirectUri, state: input.state, code_challenge: createHash("sha256").update(input.nonce).digest("base64url"), code_challenge_method: "S256", allow_signup: "false" });
+  return `${GITHUB_WEB_BASE}/login/oauth/authorize?${q.toString()}`;
+}
 
 export type GithubUser = { id: bigint; login: string };
 export type UserInstallation = { id: bigint; accountId: bigint; accountLogin: string; accountType: "USER" | "ORGANIZATION" };
@@ -156,6 +166,24 @@ export async function getUser(deps: ConnectDeps, token: string): Promise<GithubU
   const j = obj(r.json);
   const id = toId(j?.id);
   return id !== null && typeof j?.login === "string" && j.login ? { id, login: j.login } : null;
+}
+
+/**
+ * `GET /user/emails` (needs the App's "Email addresses (read)" user permission): the person's PRIMARY address, only when GitHub marks it
+ * verified. `email: null` means there is none to trust (no primary, primary unverified, none listed). `forbidden` means the App lacks the
+ * permission (403/404), which is a server setup problem, not something about the person. The result is a raw string from GitHub: the caller
+ * normalizes it. Throws "unavailable" when GitHub cannot be reached or answers oddly; null token refusal is `forbidden` too (401).
+ */
+export async function getVerifiedPrimaryEmail(deps: ConnectDeps, token: string): Promise<{ kind: "ok"; email: string | null } | { kind: "forbidden" }> {
+  const r = await send(deps, `${apiBase(deps)}/user/emails?per_page=100`, { headers: asUser(token) });
+  if (isRateLimited(r)) throw unavailable("GitHub did not answer the email request.", r.status);
+  if (r.status === 401 || r.status === 403 || r.status === 404) return { kind: "forbidden" };
+  if (r.status !== 200 || !Array.isArray(r.json)) throw unavailable("GitHub did not answer the email request.", r.status);
+  for (const item of r.json as unknown[]) {
+    const o = obj(item);
+    if (o?.primary === true && o?.verified === true && typeof o.email === "string" && o.email) return { kind: "ok", email: o.email };
+  }
+  return { kind: "ok", email: null };
 }
 
 /** `GET /user/installations`, all pages: the installations of THIS App the person can access. Null when GitHub refuses the token. */
