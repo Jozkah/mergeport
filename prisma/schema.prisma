@@ -143,6 +143,8 @@ model Workspace {
   id        String   @id @default(cuid())
   name      String
   createdAt DateTime @default(now())
+  /// Owners and administrators let people write to GitHub as themselves (create an issue from a task, comment). Off by default; only has effect while the deployment allows it (MERGEPORT_GITHUB_WRITES=on).
+  githubWritesEnabled Boolean @default(false)
 
   sessions      Session[] @relation("SessionActiveWorkspace")
   members       Member[]
