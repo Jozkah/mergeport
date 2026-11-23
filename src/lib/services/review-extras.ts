@@ -1,3 +1,4 @@
+import { samePerson } from "@/lib/domain/identity";
 import type { Db } from "@/lib/db";
 import { requireRepo, requireWorkItem, type Viewer } from "@/lib/authz/viewer";
 import { CODEOWNERS_PATHS, parseCodeowners, routeFiles, type Routing } from "@/lib/domain/codeowners";
@@ -118,7 +119,7 @@ export async function submitDrafts(ctx: { db: Db; v: Viewer; port?: GithubPort }
   const { db, v } = ctx;
   const item = await reviewTarget(db, v, id);
   const drafts = await db.reviewDraft.findMany({ where: { userId: v.userId, workItemId: id }, orderBy: { createdAt: "asc" } });
-  if (input.event === "APPROVE" && item.authorLogin?.toLowerCase() === v.login.toLowerCase()) throw new ValidationError("You cannot approve your own pull request");
+  if (input.event === "APPROVE" && samePerson({ login: item.authorLogin, id: item.authorGithubId }, { login: v.githubLogin ?? v.login, id: v.githubId })) throw new ValidationError("You cannot approve your own pull request");
   if (input.event !== "APPROVE" && drafts.length === 0 && !input.body.trim()) throw new ValidationError("Add a comment to explain the review");
   const stale = drafts.filter((d) => d.commitSha !== item.headSha);
   if (stale.length) throw new ForbiddenError(`${stale.length} of your comments were written on an older version. The pull request has changed: review them, delete the ones that no longer apply, and submit again`);
