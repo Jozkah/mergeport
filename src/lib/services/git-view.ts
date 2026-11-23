@@ -4,6 +4,7 @@ import { isHosted } from "@/lib/public-url";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { repoWhere, viaRepo, type Viewer } from "@/lib/authz/viewer";
+import { authoredWhere, viewerWho } from "@/lib/domain/identity";
 import { buildDiffFile, type DiffFile } from "@/lib/diff";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { portForSync } from "@/lib/github/factory";
@@ -95,7 +96,7 @@ export async function pullFilesView(db: Db, v: Viewer, id: string, canComment: b
     (inline[c.path] ??= []).push({ id: c.id, author: c.authorLogin, html: renderMarkdown(c.body), createdAt: c.createdAtGh.toISOString(), line: c.line, commitSha: c.commitSha, resolved: c.threadResolved });
   }
   // The person's GitHub reviews only: without a linked GitHub account there are none (an email user's name is not a GitHub login).
-  const mine = !v.githubLogin ? null : await db.workItemComment.findFirst({ where: { workItemId: item.id, kind: "REVIEW", authorLogin: { equals: v.githubLogin }, commitSha: { not: null } }, orderBy: { createdAtGh: "desc" }, select: { commitSha: true } });
+  const mine = !v.githubLogin ? null : await db.workItemComment.findFirst({ where: { workItemId: item.id, kind: "REVIEW", AND: [authoredWhere(viewerWho(v))], commitSha: { not: null } }, orderBy: { createdAtGh: "desc" }, select: { commitSha: true } });
   return { lastReviewedSha: mine?.commitSha ?? null, headSha: item.headSha, files, truncated, inline, canComment };
 }
 

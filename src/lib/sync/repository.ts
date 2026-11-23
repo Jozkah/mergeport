@@ -3,10 +3,11 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { Db } from "@/lib/db";
 import { canSpend, shouldApplyUpdate } from "@/lib/domain/sync";
 import { classifyCompare, classifyUpstreamMerge } from "@/lib/domain/forks";
-import { GithubError, type GithubPort, type RemoteComment, type RemoteWorkItem } from "@/lib/github/port";
+import { GithubError, type GithubPort, type RemoteComment, type RemoteRequested, type RemoteWorkItem } from "@/lib/github/port";
 import { mapLimit } from "@/lib/util";
 import { purgeDigests } from "@/lib/services/digest-purge";
 import { indexList, sameLogin } from "@/lib/domain/text-index";
+import { indexIds, samePerson } from "@/lib/domain/identity";
 import { refreshHubWatch } from "@/lib/hub/watch";
 import { parsePrefs, wantsInApp } from "@/lib/domain/notify-prefs";
 
@@ -46,6 +47,8 @@ function itemData(i: RemoteWorkItem): Prisma.WorkItemUncheckedUpdateInput {
     assignees: i.assignees as unknown as Prisma.InputJsonValue,
     labelNames: indexList(i.labels.map((l) => l.name)),
     assigneeLogins: indexList(i.assignees),
+    // Ids only when GitHub gave one for every assignee: a partial list would hide the unlisted ones from an id-only match.
+    assigneeIds: i.assigneeGithubIds && i.assigneeGithubIds.length === i.assignees.length && i.assigneeGithubIds.every((x) => x !== null) ? indexIds(i.assigneeGithubIds as bigint[]) : "",
     milestoneNumber: i.milestoneNumber,
     milestoneTitle: i.milestoneTitle,
     htmlUrl: i.htmlUrl,
@@ -105,9 +108,9 @@ export function upsertComment(db: Tx, workItemId: string, kind: "ISSUE_COMMENT" 
     where: { workItemId_kind_githubId: { workItemId, kind, githubId: c.githubId } },
     create:
       kind === "ISSUE_COMMENT"
-        ? { workItemId, githubId: c.githubId, kind, authorLogin: c.login, body: c.body, createdAtGh: c.createdAt, updatedAtGh: c.updatedAt }
-        : { workItemId, githubId: c.githubId, kind, authorLogin: c.login, body: c.body, path: c.path, line: c.line, commitSha: c.commitSha, threadKey: c.threadKey, createdAtGh: c.createdAt, updatedAtGh: c.updatedAt },
-    update: { body: c.body, updatedAtGh: c.updatedAt },
+        ? { workItemId, githubId: c.githubId, kind, authorLogin: c.login, authorGithubId: c.userGithubId ?? null, body: c.body, createdAtGh: c.createdAt, updatedAtGh: c.updatedAt }
+        : { workItemId, githubId: c.githubId, kind, authorLogin: c.login, authorGithubId: c.userGithubId ?? null, body: c.body, path: c.path, line: c.line, commitSha: c.commitSha, threadKey: c.threadKey, createdAtGh: c.createdAt, updatedAtGh: c.updatedAt },
+    update: { body: c.body, updatedAtGh: c.updatedAt, ...(c.userGithubId ? { authorGithubId: c.userGithubId } : {}) }, // an id learned later fills in rows stored without one
   });
 }
 const COMMENT_FETCH_CAP = 3000; // the adapter reads at most 30 pages of 100
@@ -123,7 +126,7 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
     // Thread resolution lives only in GitHub's GraphQL API. If it cannot be read, the flag stays as it was (unknown stays unknown).
     isPr ? port.listReviewThreads(owner, repo, i.number).catch(() => null) : Promise.resolve(null),
     isPr ? port.listReviews(owner, repo, i.number) : Promise.resolve([]),
-    isPr ? port.listRequestedReviewers(owner, repo, i.number) : Promise.resolve({ users: [] as string[], teams: [] as string[] }),
+    isPr ? port.listRequestedReviewers(owner, repo, i.number) : Promise.resolve<RemoteRequested>({ users: [], teams: [] }),
   ]);
   // Comments deleted on GitHub must disappear here too. Only a complete fetch can prove a deletion: a fetch that hit the paging
   // bound might be missing comments that still exist, so it never deletes anything.
@@ -141,36 +144,43 @@ async function syncDiscussion(db: Db, port: GithubPort, owner: string, repo: str
   if (!isPr) return;
   for (const r of reviews) {
     const seen = await db.workItemComment.findUnique({ where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "REVIEW", githubId: r.githubId } }, select: { id: true } });
-    if (!seen && r.state === "CHANGES_REQUESTED" && i.state === "OPEN") await notifyAuthorChanges(db, wi.id, r.login, i.title);
+    if (!seen && r.state === "CHANGES_REQUESTED" && i.state === "OPEN") await notifyAuthorChanges(db, wi.id, { login: r.login, id: r.userGithubId ?? null }, i.title);
     await db.workItemComment.upsert({
       where: { workItemId_kind_githubId: { workItemId: wi.id, kind: "REVIEW", githubId: r.githubId } },
-      create: { workItemId: wi.id, githubId: r.githubId, kind: "REVIEW", authorLogin: r.login, body: r.body, reviewState: r.state, commitSha: r.commitSha, createdAtGh: r.submittedAt, updatedAtGh: r.submittedAt },
-      update: { reviewState: r.state, body: r.body },
+      create: { workItemId: wi.id, githubId: r.githubId, kind: "REVIEW", authorLogin: r.login, authorGithubId: r.userGithubId ?? null, body: r.body, reviewState: r.state, commitSha: r.commitSha, createdAtGh: r.submittedAt, updatedAtGh: r.submittedAt },
+      update: { reviewState: r.state, body: r.body, ...(r.userGithubId ? { authorGithubId: r.userGithubId } : {}) },
     });
   }
   // Reconcile review requests: new ones get a first-observed time, vanished ones are closed (cancelled or fulfilled).
   // A review request only means something while the pull request is open. GitHub keeps listing the reviewers of a merged or
   // closed PR, so history must not turn into "waiting on" rows or fresh notifications.
   const isOpen = i.state === "OPEN";
-  const active = isOpen ? [...requested.users.map((u) => ({ kind: "USER" as const, ref: u })), ...requested.teams.map((t) => ({ kind: "TEAM" as const, ref: t }))] : [];
+  const active = isOpen ? [...requested.users.map((u, n) => ({ kind: "USER" as const, ref: u, id: requested.userGithubIds?.[n] ?? null })), ...requested.teams.map((t) => ({ kind: "TEAM" as const, ref: t, id: null as bigint | null }))] : [];
   if (!isOpen) await db.notification.deleteMany({ where: { kind: "review-requested", readAt: null, repositoryId, href: `/pull-requests/${wi.id}` } });
   const open = await db.reviewRequest.findMany({ where: { workItemId: wi.id, removedAt: null } });
+  // The same request is the same GitHub id; only when one side has no id does the login decide (a renamed login keeps its request,
+  // a login taken over by someone else does not inherit it).
+  const sameRequest = (o: { kind: string; reviewerRef: string; reviewerGithubId: bigint | null }, a: { kind: string; ref: string; id: bigint | null }) =>
+    a.kind === o.kind && (a.kind === "USER" ? samePerson({ login: o.reviewerRef, id: o.reviewerGithubId }, { login: a.ref, id: a.id }) : a.ref.toLowerCase() === o.reviewerRef.toLowerCase());
   for (const o of open) {
-    if (!active.some((a) => a.kind === o.kind && a.ref.toLowerCase() === o.reviewerRef.toLowerCase())) await db.reviewRequest.update({ where: { id: o.id }, data: { removedAt: now } });
+    const still = active.find((a) => sameRequest(o, a));
+    if (!still) await db.reviewRequest.update({ where: { id: o.id }, data: { removedAt: now } });
+    else if (still.kind === "USER" && (o.reviewerRef !== still.ref || (still.id !== null && o.reviewerGithubId !== still.id))) await db.reviewRequest.update({ where: { id: o.id }, data: { reviewerRef: still.ref, ...(still.id !== null ? { reviewerGithubId: still.id } : {}) } });
   }
   for (const a of active) {
-    if (!open.some((o) => o.kind === a.kind && o.reviewerRef.toLowerCase() === a.ref.toLowerCase())) {
-      await db.reviewRequest.create({ data: { workItemId: wi.id, kind: a.kind, reviewerRef: a.ref, requestedAt: now } });
-      if (a.kind === "USER") await notifyReviewer(db, wi.id, a.ref, i.title);
+    if (!open.some((o) => sameRequest(o, a))) {
+      await db.reviewRequest.create({ data: { workItemId: wi.id, kind: a.kind, reviewerRef: a.ref, reviewerGithubId: a.id, requestedAt: now } });
+      if (a.kind === "USER") await notifyReviewer(db, wi.id, { login: a.ref, id: a.id }, i.title);
     }
   }
 }
 
 /** Notifications are dashboard records only. They carry repositoryId so reads can be filtered by current grants. */
-async function notifyReviewer(db: Db, workItemId: string, login: string, title: string) {
+async function notifyReviewer(db: Db, workItemId: string, who: { login: string; id: bigint | null }, title: string) {
   const wi = await db.workItem.findUniqueOrThrow({ where: { id: workItemId }, include: { repository: true } });
-  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { githubId: { not: null }, login: { contains: login, mode: "insensitive" } } }, include: { user: true } });
-  const member = candidates.find((m) => sameLogin(m.user.login, login));
+  // With a GitHub id the member is the one linked to that id (their sign-in name and GitHub login may differ); without one, the login.
+  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: who.id !== null ? { githubId: who.id } : { githubId: { not: null }, login: { contains: who.login, mode: "insensitive" } } }, include: { user: true } });
+  const member = candidates.find((m) => who.id !== null || sameLogin(m.user.login, who.login));
   if (!member) return;
   await notifyUser(db, member.userId, wi, "review-requested", `Review requested: ${title}`);
 }
@@ -183,13 +193,14 @@ async function notifyUser(db: Db, userId: string, wi: { id: string; repositoryId
 }
 
 /** The author of an open pull request hears when a reviewer asks for changes (once per review). */
-async function notifyAuthorChanges(db: Db, workItemId: string, reviewer: string | null, title: string) {
+async function notifyAuthorChanges(db: Db, workItemId: string, reviewer: { login: string | null; id: bigint | null }, title: string) {
   const wi = await db.workItem.findUniqueOrThrow({ where: { id: workItemId }, include: { repository: true } });
-  if (wi.state !== "OPEN" || !wi.authorLogin || (reviewer && sameLogin(reviewer, wi.authorLogin))) return;
-  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: { githubId: { not: null }, login: { contains: wi.authorLogin, mode: "insensitive" } } }, include: { user: true } });
-  const member = candidates.find((m) => sameLogin(m.user.login, wi.authorLogin!));
+  if (wi.state !== "OPEN" || !wi.authorLogin || ((reviewer.login || reviewer.id !== null) && samePerson(reviewer, { login: wi.authorLogin, id: wi.authorGithubId }))) return;
+  const authorId = wi.authorGithubId;
+  const candidates = await db.member.findMany({ where: { workspaceId: wi.repository.workspaceId, status: "ACTIVE", user: authorId !== null ? { githubId: authorId } : { githubId: { not: null }, login: { contains: wi.authorLogin, mode: "insensitive" } } }, include: { user: true } });
+  const member = candidates.find((m) => authorId !== null || sameLogin(m.user.login, wi.authorLogin!));
   if (!member) return;
-  await notifyUser(db, member.userId, wi, "changes-requested", `Changes requested${reviewer ? ` by ${reviewer}` : ""}: ${title}`);
+  await notifyUser(db, member.userId, wi, "changes-requested", `Changes requested${reviewer.login ? ` by ${reviewer.login}` : ""}: ${title}`);
 }
 
 export async function syncRepository(db: Db, port: GithubPort, repositoryId: string, opts: { full?: boolean; now?: Date } = {}): Promise<SyncResult> {

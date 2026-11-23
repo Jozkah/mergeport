@@ -36,6 +36,8 @@ export type RemoteWorkItem = {
   authorAvatar: string | null;
   labels: RemoteLabel[];
   assignees: string[];
+  /** Numeric GitHub ids of `assignees`, same order; absent when the source has none (demo, fakes). */
+  assigneeGithubIds?: (bigint | null)[];
   milestoneNumber: number | null;
   milestoneTitle: string | null;
   htmlUrl: string;
@@ -53,9 +55,9 @@ export type RemoteWorkItem = {
   changedFiles?: number | null;
 };
 
-export type RemoteReview = { githubId: bigint; login: string | null; state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING"; body: string | null; commitSha: string | null; submittedAt: Date };
-export type RemoteComment = { githubId: bigint; login: string | null; body: string | null; createdAt: Date; updatedAt: Date; path?: string | null; line?: number | null; commitSha?: string | null; threadKey?: string | null };
-export type RemoteRequested = { users: string[]; teams: string[] };
+export type RemoteReview = { githubId: bigint; login: string | null; /** numeric id of the reviewer, when the source has one */ userGithubId?: bigint | null; state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING"; body: string | null; commitSha: string | null; submittedAt: Date };
+export type RemoteComment = { githubId: bigint; login: string | null; /** numeric id of the commenter, when the source has one */ userGithubId?: bigint | null; body: string | null; createdAt: Date; updatedAt: Date; path?: string | null; line?: number | null; commitSha?: string | null; threadKey?: string | null };
+export type RemoteRequested = { users: string[]; /** numeric ids of `users`, same order; absent when the source has none */ userGithubIds?: (bigint | null)[]; teams: string[] };
 export type RemoteFile = { filename: string; status: string; additions: number; deletions: number; patch: string | null; previousFilename?: string | null };
 export type RemoteCommit = { sha: string; message: string; author: string | null; date: Date | null; body?: string; authorAvatar?: string | null };
 export type TreeEntry = { name: string; path: string; type: "file" | "dir" | "symlink" | "submodule"; size: number; sha: string };

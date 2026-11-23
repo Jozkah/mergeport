@@ -45,7 +45,7 @@ describe("notifications follow the preferences", () => {
   const meta: RepoMeta = { githubId: 1n, fullName: "acme/tool", name: "tool", htmlUrl: "https://github.com/acme/tool", visibility: "PUBLIC", isFork: false, defaultBranch: "main", archived: false, owner: { githubId: 1001n, login: "acme", type: "ORGANIZATION" } };
   const T = (d: number) => new Date(Date.UTC(2026, 9, d));
   const pr = (o: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({
-    githubId: 503n, number: 3, type: "PULL_REQUEST", title: "Fix it", body: null, state: "OPEN", draft: false, authorLogin: "author-demo", authorGithubId: 1n, authorAvatar: null, labels: [], assignees: [], milestoneNumber: null, milestoneTitle: null,
+    githubId: 503n, number: 3, type: "PULL_REQUEST", title: "Fix it", body: null, state: "OPEN", draft: false, authorLogin: "author-demo", authorGithubId: 12n, authorAvatar: null, labels: [], assignees: [], milestoneNumber: null, milestoneTitle: null,
     htmlUrl: "https://x/3", createdAt: T(1), updatedAt: T(2), closedAt: null, mergedAt: null, headSha: "h1", headRef: "f", baseRef: "main", mergeable: "MERGEABLE", ...o,
   });
   let fake: FakeGithub;

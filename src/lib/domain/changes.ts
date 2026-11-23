@@ -2,6 +2,8 @@
  * "Since you last looked": the differences between what a person last saw of an item and what is there now. Pure.
  * The snapshot holds only facts that were visible; nothing is guessed. A missing earlier snapshot means "no baseline", never "everything is new".
  */
+import { asWho, samePerson, type WhoLike } from "./identity";
+
 export type Snapshot = {
   v: 1;
   state: string;
@@ -17,13 +19,14 @@ export type Snapshot = {
 
 export type Change = { kind: "comments" | "commits" | "checks" | "review" | "state" | "conflicts" | "title"; text: string };
 
-type CommentLike = { kind: string; authorLogin: string | null; createdAtGh: Date; reviewState: string | null };
+type CommentLike = { kind: string; authorLogin: string | null; authorGithubId?: bigint | null; createdAtGh: Date; reviewState: string | null };
 type ItemLike = { state: string; headSha: string | null; checksState: string; mergeable: string; title: string; comments: CommentLike[] };
 
-/** `viewerLogin` is the viewer's GitHub login; without a linked account (null) every comment counts as someone else's. */
-export function takeSnapshot(item: ItemLike, viewerLogin: string | null): Snapshot {
-  const me = (viewerLogin ?? "\u0000no-github-login").toLowerCase();
-  const talk = item.comments.filter((c) => (c.kind === "ISSUE_COMMENT" || c.kind === "REVIEW_COMMENT") && c.authorLogin?.toLowerCase() !== me);
+/** `viewer` is the viewer's GitHub identity (or a bare login); without a linked account (null) every comment counts as someone else's. */
+export function takeSnapshot(item: ItemLike, viewer: WhoLike): Snapshot {
+  const me = asWho(viewer);
+  const mine = (c: CommentLike) => samePerson({ login: c.authorLogin, id: c.authorGithubId ?? null }, me);
+  const talk = item.comments.filter((c) => (c.kind === "ISSUE_COMMENT" || c.kind === "REVIEW_COMMENT") && !mine(c));
   const reviews: Record<string, string> = {};
   for (const c of [...item.comments].filter((c) => c.kind === "REVIEW" && c.authorLogin && c.reviewState).sort((a, b) => a.createdAtGh.getTime() - b.createdAtGh.getTime())) {
     if (c.reviewState === "APPROVED" || c.reviewState === "CHANGES_REQUESTED") reviews[c.authorLogin!.toLowerCase()] = c.reviewState;

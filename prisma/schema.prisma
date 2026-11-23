@@ -475,6 +475,7 @@ model WorkItem {
   assignees      Json           @default("[]") // [login]
   labelNames     String         @default("") // "|bug|docs|" lowercase search index of labels (SQLite cannot filter JSON arrays)
   assigneeLogins String         @default("") // "|alice|bob|" lowercase search index of assignees
+  assigneeIds    String         @default("") // "|123|456|" numeric GitHub ids of the assignees; empty = not recorded (older row, local or demo item), then logins decide
   milestoneNumber Int?
   milestoneTitle String?
   htmlUrl        String
@@ -509,6 +510,7 @@ model WorkItemComment {
   githubId   BigInt
   kind       CommentKind
   authorLogin String?
+  authorGithubId BigInt? // numeric id of the commenter/reviewer; null = not recorded, then the login decides
   body       String?
   reviewState ReviewState?
   commitSha  String?
@@ -531,6 +533,7 @@ model ReviewRequest {
   workItemId   String
   kind         ReviewerKind
   reviewerRef  String // login or team slug
+  reviewerGithubId BigInt? // numeric id of a requested USER; null = not recorded (older row, local or demo), then the login decides
   requestedAt  DateTime
   removedAt    DateTime?
 

@@ -6,6 +6,8 @@
  * treated as an approval. Labels route attention (via the rule); they do not grant authority.
  */
 
+import { samePerson, asWho, type Who, type WhoLike } from "./identity";
+
 export type ReviewerKind = "USER" | "TEAM" | "EXTERNAL_ROLE";
 export type Reviewer = { kind: ReviewerKind; ref: string; display?: string };
 export type Semantics = "ANY" | "ALL";
@@ -20,17 +22,20 @@ export type ResolvedRule = {
 
 export type ReviewEvent = {
   reviewer: string;
+  /** Numeric GitHub id of the reviewer when recorded; the ids decide over the logins when both sides have one. */
+  reviewerId?: bigint | null;
   state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
   commitSha: string | null;
   submittedAt: Date;
 };
-export type ReviewRequestRef = { kind: "USER" | "TEAM"; ref: string; requestedAt: Date };
+export type ReviewRequestRef = { kind: "USER" | "TEAM"; ref: string; requestedAt: Date; /** numeric GitHub id of a requested USER, when recorded */ githubId?: bigint | null };
 
 export type ReviewInput = {
   type: "PULL_REQUEST" | "ISSUE";
   state: "OPEN" | "CLOSED" | "MERGED";
   draft: boolean;
   authorLogin: string | null;
+  authorGithubId?: bigint | null;
   headSha: string | null;
   checksState: "NONE" | "PENDING" | "SUCCESS" | "FAILURE" | "UNKNOWN";
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
@@ -98,9 +103,9 @@ const key = (r: { kind: string; ref: string }) => `${r.kind}:${r.kind === "EXTER
 const lc = (s: string | null | undefined) => (s ?? "").toLowerCase();
 
 /** Latest effective review by a login. COMMENTED/PENDING reviews never count. DISMISSED cancels the previous one. */
-export function effectiveReview(reviews: ReviewEvent[], login: string): ReviewEvent | null {
+export function effectiveReview(reviews: ReviewEvent[], login: string, id: bigint | null = null): ReviewEvent | null {
   const mine = reviews
-    .filter((r) => lc(r.reviewer) === lc(login) && (r.state === "APPROVED" || r.state === "CHANGES_REQUESTED" || r.state === "DISMISSED"))
+    .filter((r) => samePerson({ login: r.reviewer, id: r.reviewerId ?? null }, { login, id }) && (r.state === "APPROVED" || r.state === "CHANGES_REQUESTED" || r.state === "DISMISSED"))
     .sort((a, b) => a.submittedAt.getTime() - b.submittedAt.getTime());
   const last = mine[mine.length - 1];
   if (!last || last.state === "DISMISSED") return null;
@@ -110,9 +115,14 @@ export function effectiveReview(reviews: ReviewEvent[], login: string): ReviewEv
 /** Stands in for a viewer without a linked GitHub account: matches no login, not even the empty one of an item without an author. */
 export const NO_GITHUB_LOGIN = "\u0000no-github-login";
 
-/** `viewerLogin` is the viewer's GITHUB login (Viewer.githubLogin); null (no linked account) puts nothing in anyone's "needs my review" or "changes requested" queue. */
-export function deriveReview(input: ReviewInput, viewerLoginOrNull: string | null): ReviewDerivation {
-  const viewerLogin = viewerLoginOrNull ?? NO_GITHUB_LOGIN;
+/**
+ * `viewer` is the viewer's GITHUB identity (`viewerWho(viewer)`, or a bare login); null (no linked account) puts nothing in anyone's
+ * "needs my review" or "changes requested" queue. Where a request/review/author carries a numeric id and the viewer has one, ids decide.
+ */
+export function deriveReview(input: ReviewInput, viewerOrNull: WhoLike): ReviewDerivation {
+  const me = asWho(viewerOrNull);
+  const viewerLogin = me.login ?? NO_GITHUB_LOGIN;
+  const meWho: Who = { login: viewerLogin, id: me.id };
   const empty: ReviewDerivation = {
     applicable: false,
     satisfied: false,
@@ -146,17 +156,21 @@ export function deriveReview(input: ReviewInput, viewerLoginOrNull: string | nul
 
   // Build the expected-actor list: rule reviewers plus explicitly requested reviewers.
   const byKey = new Map<string, { actor: Reviewer; requestOnly: boolean; request?: ReviewRequestRef }>();
+  const idByKey = new Map<string, bigint | null>();
   for (const r of input.rule?.reviewers ?? []) byKey.set(key(r), { actor: r, requestOnly: false });
   for (const rq of input.requests) {
     const k = key(rq);
+    idByKey.set(k, rq.githubId ?? null);
     const existing = byKey.get(k);
     if (existing) existing.request = rq;
     else byKey.set(k, { actor: { kind: rq.kind, ref: rq.ref }, requestOnly: true, request: rq });
   }
 
   const author = lc(input.authorLogin);
+  const authorWho: Who = { login: input.authorLogin, id: input.authorGithubId ?? null };
   const actors: ActorStatus[] = [];
   const staleApprovals: string[] = [];
+  const staleWho: Who[] = [];
   const explanation: string[] = [];
 
   if (input.rule) explanation.push(`Rule (${input.rule.tier}): ${input.rule.reason}. ${input.rule.semantics === "ALL" ? "All listed reviewers" : "Any one listed reviewer"} must approve.`);
@@ -180,12 +194,13 @@ export function deriveReview(input: ReviewInput, viewerLoginOrNull: string | nul
     }
 
     if (actor.kind === "USER") {
-      if (lc(actor.ref) === author) {
+      const actorId = idByKey.get(key(actor)) ?? null;
+      if (samePerson({ login: actor.ref, id: actorId }, authorWho)) {
         // Authors cannot review their own PR; a rule naming the author is ignored (shown for clarity).
         explanation.push(`${actor.ref} is the author and cannot approve their own pull request.`);
         continue;
       }
-      const eff = effectiveReview(input.reviews, actor.ref);
+      const eff = effectiveReview(input.reviews, actor.ref, actorId);
       const reRequested = Boolean(request && eff && request.requestedAt.getTime() > eff.submittedAt.getTime());
       if (eff && !reRequested) {
         const fresh = eff.commitSha !== null && input.headSha !== null && eff.commitSha === input.headSha;
@@ -193,6 +208,7 @@ export function deriveReview(input: ReviewInput, viewerLoginOrNull: string | nul
           if (fresh) actors.push(mk("APPROVED", `Approved ${eff.commitSha?.slice(0, 7)} at the current head`));
           else {
             staleApprovals.push(actor.ref);
+            staleWho.push({ login: actor.ref, id: actorId ?? eff.reviewerId ?? null });
             actors.push(mk("APPROVED_STALE", "Approval predates the latest commits; re-review needed"));
           }
         } else {
@@ -222,6 +238,7 @@ export function deriveReview(input: ReviewInput, viewerLoginOrNull: string | nul
     else if (ap && ap.eff!.commitSha !== null && ap.eff!.commitSha === input.headSha) actors.push(mk("APPROVED", `${ap.m} (team ${actor.ref}) approved the current head`));
     else if (ap) {
       staleApprovals.push(ap.m);
+      staleWho.push({ login: ap.m, id: null });
       actors.push(mk("APPROVED_STALE", `${ap.m} (team ${actor.ref}) approved an earlier commit`));
     } else actors.push(mk("PENDING", request ? `Team ${actor.ref} was asked to review` : `Required by the routing rule; no review from team ${actor.ref} yet`));
   }
@@ -245,12 +262,12 @@ export function deriveReview(input: ReviewInput, viewerLoginOrNull: string | nul
   const pendingActors = actors.filter((a) => (a.status === "PENDING" || a.status === "UNAVAILABLE" || a.status === "APPROVED_STALE") && !(ruleOptional && !a.requestOnly));
 
   const mineIsPending = pendingActors.some((a) => {
-    if (a.actor.kind === "USER") return lc(a.actor.ref) === lc(viewerLogin);
+    if (a.actor.kind === "USER") return samePerson({ login: a.actor.ref, id: idByKey.get(key(a.actor)) ?? null }, meWho);
     if (a.actor.kind === "TEAM") return (input.teamMembers?.[a.actor.ref] ?? []).some((m) => lc(m) === lc(viewerLogin));
     return false;
-  }) || (staleApprovals.some((l) => lc(l) === lc(viewerLogin)) && !satisfied);
+  }) || (staleWho.some((w) => samePerson(w, meWho)) && !satisfied);
 
-  const viewerIsAuthor = lc(viewerLogin) === author;
+  const viewerIsAuthor = samePerson(meWho, authorWho);
   const needsMyReview = !satisfied && !viewerIsAuthor && mineIsPending;
   const internalPending = pendingActors.some((a) => !a.external);
   const externalPending = pendingActors.some((a) => a.external);

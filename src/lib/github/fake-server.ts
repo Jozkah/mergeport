@@ -460,7 +460,8 @@ export class FakeGitHubServer {
   }
 
   private userJson(login: string) {
-    return { id: (this.users.get(login) ?? this.orgs.get(login))?.id ?? 1, login, avatar_url: null };
+    // An unknown login still gets its own stable id (never one shared id), so two different people are never "the same person" to id matching.
+    return { id: (this.users.get(login) ?? this.orgs.get(login))?.id ?? 1_000_000 + [...login].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 900_000, 7), login, avatar_url: null };
   }
 
   private workJson(r: FakeRepo, w: NonNullable<FakeRepo["work"]>[number]) {
