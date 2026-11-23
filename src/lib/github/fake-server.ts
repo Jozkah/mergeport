@@ -51,6 +51,13 @@ export class FakeGitHubServer {
   revokedUserTokens: string[] = [];
   /** Simulates an App without the permission to read organization memberships: GET /user/memberships/orgs/:org answers 403. */
   forbidOrgMemberships = false;
+  /** The addresses GET /user/emails lists for a login (the App's "Email addresses (read)" user permission). Empty unless set. */
+  emails = new Map<string, { email: string; primary: boolean; verified: boolean; visibility: string | null }[]>();
+  /** Simulates an App registered without the "Email addresses" permission: GET /user/emails answers 403. */
+  forbidEmails = false;
+  setEmails(login: string, list: { email: string; primary?: boolean; verified?: boolean }[]) {
+    this.emails.set(login, list.map((e) => ({ email: e.email, primary: e.primary ?? false, verified: e.verified ?? false, visibility: null })));
+  }
   /** Whether GET /user/installations also lists suspended installations (live GitHub behaviour is unverified). */
   listSuspendedForUsers = false;
   offline = false;
@@ -559,6 +566,11 @@ export class FakeGitHubServer {
     if (method === "GET" && path === "/user") {
       const u = me ? this.users.get(me) : undefined;
       return me && u ? json(200, { id: u.id, login: u.login, type: "User" }) : json(401, { message: "Bad credentials" });
+    }
+    if (method === "GET" && path === "/user/emails") {
+      if (!me) return json(401, { message: "Bad credentials" });
+      if (this.forbidEmails) return json(403, { message: "Resource not accessible by integration" });
+      return json(200, this.emails.get(me) ?? []);
     }
     if (method === "GET" && (m = /^\/user\/memberships\/orgs\/([^/]+)$/.exec(path))) {
       if (!me) return json(401, { message: "Bad credentials" });

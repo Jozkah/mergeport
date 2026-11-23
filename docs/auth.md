@@ -37,7 +37,7 @@ without SMTP it says email sign-in is not set up and creates no link.
 
 - `User.githubId` is nullable (still unique when present). `email` is unique, always lowercase (a CHECK enforces it), `emailVerifiedAt`
   records proof. Legacy GitHub users keep `githubId` and have a null email; nothing was backfilled.
-- `Identity(provider, subject)`, unique: `email` (subject = the address), `oidc:<name>` (subject = the provider's `sub`), `github` (later).
+- `Identity(provider, subject)`, unique: `email` (subject = the address), `oidc:<name>` (subject = the provider's `sub`), `github` (subject = the numeric GitHub id, written by linking and by Sign in with GitHub).
 - `MagicLink`: lowercased address, SHA-256 of the token and of the requesting browser's value (neither is stored raw), `expiresAt`
   (15 min, indexed), `consumedAt`, hashed IP.
 - Rate limits are rows in `RateLimitState` with an `auth:` key prefix and hashed values, one atomic statement per check.
@@ -82,6 +82,12 @@ signature, `iss`, `aud`, `exp`, `nonce` and state checks and is OpenID-certified
 maintained by the author of `jose`/`oauth4webapi`, and 6.8.8 is more than two months old. Exact versions are pinned (`openid-client`
 6.8.8, `nodemailer` 10.3.1, `@types/nodemailer` 8.0.2). `src/lib/auth/oidc.ts` wraps it behind a small `OidcProtocol` interface so
 tests can replace it.
+
+### Sign in with GitHub
+
+When the deployment's GitHub App is configured (docs/github-app.md) the sign-in page also offers "Continue with GitHub": `GET /api/github/signin/start` -> github.com -> `GET /api/github/signin/callback`. Authorization code with PKCE (S256), a single-use state row and a nonce cookie bound to the browser; it is rate limited per client address
+(20 starts and 20 callbacks per 10 minutes, trusted-proxy address). The identity is the numeric GitHub id, never the login. A linked id signs that person in. An unknown id with a verified PRIMARY address (`GET /user/emails`) that no account holds creates a new person with that verified address, so
+their invitations are waiting on `/onboarding`. An unknown id whose verified address an existing account holds is **refused** (nothing linked, no session, audited): the person signs in with an email link first and links GitHub from Settings. No verified primary address: refused. Details, rules and the audit rows: docs/github-app.md, "Signing in with GitHub".
 
 ### Linking and account takeover
 
@@ -174,13 +180,13 @@ that as a disabled state instead of an error toast. Server actions report both m
 | Session fixation / logout | new random token per login, previous session destroyed; sign-out and sign-out-everywhere delete rows |
 | Replay / expiry | single-use atomic consume, 15 minutes (invitations: 7 days, single-use, same pattern) |
 | Invitation identity | accept needs the signed-in user's VERIFIED email to equal the invited address; join is a POST, never a GET |
+| GitHub sign-in takeover | the identity is the numeric GitHub id; an address that an existing account holds never links or signs in (`github.signin_refused` audited); only a PRIMARY, VERIFIED address creates an account |
 | Rate limits / lockout | database rows, atomic, refused calls uncounted, per-(address, client) budget, 1 mail a minute per address |
 | Email normalization | lowercase, trim, ASCII only; plus-addressing kept distinct |
 
 ## Not done here
 
-GitHub OAuth/App sign-in (`github` identity provider is reserved) and per-workspace GitHub
-credentials, SSO/SAML, a limit on how many workspaces one person may create, and email change.
+Per-workspace GitHub credentials, SSO/SAML, a limit on how many workspaces one person may create, and email change.
 
 ## Personal access tokens
 

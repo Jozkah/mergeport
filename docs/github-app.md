@@ -17,7 +17,8 @@ App on their GitHub account or organisation; Mergeport then acts through short-l
 | Webhook route (`/api/github/webhook`): signed deliveries queue refreshes and record installation lifecycle changes; daily pruning; slower reconcile for live installations | Implemented (not yet run against live GitHub, see "Needs a live check") |
 | Read-only data access: `portForSync` / `portForDiscovery` use the repository's (workspace's) installation token; `GET /installation/repositories` listing and admin tracking on "Connect repositories"; sync, reconcile and budgets per installation; private repositories visible by grant only | Implemented (this phase) |
 | Writes to GitHub (`portForWrite`) | Off: "GitHub writes are not enabled yet" |
-| Per-person GitHub link and GitHub-verified repository access (`user-link.ts`, `user-token.ts`, `user-access.ts`, `access-cache.ts`; Settings > GitHub account; migration `20261124100000_github_user_link`) | Implemented (not yet run against live GitHub, see "Needs a live check"). "Sign in with GitHub" (login) is NOT part of it |
+| Per-person GitHub link and GitHub-verified repository access (`user-link.ts`, `user-token.ts`, `user-access.ts`, `access-cache.ts`; Settings > GitHub account; migration `20261124100000_github_user_link`) | Implemented (not yet run against live GitHub, see "Needs a live check") |
+| Sign in with GitHub (`sign-in.ts`, `/api/github/signin/start` and `/callback`, the button on the sign-in page; migration `20261128100000_github_signin`) | Implemented (not yet run against live GitHub, see "Needs a live check") |
 
 A workspace with a proved binding syncs through its installation; one without stays on "GitHub is not connected yet". Setting the variables
 below only validates at startup; what a workspace can read still depends on its bindings.
@@ -34,9 +35,10 @@ who in the workspace sees a private repository is Mergeport's decision (docs/rol
 GitHub, Settings (or the organisation's Settings), Developer settings, GitHub Apps, New GitHub App.
 
 - **Homepage URL**: your public URL, `<public url>` below (the value of `MERGEPORT_PUBLIC_URL`).
-- **Callback URLs** (GitHub allows several): `<public url>/api/github/app/callback` (connecting a workspace) and `<public url>/api/github/link/callback` (people linking their own GitHub account). **Tick "Request user authorization (OAuth) during installation"**: the install page then returns a `code` that proves who the installer is. Leave "Expire user authorization tokens" on (the default).
+- **Callback URLs** (GitHub allows several): `<public url>/api/github/app/callback` (connecting a workspace) and `<public url>/api/github/link/callback` (people linking their own GitHub account) and `<public url>/api/github/signin/callback` (people signing in with GitHub). GitHub matches the redirect address exactly, so all of them must be registered as written. **Tick "Request user authorization (OAuth) during installation"**: the install page then returns a `code` that proves who the installer is. Leave "Expire user authorization tokens" on (the default).
 - **Webhook**: active, URL `<public url>/api/github/webhook`, and a random secret of at least 16 characters (use 32 or more).
 - **Where can this App be installed**: "Any account" if customers install it on their own accounts, otherwise "Only on this account".
+- **Account permissions** (user permissions): **Email addresses, Read-only.** "Sign in with GitHub" asks `GET /user/emails` for the person's primary, verified address; without this permission GitHub answers 403 and sign-in of NEW people fails with a "server settings" message (people already linked still sign in). GitHub shows the permission to each person on the authorization page.
 - **Organization permissions**: Members, Read-only. The connect flow asks GitHub whether the person is an owner of the organization they connect (see "Needs a live check"); without this permission that check is refused and nobody can connect an organization.
 - **Repository permissions**, all Read-only:
   Issues, Pull requests, Checks, Commit statuses, Metadata (always on). Add Contents (read) if branches and commits should refresh from events.
@@ -265,6 +267,35 @@ is always a path on this site; the start, unlink and check actions are server ac
 three actions act on the caller's own link only and are listed with reasons in `tests/mutation-guard.test.ts`; the job isolation, the per-user budgets and all the refusals above are
 covered by `tests/github-link.test.ts` and `tests/github-access.test.ts`; the UI by `tests/github-link-ui.test.tsx`. The webhook route and its proxy exemptions are not touched.
 
+## Signing in with GitHub
+
+Hosted only, and only when the App above is fully configured and `MERGEPORT_ENCRYPTION_KEY` is set (the user token is kept, exactly as when linking). The sign-in page then shows
+"Continue with GitHub" above the other providers; with no App, a partly set App, no key or a local run there is no button and both routes answer 404. No new variable: it is the same App, client id and secret.
+
+**Flow** (`src/lib/github/sign-in.ts`; it reuses the link flow's helpers: nonce hash, PKCE, `exchangeCodeForTokens`, `getUser`, `revokeUserToken`, `storeUserTokens`, `oauthAuthorizeUrl`):
+
+1. `GET /api/github/signin/start[?next=/path]` (a plain link, like the OpenID Connect start): per client address 20 starts per 10 minutes (`auth:ghsi:start:<hash>`; the address is the trusted-proxy entry from `docs/auth.md`; without one the route answers 503), a single-use
+   `GithubSigninState` row (state hash, nonce hash, the safe `next`, 10 minutes; GLOBAL, no workspace, nothing else), an HttpOnly SameSite=Lax nonce cookie `mp_gh_signin` limited to path `/api/github/signin`, and a redirect to `login/oauth/authorize`
+   (`redirect_uri` is `<public url>/api/github/signin/callback`, PKCE S256 with the nonce as verifier, `allow_signup=false`).
+2. `GET /api/github/signin/callback`: a callback without a well-formed state costs nothing and consumes nothing; then 20 callbacks per 10 minutes per client address; then the state is claimed with ONE conditional UPDATE (single use, unexpired), the nonce cookie is compared in
+   constant time (only a claimed state spends the cookie), the code is exchanged with the PKCE verifier, and `GET /user` names the account (numeric id). The answer is a redirect with `Referrer-Policy: no-referrer` and one fixed code
+   (`/sign-in?error=github-<code>`), or, on success, a NEW session (the old cookie's session is destroyed first, as for every sign-in) and the same landing rule as the other methods (`/onboarding` for someone in no workspace, an invitation link kept).
+   A session the browser arrived with is never consulted.
+
+**Who the person is: the numeric GitHub id, never the login** (a login can be released and reused). In order:
+
+1. The id is already linked (`Identity github`, or `User.githubId` for a legacy person): that person signs in. The address is not looked at and `GET /user/emails` is not called. The token is stored again (a sign-in is a fresh authorization, so a link that needed renewing is renewed), `githubLogin` is refreshed, audit `github.signin` in each workspace the person is ACTIVE in.
+2. Unknown id, GitHub's PRIMARY address and GitHub says it is VERIFIED (`GET /user/emails`, both flags required; no other address, no unverified one, not the profile email, never the login), and NO account here holds that address: a new person is created with that address as
+   a verified email (the same state a magic link leaves), `githubId`, `githubLogin`, an `email` and a `github` identity and the encrypted token. They continue like any new person: `/onboarding`, where invitations to that address are already waiting (`pendingInvitationsFor`) and can be joined.
+3. Unknown id whose verified address an account here already holds (as `User.email`, whether or not that holder ever verified it, or as an `email` identity): **refused. Nothing is linked, nobody is signed in, the token is revoked at GitHub** and the person is told to sign in with an email link to that address first and link GitHub from Settings.
+   Auto-linking would let anyone who controls a GitHub account with that address (an old address that was released, a GitHub account created with an address the owner never confirmed on this side) take the existing account. Audit `github.signin_refused` (reason and GitHub id, no address) in each workspace of the holder; a holder in no workspace leaves only a log line without values.
+4. No verified primary address (none, unverified, only a non-primary one, unusable text): refused with a message; the App lacking the email permission (403 or 404 from `GET /user/emails`) is reported as a server setting problem, not as the person's.
+
+Removed or suspended members are not special: like every other method, signing in gives a session, and a person with no ACTIVE membership lands on `/onboarding` with no access to the workspace; membership is re-checked on every request. Two first sign-ins of one account at the same moment make one person (unique keys on `githubId`, the identity and the address; the loser retries and finds the winner).
+
+**Not changed:** linking from Settings (`/api/github/link/callback`), the connect flow, the webhook, `proxy.ts` (the callback is an ordinary browser GET; the Origin rule for state-changing methods applies unchanged to every route).
+Tests: `tests/github-signin.test.ts` against the fake GitHub (`FakeGitHubServer.setEmails`, `forbidEmails`).
+
 ## Known limitations
 
 - A binding is proved once, at connect time. It is not re-proven if the connecting person later loses access (leaves the organization, is demoted). Follow-up: webhook-driven
@@ -315,3 +346,10 @@ Everything above is tested against the fake only. Before relying on it, run the 
     callback URLs (the registration steps must list it next to `/api/github/app/callback`).
 22. That the nonce cookie `mp_gh_link` (SameSite=Lax, path `/api/github/link`) survives the redirect back from github.com in Safari and Firefox, and that the callback's cookie deletion is merged into the redirect (as for item 8).
 23. That `DELETE /applications/{client_id}/token` ends the stored user token on unlink, and that revoking it does not also remove the person's installation access to anything else.
+
+### Signing in with GitHub
+
+24. **`GET /user/emails` with an App user-to-server token.** Does it answer for a GitHub App token when the App has the "Email addresses: Read-only" user permission, and 403/404 without it? Does the answer carry `primary` and `verified` as assumed, is the list complete without paging for ordinary accounts, and does an account that keeps its address private still list it here? (The code takes only the entry with BOTH `primary: true` and `verified: true`.) Does adding the permission to an existing App make GitHub ask each person to accept it, and what do already-authorized people see?
+25. **Callback registration.** That `<public url>/api/github/signin/callback` is accepted as one of the App's callback URLs next to the other two, that GitHub rejects a `redirect_uri` that differs from every registered one (no prefix matching), and that PKCE S256 and `allow_signup=false` are honoured on this authorize request as on the link flow.
+26. That the nonce cookie `mp_gh_signin` (SameSite=Lax, path `/api/github/signin`) survives the redirect back from github.com in Safari and Firefox, and that the callback's cookie deletion and the new session cookie are both merged into the redirect (as for item 8).
+27. That a person who has never authorized the App (no installation anywhere) can still complete the user authorization flow and gets a user token that can call `GET /user` and `GET /user/emails`, and that a GitHub account with two-factor or SSO enforcement behaves the same.
