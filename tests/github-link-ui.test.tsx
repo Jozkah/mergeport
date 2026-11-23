@@ -46,7 +46,7 @@ const alerts = () => screen.getAllByRole("alert").map((a) => a.textContent ?? ""
 describe("Settings > GitHub account panel", () => {
   it("not linked: one plain sentence on what it is used for and 'Link GitHub' as the primary action", () => {
     const { container } = body(view());
-    expect(container.textContent).toContain("Mergeport uses it to see which repositories you can open on GitHub; it does not post anything.");
+    expect(container.textContent).toContain("Mergeport uses it to see which repositories you can open on GitHub; it posts nothing unless your workspace turned writes on and you confirm each one.");
     expect(submitButton("Link GitHub").className).toMatch(/btn-primary/);
     expect(container.textContent).not.toMatch(FORBIDDEN);
   });
@@ -131,7 +131,7 @@ describe("result messages", () => {
   });
 
   it("the purpose sentence is the one in the spec", () => {
-    expect(LINK_PURPOSE).toBe("Mergeport uses it to see which repositories you can open on GitHub; it does not post anything.");
+    expect(LINK_PURPOSE).toBe("Mergeport uses it to see which repositories you can open on GitHub; it posts nothing unless your workspace turned writes on and you confirm each one.");
   });
 });
 

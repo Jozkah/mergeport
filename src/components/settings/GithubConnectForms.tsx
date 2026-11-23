@@ -33,7 +33,7 @@ export function ConnectGithubForm() {
   return (
     <ActionForm action={start} submitLabel="Connect GitHub" pendingLabel="Opening GitHub…" resetOnSuccess={false} onDone={go} submitClassName="btn btn-primary btn-lg" className="max-w-md">
       <input type="hidden" name="mode" value="install" />
-      <p className="text-[13px] text-ink-2">You will pick the GitHub account and the repositories on GitHub, then come back here. Mergeport only asks for read access.</p>
+      <p className="text-[13px] text-ink-2">You will pick the GitHub account and the repositories on GitHub, then come back here. Mergeport reads from GitHub; it writes only if an administrator turns that on, and then only as the person doing it.</p>
     </ActionForm>
   );
 }

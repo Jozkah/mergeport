@@ -9,7 +9,7 @@ export type LinkResult = (typeof LINK_RESULTS)[number];
 export type LinkMessage = { tone: "info" | "warn" | "error"; title: string; body: string };
 
 export const LINK_MESSAGES: Record<LinkResult, LinkMessage> = {
-  linked: { tone: "info", title: "GitHub account linked", body: "Mergeport now uses it to see which repositories you can open on GitHub. It does not post anything." },
+  linked: { tone: "info", title: "GitHub account linked", body: "Mergeport now uses it to see which repositories you can open on GitHub. It posts nothing unless your workspace turned writes on and you confirm each one." },
   "invalid-link": { tone: "error", title: "That link is no longer valid", body: "It expired, was already used, or was started by someone else or in another browser. Nothing was linked. Start again from this page." },
   "github-taken": { tone: "error", title: "That GitHub account is already linked to someone else here", body: "A GitHub account can be linked to one person. Nothing was linked. If it is yours, ask the other person to unlink it first." },
   "other-account": { tone: "error", title: "A different GitHub account is already linked to you", body: "Nothing was changed. Unlink the current one first, then link the one you want." },
@@ -24,5 +24,5 @@ export const LINK_MESSAGES: Record<LinkResult, LinkMessage> = {
 export const isLinkResult = (v: unknown): v is LinkResult => typeof v === "string" && (LINK_RESULTS as readonly string[]).includes(v);
 
 /** The plain sentence next to the Link GitHub button, and on the attention and inbox pages. */
-export const LINK_PURPOSE = "Mergeport uses it to see which repositories you can open on GitHub; it does not post anything.";
+export const LINK_PURPOSE = "Mergeport uses it to see which repositories you can open on GitHub; it posts nothing unless your workspace turned writes on and you confirm each one.";
 export const NO_KEY_TEXT = "Linking GitHub is not available on this server yet. Tell the person who runs this server.";

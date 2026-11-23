@@ -202,7 +202,7 @@ counters (not the GitHub budget rows), in batches of 1000. A repository that an 
 
 A signed-in hosted person (any role, a reader included) can link THEIR GitHub account. Mergeport then asks GitHub, with that person's own
 token, which repositories they can open, and uses the answer as one of the two ways a MEMBER or READER sees a repository (the exact rule is in
-`docs/roles.md`, "Repository visibility"). Mergeport does not post anything on their behalf with it; the App's permissions stay read-only. Local
+`docs/roles.md`, "Repository visibility"). Mergeport posts nothing on their behalf with it unless the opt-in writes below are on for the workspace, and then only what the person confirms (an issue from a task, a comment). Local
 mode is untouched (no route, no panel).
 
 **Flow** (`src/lib/github/user-link.ts`; same pattern as the connect flow, whose helpers it reuses: `claimAppState`, the nonce hash, the PKCE
