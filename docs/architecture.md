@@ -1,28 +1,27 @@
 # Architecture
 
-Mergeport is a local-first application. Each person runs it on their own computer, against their own SQLite database, authenticated to GitHub through the official GitHub CLI. By default a team shares Mergeport-owned data through private GitHub repositories, and there is no server to deploy. The diagram below shows that GitHub mode. (The optional single-team hub server and its client were removed; see "Hub removal" under Sync.)
+Mergeport is a hosted, multi-tenant web application. One deployment serves many workspaces from one PostgreSQL database; the web process renders pages and handles actions, and a separate worker process (`npm run worker`) runs the background jobs. GitHub is read through a GitHub App (installation tokens per workspace, user-to-server tokens for per-person access, signed webhooks); people sign in with a magic link or OIDC. See `docs/tenancy.md`, `docs/auth.md`, `docs/github-app.md`, `docs/federation.md` and `docs/mcp.md`.
 
 ```
- your computer                                     GitHub
-┌───────────────────────────────┐   gh api    ┌───────────────────────────┐
-│ browser ── 127.0.0.1 ── Next.js │ ──────────▶ │ source repos (issues, PRs) │  your access
-│            │                    │             ├───────────────────────────┤
-│            ├─ SQLite profile    │ ◀────────── │ mergeport-<team>-workspace │  common space (private)
-│            ├─ sync engine       │             │ mergeport-<team>-<space>   │  restricted spaces (private)
-│            └─ outbox (durable)  │             └───────────────────────────┘
-└───────────────────────────────┘
+ browser ──▶ web (Next.js) ──▶ PostgreSQL ◀── worker (jobs: sync, digests, webhook upkeep)
+                │                                 │
+                ├── GitHub App ───────────────────┴──▶ GitHub (installation + user tokens, webhooks in)
+                ├── /api/mcp (tokens, OAuth) ◀── AI apps
+                └── federation (read-only links) ◀──▶ other Mergeport instances
 ```
+
+The sections below that mention spaces, teams, the sync engine, polling, `gh`, worktrees or the upstream auto-updater describe code kept from the earlier local-first design. It runs only in a non-hosted development run with the GitHub CLI signed in (`MERGEPORT_PUBLIC_URL` unset); a hosted deployment does not use it. It is a candidate for removal, and the local launcher, SQLite profiles, profile switching and hub client it once needed are gone.
 
 ## Decisions
 
 | Decision | Why |
 | --- | --- |
-| Loopback server, one SQLite file per `(host, GitHub user id)` | No infrastructure; accounts never share a database; a switch of the `gh` account locks the app instead of mixing data |
-| GitHub is the source of truth for issues, PRs, reviews, labels | Fetched with the acting person's access and cached locally; Mergeport never claims to know more than the last successful fetch, and says how old it is |
-| Mergeport-owned data lives in private "space" repositories | The repository **is** the audience. Privacy is a property of where data is stored, not of what the UI hides |
-| One JSON file per entity, optimistic concurrency by blob SHA and non-force ref updates | Independent edits merge; same-record edits surface as a conflict; no server arbitration needed |
-| Polling, not webhooks, in the default mode | A local app has no public address and must not need a tunnel. Consistency is eventual and the delay is published. The optional hub adds a live WebSocket link and can relay GitHub App webhooks to apps ("Hub webhook relay"); the local app itself never receives a webhook |
-| Roles from GitHub permissions | An editable role string would be a forgery vector |
+| One PostgreSQL database, every tenant row scoped by `workspaceId` | One deployment serves many workspaces; isolation is enforced in the query and checked by tests (`docs/tenancy.md`) |
+| GitHub is the source of truth for issues, PRs, reviews, labels | Fetched through the App installation or the person's own access and stored in Postgres; Mergeport never claims to know more than the last successful fetch, and says how old it is |
+| (Non-hosted dev path) Mergeport-owned data lives in private "space" repositories | The repository **is** the audience. Privacy is a property of where data is stored, not of what the UI hides |
+| (Non-hosted dev path) One JSON file per entity, optimistic concurrency by blob SHA and non-force ref updates | Independent edits merge; same-record edits surface as a conflict; no server arbitration needed |
+| Webhooks and a worker, not page-time fetches | Pages render from stored data and its age; the worker refreshes it, and signed GitHub webhooks keep it close to live |
+| Roles are workspace roles set by an admin; GitHub access is checked per person | A role is never read from a file or a field a member can edit |
 | GSAP only for board layout animation; everything else CSS | One owner per animated element; dnd-kit keeps the drag transform |
 
 ## Storage and migration
@@ -41,12 +40,11 @@ Mergeport is a local-first application. Each person runs it on their own compute
 
 Pages read the last known result from the local database (`DiscoveryCache`) and show how old it is. `src/lib/local/discovery.ts` refreshes in the background: one refresh per list at a time (callers share it), a deadline and an `AbortSignal` per attempt, at most three attempts with 2 s and 8 s backoff, then the scheduler retries after two minutes. A failure **keeps the saved list** and records why: offline, rate limited (waits for the reset), sign-in needed (waits for the person), or error. A failed refresh is never turned into an empty list or a "synced" state. Shutdown cancels refreshes and kills their `gh` processes; an attempt a crash interrupted is marked on the next start. The only live GitHub calls made while a page renders are ones the person just asked for (reviewing a team plan, opening a join link), each with a hard 12 s deadline.
 
-## Local server boundary
+## Server boundary
 
-- `scripts/start-local.ts` picks the profile, binds `127.0.0.1`, and opens a one-time launch link. The launch token is compared in constant time and works once.
-- `src/proxy.ts` refuses any `Host` outside `127.0.0.1`, `localhost`, `[::1]` (DNS rebinding) and any state-changing request without a same-origin `Origin` or `Sec-Fetch-Site`, and marks every response `no-store`.
-- The session cookie is `HttpOnly`, `SameSite=Strict`, minted only by the launcher link (or the demo sign-in), stored hashed.
-- `/api/sync/events` is a server-sent-events stream used only for live refresh; `/api/sync/visibility` lets the page tell the engine whether it is visible so polling can slow down.
+- `src/proxy.ts` refuses any `Host` that is not the public host (hosted) or a loopback name (development: `127.0.0.1`, `localhost`, `[::1]`, which blocks DNS rebinding) and any state-changing request without a same-origin `Origin` or `Sec-Fetch-Site`, and marks every response `no-store`. Server-to-server callers (federation, the GitHub webhook, MCP and OAuth machine endpoints) are exempt only on their exact paths and only when plainly not a browser.
+- The session cookie is `HttpOnly`, `SameSite=Strict`, minted by a sign-in (magic link, OIDC, or the demo and development sign-ins), stored hashed.
+- `/api/sync/events` is a server-sent-events stream used only for live refresh; `/api/sync/visibility` lets the page tell the process whether it is visible so polling can slow down.
 
 ## Spaces and teams
 
@@ -97,12 +95,7 @@ Per-space state shown to the person: **Pending, Syncing, Synced, Offline, Confli
 
 ### Hub removal
 
-The old single-team hub (server in `hub/`, client in `src/lib/hub/`, connect flow, hub Team page, GitHub App webhook relay) was deleted. What is left on purpose, until a dedicated change removes it with its data model:
-
-- `SyncEngine` still dispatches on `Space.backend` (`GITHUB` or `HUB`, `pullHub`/`pushHub`, `HubClient` in `src/lib/hub/types.ts`). No code provides a hub client any more, so a `HUB` space throws "No hub client configured".
-- The tables `HubSession`, `HubRestore` and the `hub*` columns on `Space` and `TeamConfig` stay (no migration drops them here).
-- `src/lib/hub/session-vault.ts` now only holds `openVault`/`keyFileFor`, the AES-GCM helper for the AI provider key.
-- `hubs.json` and `hub-<fingerprint>` backend ids in the profile registry are still read by the workspace switcher.
+The old single-team hub (server, client, connect flow, Team page, webhook relay), the `SyncEngine` hub dispatch (`pullHub`/`pushHub`, `HubClient`), the hub restore UI, the profile backend ids and the workspace switcher over `hubs.json` were deleted. The tables `HubSession`, `HubRestore` and the `hub*` columns on `Space` and `TeamConfig` remain in the Prisma schema (no migration drops them yet). `src/lib/hub/session-vault.ts` only holds `openVault`/`vaultKeyFile`, the AES-GCM helper for the AI provider key (key file `.data/key`).
 
 ## Scheduler
 
@@ -179,7 +172,7 @@ See `DESIGN.md` ("Dark theme", "Motion") and `docs/motion.md` (motion matrix, to
 - `repo` is a broad GitHub scope; see `docs/github-cli-setup.md`.
 - Real GitHub was exercised only read-only (see below). SSO, throttling, invitations and every write remain simulated.
 
-## Verification record
+## Verification record (historical: recorded under the removed local launcher and SQLite profiles)
 
 Run on 29 Oct 2026, Windows 11, Node 24.12, `gh` 2.102.0 with one existing signed-in account. Four categories, kept apart:
 

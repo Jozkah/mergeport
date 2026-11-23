@@ -1,6 +1,6 @@
 # Mergeport
 
-A local-first control center for selected GitHub repositories: review queues ("I should review" vs "waiting on someone else"), planning across repositories, fork and upstream tracking, and read-only visibility of local worktrees. It runs on **your own computer**. By default a team shares planning state through private GitHub repositories, not through a server; running your own hub is optional.
+A control center for selected GitHub repositories: review queues ("I should review" vs "waiting on someone else"), planning across repositories, fork and upstream tracking, and read-only visibility of local worktrees. It is a hosted, multi-tenant web app on PostgreSQL: workspaces, magic-link or OIDC sign-in, a GitHub App, federation between instances and an MCP endpoint for AI apps. Operating a deployment is in `docs/auth.md`, `docs/github-app.md` and `docs/tenancy.md`.
 
 Visual character follows <https://kravio-dashboard.vercel.app/> (`DESIGN.md`), in light and dark. Product intent is in `PRODUCT.md`; the design of the system is in `docs/architecture.md`.
 
