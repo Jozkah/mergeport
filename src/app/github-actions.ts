@@ -9,6 +9,7 @@ import { ValidationError } from "@/lib/errors";
 import { githubAppConfig } from "@/lib/github/app-config";
 import { CONNECT_COOKIE, CONNECT_COOKIE_PATH, CALLBACK_PATH, checkInstallation, disconnectInstallation, startConnect, type StartMode } from "@/lib/github/connect";
 import { cookiesSecure, isHosted, publicOrigin } from "@/lib/public-url";
+import { setWorkspaceGithubWrites } from "@/lib/services/github-writes-setting";
 
 /**
  * GitHub connection actions (docs/github-app.md). Server actions get Next's same-origin check and proxy.ts's Origin rules. Each one
@@ -53,6 +54,18 @@ export async function disconnectGithubInstallationAction(fd: FormData): Promise<
     revalidatePath("/settings");
     revalidatePath("/", "layout"); // the "GitHub is not connected" banner lives in the app layout
     return { ok: true, message: "Disconnected. Your repositories and planning data are still here; repositories now show as not connected." };
+  });
+}
+
+/** Owners and administrators: let people write to GitHub as themselves in this workspace (create an issue from a task, comment). Re-checked on the server; off by default. */
+export async function setGithubWritesAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireWriter();
+    const enabled = str(fd, "enabled") === "on";
+    await setWorkspaceGithubWrites(db, viewer, enabled);
+    revalidatePath("/settings/github");
+    revalidatePath("/", "layout");
+    return { ok: true, message: enabled ? "People in this workspace can now write to GitHub as themselves, once they have linked their account." : "Writing to GitHub is off for this workspace." };
   });
 }
 

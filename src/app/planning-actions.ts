@@ -157,7 +157,10 @@ export async function templateTaskAction(fd: FormData): Promise<ActionResult> {
 export async function promoteAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireWriter();
-    const r = await promoteTask(db, viewer, str(fd, "taskId"), str(fd, "repositoryId"));
+    const r = await promoteTask(db, viewer, str(fd, "taskId"), str(fd, "repositoryId"), undefined, str(fd, "previewHash")).catch((e) => {
+      revalidatePath(`/tasks/${str(fd, "taskId")}`); // the preview is drawn again from the task as it is now
+      throw e;
+    });
     revalidatePath(`/tasks/${str(fd, "taskId")}`);
     refresh();
     return { ok: true, message: `Issue #${r.number} created on GitHub and linked to this task` };

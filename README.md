@@ -41,6 +41,8 @@ npm run demo                    # demo mode: synthetic data, no GitHub at all; o
 
 `npm run demo` applies pending migrations, seeds the synthetic demo workspace when the database has no users yet, and starts `next dev` on `127.0.0.1` with `DEMO_MODE=true` (it refuses a database that holds real repositories). Sign in from the demo people on `/sign-in`. Everything in the demo database is synthetic and labelled, and actions change that database only. The equivalent by hand: `DEMO_MODE=true npm run dev` after `npm run db:seed`.
 
+Optional GitHub writes (create an issue from a task, comment), made as each person with their own linked GitHub account: `MERGEPORT_GITHUB_WRITES=on` (default `off`) lets a workspace owner or administrator switch them on in Settings, GitHub; the App then also needs Issues and Pull requests write permission, which each installation owner must accept (`docs/github-app.md`, "Writing to GitHub as you").
+
 Real GitHub data needs a hosted setup: set `MERGEPORT_PUBLIC_URL` and the variables in `docs/auth.md` and `docs/github-app.md`, run `npm start` for the web app and `npm run worker` for the background jobs (sync, digests, webhook upkeep). There is no sign-in without it other than the demo's synthetic people.
 
 ### Reviewing code

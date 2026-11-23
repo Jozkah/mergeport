@@ -78,7 +78,7 @@ suspended, not deleted) -> `mintInstallationToken` -> `OctokitPort`. No binding 
 (`markInstallationState`), so every workspace using it reads as not connected at once. Two workspaces sharing an installation each hold their
 own `Repository` rows (unique on workspace and GitHub id), so each sees only what it tracked; and what a MEMBER sees of those rows is
 `repoWhere` (docs/roles.md), never the token's reach. `workspaceGithubStatus(db, workspaceId)` (`src/lib/github/status.ts`) is the one answer to
-"is this workspace connected" (`configured`, `bound`, `suspended`). Writes are not enabled: `portForWrite` throws "GitHub writes are not enabled yet".
+"is this workspace connected" (`configured`, `bound`, `suspended`). The generic write port is not enabled: `portForWrite` throws "GitHub writes are not enabled yet". The two opt-in writes (an issue from a task, a comment) are separate: they need `MERGEPORT_GITHUB_WRITES=on`, `Workspace.githubWritesEnabled`, a repository whose installation THIS workspace proved it controls (`loadBoundInstallation`), and the acting person's own user-to-server token; they never use the installation token, and their budgets (`ghwrite:user:<id>`, `ghwrite:ws:<id>`) are per person and per workspace (`src/lib/github/writes.ts`, docs/github-app.md "Writing to GitHub as you"). `Workspace.githubWritesEnabled` is a per-workspace column, default false.
 
 ## Jobs
 

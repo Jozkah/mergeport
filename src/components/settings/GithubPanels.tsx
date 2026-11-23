@@ -2,8 +2,8 @@ import { ActionForm } from "@/components/forms/ActionForm";
 import { ConfirmSheet } from "@/components/forms/ConfirmSheet";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { Banner, EmptyState, Panel, SimplePill } from "@/components/ui/primitives";
-import { Building2, Layers, ListChecks, Unplug, User } from "@/components/ui/icons";
-import { checkGithubInstallationAction, disconnectGithubInstallationAction } from "@/app/github-actions";
+import { Building2, Layers, ListChecks, Pencil, Unplug, User } from "@/components/ui/icons";
+import { checkGithubInstallationAction, disconnectGithubInstallationAction, setGithubWritesAction } from "@/app/github-actions";
 import { formatDateOnly, relativeTime } from "@/lib/format";
 import type { InstallationStatus } from "@/lib/github/binding";
 import type { ResultMessage } from "@/lib/github/connect-messages";
@@ -26,6 +26,8 @@ export type GithubView = {
   /** The viewer is an owner or administrator (may connect and disconnect). */
   manage: boolean;
   installations: InstallationRow[];
+  /** Writing to GitHub as the person: whether the server allows it (the ceiling) and this workspace's own choice. Absent: nothing is shown. */
+  writes?: { ceiling: boolean; enabled: boolean };
 };
 
 /** What the person who runs the server has to set, in plain words. Names only: no value is ever shown. */
@@ -101,7 +103,7 @@ export function liveUpdatesText(configured: boolean, installations: Installation
 
 /** The whole Settings > GitHub page body for one viewer. Pure data in, so it renders the same in tests. */
 export function GithubSettingsBody({ view, result, now }: { view: GithubView; result: ResultMessage | null; now?: Date }) {
-  const { configured, manage, installations } = view;
+  const { configured, manage, installations, writes } = view;
   return (
     <div className="flex flex-col gap-5">
       {result && <Banner tone={result.tone} title={result.title}>{result.body}</Banner>}
@@ -132,6 +134,36 @@ export function GithubSettingsBody({ view, result, now }: { view: GithubView; re
           </ul>
           <p className="border-t border-line p-4 text-[12.5px] text-ink-2" id="gh-live"><span className="font-medium">Live updates:</span> {liveUpdatesText(configured, installations, now ?? new Date())}</p>
           {!manage && <p className="border-t border-line p-4 text-[12.5px] text-ink-3">Only the owner and administrators can connect or disconnect GitHub.</p>}
+        </Panel>
+      )}
+
+      {writes?.ceiling && installations.length > 0 && (
+        <Panel title="Write to GitHub as you" icon={Pencil} id="gh-writes">
+          <div className="flex flex-col gap-3 p-4 text-[13px]">
+            <p className="flex flex-wrap items-center gap-2"><SimplePill tone={writes.enabled ? "ok" : "waiting"}>{writes.enabled ? "On" : "Off"}</SimplePill> <span className="text-ink-2">{writes.enabled ? "People here can create issues from tasks and comment on issues and pull requests." : "Nothing is written to GitHub from this workspace."}</span></p>
+            <p className="max-w-[70ch] text-[12.5px] text-ink-3 text-pretty">Each person writes as themselves, with their own linked GitHub account, so GitHub shows and checks who did it. Only two things can be written: a new issue from a task, and a comment. Mergeport never merges, closes, deletes, pushes, labels or reviews on GitHub. Each person must have linked GitHub and be allowed to manage work in the repository.</p>
+            {manage ? (
+              writes.enabled ? (
+                <ActionForm action={setGithubWritesAction} submitLabel="Turn off" pendingLabel="Turning off…" resetOnSuccess={false} layout="inline" submitClassName="btn">
+                  <input type="hidden" name="enabled" value="off" />
+                </ActionForm>
+              ) : (
+                <ConfirmSheet
+                  title="Let people write to GitHub as themselves?"
+                  consequence={<>People in this workspace who linked their GitHub account will be able to create an issue from a task and comment on tracked issues and pull requests, each as themselves. GitHub must also have accepted the App&apos;s write permissions for the account. You can turn this off any time.</>}
+                  action={setGithubWritesAction}
+                  submitLabel="Turn on"
+                  pendingLabel="Turning on…"
+                  danger={false}
+                  trigger={<button type="button" className="btn btn-primary self-start">Turn on</button>}
+                >
+                  <input type="hidden" name="enabled" value="on" />
+                </ConfirmSheet>
+              )
+            ) : (
+              <p className="text-[12.5px] text-ink-3">Only the owner and administrators can change this.</p>
+            )}
+          </div>
         </Panel>
       )}
 

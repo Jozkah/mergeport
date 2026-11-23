@@ -10,6 +10,8 @@ import { sinceLastLooked } from "@/lib/services/seen";
 import { SinceYouLooked } from "@/components/review/SinceYouLooked";
 import { OwnersPanel } from "@/components/code/ReviewTools";
 import { GITHUB_WRITES_DISABLED } from "@/lib/github/hosted";
+import { REFUSAL_MESSAGES, writeRefusal } from "@/lib/github/writes";
+import { GithubCommentBox } from "./GithubCommentBox";
 import { deriveReadiness } from "@/lib/domain/readiness";
 import { ReadinessPanel } from "@/components/review/ReadinessPanel";
 import { StageList } from "@/components/review/StageList";
@@ -53,6 +55,8 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   const sinceLooked = await sinceLastLooked(db, viewer, item.id);
   // Writes to GitHub are not enabled yet (the App holds read permissions); the demo store accepts them.
   const writeBlocked = item.repository.isDemo ? undefined : `${GITHUB_WRITES_DISABLED}.`;
+  // Commenting is the one write that can be opted into (src/lib/github/writes.ts): offered only when every gate would pass, with the reason otherwise.
+  const commentRefusal = item.repository.isDemo || !caps.manageWork ? null : await writeRefusal(db, viewer, await db.repository.findFirstOrThrow({ where: { id: item.repositoryId, workspaceId: viewer.workspaceId } }));
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
   const comments = item.comments;
@@ -91,14 +95,20 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
                   </ol>
                 )}
                 <div className="border-t border-line p-4">
-                  {caps.manageWork && !writeBlocked ? (
-                    <ActionForm action={commentAction} submitLabel="Comment" pendingLabel="Posting…">
-                      <input type="hidden" name="id" value={item.id} />
-                      <label className="label" htmlFor="comment-body">Add a comment</label>
-                      <textarea id="comment-body" name="body" className="textarea" required />
-                    </ActionForm>
+                  {caps.manageWork && !commentRefusal ? (
+                    item.repository.isDemo ? (
+                      <ActionForm action={commentAction} submitLabel="Comment" pendingLabel="Posting…">
+                        <input type="hidden" name="id" value={item.id} />
+                        <label className="label" htmlFor="comment-body">Add a comment</label>
+                        <textarea id="comment-body" name="body" className="textarea" required />
+                      </ActionForm>
+                    ) : (
+                      <GithubCommentBox id={item.id} repoName={item.repository.fullName} number={item.number} />
+                    )
+                  ) : commentRefusal === "not-linked" || commentRefusal === "relink" ? (
+                    <p className="text-[12.5px] text-ink-3">{REFUSAL_MESSAGES[commentRefusal]} <Link href="/settings/linked" className="link">Open linked accounts</Link></p>
                   ) : (
-                    <p className="text-[12.5px] text-ink-3">{writeBlocked ?? "Your grant for this repository does not include managing work, so commenting is unavailable."}</p>
+                    <p className="text-[12.5px] text-ink-3">{commentRefusal === "ceiling-off" ? `${GITHUB_WRITES_DISABLED}.` : commentRefusal ? REFUSAL_MESSAGES[commentRefusal] : "Your grant for this repository does not include managing work, so commenting is unavailable."}</p>
                   )}
                 </div>
               </Panel>

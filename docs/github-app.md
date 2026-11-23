@@ -16,7 +16,7 @@ App on their GitHub account or organisation; Mergeport then acts through short-l
 | Loss detection when a token cannot be minted (`installation-health.ts`: `withInstallationHealth`, `noteInstallationError`) | Implemented; wrapping the factory's token provider with it is the next task |
 | Webhook route (`/api/github/webhook`): signed deliveries queue refreshes and record installation lifecycle changes; daily pruning; slower reconcile for live installations | Implemented (not yet run against live GitHub, see "Needs a live check") |
 | Read-only data access: `portForSync` / `portForDiscovery` use the repository's (workspace's) installation token; `GET /installation/repositories` listing and admin tracking on "Connect repositories"; sync, reconcile and budgets per installation; private repositories visible by grant only | Implemented (this phase) |
-| Writes to GitHub (`portForWrite`) | Off: "GitHub writes are not enabled yet" |
+| Writes to GitHub (`portForWrite`) | Off: "GitHub writes are not enabled yet". Only two opt-in writes exist, made as the person: see "Writing to GitHub as you" (`MERGEPORT_GITHUB_WRITES`, off by default) |
 | Per-person GitHub link and GitHub-verified repository access (`user-link.ts`, `user-token.ts`, `user-access.ts`, `access-cache.ts`; Settings > GitHub account; migration `20261124100000_github_user_link`) | Implemented (not yet run against live GitHub, see "Needs a live check") |
 | Sign in with GitHub (`sign-in.ts`, `/api/github/signin/start` and `/callback`, the button on the sign-in page; migration `20261128100000_github_signin`) | Implemented (not yet run against live GitHub, see "Needs a live check") |
 
@@ -42,14 +42,15 @@ GitHub, Settings (or the organisation's Settings), Developer settings, GitHub Ap
 - **Organization permissions**: Members, Read-only. The connect flow asks GitHub whether the person is an owner of the organization they connect (see "Needs a live check"); without this permission that check is refused and nobody can connect an organization.
 - **Repository permissions**, all Read-only:
   Issues, Pull requests, Checks, Commit statuses, Metadata (always on). Add Contents (read) if branches and commits should refresh from events.
+  **Only if you will set `MERGEPORT_GITHUB_WRITES=on`:** raise Issues and Pull requests to Read and write (see "Writing to GitHub as you"); every installation owner then has to accept the new permissions.
 - **Subscribe to events**: Issues, Issue comment, Pull request, Pull request review, Pull request review comment, Pull request review thread,
   Check run, Check suite, Status. With Contents: Push, Create, Delete.
   (`installation` and `installation_repositories` are always delivered to an App; `repository`, `label` and `milestone` are optional extras that are handled when subscribed.)
 - Generate a **private key** (PEM) and a **client secret**. Note the **App ID**, **Client ID** and the **slug** (the last part of
   `https://github.com/apps/<slug>`).
 
-If a feature later needs more access (writing comments, merging), the permission is added to the App and each installation owner has to
-accept the change; this document and the manifest list are updated together.
+If a feature later needs more access (merging, other writes), the permission is added to the App and each installation owner has to
+accept the change; this document and the manifest list are updated together. The Issues and Pull requests write permissions for the opt-in writes are described in "Writing to GitHub as you".
 
 ## Environment
 
@@ -63,6 +64,7 @@ accept the change; this document and the manifest list are updated together.
 | `MERGEPORT_GITHUB_APP_CLIENT_SECRET` | The App's client secret; at least 20 characters. |
 | `MERGEPORT_GITHUB_APP_SLUG` | The App's URL name: lowercase letters, digits, hyphens, at most 39 characters. |
 | `MERGEPORT_ENCRYPTION_KEY` | Also required for people to link their own GitHub account: it encrypts their GitHub token (same variable and format as in `docs/federation.md`). Without it the link is unavailable and Settings says so. **Rotating it makes every stored token undecryptable: people must link again.** |
+| `MERGEPORT_GITHUB_WRITES` | `on` or `off` (default `off`). The deployment ceiling for the two opt-in GitHub writes (create an issue from a task, comment), made with each person's own token. Needs `MERGEPORT_ENCRYPTION_KEY` and a per-workspace switch in Settings, GitHub. Any other value is a startup problem. See "Writing to GitHub as you". |
 | `MERGEPORT_GITHUB_API_BASE` | Tests and local development only: replaces `https://api.github.com`. Honoured only when `NODE_ENV` is `test` or `development`, and only for https or http on a loopback name. **A hosted deployment refuses to start with it set.** |
 
 Rules:
@@ -296,6 +298,34 @@ Removed or suspended members are not special: like every other method, signing i
 **Not changed:** linking from Settings (`/api/github/link/callback`), the connect flow, the webhook, `proxy.ts` (the callback is an ordinary browser GET; the Origin rule for state-changing methods applies unchanged to every route).
 Tests: `tests/github-signin.test.ts` against the fake GitHub (`FakeGitHubServer.setEmails`, `forbidEmails`).
 
+## Writing to GitHub as you
+
+Off by default, narrow on purpose, and made as the person. The scope of this change is exactly two writes: **create an issue from a Mergeport task** (the "Also create a GitHub issue" option in New task and "Turn into a GitHub issue" on a task) and **post a comment on a tracked issue or pull request**. Mergeport never merges, closes, deletes, pushes, edits somebody else's comment, changes labels, assignees or milestones on GitHub, requests reviewers or submits a review, and GitHub writes are not offered over MCP (docs/mcp.md).
+
+**Three switches, all must be on.**
+
+1. The deployment ceiling: `MERGEPORT_GITHUB_WRITES=on` (default `off`; anything else is a startup problem on a hosted deployment, and `on` also needs `MERGEPORT_ENCRYPTION_KEY`). With it off nothing in the app writes to GitHub and no option is shown.
+2. The workspace switch: Settings, GitHub, "Write to GitHub as you" (owners and administrators, `manageGithub`). Default off. Shown only while the ceiling is on. Turning it on or off is audited (`github.writes.enable`, `github.writes.disable`); it is `Workspace.githubWritesEnabled`.
+3. The person: they must have linked their own GitHub account (Settings, Linked accounts) with a working link (not "needs a new sign-in"), and GitHub's own answer for them must be cached: a fresh `GithubRepoAccess` row for the repository with `pull` or better is the "may see this repository" gate. What they may DO there is GitHub's answer: Mergeport calls and maps the refusal.
+
+**As the person, never as the installation.** The call uses the person's own user-to-server token (decrypted for the call, renewed through `user-token.ts`, never logged or shown). GitHub therefore authorizes and attributes the issue or comment to them. The installation token is never used to write (a test asserts it), and the repository must belong to an installation this workspace proved it controls. A token GitHub refuses is renewed once, the call retried once (a 401 means nothing was written), and then the link is marked "needs a new sign-in".
+
+**Mergeport's own checks, before GitHub is asked** (`src/lib/github/writes.ts`):
+
+- The Mergeport capability: `requireRepo(..., "manageWork")`, so a READER, or a member whose only access is GitHub-verified visibility (no grant), is refused, exactly as for any other change.
+- Plain text only (no control or bidirectional-override characters), title at most 256 characters on one line, text at most 20,000. Labels of a task are not sent.
+- The text ends with a footer line, `Created from Mergeport`, and nothing else of ours (no tokens, no internal ids). The confirmation sheet shows the repository, the title and the text exactly as it will be sent (`ConfirmSheet`); nothing is sent before it is confirmed. Ticking the New task option only creates the task and opens that preview.
+- Budgets in the rate-limit table: 20 writes per person per hour (`ghwrite:user:<id>`), 100 per workspace per hour (`ghwrite:ws:<id>`).
+- Idempotency: a task that already follows an issue (or whose created issue is waiting to be matched by the next sync) cannot create a second one, and a one-shot lock per task (`ghwrite:issue:<task>`) makes a double submit create one issue. An identical comment sent twice within two minutes is refused as a duplicate. The lock is released when GitHub refuses.
+- Audit rows: `github.write.issue.create` and `github.write.comment` (repository full name, issue number, the person; never a token) and `github.write.<kind>.failed` (repository, reason, GitHub's status).
+- After a success the task keeps its link (work item, or repository plus number until the mirror has it: `linkPendingTasks` in the `sync.item` job finishes it) and a `sync.item` job is queued so the mirror updates.
+
+**What the person sees when it is refused** (all fixed texts, `REFUSAL_MESSAGES` and `explain` in `writes.ts`): turned off by the server (the option is simply absent), turned off for this workspace, "Link GitHub first", "needs a new sign-in", access not confirmed yet, a rate limit, and for GitHub's own answers: 403 (their GitHub account may not write there, the conversation is locked, **or the App does not hold the write permission yet**), 404 (no access, renamed or deleted), 410 (issues disabled, or the item was deleted or moved), 422 (GitHub rejected the text), rate limit, SSO, network.
+
+**GitHub App permissions for this feature.** Repository permissions **Issues: Read and write** and **Pull requests: Read and write** (a pull request comment is an issue comment; GitHub's authorization needs both listed). The App stays read-only for everything else. Changing the permissions of an existing App does not apply to existing installations by itself: **an owner of each installation has to accept the new permissions** (GitHub emails them and shows a banner on the installation page), and until they do, GitHub answers 403 to the write and Mergeport says so. Leave the permissions read-only if you never set `MERGEPORT_GITHUB_WRITES=on`.
+
+Tests: `tests/github-writes.test.ts` against the fake GitHub (`FakeGitHubServer.userWrites`, `appLacksWritePermission`, and `failNext` for 403, 404, 410 and 422). Not run against live GitHub: see "Needs a live check", items 28 to 33.
+
 ## Known limitations
 
 - A binding is proved once, at connect time. It is not re-proven if the connecting person later loses access (leaves the organization, is demoted). Follow-up: webhook-driven
@@ -353,3 +383,12 @@ Everything above is tested against the fake only. Before relying on it, run the 
 25. **Callback registration.** That `<public url>/api/github/signin/callback` is accepted as one of the App's callback URLs next to the other two, that GitHub rejects a `redirect_uri` that differs from every registered one (no prefix matching), and that PKCE S256 and `allow_signup=false` are honoured on this authorize request as on the link flow.
 26. That the nonce cookie `mp_gh_signin` (SameSite=Lax, path `/api/github/signin`) survives the redirect back from github.com in Safari and Firefox, and that the callback's cookie deletion and the new session cookie are both merged into the redirect (as for item 8).
 27. That a person who has never authorized the App (no installation anywhere) can still complete the user authorization flow and gets a user token that can call `GET /user` and `GET /user/emails`, and that a GitHub account with two-factor or SSO enforcement behaves the same.
+
+### Writing to GitHub as you
+
+28. **Permissions.** With the App's Issues and Pull requests permissions set to Read and write, does `POST /repos/{owner}/{repo}/issues` with a user-to-server token create the issue as the person (the issue's author is them, not the App), and does `POST /repos/{owner}/{repo}/issues/{number}/comments` do the same for an issue and for a pull request? Does a user token need any user-level permission besides the repository ones?
+29. **Existing installations.** After the permissions are raised, what do installation owners see, and what exactly does GitHub answer (403 with which message) to a write before they accept? Is the answer the same for a person who is the owner of the installation themselves?
+30. **Who may do what.** Does GitHub allow a person with only read access to create an issue or comment in a private repository, and in a public one? Mergeport only requires a cached grant with `pull` or better and passes GitHub's answer on, so the real rule decides what people can do. Confirm the 403, 404, 410 (issues disabled) and 422 (empty title, text too long) answers and their bodies for both calls, and a locked conversation.
+31. **Organizations with SAML SSO or an App access policy.** Does a user token that was not authorized for the organization's SSO get a 403 with `X-GitHub-SSO` on the write, as the mapped "sso" message assumes?
+32. **Attribution.** That the footer line `---` plus `Created from Mergeport` renders as a rule and a plain line on GitHub, and that the issue shows no "via Mergeport" label that would make the footer redundant.
+33. **Rate limits.** That user-to-server writes count against the person's own quota and GitHub's secondary rate limit for content creation (a 403 or 429 with `retry-after`) is mapped to the rate-limit message and does not consume the Mergeport budget twice.

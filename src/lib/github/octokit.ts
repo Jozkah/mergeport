@@ -62,16 +62,16 @@ function mapError(e: any): GithubError {
     const remaining = headers["x-ratelimit-remaining"];
     if (retryAfter || remaining === "0" || /rate limit/i.test(msg) || status === 429) return new GithubError("rate-limited", msg, retryAfter ?? (reset ? Math.max(1, Math.ceil((reset.getTime() - Date.now()) / 1000)) : 60), reset);
     if (/SAML|SSO/i.test(msg) || headers["x-github-sso"]) return new GithubError("sso", "SAML SSO authorization is required for this organization");
-    return new GithubError("forbidden", msg);
+    return new GithubError("forbidden", msg, undefined, undefined, status);
   }
   // The profile's own account could not be used (bound.ts): keep the specific, actionable reason.
   if (headers["x-mergeport-identity"]) return new GithubError("auth", String(e?.response?.data?.message ?? "Reconnect the GitHub account for this profile."), undefined, undefined, 401);
   if (status === 401) return new GithubError("auth", "The GitHub credential is no longer valid");
-  if (status === 404) return new GithubError("not-found", "Not found, or not accessible with this connection");
+  if (status === 404) return new GithubError("not-found", "Not found, or not accessible with this connection", undefined, undefined, 404);
   if (status === undefined) return new GithubError("network", msg);
   // Octokit reports a fetch that never got an HTTP response (offline, DNS, a stalled or killed gh) as a 500 carrying the transport's message.
   if (status === 500 && /fetch failed|network|ECONN|ENOTFOUND|EAI_AGAIN|timed out|did not answer/i.test(String(e?.message))) return new GithubError("network", "Could not reach GitHub");
-  return new GithubError("unknown", `${status}: ${msg}`);
+  return new GithubError("unknown", `${status}: ${msg}`, undefined, undefined, status);
 }
 
 type Stored = { __mp: 1; data: unknown; link: string | null };
