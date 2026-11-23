@@ -1,9 +1,9 @@
 /**
- * Encrypted store for the hub session token: one `HubSession` row in the profile database, AES-256-GCM under a random
- * 32-byte key kept in the profile directory (`key`, beside `mergeport.db`).
+ * Encryption for secrets kept in the database (the AI provider key): AES-256-GCM under a random 32-byte key kept in the
+ * profile directory (`key`, beside `mergeport.db`).
  *
- * What the key file buys, honestly: it protects the token against accidental disclosure only. Copying the database on its
- * own, a backup of the database alone, or a log or bug report that includes it cannot reveal the token without the key.
+ * What the key file buys, honestly: it protects a secret against accidental disclosure only. Copying the database on its
+ * own, a backup of the database alone, or a log or bug report that includes it cannot reveal it without the key.
  * It does NOT protect against another process running as the same OS user: that process can read both files, exactly
  * as this module does. The upgrade path with real isolation is the operating system keychain (Keychain, Credential
  * Manager, Secret Service), not adopted so far because it needs a native dependency.
@@ -15,11 +15,10 @@ import { execFileSync } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { Db } from "@/lib/db";
-import { firstWorkspace } from "@/lib/local/profile";
+
+export const keyFileFor = (dbFile: string) => path.join(path.dirname(dbFile), "key");
 
 export type Vault = { encrypt(plain: string): string; decrypt(cipher: string): string };
-export type StoredHubSession = { origin: string; token: string; githubId: bigint; login: string };
 
 
 export function restrictToCurrentUser(file: string): void {
@@ -92,24 +91,4 @@ export function openVault(keyFile: string): Vault {
       return Buffer.concat([d.update(Buffer.from(data, "base64")), d.final()]).toString("utf8");
     },
   };
-}
-
-export async function saveHubSession(db: Db, vault: Vault, s: StoredHubSession, workspaceId?: string): Promise<void> {
-  const data = { origin: s.origin, cipher: vault.encrypt(s.token), githubId: s.githubId, login: s.login };
-  const ws = workspaceId ?? (await firstWorkspace(db)).id; // one hub login per workspace; omitted: the profile's only workspace (fails closed when there are several)
-  await db.hubSession.upsert({ where: { workspaceId: ws }, create: { workspaceId: ws, ...data }, update: data });
-}
-
-export async function loadHubSession(db: Db, vault: Vault, workspaceId?: string): Promise<StoredHubSession | null> {
-  const row = await db.hubSession.findUnique({ where: { workspaceId: workspaceId ?? (await firstWorkspace(db)).id } });
-  if (!row) return null;
-  try {
-    return { origin: row.origin, token: vault.decrypt(row.cipher), githubId: row.githubId, login: row.login };
-  } catch {
-    return null;
-  }
-}
-
-export async function clearHubSession(db: Db, workspaceId?: string): Promise<void> {
-  await db.hubSession.deleteMany({ where: { workspaceId: workspaceId ?? (await firstWorkspace(db)).id } });
 }

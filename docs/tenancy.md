@@ -116,7 +116,7 @@ It FAILS CLOSED: it throws when the database holds more than one workspace, so t
 silently serving the oldest tenant. Fail-closed paths today: the hub live link (it also refuses to start for any workspace but the
 only one), `hubSessionPort`, `getHubTeamService`, the background discovery refresh and retry, the repository watcher, desktop toasts,
 and an engine or team service built without a workspace. `tests/tenancy-scope.test.ts` allows `firstWorkspace(` only in the files
-listed in `FIRST_WORKSPACE_ALLOWLIST`, each with a reason. This local and hub code is scheduled for removal; a hosted deployment does
+listed in `FIRST_WORKSPACE_ALLOWLIST`, each with a reason. This local code is scheduled for removal; a hosted deployment does
 not use it.
 
 The fan-out jobs (`reconcile.all`, `digest.daily`, `ai.autopilot`) run each workspace in id order inside its own try/catch; a failing

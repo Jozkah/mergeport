@@ -2,7 +2,6 @@ import { wsId } from "./helpers";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createTestPrisma } from "./pg";
-import { syncHubSpaces } from "@/lib/hub/spaces";
 import { BackendMismatchError } from "@/lib/local/backend-guard";
 import { hubBackendId, type Backend } from "@/lib/local/backends";
 import { SyncEngine } from "@/lib/sync/engine";
@@ -83,8 +82,5 @@ describe("backend isolation guard wired into the engine", () => {
     await expect(team.createRestrictedSpace({ name: "r" })).rejects.toBeInstanceOf(BackendMismatchError);
     await expect(team.join("acme/x", { confirmed: true })).rejects.toBeInstanceOf(BackendMismatchError);
     expect(fetch).not.toHaveBeenCalled();
-    const before = await db.space.count({ where: { backend: "HUB" } });
-    await expect(syncHubSpaces(db, engine("github").e, { team: { id: "t" }, spaces: [{ id: "new", kind: "COMMON", name: "c", canWrite: true }] } as never)).rejects.toBeInstanceOf(BackendMismatchError);
-    expect(await db.space.count({ where: { backend: "HUB" } })).toBe(before);
   });
 });

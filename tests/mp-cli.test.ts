@@ -2,14 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createTestPrisma } from "./pg";
 import type { Viewer } from "@/lib/authz/viewer";
 import { isBusy, withBusyRetry } from "@/lib/cli/busy";
 import { parseDue } from "@/lib/cli/dates";
-import { CliError, loadProfileViewer, locateProfile } from "@/lib/cli/locate";
+import { loadProfileViewer, locateProfile } from "@/lib/cli/locate";
 import { runMp } from "@/lib/cli/mp";
-import { ensureLocalProfile } from "@/lib/local/profile";
-import { writeActive } from "@/lib/local/registry";
 import { getTask, updateTask } from "@/lib/services/tasks";
 import { freshSeed } from "./helpers";
 
@@ -335,27 +332,6 @@ describe("SQLITE_BUSY retry", () => {
 
 describe("profile lookup", () => {
   const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "mp-home-"));
-
-  // phase P3 removal: needs one SQLite profile database per account; Postgres is single-tenant
-  it.skip("finds the active profile from MERGEPORT_HOME, ties it to its user and builds the app's viewer", async () => {
-    const home = tmp();
-    try {
-      const dir = path.join(home, "profiles", "github.com-4242");
-      fs.mkdirSync(dir, { recursive: true });
-      const file = path.join(dir, "mergeport.db");
-      const db = createTestPrisma(file);
-      await ensureLocalProfile(db, { id: 4242n, login: "Zoe", name: null, avatarUrl: null, host: "github.com" });
-      writeActive(home, { host: "github.com", accountId: "4242", backend: "github" });
-      const loc = locateProfile({ MERGEPORT_HOME: home });
-      expect(loc.file).toBe(file);
-      const v = await loadProfileViewer(db, loc.expectedGithubId);
-      expect(v).toMatchObject({ login: "Zoe", isAdmin: true });
-      await expect(loadProfileViewer(db, 999n)).rejects.toBeInstanceOf(CliError);
-      await db.$disconnect();
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
-  });
 
   it("refuses when there is no profile, an explicit database that is missing, or only demo users", async () => {
     const home = tmp();

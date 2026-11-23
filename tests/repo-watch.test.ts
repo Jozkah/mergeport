@@ -9,10 +9,9 @@ import { ghFetch } from "@/lib/github/gh";
 import type { GhRunner } from "@/lib/github/exec";
 import { requestRepositoryRefresh } from "@/lib/services/refresh";
 import { ensureLocalProfile } from "@/lib/local/profile";
-import { MAX_BACKOFF_MS, MAX_IN_FLIGHT, MAX_REFRESHES, MIN_REFRESH_GAP_MS, coveredIds, createRepoWatcher, watchTargets, watchView } from "@/lib/local/repo-watch";
+import { MAX_BACKOFF_MS, MAX_IN_FLIGHT, MAX_REFRESHES, MIN_REFRESH_GAP_MS, createRepoWatcher, watchTargets, watchView } from "@/lib/local/repo-watch";
 import { WATCH_MAX_REPOS, effectiveWatchSeconds, watchLabel, watchTitle } from "@/lib/local/watch-format";
 import { parseWatchMaxRepos, parseWatchSeconds, readWatchSettings, saveWatchSettings } from "@/lib/local/watch-settings";
-import { saveHubCoverage, saveHubWebhooks } from "@/lib/hub/github-app-install";
 import { ValidationError } from "@/lib/errors";
 import { db as appDb } from "@/lib/db";
 import { testDb } from "./helpers";
@@ -32,7 +31,6 @@ vi.mock("@/lib/authz-page", () => ({ requireViewer: async () => ({ viewer: h.vie
 vi.mock("@/lib/local/identity", () => ({ currentGhStatus: async () => ({ state: "missing-gh" }), checkProfile: async () => ({ kind: "no-profile" }) }));
 
 const db = testDb();
-const HUB = "hub-0123456789abcdef";
 
 /** A fake GitHub REST with ETag semantics: GET with a matching if-none-match answers 304. */
 function fakeGithub() {
@@ -207,23 +205,12 @@ describe("which repositories", () => {
     expect(t.at(-1)!.fullName).toBe("a/r19");
   });
 
-  it("GitHub-only profile (no hub): nothing is covered, so everything is watched; with a hub the reported ids are covered", async () => {
-    await addRepo("a/one", { githubId: 1n });
-    await saveHubCoverage(db, ["1"]);
-    await saveHubWebhooks(db, true);
-    expect([...(await coveredIds(db, "github"))!]).toEqual([]);
-    expect([...(await coveredIds(db, HUB))!]).toEqual(["1"]);
-    const s = setup({ covered: () => coveredIds(db, "github") });
-    await s.round(1);
-    expect(s.gh.calls.length).toBe(2);
-  });
-
-  it("watchView reports the repositories and never includes Instant ones", async () => {
+  it("watchView reports the repositories", async () => {
     await addRepo("a/one", { githubId: 1n });
     await addRepo("a/two", { githubId: 2n });
-    const v = await watchView(db, new Set(["2"]));
-    expect([...v.ids]).toEqual(["1"]);
-    expect(v.summary).toMatchObject({ enabled: true, configured: 15, effective: 15, repos: 1, stretched: false });
+    const v = await watchView(db);
+    expect([...v.ids].sort()).toEqual(["1", "2"]);
+    expect(v.summary).toMatchObject({ enabled: true, configured: 15, effective: 15, repos: 2, stretched: false });
   });
 });
 
@@ -515,14 +502,13 @@ describe("pages", () => {
     expect(html).toContain("Saved here. Clear the field to go back to the default.");
   });
 
-  it("RepoList shows the pill for watched repositories only, not for Instant ones", async () => {
+  it("RepoList shows the pill for watched repositories only", async () => {
     const { RepoList } = await import("@/components/repos/RepoList");
     const base = { ownerLogin: "o", ownerAvatar: null, ownerType: "USER", visibility: "PUBLIC", access: { label: "Read", detail: "" }, archived: false, demo: false, fork: null, openItems: 1, status: "ok", statusDetail: null, synced: "synced 1m ago", spaceId: null, spaceName: null, canUnshare: false, projects: [] };
     const watch = { label: "Auto-sync ~15 s", title: "Checked about every 15 seconds while Mergeport is open" };
     const rows = [
-      { ...base, id: "1", name: "watched", fullName: "o/watched", instant: false, watch },
-      { ...base, id: "2", name: "instant", fullName: "o/instant", instant: true, watch },
-      { ...base, id: "3", name: "plain", fullName: "o/plain", instant: false, watch: null },
+      { ...base, id: "1", name: "watched", fullName: "o/watched", watch },
+      { ...base, id: "3", name: "plain", fullName: "o/plain", watch: null },
     ];
     const html = renderToStaticMarkup(createElement(RepoList, { rows, writable: [] } as never));
     expect(html.match(/Auto-sync ~15 s/g)).toHaveLength(1);
@@ -664,22 +650,6 @@ describe("review fixes", () => {
     await w.step();
     await w.settle();
     expect((await db.job.findFirstOrThrow({ where: { type: "sync.repository" } })).payload).toMatchObject({ full: true }); // keepFull
-  });
-
-  it("coveredIds: a covered repository is excluded only while the hub's webhooks are enabled; an unreadable database is null, not empty", async () => {
-    await saveHubCoverage(db, ["1"]);
-    expect([...(await coveredIds(db, HUB))!]).toEqual([]); // flag unknown: nothing covered
-    await saveHubWebhooks(db, false);
-    expect([...(await coveredIds(db, HUB))!]).toEqual([]);
-    await saveHubWebhooks(db, true);
-    expect([...(await coveredIds(db, HUB))!]).toEqual(["1"]);
-    expect([...(await coveredIds(db, "github"))!]).toEqual([]);
-    const broken = { discoveryCache: { findUnique: async () => { throw new Error("locked"); } } } as never;
-    expect(await coveredIds(broken, HUB)).toBeNull();
-    // watchView follows the same rule
-    await addRepo("a/one", { githubId: 1n });
-    await saveHubWebhooks(db, false);
-    expect((await watchView(db)).ids.has("1")).toBe(true); // backend is GitHub-only here: nothing covered
   });
 
   it("the watcher skips the cycle when coverage is unreadable and keeps the last known set afterwards", async () => {

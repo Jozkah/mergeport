@@ -8,7 +8,6 @@ import { mapLimit } from "@/lib/util";
 import { purgeDigests } from "@/lib/services/digest-purge";
 import { indexList, sameLogin } from "@/lib/domain/text-index";
 import { indexIds, samePerson } from "@/lib/domain/identity";
-import { refreshHubWatch } from "@/lib/hub/watch";
 import { parsePrefs, wantsInApp } from "@/lib/domain/notify-prefs";
 
 /**
@@ -30,7 +29,6 @@ const SKEW_MS = 2 * 60_000;
  */
 export async function setStatus(db: Db, repositoryId: string, data: Prisma.RepositoryUpdateManyMutationInput) {
   const r = await db.repository.updateMany({ where: { id: repositoryId, trackingStatus: { not: "REMOVED" } }, data });
-  if (data.trackingStatus !== undefined) refreshHubWatch(); // ACTIVE <-> DISCONNECTED changes what the hub should relay
   return r;
 }
 

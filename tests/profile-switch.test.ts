@@ -99,14 +99,6 @@ const whoami = async (port: number, cookie: string) => {
   return res.status === 200 ? ((await res.json()) as { db: string }).db : res.status;
 };
 const ready = async (port: number) => (await (await fetch(`http://127.0.0.1:${port}/api/local/ready`)).json()) as Ready;
-async function names(file: string) {
-  const db = createTestPrisma(file, { migrate: false });
-  try {
-    return (await db.workspace.findMany()).map((w) => w.name);
-  } finally {
-    await db.$disconnect();
-  }
-}
 async function switchAndWait(client: ControlClient, port: number, backend: Backend) {
   // The previous switch's supervisor bookkeeping may still be finishing right after its child became ready.
   let r = await client.switchTo(backend).catch(() => null);
@@ -137,19 +129,6 @@ describe("profile switching with real processes", () => {
     expect((await launch(r.launchUrl)).status).toBe(403);
     expect((await launch(first.launchUrl)).status).toBe(403);
     expect(await whoami(port, a.cookie)).toBe(401);
-  }, 30_000);
-
-  // phase P3 removal: needs one SQLite profile database per account; Postgres is single-tenant
-  it.skip("keeps data isolated when switching back and forth twice", async () => {
-    const { port, ghFile, hubFile, client } = await setup();
-    for (const backend of [HUB, "github", HUB, "github"] as Backend[]) {
-      const r = await switchAndWait(client, port, backend);
-      expect(r.outcome).toBe("go-launch");
-      const c = await launch(r.launchUrl);
-      expect(await whoami(port, c.cookie)).toBe(backend === "github" ? ghFile : hubFile);
-      expect(await names(ghFile)).toEqual(["GitHub project"]);
-      expect(await names(hubFile)).toEqual(["Hub project"]);
-    }
   }, 30_000);
 });
 

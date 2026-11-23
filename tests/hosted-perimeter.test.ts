@@ -41,7 +41,7 @@ const proxyAt = async (host: string, path: string, init: { method?: string; orig
 };
 
 describe("the proxy in hosted mode", () => {
-  const LOCAL_ROUTES = ["/api/local/signin", "/api/local/demo", "/api/local/launch", "/api/local/link", "/api/local/switch", "/api/local/hub/start", "/api/local/hub/poll", "/api/local/hub/check", "/api/local/hub/github-app/start", "/api/local/hub/github-app/callback"];
+  const LOCAL_ROUTES = ["/api/local/signin", "/api/local/demo", "/api/local/launch", "/api/local/link", "/api/local/switch"];
 
   it("answers 404 to every /api/local route on the public host (except sign-out and the readiness probe)", async () => {
     for (const p of LOCAL_ROUTES) {
@@ -73,17 +73,13 @@ describe("the proxy in hosted mode", () => {
 describe("the local routes themselves refuse a hosted request (the proxy is not the only gate)", () => {
   const post = (path: string, extra: Record<string, string> = {}) => formPost(path, { as: "admin" }, extra);
 
-  it("POST /api/local/signin, /demo, /switch and the hub routes: 404, no session, no gh", async () => {
+  it("POST /api/local/signin, /demo, /switch : 404, no session, no gh", async () => {
     vi.stubEnv("DEMO_MODE", "true");
     const user = await db().user.create({ data: { githubId: 11n, login: "server-owner" } });
     const routes: [string, string][] = [
       ["signin", "@/app/api/local/signin/route"],
       ["demo", "@/app/api/local/demo/route"],
       ["switch", "@/app/api/local/switch/route"],
-      ["hub/start", "@/app/api/local/hub/start/route"],
-      ["hub/poll", "@/app/api/local/hub/poll/route"],
-      ["hub/check", "@/app/api/local/hub/check/route"],
-      ["hub/github-app/start", "@/app/api/local/hub/github-app/start/route"],
     ];
     for (const [name, mod] of routes) {
       const res = await (await import(/* @vite-ignore */ mod)).POST(post(`/api/local/${name}`));
@@ -94,8 +90,8 @@ describe("the local routes themselves refuse a hosted request (the proxy is not 
     expect(spies.spawn).not.toHaveBeenCalled();
   });
 
-  it("GET /api/local/launch, /link and the GitHub App callback: 404", async () => {
-    for (const mod of ["@/app/api/local/launch/route", "@/app/api/local/link/route", "@/app/api/local/hub/github-app/callback/route"]) {
+  it("GET /api/local/launch, /link : 404", async () => {
+    for (const mod of ["@/app/api/local/launch/route", "@/app/api/local/link/route"]) {
       const res = await (await import(/* @vite-ignore */ mod)).GET(request("/api/local/x?token=anything"));
       expect(res.status, mod).toBe(404);
     }

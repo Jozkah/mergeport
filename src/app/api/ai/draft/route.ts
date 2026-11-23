@@ -3,8 +3,7 @@ import { requireWrite } from "@/lib/authz/viewer";
 import { withViewerStream } from "@/lib/api-post";
 import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
-import { keyFileFor } from "@/lib/hub/ports-impl";
-import { openVault } from "@/lib/hub/session-vault";
+import { keyFileFor, openVault } from "@/lib/hub/session-vault";
 import { runDraft } from "@/lib/services/ai-run";
 
 export const runtime = "nodejs";

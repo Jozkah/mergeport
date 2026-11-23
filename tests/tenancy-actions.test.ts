@@ -1,12 +1,7 @@
-import os from "node:os";
-import path from "node:path";
-import fs from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@/lib/db";
 import { truncateAll } from "@/lib/demo/seed";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
-import { clearCoverage, clearHubCoverage, clearHubWebhooks, readAllCoverage, readHubWebhooksEnabled, saveCoverage, saveHubCoverage, saveHubWebhooks } from "@/lib/hub/github-app-install";
-import { clearHubSession, loadHubSession, openVault, saveHubSession } from "@/lib/hub/session-vault";
 import { handlers, forEachWorkspace } from "@/lib/local/handlers";
 import { readCached, toJson } from "@/lib/local/discovery";
 import { firstWorkspace } from "@/lib/local/profile";
@@ -118,38 +113,6 @@ describe("discovery lists", () => {
   it("a path with no workspace fails closed when there are several", async () => {
     await expect(readCached(db, "repos")).rejects.toThrow(/one workspace per database/);
     await expect(firstWorkspace(db)).rejects.toThrow(/Pass the workspace explicitly/);
-  });
-});
-
-describe("hub coverage caches and the hub login", () => {
-  it("coverage, webhooks flag and hub session of the second workspace never touch the first's", async () => {
-    await saveCoverage(db, { appSlug: "app", checkedAt: new Date().toISOString(), covered: ["1"] }, A.ws);
-    await saveHubCoverage(db, ["2"], new Date(), A.ws);
-    await saveHubWebhooks(db, true, new Date(), A.ws);
-    await saveCoverage(db, { appSlug: "app", checkedAt: new Date().toISOString(), covered: ["9"] }, B.ws);
-    expect([...(await readAllCoverage(db, "app", A.ws))].sort()).toEqual(["1", "2"]);
-    expect([...(await readAllCoverage(db, "app", B.ws))]).toEqual(["9"]);
-    expect(await readHubWebhooksEnabled(db, B.ws)).toBe(false);
-    await clearCoverage(db, B.ws);
-    await clearHubCoverage(db, B.ws);
-    await clearHubWebhooks(db, B.ws);
-    expect([...(await readAllCoverage(db, "app", A.ws))].sort()).toEqual(["1", "2"]);
-    expect(await readHubWebhooksEnabled(db, A.ws)).toBe(true);
-    await expect(clearCoverage(db)).rejects.toThrow(/one workspace per database/); // fail closed, never "the oldest"
-
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vault-"));
-    try {
-      const vault = openVault(path.join(dir, "key"));
-      await saveHubSession(db, vault, { origin: "https://hub.a", token: "tok-a", githubId: 1n, login: "alpha" }, A.ws);
-      expect(await loadHubSession(db, vault, B.ws)).toBeNull();
-      await saveHubSession(db, vault, { origin: "https://hub.b", token: "tok-b", githubId: 2n, login: "beta" }, B.ws);
-      await clearHubSession(db, B.ws);
-      expect((await loadHubSession(db, vault, A.ws))?.token).toBe("tok-a");
-      expect(await loadHubSession(db, vault, B.ws)).toBeNull();
-      await expect(loadHubSession(db, vault)).rejects.toThrow(/one workspace per database/);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
 

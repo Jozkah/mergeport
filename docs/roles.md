@@ -1,8 +1,7 @@
 # Roles, members and spaces
 
 Hosted workspaces have four roles and one owner. The policy is one table in `src/lib/authz/roles.ts` (`POLICY`, `can(subject, action, resource)`);
-`tests/roles-policy.test.ts` checks every role against every action. Ported from `hub/src/authz.ts` and `hub/src/admin-routes.ts`
-(the hub is not imported and not changed).
+`tests/roles-policy.test.ts` checks every role against every action. Ported from the removed hub server's `authz.ts` and `admin-routes.ts`.
 
 ## Roles
 

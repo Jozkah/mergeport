@@ -20,7 +20,6 @@ export const TENANCY_ALLOWLIST: TenancyAllow[] = [
   { file: "src/lib/local/discovery.ts", models: ["discoveryCache"], ops: ["updateMany"], reason: "Crash recovery: an attempt interrupted by a restart is reset in every workspace, because the process that ran it served all of them." },
   { file: "src/lib/github/demo.ts", reason: "Demo mode: the seeded database is one synthetic workspace; DemoPort only serves repositories flagged isDemo." },
   { file: "src/lib/github/factory.ts", models: ["repository"], reason: "portForSync loads a repository by an id taken from a job payload or from a caller that already scoped it (requireRepo / job.workspaceId); it decides demo vs real credential and, hosted, which installation serves it (the binding is then loaded with the repository's own workspaceId, never a caller's)." },
-  { file: "src/lib/hub/gh-events.ts", reason: "Webhook ingest: an event names a GitHub repository id, and is applied to every tracked repository with that GitHub id; the review-request notification cleanup is keyed by a work item id." },
   { file: "src/lib/sync/repository.ts", reason: "Source sync internals run for one repository id taken from a job (or a webhook already matched to it); every row they touch hangs off that repository, so it is the tenant boundary." },
   { file: "src/lib/federation/provider.ts", models: ["federationGrant"], ops: ["findUnique"], reason: "A grant is looked up by the sha256 of its one-time code or bearer token: the secret names the tenant, so there is no workspace to filter on yet. Everything after the lookup is scoped by grant.workspaceId." },
   { file: "src/lib/federation/consumer.ts", models: ["federationLink"], ops: ["findFirst"], reason: "The OAuth callback finds the pending link by the sha256 of its one-use state AND the signed-in userId; the link then supplies the workspace for every later query." },
@@ -46,9 +45,4 @@ export const FIRST_WORKSPACE_ALLOWLIST: { file: string; reason: string }[] = [
   { file: "src/lib/local/discovery-jobs.ts", reason: "Space lookup for the background invitation-status refresh started by the local scheduler." },
   { file: "src/lib/local/repo-watch.ts", reason: "The local repository watcher runs in the scheduler process for the profile's one workspace." },
   { file: "src/lib/local/watch-settings.ts", reason: "Default workspace when the caller (the watcher) has no viewer; the settings action passes the viewer's." },
-  { file: "src/lib/hub/session-vault.ts", reason: "Hub login of the profile: ports and the live link have only a db file; callers with a viewer pass the workspace." },
-  { file: "src/lib/hub/github-app-install.ts", reason: "Coverage caches of the profile's hub link; callers with a viewer pass the workspace." },
-  { file: "src/lib/hub/instant-badges.ts", reason: "Badge lookup defaults to the profile's workspace; the repositories page passes the viewer's." },
-  { file: "src/lib/hub/ports-impl.ts", reason: "Hub profile ports work on a profile db file (connect flow) with no viewer." },
-  { file: "src/lib/hub/watch.ts", reason: "The hub watch set of the profile's single hub link." },
 ];
