@@ -162,7 +162,7 @@ export async function runMp(argv: string[], env: MpEnv): Promise<number> {
     if (cmd === "projects") {
       parseArgs(rest, { json: B }, 0);
       const projects = await withBusyRetry(() => visibleProjects(env.db, env.viewer), { sleep: env.sleep });
-      const data = { viewer: { login: env.viewer.login }, projects: projects.map((p) => ({ id: p.id, name: p.name, shared: p.spaceId !== null, repos: repoNames(p), columns: p.columns.map((c) => ({ key: c.key, name: c.name })) })) };
+      const data = { viewer: { login: env.viewer.login }, projects: projects.map((p) => ({ id: p.id, name: p.name, repos: repoNames(p), columns: p.columns.map((c) => ({ key: c.key, name: c.name })) })) };
       emit(data, data.projects.length ? data.projects.map((p) => `${p.name} (${p.id})\n  repos: ${p.repos.join(", ") || "none"}\n  columns: ${p.columns.map((c) => `${c.key}`).join(", ")}`).join("\n") : "No projects.");
       return 0;
     }
