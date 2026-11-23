@@ -1,7 +1,7 @@
 # GitHub App (hosted)
 
 A hosted Mergeport deployment talks to GitHub through ONE GitHub App, registered by the operator. Workspaces connect by installing the
-App on their GitHub account or organisation; Mergeport then acts through short-lived installation tokens instead of any credential of the server's own. See `docs/tenancy.md` for how installations map to workspaces.
+App on their GitHub account or organisation; Mergeport then acts through short-lived installation tokens instead of any credential of the server's own. See `docs/tenancy.md` for how installations map to workspaces, and `docs/deploy.md` for running the web and worker services (container, proxy, health check) these variables belong to.
 
 ## What exists now, and what comes later
 

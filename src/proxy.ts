@@ -17,6 +17,8 @@ const GITHUB_WEBHOOK = "/api/github/webhook";
 /** The hosted MCP endpoint (docs/mcp.md): a POST from an AI app, authorised only by a personal access token in `Authorization: Bearer`. */
 const MCP_ENDPOINT = "/api/mcp";
 const OAUTH_MACHINE = new Set(["/api/oauth/register", "/api/oauth/token"]);
+/** Deployer health probe (docs/deploy.md): GET or HEAD only, answers {ok, worker} and nothing else. */
+const HEALTH = "/api/health";
 const LOOPBACK =/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
 
 /**
@@ -34,7 +36,13 @@ export function proxy(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
   // Local app: loopback names only. Hosted (MERGEPORT_PUBLIC_URL): ONLY the public host. A reverse proxy can forward a client's own
   // "Host: 127.0.0.1" header, so loopback names are no proof of a local caller there.
-  if (isHosted()) {
+  // Health probes come from the platform with whatever Host it uses (container IP, localhost). The route holds no secret and no tenant
+  // data, so it alone skips the Host check; every other path, and every other method on this one, still goes through it.
+  const probeMethod = req.method.toUpperCase();
+  const healthProbe = req.nextUrl.pathname === HEALTH && (probeMethod === "GET" || probeMethod === "HEAD");
+  if (healthProbe) {
+    // no host check
+  } else if (isHosted()) {
     if (!isPublicHost(host)) return new NextResponse("Forbidden host", { status: 403 });
     // The local app's routes do not exist here, except sign-out.
     const p = req.nextUrl.pathname;

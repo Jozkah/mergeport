@@ -13,3 +13,4 @@ test-results
 .playwright-mcp
 .impeccable
 *.tsbuildinfo
+.env.production
