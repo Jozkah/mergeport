@@ -3,6 +3,7 @@ import { loadViewer, requireWrite, subjectOf, type Viewer } from "@/lib/authz/vi
 import { can } from "@/lib/authz/roles";
 import { randomToken, safeEqual, sha256 } from "@/lib/crypto";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
+import { mcpResourceUrl } from "@/lib/oauth-urls";
 import { audit } from "./audit";
 
 /**
@@ -11,8 +12,8 @@ import { audit } from "./audit";
  * person's viewer fresh on every call, so a role change, a removal or a restricted space applies on the very next request.
  */
 export const TOKEN_PREFIX = "mp_pat_";
-/** `mp_pat_` and 32 random bytes as base64url (43 characters). */
-const TOKEN_SHAPE = /^mp_pat_[A-Za-z0-9_-]{43}$/;
+/** `mp_pat_` (a personal token) or `mp_oat_` (issued to a connected app, see oauth.ts) and 32 random bytes as base64url (43 characters). */
+const TOKEN_SHAPE = /^mp_(?:pat|oat)_[A-Za-z0-9_-]{43}$/;
 export const EXPIRY_DAYS = [30, 90, 365] as const;
 export const TOKEN_NAME_MAX = 60;
 /** At most this many live tokens per person and workspace. */
@@ -34,7 +35,7 @@ export async function createApiToken(db: Db, v: Viewer, input: { name: string; s
   if (input.scope === "WRITE" && !can(subjectOf(v), "write")) throw new ValidationError("Your role is read-only in this workspace, so a token can only read");
   const days = input.expiresInDays ?? null;
   if (days !== null && !(EXPIRY_DAYS as readonly number[]).includes(days)) throw new ValidationError("Choose 30, 90 or 365 days, or no expiry");
-  const live = await db.apiToken.count({ where: { workspaceId: v.workspaceId, userId: v.userId, revokedAt: null } });
+  const live = await db.apiToken.count({ where: { workspaceId: v.workspaceId, userId: v.userId, revokedAt: null, kind: "PAT" } });
   if (live >= TOKENS_PER_PERSON) throw new ValidationError(`You can have at most ${TOKENS_PER_PERSON} active tokens. Revoke one you no longer use`);
   const secret = TOKEN_PREFIX + randomToken(32);
   const row = await db.apiToken.create({
@@ -57,7 +58,7 @@ export type TokenRow = { id: string; name: string; prefix: string; scope: ApiSco
 /** Your own tokens; an administrator sees every token of the workspace. Never the hash. */
 export async function listApiTokens(db: Db, v: Viewer, now = new Date()): Promise<TokenRow[]> {
   const rows = await db.apiToken.findMany({
-    where: { workspaceId: v.workspaceId, ...(v.isAdmin ? {} : { userId: v.userId }) },
+    where: { workspaceId: v.workspaceId, kind: "PAT", ...(v.isAdmin ? {} : { userId: v.userId }) },
     orderBy: [{ revokedAt: { sort: "asc", nulls: "first" } }, { createdAt: "desc" }],
     take: 200,
     include: { user: { select: { login: true, email: true } } },
@@ -102,10 +103,18 @@ export async function authenticateApiToken(db: Db, secret: string, now = new Dat
   const t = await db.apiToken.findUnique({ where: { tokenHash: hash } });
   if (!t || !safeEqual(t.tokenHash, hash)) return null;
   if (t.revokedAt || (t.expiresAt && t.expiresAt <= now)) return null;
+  if (t.kind === "OAUTH") {
+    // Issued to a connected app: only for this server's own /api/mcp address, and only while the person's consent stands.
+    const own = mcpResourceUrl();
+    if (!own || !t.audience || !safeEqual(t.audience, own) || !t.grantId) return null;
+    const grant = await db.oAuthGrant.findFirst({ where: { id: t.grantId, workspaceId: t.workspaceId, revokedAt: null }, select: { id: true } });
+    if (!grant) return null;
+  }
   const viewer = await loadViewer(db, t.userId, t.workspaceId, { now });
   if (!viewer || viewer.workspaceId !== t.workspaceId) return null;
   if (!t.lastUsedAt || now.getTime() - t.lastUsedAt.getTime() >= TOUCH_EVERY_MS) {
     await db.apiToken.updateMany({ where: { id: t.id, workspaceId: t.workspaceId }, data: { lastUsedAt: now } }).catch(() => {});
+    if (t.grantId) await db.oAuthGrant.updateMany({ where: { id: t.grantId, workspaceId: t.workspaceId }, data: { lastUsedAt: now } }).catch(() => {});
   }
   // A WRITE token held by someone who is now a READER stays a token that can read: tools check the role again on every write.
   return { tokenId: t.id, scope: t.scope, viewer };

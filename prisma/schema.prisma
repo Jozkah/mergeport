@@ -172,6 +172,9 @@ model Workspace {
   installations WorkspaceInstallation[]
   githubAppStates GithubAppState[]
   apiTokens ApiToken[]
+  oauthGrants OAuthGrant[]
+  oauthCodes OAuthCode[]
+  oauthRefreshes OAuthRefresh[]
   federationPolicy FederationPolicy?
   federationLinks  FederationLink[]
   federationGrants FederationGrant[]
@@ -207,6 +210,8 @@ model User {
   githubUserToken  GithubUserToken?
   githubRepoAccess GithubRepoAccess[]
   apiTokens ApiToken[]
+  oauthGrants OAuthGrant[]
+  oauthCodes OAuthCode[]
 }
 
 model Session {
@@ -1796,9 +1801,94 @@ model ApiToken {
   lastUsedAt  DateTime?
   expiresAt   DateTime?
   revokedAt   DateTime?
+  /// PAT: made by hand in Settings. OAUTH: issued to a connected app (an OAuthGrant), short-lived, bound to `audience` (the /api/mcp address).
+  kind        ApiTokenKind  @default(PAT)
+  grantId     String?
+  audience    String?
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grant     OAuthGrant? @relation(fields: [grantId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, userId])
+  @@index([grantId])
+}
+
+enum ApiTokenKind {
+  PAT
+  OAUTH
+}
+
+/// An app that registered itself (RFC 7591, public client, no secret). GLOBAL: it names no workspace; a person authorizes it for one workspace through an OAuthGrant.
+model OAuthClient {
+  id           String   @id @default(cuid())
+  name         String
+  redirectUris Json
+  createdAt    DateTime @default(now())
+
+  grants OAuthGrant[]
+  codes  OAuthCode[]
+
+  @@index([createdAt])
+}
+
+/// One person's consent for one app in ONE workspace (docs/mcp.md, "OAuth"). The family: its access tokens (ApiToken, kind OAUTH) and refresh tokens all hang off it, and revoking it kills them all.
+model OAuthGrant {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  clientId    String
+  scope       ApiTokenScope @default(READ)
+  resource    String
+  createdAt   DateTime      @default(now())
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client    OAuthClient    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tokens    ApiToken[]
+  refreshes OAuthRefresh[]
+
+  @@index([workspaceId, userId])
+}
+
+/// A single-use authorization code (hash only), 60 seconds, bound to client, redirect address, PKCE challenge, workspace and person.
+model OAuthCode {
+  id            String        @id @default(cuid())
+  codeHash      String        @unique
+  workspaceId   String
+  userId        String
+  clientId      String
+  redirectUri   String
+  codeChallenge String
+  scope         ApiTokenScope
+  resource      String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  /// The grant made when the code was used; a replayed code revokes it.
+  grantId       String?
+  createdAt     DateTime      @default(now())
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client    OAuthClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, expiresAt])
+}
+
+/// A refresh token (hash only), rotated on every use. Using one a second time revokes the whole grant.
+model OAuthRefresh {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  workspaceId String
+  grantId     String
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  grant     OAuthGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, grantId])
 }

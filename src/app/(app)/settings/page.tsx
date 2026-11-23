@@ -23,6 +23,7 @@ import { listWorkspaceInstallations } from "@/lib/github/binding";
 import { isHosted, publicOrigin } from "@/lib/public-url";
 import { ConnectAiPanel, type ConnectAiView } from "@/components/settings/ConnectAiPanel";
 import { listApiTokens } from "@/lib/services/api-tokens";
+import { listGrants } from "@/lib/services/oauth";
 import { can } from "@/lib/authz/roles";
 import { subjectOf } from "@/lib/authz/viewer";
 import { federationState } from "@/lib/federation/config";
@@ -65,7 +66,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const linkCode = Array.isArray(sp.githublink) ? sp.githublink[0] : sp.githublink;
   // Connect AI (hosted): personal access tokens for the MCP endpoint, docs/mcp.md.
   const origin = publicOrigin();
-  const connectAi: ConnectAiView | null = hosted && !isDemo() && origin ? { connectorUrl: `${origin.origin}/api/mcp`, canWrite: can(subjectOf(viewer), "write"), admin: viewer.isAdmin, tokens: await listApiTokens(db, viewer) } : null;
+  const connectAi: ConnectAiView | null = hosted && !isDemo() && origin ? { connectorUrl: `${origin.origin}/api/mcp`, canWrite: can(subjectOf(viewer), "write"), admin: viewer.isAdmin, tokens: await listApiTokens(db, viewer), apps: await listGrants(db, viewer) } : null;
   const hint = (stored: number | null, fb: number, fromEnv: boolean, envName: string) => (stored !== null ? "Saved here. Clear the field to go back to the default." : fromEnv ? `Using ${fb} from the environment (${envName}). Type a number to override it.` : `Using the default, ${fb}. Type a number to change it.`);
   return (
     <>

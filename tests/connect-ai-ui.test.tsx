@@ -9,6 +9,7 @@ vi.mock("@/app/api-token-actions", () => ({
   createApiTokenAction: vi.fn(async (): Promise<ActionResult> => ({ ok: true })),
   revokeApiTokenAction: vi.fn(async (): Promise<ActionResult> => ({ ok: true })),
 }));
+vi.mock("@/app/oauth-actions", () => ({ revokeOAuthGrantAction: vi.fn(async (): Promise<ActionResult> => ({ ok: true })), decideOAuthAction: vi.fn(async (): Promise<ActionResult> => ({ ok: true })) }));
 
 import { ConnectAiBody, type ConnectAiView } from "@/components/settings/ConnectAiPanel";
 import type { TokenRow } from "@/lib/services/api-tokens";
@@ -18,7 +19,7 @@ Object.defineProperty(window, "matchMedia", { writable: true, value: (q: string)
 
 const NOW = new Date("2026-11-22T12:00:00Z");
 const tok = (o: Partial<TokenRow> = {}): TokenRow => ({ id: "t1", name: "Claude laptop", prefix: "mp_pat_AbCdE", scope: "WRITE", createdAt: new Date("2026-11-20T10:00:00Z"), lastUsedAt: new Date("2026-11-22T11:00:00Z"), expiresAt: new Date("2027-02-20T00:00:00Z"), revokedAt: null, owner: "me@example.com", mine: true, state: "active", ...o });
-const view = (o: Partial<ConnectAiView> = {}): ConnectAiView => ({ connectorUrl: "https://mp.example.com/api/mcp", canWrite: true, admin: false, tokens: [tok()], ...o });
+const view = (o: Partial<ConnectAiView> = {}): ConnectAiView => ({ connectorUrl: "https://mp.example.com/api/mcp", canWrite: true, admin: false, tokens: [tok()], apps: [], ...o });
 const show = (v: ConnectAiView) => render(<ConnectAiBody view={v} now={NOW} />).container;
 
 describe("Settings > Connect AI (MCP)", () => {

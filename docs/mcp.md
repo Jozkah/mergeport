@@ -17,6 +17,33 @@ notification is answered `202`. There are no sessions and no event streams, so `
 
 The token goes in the header only. A token in the query string is never read.
 
+## OAuth (Claude custom connectors)
+
+claude.ai and the Claude desktop app cannot send a custom header, so the endpoint also speaks the MCP authorization spec (OAuth 2.1, authorization code with PKCE,
+public clients that register themselves). In Claude: Settings, Connectors, add a custom connector, paste the connector address. Claude finds the rest itself, sends
+you to Mergeport to sign in and allow it, and no token is pasted anywhere. Personal access tokens above keep working unchanged.
+
+| Address | What |
+| --- | --- |
+| `GET /.well-known/oauth-protected-resource` (and `/api/mcp` form) | RFC 9728 metadata: the resource (`<origin>/api/mcp`) and its authorization server. A `401` from `/api/mcp` carries `WWW-Authenticate: Bearer realm="Mergeport", resource_metadata="<that address>"`. |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 metadata: endpoints, `S256` only, `none` client authentication, scopes `read` and `write`. |
+| `POST /api/oauth/register` | RFC 7591 dynamic registration. Public clients only. Redirect addresses: https, or http on `localhost`, `127.0.0.1` or `[::1]`; no fragment, credentials or wildcard; at most 5; matched exactly later. 10 registrations per address and hour; 1000 clients in all (apps never authorized and older than a day are forgotten when full). |
+| `GET /oauth/authorize` | An ordinary session page. Signed out goes to sign-in and back. Shows the app's name (NOT verified: anyone can register any name, so the address it returns to is shown too), a picker limited to YOUR active workspaces, and Read only (default) or Read, open tasks and comment (only where your role writes). Allow or Cancel. An unknown client or a redirect address that is not exactly a registered one is never redirected to; other errors go back to the registered address with `state`. |
+| `POST /api/oauth/token` | `authorization_code` and `refresh_token` grants. 60 requests per address and 120 per client each minute. |
+
+- **PKCE S256 is required.** The challenge is bound to the code; a wrong verifier fails and burns the code. `state` is echoed. `resource`, when sent, must be the `/api/mcp` address.
+- **Codes** are single-use, 60 seconds, hashed, bound to client, redirect address, challenge, workspace and person. Using one again revokes the grant it bought.
+- **Access tokens** are `ApiToken` rows (`kind` OAUTH, `mp_oat_` and 43 characters, one hour, hashed) bound to the `/api/mcp` address as audience, so every check, limit and
+  audit entry of a personal token applies: membership and role are loaded fresh on every call, a removed member's tokens stop, a READER or a demoted member cannot write.
+  A write still needs the WRITE scope and a writing role. The granted scope never exceeds the role: a refresh after a demotion comes back read-only.
+- **Refresh tokens** (`mp_ort_`, 30 days, hashed) rotate on every use. Using an old one again means two parties hold it: the whole grant (family) is revoked, access tokens included.
+- **Connected apps** are listed in Settings, Connect AI (yours; an owner or administrator sees every app in the workspace) with Disconnect, which ends the grant, its access tokens and its refresh tokens at once.
+- Audit entries: `oauth.authorize`, `oauth.revoke`, `oauth.code-replay`, `oauth.refresh-reuse`, and the usual `mcp.task.*` entries for writes, with the token id.
+- The consent action checks the session's CSRF token, re-validates every parameter the form carried, and `src/proxy.ts` still applies its Origin rule to it. The proxy exempts exactly `POST /api/oauth/register` and `POST /api/oauth/token`, and
+  only for a request with no `Origin`, `Sec-Fetch-Site` or `Cookie` (the AI app's server calls them, not a browser). No CORS, so a browser-based client cannot use them. Hosted only: all of it is `404` otherwise.
+
+Not built: client secrets and confidential clients, client metadata documents, token revocation and introspection endpoints (disconnect in Settings instead), OpenID Connect, dynamic scopes beyond `read` and `write`.
+
 ## Tokens
 
 `ApiToken` is a ROOT model (docs/tenancy.md): `workspaceId`, `userId`, `name`, `tokenHash` (unique), `prefix` (first 12 characters, for display), `scope`
@@ -74,7 +101,7 @@ The route never reads cookies and sends no CORS headers; a preflight is not answ
 
 ## Unverified
 
-Not tried against a real Claude connector. claude.ai's connector screen may only offer OAuth, which is not built; apps that let you set a header (Claude
-Code, Cursor and similar) are the target. If OAuth is needed it would add a token endpoint on top of the same `ApiToken` check.
+Not tried against a real Claude connector or a real browser consent flow; the flow is tested end to end against the route handlers, not against claude.ai. Claude's exact
+registration and redirect addresses (for example whether it needs a particular `redirect_uris` shape) are not confirmed here.
 
 See docs/roles.md (roles) and docs/auth.md (sessions); docs/tenancy.md lists `ApiToken`.

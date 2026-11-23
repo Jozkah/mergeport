@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { readBodyCapped } from "@/lib/github/webhook-signature";
 import { hostedCtx } from "@/lib/mcp/hosted";
 import { handle, type Reply } from "@/lib/mcp/server";
+import { resourceMetadataUrl } from "@/lib/oauth-urls";
 import { isHosted } from "@/lib/public-url";
 import { authenticateApiToken, bearerSecret } from "@/lib/services/api-tokens";
 
@@ -28,7 +29,8 @@ const BAD_TOKENS_PER_MINUTE = 20;
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...headers } });
 const rpcError = (status: number, code: number, message: string, headers?: Record<string, string>) => json(status, { jsonrpc: "2.0", id: null, error: { code, message } } satisfies Reply, headers);
-const unauthorized = () => json(401, { error: "unauthorized" }, { "www-authenticate": 'Bearer realm="Mergeport"' });
+/** The 401 every bad credential gets. resource_metadata tells an OAuth client where to start (RFC 9728). */
+const unauthorized = () => json(401, { error: "unauthorized" }, { "www-authenticate": `Bearer realm="Mergeport", resource_metadata="${resourceMetadataUrl()}"` });
 const bucket = (req: Request) => `mcp:bad:${createHash("sha256").update(clientIp(req) ?? "unknown").digest("hex").slice(0, 24)}`;
 
 export async function POST(req: Request) {

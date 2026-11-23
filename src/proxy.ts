@@ -16,6 +16,7 @@ const FEDERATION_S2S = new Set(["/api/federation/v1/token", "/api/federation/v1/
 const GITHUB_WEBHOOK = "/api/github/webhook";
 /** The hosted MCP endpoint (docs/mcp.md): a POST from an AI app, authorised only by a personal access token in `Authorization: Bearer`. */
 const MCP_ENDPOINT = "/api/mcp";
+const OAUTH_MACHINE = new Set(["/api/oauth/register", "/api/oauth/token"]);
 const LOOPBACK =/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
 
 /**
@@ -54,7 +55,10 @@ export function proxy(req: NextRequest) {
     !req.headers.has("origin") &&
     !req.headers.has("sec-fetch-site") &&
     !req.headers.has("cookie");
-  const serverToServer = isHosted() && (FEDERATION_S2S.has(req.nextUrl.pathname) || (method === "POST" && req.nextUrl.pathname === GITHUB_WEBHOOK) || mcpClient);
+  // The OAuth machine endpoints (client registration and the token endpoint, docs/mcp.md) are called by the AI app's server, not by a
+  // browser: same rule without the Bearer header (their credentials are in the body). The consent page and its action are NOT exempt.
+  const oauthMachine = method === "POST" && OAUTH_MACHINE.has(req.nextUrl.pathname) && !req.headers.has("origin") && !req.headers.has("sec-fetch-site") && !req.headers.has("cookie");
+  const serverToServer = isHosted() && (FEDERATION_S2S.has(req.nextUrl.pathname) || (method === "POST" && req.nextUrl.pathname === GITHUB_WEBHOOK) || mcpClient || oauthMachine);
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !serverToServer) {
     const origin = req.headers.get("origin");
     const site = req.headers.get("sec-fetch-site");

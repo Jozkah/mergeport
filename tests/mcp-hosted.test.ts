@@ -183,7 +183,7 @@ describe("protocol", () => {
     for (const secret of [null, "mp_pat_" + "z".repeat(43), "nonsense", gone.secret, "mp_pat_" + "e".repeat(43)]) {
       const r = await post(secret, { jsonrpc: "2.0", id: 1, method: "ping" });
       expect(r.status).toBe(401);
-      expect(r.headers.get("www-authenticate")).toBe('Bearer realm="Mergeport"');
+      expect(r.headers.get("www-authenticate")).toBe(`Bearer realm="Mergeport", resource_metadata="${ORIGIN}/.well-known/oauth-protected-resource/api/mcp"`);
       expect(r.headers.get("cache-control")).toBe("no-store");
       bodies.add(await r.text());
     }

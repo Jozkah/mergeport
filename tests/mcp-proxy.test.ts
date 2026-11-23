@@ -52,3 +52,38 @@ describe("proxy and /api/mcp", () => {
     expect(o.headers.get("access-control-allow-origin")).toBeNull();
   });
 });
+
+describe("proxy and the OAuth endpoints", () => {
+  const MACHINE = ["/api/oauth/register", "/api/oauth/token"];
+
+  it("lets register and token through for a plainly non-browser POST, no Bearer needed", async () => {
+    for (const p of MACHINE) expect(passes(await at(p)), p).toBe(true);
+  });
+
+  it("refuses them for anything that could be a browser", async () => {
+    for (const p of MACHINE) {
+      expect((await at(p, { headers: { origin: "https://evil.example" } })).status, p).toBe(403);
+      expect((await at(p, { headers: { origin: "null" } })).status, p).toBe(403);
+      expect((await at(p, { headers: { "sec-fetch-site": "cross-site" } })).status, p).toBe(403);
+      expect((await at(p, { headers: { cookie: "mp_session=x" } })).status, p).toBe(403);
+      expect((await at(p, { headers: { "sec-fetch-site": "same-origin" } })).status, p).toBe(200);
+    }
+  });
+
+  it("exempts nothing else: not the consent page, its action, other methods' paths or look-alikes", async () => {
+    for (const p of ["/oauth/authorize", "/api/oauth", "/api/oauth/", "/api/oauth/token/", "/api/oauth/register/x", "/api/oauth/revoke", "/oauth/token"]) expect((await at(p)).status, p).toBe(403);
+    expect((await at("/oauth/authorize", { headers: { origin: "https://evil.example" } })).status).toBe(403);
+    expect(passes(await at("/oauth/authorize", { method: "GET" }))).toBe(true);
+    expect(passes(await at("/.well-known/oauth-protected-resource/api/mcp", { method: "GET" }))).toBe(true);
+    expect(passes(await at("/.well-known/oauth-authorization-server", { method: "GET" }))).toBe(true);
+  });
+
+  it("does nothing off the public host or when not hosted, and sends no CORS headers", async () => {
+    expect((await at("/api/oauth/token", { host: "127.0.0.1:3000" })).status).toBe(403);
+    const r = await at("/api/oauth/token");
+    expect(r.headers.get("access-control-allow-origin")).toBeNull();
+    vi.stubEnv("MERGEPORT_PUBLIC_URL", "");
+    expect((await at("/api/oauth/token", { host: "127.0.0.1:3000" })).status).toBe(403);
+  });
+});
+
