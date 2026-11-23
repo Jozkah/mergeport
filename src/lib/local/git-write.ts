@@ -5,7 +5,7 @@ import path from "node:path";
 
 /**
  * The ONLY place Mergeport lets git write, and only inside the upstream auto-updater's private folder
- * (`<MERGEPORT_HOME>/updater/<mappingId>/`). `git.ts` stays read-only and is deliberately not loosened.
+ * (`.data/updater/<mappingId>/`). `git.ts` stays read-only and is deliberately not loosened.
  *  - argument arrays only, `shell: false`: nothing is ever interpolated into a command line;
  *  - a fixed allow-list of subcommands, each with its own argument rules (no deleting, no forced or broad pushes, no options that run programs);
  *  - `cwd` must resolve (realpath) inside the updater folder, so a link or `..` cannot lead into anyone's working tree;

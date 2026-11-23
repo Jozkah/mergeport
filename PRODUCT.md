@@ -6,39 +6,42 @@
 
 ## Platform
 
-web, served by a local process on the user's own computer (127.0.0.1)
+web: a hosted, multi-tenant application. One deployment serves many workspaces from one PostgreSQL database; people sign in with a magic link or OIDC. A development run (`npm run dev`, `npm run demo`) serves 127.0.0.1 only.
 
 ## Stack
 
-TypeScript, Next.js App Router on a local Node process, SQLite (one database per GitHub account, via Prisma and better-sqlite3), Tailwind CSS, Octokit over the official GitHub CLI (`gh api`), Lucide, dnd-kit, GSAP for the few layout animations CSS cannot express. The default GitHub-repository mode needs no Docker, Postgres, VPS, tunnel, public webhook, GitHub App or shared secret. A team may optionally run its own hub (`hub/`, one Node process and one SQLite file) for live sync and, if its owner sets it up, a GitHub App webhook relay; the local app itself never exposes a public address.
+TypeScript, Next.js App Router, PostgreSQL through Prisma (pg adapter) with SQL migrations, Tailwind CSS, Octokit with a GitHub App (installation tokens, user-to-server tokens for per-person access, signed webhooks), a separate worker process for background jobs (`npm run worker`), Lucide, dnd-kit, GSAP for the few layout animations CSS cannot express. Optional: federation between instances (read-only project links), a remote MCP endpoint with personal access tokens and OAuth.
 
 ## Users
 
-- **Individual**: tracks repositories they can already reach, keeps boards and internal tasks locally, and sees what to review and what is waiting on someone else. Personal mode needs nothing but `gh`.
-- **Team owner**: creates a team (a private GitHub repository for shared planning), invites collaborators, and may create restricted spaces (separate private repositories) for smaller audiences. Their administrative power comes from GitHub's permission on that repository.
-- **Teammate**: accepts the GitHub invitation, signs in as themself, joins by link, and sees only the spaces their GitHub access allows.
+- **Workspace owner / admin**: creates the workspace, installs the GitHub App, chooses which repositories are tracked, invites members and sets roles (owner, admin, member, reader).
+- **Member**: signs in, sees the repositories and projects their workspace role and GitHub access allow, plans work, reviews pull requests and keeps internal tasks.
+- **Reader**: read-only access to what they are granted.
 - **External reviewer** (tracked, not a member): a GitHub user or team whose review other work waits on.
+- **AI app**: acts for a person through the MCP endpoint, with that person's rights and no way to change GitHub by itself.
 
 ## Product Purpose
 
-A local-first control center for selected GitHub repositories: attention queues (needs my review vs waiting on others), planning across repos, fork/upstream intelligence, and read-only local worktree visibility. By default a team's Mergeport-owned data syncs through private GitHub repositories instead of a server (running the optional hub is a choice, never a requirement). Success: nobody opens GitHub tabs to answer "what do I review, what is blocked on whom, what upstream work is my fork missing", and nobody has to run infrastructure to share a board.
+A shared control center for selected GitHub repositories: attention queues (needs my review vs waiting on others), planning across repos, fork/upstream intelligence, and read-only worktree visibility where a person runs it next to their clones. Success: nobody opens GitHub to find out what needs them, who they are waiting on, or what blocks whom.
 
 ## Positioning
 
-GitHub stays the source of truth for issues, pull requests, reviews and labels, fetched with each person's own access. Mergeport owns only planning data, and shares it through repositories whose audience **is** the privacy boundary. Review-waiting is its own workflow dimension; fork/upstream status shows honest evidence levels instead of guesses.
+GitHub stays the source of truth for issues, pull requests, reviews and labels, read through the workspace's GitHub App installation and each person's own linked access. Mergeport owns the planning data (projects, boards, internal tasks, routing rules, waiting annotations) and keeps it per workspace. Review-waiting is its own workflow dimension; fork/upstream status shows honest evidence levels instead of guesses.
 
 ## Operating Context
 
-One person, one computer, one account profile; optional teams. Offline-tolerant: edits are saved locally first and sent when GitHub is reachable. Shared state is eventually consistent by polling (about 30 s while open, slowing to at most 2 min when nothing changes; teams on a hub get live updates), stated plainly in the UI. Demo mode (synthetic data, no GitHub) is separate from connected mode.
+A hosted service for teams, many workspaces per deployment. Repository data is refreshed from GitHub in the background (webhooks and a worker), so pages render from stored data with its age and never wait on GitHub. Demo mode (synthetic data, no GitHub) is separate from connected mode and runs on the same Postgres (`npm run demo`).
+
+Code still present from the earlier local-first design, used only by a non-hosted run with the GitHub CLI signed in (development): `gh` sign-in, GitHub-repository team spaces with their sync engine, local worktree views and the upstream auto-updater. They are candidates for removal, not part of the hosted product.
 
 ## Capabilities and Constraints
 
-- Access model: privacy is enforced by **which repository holds the data**, never by hiding rows locally. Admin operations map to GitHub permissions, not editable role strings.
-- Credentials stay in the GitHub CLI; the browser, shared repositories, logs and exported configuration never hold a token. Nothing from a coordination repository is ever executed or installed.
+- Access model: every query is scoped to one workspace (`docs/tenancy.md`); visibility inside it follows the viewer's role and GitHub access, evaluated per request, never by hiding rows in the UI. Roles live in the database and are changed only by an admin.
+- Credentials: the GitHub App private key, webhook secret and encryption key are server configuration; a person's GitHub tokens are stored encrypted and never reach the browser, logs or exports. Nothing fetched from a repository is ever executed or installed.
 - Server-side authorization on every resource; scoped counts and search; non-leaking not-found.
 - No real GitHub mutations, repository creation or invitations to demonstrate features; live checks need an explicitly approved disposable target.
 - Do not infer account types (e.g. `northwind`) by name; fixtures with that owner are synthetic.
-- Out of scope: billing, chat, AI assistant, code editor, Projects v2 sync, worktree mutation, sharing worktree data, peer-to-peer sync, syncing database files.
+- Out of scope: billing, chat, code editor, Projects v2 sync, worktree mutation, sharing worktree data, peer-to-peer sync, syncing database files.
 
 ## Evidence on Hand
 
@@ -46,7 +49,7 @@ No real data, customers or metrics. All demo data is synthetic and labelled. Bri
 
 ## Product Principles
 
-1. Access first: authorization is enforced before anything is aggregated or shown; privacy lives in repository boundaries.
+1. Access first: authorization is enforced before anything is aggregated or shown; tenancy and role checks sit in the query, not the view.
 2. Evidence over guesses: every status shows its source, freshness and certainty; unknown stays unknown. Sync state (Pending, Syncing, Synced, Offline, Conflict, Access revoked) is always visible and always text plus icon.
 3. Review waiting is its own dimension; labels route attention but never grant authority.
 4. Never fabricate: no fake live data, no silently successful writes, no invented trends.

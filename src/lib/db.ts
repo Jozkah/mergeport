@@ -1,19 +1,8 @@
-import path from "node:path";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
 declare global {
   var __prisma: PrismaClient | undefined;
-}
-
-/**
- * Anchor path for per-install side files (the credential vault key lives next to it, see keyFileFor). Not a database any more:
- * the database is Postgres, named by DATABASE_URL. MERGEPORT_DB is only still read for this path (phase P3 removes it).
- */
-export function resolveDbFile(): string {
-  const explicit = process.env.MERGEPORT_DB;
-  if (explicit) return path.resolve(explicit.replace(/^file:/, ""));
-  return path.resolve(process.cwd(), ".data", "dev.db");
 }
 
 export function databaseUrl(): string {

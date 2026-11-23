@@ -16,7 +16,7 @@ export default async function AccountChanged() {
         <ul className="mt-3 list-disc space-y-1 pl-5 text-[13px] text-ink-2">
           <li>If @{p.profileLogin} is still signed in to the CLI, Mergeport simply carries on as @{p.profileLogin}.</li>
           <li>If it is not, requests are blocked and you are asked to reconnect: <span className="mono">gh auth login</span> as @{p.profileLogin}.</li>
-          <li>To work as @{p.ghLogin} instead, stop Mergeport and start it again with <span className="mono">npm run local</span>: it opens @{p.ghLogin}&apos;s own, separate profile.</li>
+          <li>To work as @{p.ghLogin} instead, run this app against a separate database (its own DATABASE_URL) for @{p.ghLogin}: one database holds one GitHub account.</li>
         </ul>
         <Link className="btn btn-lg mt-4 w-full" href="/">Continue</Link>
       </div>

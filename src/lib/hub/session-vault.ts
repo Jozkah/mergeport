@@ -1,22 +1,20 @@
 /**
  * Encryption for secrets kept in the database (the AI provider key): AES-256-GCM under a random 32-byte key kept in the
- * profile directory (`key`, beside `mergeport.db`).
+ * working directory's `.data` folder (`.data/key`, gitignored).
  *
  * What the key file buys, honestly: it protects a secret against accidental disclosure only. Copying the database on its
  * own, a backup of the database alone, or a log or bug report that includes it cannot reveal it without the key.
  * It does NOT protect against another process running as the same OS user: that process can read both files, exactly
  * as this module does. The upgrade path with real isolation is the operating system keychain (Keychain, Credential
  * Manager, Secret Service), not adopted so far because it needs a native dependency.
- *
- * The key file must stay out of anything that copies or exports a profile; nothing in the project copies profile
- * directories (saved-profiles.ts reads mergeport.db read-only, migrate-from-postgres.ts writes a fresh database).
  */
 import { execFileSync } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-export const keyFileFor = (dbFile: string) => path.join(path.dirname(dbFile), "key");
+/** Where the vault key lives. Next to the database dumps nobody takes: not in the database, never exported or backed up with it. */
+export const vaultKeyFile = () => path.resolve(process.cwd(), ".data", "key");
 
 export type Vault = { encrypt(plain: string): string; decrypt(cipher: string): string };
 
@@ -39,7 +37,7 @@ export function restrictToCurrentUser(file: string): void {
 function readKey(keyFile: string): Buffer | null {
   try {
     const key = fs.readFileSync(keyFile);
-    if (key.length !== 32) throw new Error(`Hub key file ${keyFile} is corrupt (expected 32 bytes, got ${key.length}); remove it to start over`);
+    if (key.length !== 32) throw new Error(`Vault key file ${keyFile} is corrupt (expected 32 bytes, got ${key.length}); remove it to start over`);
     return key;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;

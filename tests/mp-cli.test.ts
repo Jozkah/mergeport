@@ -1,11 +1,7 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Viewer } from "@/lib/authz/viewer";
 import { isBusy, withBusyRetry } from "@/lib/cli/busy";
 import { parseDue } from "@/lib/cli/dates";
-import { loadProfileViewer, locateProfile } from "@/lib/cli/locate";
 import { runMp } from "@/lib/cli/mp";
 import { getTask, updateTask } from "@/lib/services/tasks";
 import { freshSeed } from "./helpers";
@@ -326,21 +322,6 @@ describe("SQLITE_BUSY retry", () => {
       expect(r.err).toMatch(/busy/);
     } finally {
       (S.db.planningColumn as any).findFirst = real;
-    }
-  });
-});
-
-describe("profile lookup", () => {
-  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "mp-home-"));
-
-  it("refuses when there is no profile, an explicit database that is missing, or only demo users", async () => {
-    const home = tmp();
-    try {
-      expect(() => locateProfile({ MERGEPORT_HOME: home })).toThrow(/No Mergeport profile/);
-      expect(() => locateProfile({ MERGEPORT_DB: path.join(home, "nope.db") })).toThrow(/does not exist/);
-      await expect(loadProfileViewer(S.db, null)).rejects.toThrow(/no signed-in user/); // the seed holds demo users only
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 });

@@ -1,6 +1,6 @@
 # Mergeport
 
-A local-first control center for selected GitHub repositories: review queues ("I should review" vs "waiting on someone else"), planning across repositories, fork and upstream tracking, and read-only visibility of local worktrees. It runs on **your own computer**. By default a team shares planning state through private GitHub repositories, not through a server; running your own hub is optional.
+A control center for selected GitHub repositories: review queues ("I should review" vs "waiting on someone else"), planning across repositories, fork and upstream tracking, and read-only visibility of local worktrees. It is a hosted, multi-tenant web app on PostgreSQL: workspaces, magic-link or OIDC sign-in, a GitHub App, federation between instances and an MCP endpoint for AI apps. Operating a deployment is in `docs/auth.md`, `docs/github-app.md` and `docs/tenancy.md`.
 
 Visual character follows <https://kravio-dashboard.vercel.app/> (`DESIGN.md`), in light and dark. Product intent is in `PRODUCT.md`; the design of the system is in `docs/architecture.md`.
 
@@ -8,7 +8,7 @@ Visual character follows <https://kravio-dashboard.vercel.app/> (`DESIGN.md`), i
 
 ## What it looks like
 
-All screenshots use the built-in synthetic demo data (`npm run local:demo`): made-up people, repositories and pull requests, nothing from a real account.
+All screenshots use the built-in synthetic demo data (`npm run demo`): made-up people, repositories and pull requests, nothing from a real account.
 
 | | |
 | --- | --- |
@@ -25,21 +25,24 @@ All screenshots use the built-in synthetic demo data (`npm run local:demo`): mad
 
 ## What you need
 
-- **Node 24** (declared in `engines`: `>=24 <25`) and npm 10 or newer. The SQLite binding ships prebuilt inside the package (Windows, macOS and Linux; only Windows x64 was exercised) so nothing is compiled during install.
-- The [GitHub CLI](https://cli.github.com/) (`gh`), signed in: `gh auth login` (details and honest scope notes in `docs/github-cli-setup.md`). Mergeport never stores or logs your token and never sends it to the browser. It asks `gh` for the token of THIS profile's account at run time, keeps it in memory, and hands it to `gh` through the child process's environment (never an argument). See "Account binding" below.
-- Nothing else for the default GitHub-repository mode: no Docker, no VPS, no tunnel, no webhooks, no shared `.env`. It needs a PostgreSQL database (`npm run db:dev` starts a native one).
+- **Node 24** (declared in `engines`: `>=24 <25`) and npm 10 or newer.
+- **PostgreSQL.** `npm run db:dev` starts a native dev Postgres on port 5433 (no Docker); or point `DATABASE_URL` at your own.
+- For a real deployment: a GitHub App, a public URL and a mail or OIDC sign-in. See `docs/auth.md`, `docs/github-app.md` and `docs/tenancy.md`.
+- Optional, for the development sign-in without a hosted setup: the [GitHub CLI](https://cli.github.com/) (`gh`), signed in (`docs/github-cli-setup.md`). Mergeport never stores or logs your token and never sends it to the browser.
 
 ## Quick start
 
 ```bash
-npm ci                 # install exactly what package-lock.json says; also generates the Prisma client (postinstall)
-npm run local          # signs in as your gh account, opens the app on 127.0.0.1
-npm run local:demo     # synthetic data, no GitHub at all
+npm ci                          # install exactly what package-lock.json says; also generates the Prisma client (postinstall)
+cp .env.example .env            # DATABASE_URL points at the dev Postgres below
+npm run db:dev                  # separate terminal: native dev Postgres on 127.0.0.1:5433 (data in .data/pg)
+npx prisma migrate deploy       # apply the schema (and again after every pull that adds migrations)
+npm run demo                    # demo mode: synthetic data, no GitHub at all; opens on http://127.0.0.1:3000/sign-in
 ```
 
-`npm run local` works out who `gh` is signed in as, opens **that account's own SQLite profile** (`~/.mergeport/profiles/<host>-<numeric id>/mergeport.db`), starts the server on `127.0.0.1` only, and opens your browser on a one-time launch link. It builds the app on the first run and again whenever the code changed since the last build (after a `git pull`; about half a minute). The launch link works once and expires after 10 minutes unused; for a fresh one, stop Mergeport and start it again. On Windows, `scripts/open-mergeport.ps1` does that as a desktop shortcut: point a shortcut at `powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "<repo>\scripts\open-mergeport.ps1"`. Stop it with **Ctrl+C**. In `cmd.exe`, Windows may then ask "Terminate batch job (Y/N)?": that prompt comes from npm's own `npm.cmd` wrapper after the app and every `gh` process it started have already ended; answer Y. PowerShell does not ask.
+`npm run demo` applies pending migrations, seeds the synthetic demo workspace when the database has no users yet, and starts `next dev` on `127.0.0.1` with `DEMO_MODE=true` (it refuses a database that holds real repositories). Sign in from the demo people on `/sign-in`. Everything in the demo database is synthetic and labelled, and actions change that database only. The equivalent by hand: `DEMO_MODE=true npm run dev` after `npm run db:seed`.
 
-Demo mode keeps its own database under `~/.mergeport/demo/`. Everything in it is synthetic and labelled, and actions change that database only.
+For development with real GitHub data, run `npm run dev` without `DEMO_MODE` and sign in on `/sign-in` with your `gh` account (`docs/github-cli-setup.md`); the background job loop is a separate process, `npm run worker`. A hosted deployment sets `MERGEPORT_PUBLIC_URL` and the variables in `docs/auth.md` and `docs/github-app.md`, runs `npm start` for the web app and `npm run worker` for the jobs.
 
 ## Personal and Team
 
@@ -72,26 +75,26 @@ Each morning (after 08:00 by default, adjustable in **Settings**) Mergeport writ
 
 Repositories the team shares are matched to your own GitHub access; a repository you cannot read shows up as shared but unavailable to you.
 
-### Workspaces and connecting to a server
+### Workspaces
 
-The top bar has a workspace switcher. Each workspace is a separate local profile, so data never mixes. Switching restarts the app in place and shows a short "switching" overlay. See `docs/architecture.md`.
+A hosted deployment holds many workspaces; the top bar has a workspace switcher for people who belong to more than one. See `docs/tenancy.md`.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `npm run local` / `npm run local:demo` | Start Mergeport for your gh account / with demo data |
-| `npm run dev` | Next.js dev server on `127.0.0.1:3000` using `./.data/dev.db` (development only) |
-| `npm run build` / `npm start` | Production build (runs `prisma generate`) / serve it |
+| `npm run demo` | Demo mode on the dev Postgres: migrate, seed when empty, start the dev server |
+| `npm run dev` | Next.js dev server on `127.0.0.1:3000` against `DATABASE_URL` |
+| `npm run worker` | The background job loop (sync, digests, webhooks maintenance); several can share one database |
+| `npm run db:dev` | Native dev Postgres on port 5433, data in `.data/pg` |
+| `npm run build` / `npm start` | Production build (runs `prisma generate`) / apply migrations and serve it |
 | `npm run typecheck` / `npm run lint` | `tsc --noEmit` / ESLint |
 | `npm test` | Vitest. Tests use an embedded PostgreSQL on port 5434; no services needed |
-| `npm run db:seed` | Seed synthetic data into the dev database |
+| `npm run db:seed` | Seed synthetic data (`DEMO_MODE=true`) into the database named by `DATABASE_URL` |
 
-## Agents and the command line
+## Agents
 
-`npm run mp -- <command>` creates and updates Mergeport tasks from a terminal, so you can tell any AI agent "add this to mergeport under the atlas-api repo, assign bram". It runs the app's own services against the signed-in profile's database as that profile's user (same rules, limits and task history as the web app), works while Mergeport is running, never calls GitHub and never creates GitHub issues or pull requests. Commands: `projects`, `task add` (`--dry-run` previews), `task update <id>`, `task done <id>`, `task list`; add `--json` for machine-readable output, `npm run mp -- help` for flags. Ambiguity (a repo in several projects, an unknown assignee) is an error that lists the candidates, never a guess.
-
-`npm run skill:install` copies the agent-neutral skill in `docs/agent-skill/mergeport` to `~/.claude`, `~/.agents` and, when those folders exist, `~/.codex` and `~/.gemini` (`--dry-run`, `--force`, `--tool claude,codex,agents,gemini`). It never overwrites a differing file without `--force`.
+AI apps use the hosted MCP endpoint, `POST /api/mcp`, with a personal access token or OAuth: list projects, create, update and complete tasks, look up pull request status. Nothing it does changes GitHub. See `docs/mcp.md`. The old `npm run mp` command line and the stdio MCP server read a local profile database and were removed with the local launcher.
 
 ## Light, dark, system
 
@@ -101,13 +104,13 @@ Settings has **Light / Dark / System**, and the top bar has a quick toggle. The 
 
 - **Account binding.** Every GitHub call runs as the account the profile was created for, identified by its immutable numeric user id, never as whichever account `gh` has selected at that moment. A switch with `gh auth switch` before, during or after a call cannot change who it runs as. If that account is not signed in, is a different id, or the CLI is too old, the call is **blocked** and you are asked to reconnect; nothing falls back to another account or an inherited `GH_TOKEN`.
 
-- The server binds to `127.0.0.1`. A guard refuses any `Host` that is not loopback (DNS rebinding) and any state-changing request that is not same-origin.
-- The browser gets a session cookie only through the one-time launch link the launcher opens. Other pages in your browser cannot use the app.
+- A guard (`src/proxy.ts`) refuses any `Host` that is not the public host (hosted) or a loopback name (development), and any state-changing request that is not same-origin.
+- Pages need the session cookie. Other pages in your browser cannot use the app.
 - GitHub calls are `gh api` with an argument array, never a shell string, each with a timeout and cancellation that kill the whole process tree. Credential headers are dropped. Tokens, keys, local paths, logs and worktree snapshots never enter a shared repository.
 - **Joining is explicit.** Mergeport finds candidate coordination repositories and shows what each is; nothing is joined or imported until you press Join and confirm.
 - **Pages never wait on GitHub.** Team and Connect render from the last saved result with its age; GitHub is asked in the background, and a failure keeps the saved list and says why (offline, rate limited, sign-in needed).
 - Privacy is a real boundary: a restricted audience gets its **own private repository**. Data a person may not see is never written to a repository they can read, and is never merely hidden in the UI.
-- Roles come from GitHub's permission on the team repository, not from a field in a file anyone can edit. A forged `role: "admin"` in a local database or a shared file grants nothing.
+- Roles come from GitHub's permission on the team repository, not from a field in a file anyone can edit. A forged `role: "admin"` in a database row or a shared file grants nothing.
 - A coordination repository is data. Mergeport never executes, installs or follows instructions from one.
 
 ## What is verified

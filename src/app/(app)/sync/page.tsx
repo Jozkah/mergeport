@@ -11,11 +11,10 @@ import { MAX_POLL_MS, expectedConsistencyDelaySeconds } from "@/lib/sync/engine"
 import { formatInstant } from "@/lib/format";
 import { deriveSourceStatus } from "@/lib/sync/source-status";
 import { ActionForm } from "@/components/forms/ActionForm";
-import { Sheet } from "@/components/ui/dialog";
 import { SyncBadge } from "@/components/sync/SyncBadge";
 import { Banner, EmptyState, Mono, PageHeader, Panel, Time } from "@/components/ui/primitives";
 import { FolderGit2, RefreshCw, ShieldCheck } from "@/components/ui/icons";
-import { dismissRestoredAction, refreshSyncAction, releaseQuarantineAction, resendRestoredAction, resolveConflictAction } from "@/app/team-actions";
+import { refreshSyncAction, releaseQuarantineAction, resolveConflictAction } from "@/app/team-actions";
 
 export const metadata = { title: "Sync" };
 export const dynamic = "force-dynamic";
@@ -28,7 +27,6 @@ export default async function SyncPage() {
   const cfg = await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } });
   const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId }, orderBy: { createdAt: "asc" } });
   const conflicts = await db.syncConflict.findMany({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { createdAt: "asc" } });
-  const restores = await db.hubRestore.findMany({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { at: "asc" } });
   const quarantined = await db.outboxOp.findMany({ where: { status: "QUARANTINED", space: { workspaceId: viewer.workspaceId } }, include: { space: true } });
   const pendingOps = await db.outboxOp.findMany({ where: { status: { in: ["PENDING", "SENT", "FAILED"] }, space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { createdAt: "asc" }, take: 50 });
   const poll = cfg?.pollSeconds ?? 30;
@@ -143,38 +141,6 @@ export default async function SyncPage() {
           </ul>
         )}
       </Panel>
-
-      {restores.length > 0 && (
-        <div className="mt-5">
-          <Panel title={`Server restored from a backup (${restores.length})`} icon={ShieldCheck} id="restored">
-            <div className="flex flex-col text-[13px]">
-              <p className="max-w-[75ch] text-pretty p-4 text-ink-3">The team server went back to an earlier copy, so some newer copies here were replaced. Unsent edits were kept.</p>
-              <ul>
-              {restores.map((r) => {
-                const entries = r.detail as unknown as { type: string; entityId: string; deleted: boolean; data: Record<string, unknown>; resend: boolean }[];
-                const sendable = entries.filter((e) => e.resend).length;
-                return (
-                  <li key={r.id} className="flex flex-col gap-2 border-t border-line p-4">
-                    <span><strong className="tnum">{r.rolledBack}</strong> {r.rolledBack === 1 ? "item" : "items"} in <strong>{r.space.name}</strong> replaced by the server&apos;s older copy{r.kept > 0 ? <>, <strong className="tnum">{r.kept}</strong> with unsent edits kept</> : null}. Detected <Time value={r.at} formatted={formatInstant(r.at, viewer.timezone)} />.</span>
-                    <ul className="text-[12.5px] text-ink-3" aria-label="What was replaced">
-                      {entries.slice(0, 8).map((e) => <li key={`${e.type}/${e.entityId}`} className="break-words">{e.type} <Mono>{typeof e.data.title === "string" ? e.data.title : typeof e.data.name === "string" ? e.data.name : e.entityId}</Mono>{e.deleted ? " (you had deleted it)" : ""}</li>)}
-                      {r.rolledBack > Math.min(entries.length, 8) && <li>and {r.rolledBack - Math.min(entries.length, 8)} more</li>}
-                    </ul>
-                    <span className="flex flex-wrap items-start gap-2">
-                      {sendable > 0 && <ActionForm action={resendRestoredAction} submitLabel={`Send my copies again (${sendable})`} submitAriaLabel="Send my newer copies to the server again" submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={r.id} /></ActionForm>}
-                      <Sheet title="Keep the server's version?" description={`Your computer keeps what the server has. The ${r.rolledBack === 1 ? "replaced copy" : `${r.rolledBack} replaced copies`} will no longer be listed here, and you cannot send ${r.rolledBack === 1 ? "it" : "them"} again later.`} trigger={<button type="button" className="btn" aria-label="Keep the server's version and drop the replaced copies">Keep the server&apos;s version</button>}>
-                        <ActionForm action={dismissRestoredAction} submitLabel="Keep the server's version" pendingLabel="Saving…" submitClassName="btn btn-primary" closeOnSuccess><input type="hidden" name="id" value={r.id} /></ActionForm>
-                      </Sheet>
-                    </span>
-                    {sendable > 0 && <p className="max-w-[75ch] text-pretty text-[12px] text-ink-3">Sending again puts your {sendable === 1 ? "copy" : "copies"} back as new edits that teammates will see.</p>}
-                  </li>
-                );
-              })}
-              </ul>
-            </div>
-          </Panel>
-        </div>
-      )}
 
       {pendingOps.length > 0 && (
         <div className="mt-5"><Panel title={`Waiting to be sent (${pendingOps.length})`} icon={RefreshCw} id="outbox"><ul className="text-[12.5px]">{pendingOps.map((o) => <li key={o.id} className="flex items-center justify-between gap-3 border-b border-line px-4 py-2 last:border-b-0"><span><span className="font-medium">{o.kind === "DELETE" ? "Delete" : "Change"}</span> {o.entityType} in <Mono>{o.space.repoName}</Mono></span><span className="text-ink-3">{o.status.toLowerCase()}{o.error ? ` · ${o.error}` : ""}</span></li>)}</ul></Panel></div>

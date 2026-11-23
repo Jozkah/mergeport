@@ -18,7 +18,7 @@ const checked = (fd: FormData, k: string) => fd.get(k) === "on" || fd.get(k) ===
 
 async function team(workspaceId: string) {
   const t = await getTeamService(workspaceId);
-  if (!t) throw new ValidationError("GitHub sign-in is not available in demo mode. Run npm run local to use teams.");
+  if (!t) throw new ValidationError("GitHub sign-in is not available in demo mode.");
   return t;
 }
 async function engine(workspaceId: string) {
@@ -152,24 +152,6 @@ export async function releaseQuarantineAction(fd: FormData): Promise<ActionResul
     await (await engine(viewer.workspaceId)).releaseQuarantine(str(fd, "spaceId"), str(fd, "action") === "retry" ? "retry" : "discard");
     revalidatePath("/sync");
     return { ok: true, message: "Done" };
-  });
-}
-
-export async function resendRestoredAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireWriter();
-    const { queued } = await (await engine(viewer.workspaceId)).resendRestored(str(fd, "id"));
-    revalidatePath("/sync");
-    return { ok: true, message: queued ? `${queued} item(s) queued to send to the server again` : "Nothing to send: those items were changed since." };
-  });
-}
-
-export async function dismissRestoredAction(fd: FormData): Promise<ActionResult> {
-  return run(async () => {
-    const { viewer } = await requireWriter();
-    await (await engine(viewer.workspaceId)).dismissRestored(str(fd, "id"));
-    revalidatePath("/sync");
-    return { ok: true, message: "Dismissed" };
   });
 }
 

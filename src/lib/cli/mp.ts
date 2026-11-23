@@ -10,10 +10,10 @@ import { parseDue } from "./dates";
 import { CliError } from "./errors";
 
 /**
- * `npm run mp -- <command>`: Mergeport's own task records from the command line, for people and for AI agents.
- * It runs the same services as the web app, as the profile's own user, so every rule, limit and history entry is identical.
- * It never calls GitHub and never changes anything on GitHub: a task here is a planning record on this computer.
- * Pure: `scripts/mp.ts` supplies the database, the viewer and the output streams.
+ * Mergeport's own task records as text commands: the task core the hosted MCP server (src/lib/mcp) runs for AI agents.
+ * It runs the same services as the web app, as the caller's own viewer, so every rule, limit and history entry is identical.
+ * It never calls GitHub and never changes anything on GitHub: a task here is a planning record.
+ * Pure: the caller supplies the database, the viewer and the output streams. (The `npm run mp` command line that used it was removed with the local launcher.)
  */
 export type MpOut = { stdout: (s: string) => void; stderr: (s: string) => void };
 /** `via` says where the change came from, for the history entry ("added this from ..."); default the command line. */

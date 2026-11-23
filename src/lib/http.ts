@@ -14,7 +14,7 @@ export function safeReturnTo(v: string | null | undefined): string {
 
 /**
  * Redirect on the SAME host the browser used. Next derives `req.url` from its configured hostname ("localhost"), which can
- * differ from the 127.0.0.1 address the launcher opened; redirecting there would drop the session cookie and trip the
+ * differ from the 127.0.0.1 address the browser used; redirecting there would drop the session cookie and trip the
  * form-action policy. The Host header was already checked by proxy.ts to be loopback.
  */
 export function redirectTo(req: Request, path: string, status = 307): Response {

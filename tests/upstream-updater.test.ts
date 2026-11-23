@@ -22,7 +22,7 @@ const pulls = () => port.pulls.filter((p) => p.repo === "proj");
 
 describe("upstream updater: pr mode", () => {
   it("clean merge + verify pass pushes ONLY the sync branch and opens one pull request; a second run updates it", async () => {
-    const s = await setupMapping(db, { verifyCommand: w.script("v", `const fs=require("fs");if(!fs.existsSync("up1.txt")||!fs.existsSync("fork-only.txt")||process.env.CI!=="1"||process.env.GH_TOKEN||process.env.MERGEPORT_DB)process.exit(7);`) });
+    const s = await setupMapping(db, { verifyCommand: w.script("v", `const fs=require("fs");if(!fs.existsSync("up1.txt")||!fs.existsSync("fork-only.txt")||process.env.CI!=="1"||process.env.GH_TOKEN)process.exit(7);`) });
     w.commitFork({ "fork-only.txt": "ours\n" }, "our patch");
     const up = w.commitUpstream({ "up1.txt": "one\n" }, "feat: one", "Alice Upstream");
     const mainBefore = w.tip(w.fork)!;

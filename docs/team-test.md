@@ -15,8 +15,8 @@ Show, with two real accounts, that:
 ## Setup
 
 - Person A: the owner account already used for the read-only checks (profile `github.com-<id>`).
-- Person B: a second GitHub account (the teammate) with its **own** `gh` sign-in and its own Mergeport profile, on its own computer, or on this computer with an isolated environment (`GH_CONFIG_DIR` pointing to a new folder and `MERGEPORT_HOME` to another) so A's globally selected `gh` account is never switched. B performs B's own `gh auth login`; no credential is typed by anyone else.
-- Both run `npm run local`. No server, tunnel or shared secret.
+- Person B: a second GitHub account (the teammate) with its **own** `gh` sign-in and its own Mergeport profile, on its own computer, or on this computer with an isolated environment (`GH_CONFIG_DIR` pointing to a new folder, and a separate `DATABASE_URL`) so A's globally selected `gh` account is never switched. B performs B's own `gh auth login`; no credential is typed by anyone else.
+- Both run `npm run dev` against their own Postgres (`npm run db:dev`) and sign in with their `gh` account. No server, tunnel or shared secret. (Written when the app ran through the removed local launcher; the setup lines are adapted, the plan itself is unchanged and still not run.)
 
 ## Approval needed (all external writes)
 

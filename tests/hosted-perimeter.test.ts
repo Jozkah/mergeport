@@ -1,7 +1,7 @@
 import os from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestPrisma } from "./pg";
-import { HOST, ORIGIN, formPost, request, state } from "./auth-mocks";
+import { HOST, ORIGIN, formPost, state } from "./auth-mocks";
 
 /**
  * A hosted deployment must not expose the local app's sign-in routes, must not accept loopback Host names (a proxy can forward a
@@ -41,25 +41,23 @@ const proxyAt = async (host: string, path: string, init: { method?: string; orig
 };
 
 describe("the proxy in hosted mode", () => {
-  const LOCAL_ROUTES = ["/api/local/signin", "/api/local/demo", "/api/local/launch", "/api/local/link", "/api/local/switch"];
+  const LOCAL_ROUTES = ["/api/local/signin", "/api/local/demo"];
 
-  it("answers 404 to every /api/local route on the public host (except sign-out and the readiness probe)", async () => {
+  it("answers 404 to every /api/local route on the public host (except sign-out)", async () => {
     for (const p of LOCAL_ROUTES) {
       expect((await proxyAt(HOST, p, { method: "POST", origin: ORIGIN })).status, p).toBe(404);
       expect((await proxyAt(HOST, p)).status, p).toBe(404);
     }
-    expect((await proxyAt(HOST, "/api/local/ready")).status).toBe(404);
     expect((await proxyAt(HOST, "/api/local/signout", { method: "POST", origin: ORIGIN })).status).toBe(200);
     expect((await proxyAt(HOST, "/sign-in")).status).toBe(200);
   });
 
-  it("refuses a loopback Host (as a proxy might forward from a client) everywhere except the launcher's readiness probe", async () => {
+  it("refuses a loopback Host (as a proxy might forward from a client) everywhere", async () => {
     for (const p of ["/sign-in", "/", "/api/local/signin", "/api/local/demo", "/auth/magic/request"]) {
       expect((await proxyAt("127.0.0.1:3000", p, { method: p.startsWith("/api") || p.startsWith("/auth") ? "POST" : "GET", origin: "http://127.0.0.1:3000" })).status, p).toBe(403);
     }
     expect((await proxyAt("localhost:3000", "/sign-in")).status).toBe(403);
     expect((await proxyAt("[::1]:3000", "/sign-in")).status).toBe(403);
-    expect((await proxyAt("127.0.0.1:3000", "/api/local/ready")).status).toBe(200);
   });
 
   it("the local app still accepts loopback only and never the public name", async () => {
@@ -73,13 +71,12 @@ describe("the proxy in hosted mode", () => {
 describe("the local routes themselves refuse a hosted request (the proxy is not the only gate)", () => {
   const post = (path: string, extra: Record<string, string> = {}) => formPost(path, { as: "admin" }, extra);
 
-  it("POST /api/local/signin, /demo, /switch : 404, no session, no gh", async () => {
+  it("POST /api/local/signin, /demo : 404, no session, no gh", async () => {
     vi.stubEnv("DEMO_MODE", "true");
     const user = await db().user.create({ data: { githubId: 11n, login: "server-owner" } });
     const routes: [string, string][] = [
       ["signin", "@/app/api/local/signin/route"],
       ["demo", "@/app/api/local/demo/route"],
-      ["switch", "@/app/api/local/switch/route"],
     ];
     for (const [name, mod] of routes) {
       const res = await (await import(/* @vite-ignore */ mod)).POST(post(`/api/local/${name}`));
@@ -90,14 +87,6 @@ describe("the local routes themselves refuse a hosted request (the proxy is not 
     expect(spies.spawn).not.toHaveBeenCalled();
   });
 
-  it("GET /api/local/launch, /link : 404", async () => {
-    for (const mod of ["@/app/api/local/launch/route", "@/app/api/local/link/route"]) {
-      const res = await (await import(/* @vite-ignore */ mod)).GET(request("/api/local/x?token=anything"));
-      expect(res.status, mod).toBe(404);
-    }
-    expect(state.jar.size).toBe(0);
-  });
-
   it("POST /api/local/signin needs a loopback Host with the right port even in the local app (a public name is refused)", async () => {
     vi.stubEnv("MERGEPORT_PUBLIC_URL", "");
     const { POST } = await import("@/app/api/local/signin/route");
@@ -105,11 +94,9 @@ describe("the local routes themselves refuse a hosted request (the proxy is not 
     expect((await POST(post("/api/local/signin", { host: "127.0.0.1:9999", origin: "http://127.0.0.1:9999" }))).status).toBe(403); // wrong port
   });
 
-  it("sign-out and the readiness probe keep working", async () => {
+  it("sign-out keeps working", async () => {
     const out = await (await import("@/app/api/local/signout/route")).POST(post("/api/local/signout"));
     expect(out.status).toBe(303);
-    const ready = await (await import("@/app/api/local/ready/route")).GET(request("/api/local/ready"));
-    expect(ready.status).toBe(403); // Host is the public name, not loopback
   });
 });
 

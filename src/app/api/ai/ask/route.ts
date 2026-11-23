@@ -1,9 +1,9 @@
-import { db, resolveDbFile } from "@/lib/db";
+import { db } from "@/lib/db";
 import { requireWrite } from "@/lib/authz/viewer";
 import { withViewerStream } from "@/lib/api-post";
 import { isDemo } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
-import { keyFileFor, openVault } from "@/lib/hub/session-vault";
+import { vaultKeyFile, openVault } from "@/lib/hub/session-vault";
 import { runAsk } from "@/lib/services/ai-run";
 
 export const runtime = "nodejs";
@@ -14,6 +14,6 @@ export async function POST(req: Request) {
     requireWrite(v); // spends the workspace AI key: writers only
     if (isDemo()) throw new ValidationError("The demo does not send anything to an AI endpoint.");
     const input = JSON.parse(body || "{}") as { question?: string };
-    return runAsk(db, v, openVault(keyFileFor(resolveDbFile())), { question: String(input.question ?? "") }, step);
+    return runAsk(db, v, openVault(vaultKeyFile()), { question: String(input.question ?? "") }, step);
   });
 }

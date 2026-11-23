@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, ChevronRight, LayoutDashboard, LogOut } from "@/components/ui/icons";
 import { ThemeToggle } from "@/components/shell/ThemeControls";
-import { WorkspaceSwitcher } from "@/components/shell/WorkspaceSwitcher";
 import { AccountWorkspaceSwitcher } from "@/components/shell/AccountWorkspaceSwitcher";
 import { SubmitButton } from "@/components/forms/SubmitButton";
 import { Tip } from "@/components/ui/Tooltip";
@@ -52,7 +51,7 @@ export function crumbsFor(path: string): { href: string; label: string }[] {
   return parts.map((p, i) => ({ href: "/" + parts.slice(0, i + 1).join("/"), label: LABELS[p] ?? (p.length > 16 ? "Detail" : p) }));
 }
 
-export function Topbar({ hosted, aiQuick, unread, menu, syncNote, theme, sync, scopePicker, workspaces, accountSwitcher }: { hosted?: boolean; aiQuick?: React.ReactNode; accountSwitcher?: { workspaces: { id: string; name: string }[]; active: string } | null; workspaces?: React.ComponentProps<typeof WorkspaceSwitcher> | null; scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
+export function Topbar({ hosted, aiQuick, unread, menu, syncNote, theme, sync, scopePicker, accountSwitcher }: { hosted?: boolean; aiQuick?: React.ReactNode; accountSwitcher?: { workspaces: { id: string; name: string }[]; active: string } | null; scopePicker?: React.ReactNode; unread: number; menu: React.ReactNode; syncNote?: string; theme: ThemePreference; sync: { state: SyncStateName; pending: number; conflicts: number; detail?: string | null; scope?: "source" } | null }) {
   const path = usePathname();
   const crumbs = crumbsFor(path);
   return (
@@ -80,7 +79,6 @@ export function Topbar({ hosted, aiQuick, unread, menu, syncNote, theme, sync, s
           ))}
         </ol>
       </nav>
-      {workspaces ? <div className="hidden sm:block"><WorkspaceSwitcher {...workspaces} /></div> : null}
       {accountSwitcher ? <div className="hidden sm:block"><AccountWorkspaceSwitcher {...accountSwitcher} /></div> : null}
       {scopePicker ? <div className="hidden sm:block">{scopePicker}</div> : null}
       {syncNote && <span className="tnum hidden text-[12px] text-ink-3 md:inline">{syncNote}</span>}
@@ -100,10 +98,9 @@ export function Topbar({ hosted, aiQuick, unread, menu, syncNote, theme, sync, s
       </form>
     </header>
     {/* Narrow screens have no room for more controls in the bar: scope and workspace get their own row under it. */}
-    {scopePicker || workspaces || accountSwitcher ? (
+    {scopePicker || accountSwitcher ? (
       <div className="flex items-center gap-2 border-b border-line px-4 py-2 sm:hidden">
         {scopePicker ? <div className="min-w-0 flex-1">{scopePicker}</div> : null}
-        {workspaces ? <div className="min-w-0 flex-1"><WorkspaceSwitcher {...workspaces} className="w-full" /></div> : null}
         {accountSwitcher ? <div className="min-w-0 flex-1"><AccountWorkspaceSwitcher {...accountSwitcher} className="w-full" /></div> : null}
       </div>
     ) : null}

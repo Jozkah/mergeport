@@ -1,68 +1,8 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CONTROL_HEADER, FRESH_LINK_TTL_MS, controlFile, controlSecretOk, mintFreshLink, removeControlFile, takeFreshLink, writeControlFile } from "@/lib/local/fresh-link";
 import { toastScript, toastXml } from "@/lib/local/toast";
 import { dispatchToasts, type ToastOut } from "@/lib/services/toasts";
 import { setPrefs } from "@/lib/services/notification-prefs";
-import { GET as linkRoute } from "@/app/api/local/link/route";
 import { freshSeed } from "./helpers";
-
-describe("fresh sign-in links for the shortcut", () => {
-  it("a minted link works once, and only while it is young", () => {
-    const s = new Map<string, number>();
-    const t = mintFreshLink(1_000, s);
-    expect(takeFreshLink("nope", 1_001, s)).toBe(false);
-    expect(takeFreshLink(t, 1_001, s)).toBe(true);
-    expect(takeFreshLink(t, 1_002, s)).toBe(false); // used
-    const old = mintFreshLink(5_000, s);
-    expect(takeFreshLink(old, 5_000 + FRESH_LINK_TTL_MS + 1, s)).toBe(false); // expired
-  });
-
-  it("only a few links are outstanding at once; the oldest is dropped", () => {
-    const s = new Map<string, number>();
-    const tokens = Array.from({ length: 7 }, (_, i) => mintFreshLink(1_000 + i, s));
-    expect(s.size).toBe(5);
-    expect(takeFreshLink(tokens[0], 2_000, s)).toBe(false);
-    expect(takeFreshLink(tokens[6], 2_000, s)).toBe(true);
-  });
-
-  it("the control secret must match exactly", () => {
-    expect(controlSecretOk("abc", "abc")).toBe(true);
-    expect(controlSecretOk("abd", "abc")).toBe(false);
-    expect(controlSecretOk(null, "abc")).toBe(false);
-    expect(controlSecretOk("abc", undefined)).toBe(false);
-    expect(controlSecretOk("", "")).toBe(false);
-  });
-
-  it("the endpoint refuses browsers and wrong secrets, and hands a link to the right caller", async () => {
-    process.env.MERGEPORT_CONTROL_SECRET = "s3cret";
-    const call = (headers: Record<string, string>) => linkRoute(new Request("http://127.0.0.1:3000/api/local/link", { headers }));
-    expect((await call({})).status).toBe(403);
-    expect((await call({ [CONTROL_HEADER]: "wrong" })).status).toBe(403);
-    expect((await call({ [CONTROL_HEADER]: "s3cret", origin: "https://evil.example" })).status).toBe(403); // a web page, even with the secret
-    const ok = await call({ [CONTROL_HEADER]: "s3cret" });
-    expect(ok.status).toBe(200);
-    const { url } = (await ok.json()) as { url: string };
-    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/api\/local\/launch\?token=[\w-]{20,}$/);
-    expect(takeFreshLink(new URL(url).searchParams.get("token")!)).toBe(true);
-    delete process.env.MERGEPORT_CONTROL_SECRET;
-  });
-
-  it("the control file is written for this process only and removed only by it", () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "mp-control-"));
-    let restricted = "";
-    writeControlFile(home, { port: 3000, secret: "x", pid: 111, stamp: "abc def" }, (f) => (restricted = f));
-    expect(restricted).toBe(controlFile(home));
-    expect(JSON.parse(fs.readFileSync(controlFile(home), "utf8"))).toMatchObject({ port: 3000, pid: 111 });
-    removeControlFile(home, 222); // another launcher's exit must not delete it
-    expect(fs.existsSync(controlFile(home))).toBe(true);
-    removeControlFile(home, 111);
-    expect(fs.existsSync(controlFile(home))).toBe(false);
-    fs.rmSync(home, { recursive: true, force: true });
-  });
-});
 
 describe("Windows toast content", () => {
   it("escapes everything and never puts notification text on a command line", () => {

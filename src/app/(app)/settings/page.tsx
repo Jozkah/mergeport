@@ -32,7 +32,6 @@ import { RoleChip } from "@/components/ui/identity";
 import { BackupPanel } from "@/components/settings/BackupPanel";
 import { NotificationSettings } from "@/components/settings/NotificationSettings";
 import { getPrefs } from "@/lib/services/notification-prefs";
-import { McpPanel } from "@/components/settings/McpPanel";
 import { AiSettingsPanel } from "@/components/settings/AiSettingsPanel";
 import { getAiView } from "@/lib/services/ai";
 import { GithubAccountPanel } from "@/components/settings/GithubAccountPanel";
@@ -152,11 +151,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         {ai && (
           <Panel title="AI assistant" icon={Wand2} id="ai" defaultOpen={false} summary={!ai.saved ? "Not set up" : `${ai.autopilot === "off" ? "Autopilot off" : ai.autopilot === "suggest" ? "Autopilot suggests" : "Autopilot creates tasks"}${ai.model ? ` · prefers ${ai.model}` : ""}`}>
             <AiSettingsPanel baseUrl={ai.baseUrl} hasKey={ai.hasKey} model={ai.model} autopilot={ai.autopilot} hosted={hosted} />
-          </Panel>
-        )}
-        {!isDemo() && !hosted && (
-          <Panel title="Use from other AI apps" icon={Wand2} id="mcp" defaultOpen={false} summary="Claude, opencode, Cursor and others (MCP)">
-            <McpPanel launcher={path.join(process.cwd(), "scripts", "mcp.mjs")} />
           </Panel>
         )}
         {!hosted && <Panel title="Sync" icon={RefreshCw} id="polling">

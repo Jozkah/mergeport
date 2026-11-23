@@ -26,6 +26,7 @@ export const TENANCY_ALLOWLIST: TenancyAllow[] = [
   { file: "src/lib/services/api-tokens.ts", models: ["apiToken"], ops: ["findUnique"], reason: "A personal access token is found by the sha256 of its secret: the secret names the tenant, so there is no workspace to filter on yet. The row then supplies the workspace for loadViewer and every later query (docs/mcp.md)." },
   { file: "src/lib/services/oauth.ts", models: ["oAuthCode", "oAuthRefresh"], ops: ["findUnique"], reason: "An authorization code or refresh token is found by the sha256 of its secret: the secret names the tenant, so there is no workspace to filter on yet. The row then supplies the workspace for every later query, including the single-use claim (docs/mcp.md, OAuth)." },
   { file: "src/lib/services/oauth.ts", models: ["member"], reason: "The consent page lists the caller's OWN active memberships (filtered by userId): the workspaces they may authorize an app for, across workspaces by design." },
+  { file: "scripts/demo.ts", reason: "`npm run demo`: refuses a database that holds real repositories, seeds the demo workspace when the database has no users. Dev tool, no request, no tenant." },
   { file: "prisma/seed.ts", reason: "Seed script: refuses to run when real data exists and wipes the whole demo database." },
 ];
 

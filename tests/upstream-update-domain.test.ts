@@ -89,15 +89,13 @@ describe("text and rules", () => {
 describe("environments and redaction", () => {
   it("verify runs with PATH, SYSTEMROOT, HOME/USERPROFILE and CI=1 only", () => {
     process.env.GH_TOKEN = "secret-token";
-    process.env.MERGEPORT_LAUNCH_TOKEN = "launch";
     try {
       const e = verifyEnv();
       expect(Object.keys(e).every((k) => ["PATH", "SYSTEMROOT", "HOME", "USERPROFILE", "CI"].includes(k))).toBe(true);
       expect(e.CI).toBe("1");
-      expect(JSON.stringify(e)).not.toMatch(/secret-token|launch/);
+      expect(JSON.stringify(e)).not.toMatch(/secret-token/);
     } finally {
       delete process.env.GH_TOKEN;
-      delete process.env.MERGEPORT_LAUNCH_TOKEN;
     }
   });
   it("git runs with no inherited GIT_DIR / GIT_WORK_TREE and never prompts", () => {

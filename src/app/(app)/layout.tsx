@@ -38,10 +38,8 @@ import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 import { checkProfile } from "@/lib/local/identity";
 import { getEngine } from "@/lib/local/runtime";
 import { deriveSourceStatus } from "@/lib/sync/source-status";
-import { env, isDemo } from "@/lib/env";
+import { isDemo } from "@/lib/env";
 import { federationState } from "@/lib/federation/config";
-import { mergeportHome } from "@/lib/local/profile";
-import { listWorkspaces } from "@/lib/local/workspaces";
 import Link from "next/link";
 import { cookies } from "next/headers";
 
@@ -78,16 +76,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const profile = await checkProfile(); // last known answer; refreshed in the background, never waits on gh
   const githubState = profile.kind === "hosted" ? await connectionState(db, viewer.workspaceId) : "ok";
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
-  const [spaceCount, conflictRows, restoreRows, quarantined, pendingOps, offlineSpaces] = await Promise.all([
+  const [spaceCount, openConflicts, quarantined, pendingOps, offlineSpaces] = await Promise.all([
     db.space.count({ where: { workspaceId: viewer.workspaceId } }),
     db.syncConflict.count({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } } }),
-    // A restored server needs a decision (send my copies again, or keep the server's), like a conflict does.
-    db.hubRestore.count({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } } }),
     db.outboxOp.count({ where: { status: "QUARANTINED", space: { workspaceId: viewer.workspaceId } } }),
     db.outboxOp.count({ where: { status: { in: ["PENDING", "SENT", "FAILED"] }, space: { workspaceId: viewer.workspaceId } } }),
     db.space.count({ where: { workspaceId: viewer.workspaceId, lastError: "offline" } }),
   ]);
-  const openConflicts = conflictRows + restoreRows;
   // The single state shown in the top bar is the MOST SEVERE one across spaces (what needs a person comes first).
   const SEVERITY: SyncStateName[] = ["conflict", "revoked", "signin", "schema", "rate-limited", "offline", "reconnecting", "syncing", "pending", "read-only", "synced"];
   let aggregate: SyncStateName = openConflicts ? "conflict" : quarantined ? "revoked" : offlineSpaces ? "offline" : pendingOps ? "pending" : "synced";
@@ -96,7 +91,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     const states = await Promise.all((await db.space.findMany({ where: { workspaceId: viewer.workspaceId } })).map(async (s) => (await engine.stateFor(s)).state as SyncStateName));
     aggregate = states.sort((x, y) => SEVERITY.indexOf(x) - SEVERITY.indexOf(y))[0] ?? aggregate;
   }
-  if (restoreRows) aggregate = "conflict";
   // Refreshing tracked source repositories is real work too, and it exists with no team space at all.
   // A job still marked RUNNING by a process that died is not work in progress; it is reclaimed on a timer.
   const bootAt = processStartedAt();
@@ -115,13 +109,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (spaceCount > 0) candidates.push({ state: aggregate, pending: pendingOps, conflicts: openConflicts });
   if (source) candidates.push({ state: source.state, pending: 0, conflicts: 0, detail: source.detail, scope: "source" });
   const sync = candidates.sort((x, y) => SEVERITY.indexOf(x.state) - SEVERITY.indexOf(y.state))[0] ?? null;
-  // Switching needs the launcher's control channel; without it (plain dev server) the label is static, and demo shows nothing.
-  const switchable = Boolean(process.env.MERGEPORT_CONTROL_URL);
   const hosted = isHosted();
   const mine = hosted ? await activeWorkspaces(db, user.id) : [];
   const accountSwitcher = mine.length > 1 ? { workspaces: mine, active: viewer.workspaceId } : null;
-  const wsList = isDemo() || hosted ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId?.toString() ?? "");
-  const workspaces = wsList && { ...wsList, switchable };
   const aiQuick = isDemo() || !(await getAiView(db, viewer.workspaceId)).saved ? null : <AiQuick suggestions={aiSuggestions} requests={aiRequests} />;
   const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: ws.name };
   return (
@@ -143,7 +133,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <DesktopNotifier />
           <Shortcuts />
           <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
-          <Topbar aiQuick={aiQuick} workspaces={workspaces} accountSwitcher={hosted ? accountSwitcher : undefined} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} hosted={hosted} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
+          <Topbar aiQuick={aiQuick} accountSwitcher={hosted ? accountSwitcher : undefined} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} hosted={hosted} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
         {profile.kind === "hosted" && githubState !== "ok" && (
           // The Settings > GitHub page explains the state itself and has the actions, so the banner would only repeat it there.

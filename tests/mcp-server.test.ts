@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { handle, serve, SERVER_INFO } from "@/lib/mcp/server";
+import { handle, SERVER_INFO } from "@/lib/mcp/server";
 import { TOOLS } from "@/lib/mcp/tools";
 import { listWorkItems } from "@/lib/services/queries";
 import { freshSeed } from "./helpers";
@@ -28,16 +28,6 @@ describe("protocol", () => {
     expect(await handle({ jsonrpc: "2.0", method: "notifications/initialized" }, ctx)).toBeNull();
     expect((await handle({ jsonrpc: "2.0", id: 5, method: "nope" }, ctx))!.error?.code).toBe(-32601);
     expect((await handle({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "nope" } }, ctx))!.error?.code).toBe(-32602);
-  });
-
-  it("reads lines from stdin, one reply per request, and survives garbage", async () => {
-    const out: string[] = [];
-    const lines = [JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) + "\n", "not json\n", JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n", JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" })];
-    await serve((async function* () { for (const l of lines) yield l; })(), (l) => out.push(l), { db: S.db, viewer: S.admin });
-    const replies = out.map((l) => JSON.parse(l));
-    expect(replies.filter((r) => r.id === 1 || r.id === 2)).toHaveLength(2);
-    expect(replies.find((r) => r.error?.code === -32700)).toBeTruthy();
-    expect(replies).toHaveLength(3);
   });
 });
 

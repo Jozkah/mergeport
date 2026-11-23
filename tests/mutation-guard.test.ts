@@ -38,7 +38,6 @@ const ALLOW: Allow[] = [
   { file: "src/app/actions.ts", fn: "saveFilterAction", reason: "The caller's own saved filter (per person, not per workspace)." },
   { file: "src/app/actions.ts", fn: "deleteFilterAction", reason: "The caller's own saved filter." },
   { file: "src/app/actions.ts", fn: "markNotificationsReadAction", reason: "The caller's own notifications." },
-  { file: "src/app/context-actions.ts", fn: "switchContextAction", reason: "Local app only: picks which local profile to open." },
   { file: "src/app/digest-actions.ts", fn: "regenerateDigestAction", reason: "Rebuilds the caller's own digest from data they can already see." },
   { file: "src/app/digest-actions.ts", fn: "markDigestReadAction", reason: "The caller's own digest state." },
   { file: "src/app/digest-actions.ts", fn: "saveDigestSettingsAction", reason: "The caller's own digest preference." },
