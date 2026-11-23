@@ -1,6 +1,6 @@
 import { take } from "@/lib/auth/rate-limit";
 import { db } from "@/lib/db";
-import { addressBucket, oauthError, oauthJson, readFlatBody } from "@/lib/oauth-http";
+import { addressBucket, addressHash, noAddress, oauthError, oauthJson, readFlatBody } from "@/lib/oauth-http";
 import { isHosted } from "@/lib/public-url";
 import { OAuthError, exchangeCode, exchangeRefresh } from "@/lib/services/oauth";
 
@@ -12,7 +12,9 @@ export const dynamic = "force-dynamic";
  * the code plus its PKCE verifier, or the refresh token; there is no cookie and no client secret. `src/proxy.ts` exempts exactly this
  * path and POST for a request with no Origin, Sec-Fetch-Site or Cookie. Every answer is `no-store`. 404 unless hosted.
  *
- * Limits: 60 requests a minute per address and 120 per client. Codes are single-use and 60 seconds; a refresh token is single-use too,
+ * Limits: 60 requests a minute per address, and 120 per client AND address (so a stranger who knows a public client_id cannot drain the
+ * budget of that app's real users, and junk client ids create no counter rows: the client is loaded first and an unknown one is
+ * `invalid_client`). A request with no client address is refused (503) rather than put in a bucket everyone shares. Codes are single-use and 60 seconds; a refresh token is single-use too,
  * and one used twice revokes its whole grant (services/oauth.ts).
  */
 const PER_ADDRESS = 60;
@@ -22,12 +24,15 @@ const s = (v: unknown, max = 2000): string | undefined => (typeof v === "string"
 
 export async function POST(req: Request) {
   if (!isHosted()) return new Response("Not found", { status: 404 });
-  if (!(await take(db, addressBucket("tok", req), PER_ADDRESS, 60_000).catch(() => true))) return oauthJson(429, { error: "temporarily_unavailable", error_description: "Slow down." }, { "retry-after": "60" });
+  const mine = addressBucket("tok", req);
+  if (!mine) return noAddress();
+  if (!(await take(db, mine, PER_ADDRESS, 60_000).catch(() => true))) return oauthJson(429, { error: "temporarily_unavailable", error_description: "Slow down." }, { "retry-after": "60" });
   const body = await readFlatBody(req, ["form", "json"]);
   if (!body) return oauthError(new OAuthError("invalid_request", "Send application/x-www-form-urlencoded parameters, up to 16 KiB."));
   const clientId = s(body.client_id, 64);
   if (!clientId) return oauthError(new OAuthError("invalid_client", "client_id is required.", 401));
-  if (!(await take(db, `oauth:tok:c:${clientId}`, PER_CLIENT, 60_000).catch(() => true))) return oauthJson(429, { error: "temporarily_unavailable", error_description: "Slow down." }, { "retry-after": "60" });
+  if (!(await db.oAuthClient.findUnique({ where: { id: clientId }, select: { id: true } }))) return oauthError(new OAuthError("invalid_client", "Unknown client.", 401));
+  if (!(await take(db, `oauth:tok:c:${clientId}:${addressHash(req)}`, PER_CLIENT, 60_000).catch(() => true))) return oauthJson(429, { error: "temporarily_unavailable", error_description: "Slow down." }, { "retry-after": "60" });
   const resource = body.resource === undefined ? undefined : s(body.resource);
   try {
     if (body.grant_type === "authorization_code") {

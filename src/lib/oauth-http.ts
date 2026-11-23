@@ -11,8 +11,21 @@ export const oauthJson = (status: number, body: unknown, headers: Record<string,
 
 export const oauthError = (e: OAuthError) => oauthJson(e.status, { error: e.code, error_description: e.description });
 
-/** A counter key carrying a hash of the client address, never the address. A missing address (no trusted proxy header) shares one bucket. */
-export const addressBucket = (kind: string, req: Request) => `oauth:${kind}:${createHash("sha256").update(clientIp(req) ?? "unknown").digest("hex").slice(0, 24)}`;
+/**
+ * A short hash of the client address (never the address), or null when there is none: no trusted proxy header, or too few entries in it.
+ * A hosted server refuses to start without MERGEPORT_TRUST_PROXY=true, so null means this one request arrived without the address a
+ * proxy should have appended. The OAuth endpoints refuse such a request (`noAddress`) instead of putting it in a bucket shared by
+ * everyone, which one caller could fill to lock all others out.
+ */
+export const addressHash = (req: Request): string | null => {
+  const ip = clientIp(req);
+  return ip ? createHash("sha256").update(ip).digest("hex").slice(0, 24) : null;
+};
+export const addressBucket = (kind: string, req: Request): string | null => {
+  const h = addressHash(req);
+  return h ? `oauth:${kind}:${h}` : null;
+};
+export const noAddress = () => oauthJson(503, { error: "temporarily_unavailable", error_description: "Client address unavailable." }, { "retry-after": "5" });
 
 /** The body as a flat object of strings (form or JSON), size capped. Null when it is not one. */
 export async function readFlatBody(req: Request, kinds: ("form" | "json")[]): Promise<Record<string, unknown> | null> {

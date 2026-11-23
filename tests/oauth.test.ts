@@ -45,7 +45,7 @@ const pkce = () => {
   return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
 };
 const asUser = (v: Viewer) => void (session.current = { viewer: v, user: { id: v.userId }, csrf: "csrf-token" });
-const req = (path: string, init: RequestInit & { headers?: Record<string, string> } = {}) => new Request(`${ORIGIN}${path}`, { ...init, headers: { host: HOST, ...(init.headers ?? {}) } });
+const req = (path: string, init: RequestInit & { headers?: Record<string, string> } = {}) => new Request(`${ORIGIN}${path}`, { ...init, headers: { host: HOST, "x-forwarded-for": "203.0.113.9", ...(init.headers ?? {}) } });
 
 /** The answer as an object; plain-text answers (a 404) give {}. */
 async function readJson(res: Response): Promise<Record<string, any>> {
@@ -55,9 +55,9 @@ async function readJson(res: Response): Promise<Record<string, any>> {
     return {};
   }
 }
-async function register(body: Record<string, unknown> = { client_name: "Claude", redirect_uris: [REDIRECT] }) {
+async function register(body: Record<string, unknown> = { client_name: "Claude", redirect_uris: [REDIRECT] }, headers: Record<string, string> = {}) {
   const { POST } = await import("@/app/api/oauth/register/route");
-  const res = await POST(req("/api/oauth/register", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } }));
+  const res = await POST(req("/api/oauth/register", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", ...headers } }));
   return { res, json: await readJson(res) };
 }
 async function token(params: Record<string, string>, headers: Record<string, string> = {}) {
@@ -170,22 +170,54 @@ describe("registration", () => {
     expect(await db().oAuthClient.count()).toBe(0);
   });
 
-  it("limits registrations per address and caps the table (forgetting apps never used)", async () => {
+  it("limits registrations per address and, across everyone, per hour", async () => {
     for (let i = 0; i < 10; i++) expect((await register()).res.status).toBe(201);
     const over = await register();
     expect(over.res.status).toBe(429);
     expect(over.res.headers.get("retry-after")).toBe("3600");
-    await db().rateLimitState.deleteMany({});
-    const old = new Date(Date.now() - 3 * 86_400_000);
-    await db().oAuthClient.createMany({ data: Array.from({ length: MAX_CLIENTS }, (_, i) => ({ id: `old${i}`, name: "old", redirectUris: [REDIRECT], createdAt: old })) });
-    await db().oAuthGrant.create({ data: { workspaceId: a.workspaceId, userId: a.userId, clientId: "old0", resource: MCP } }); // one has a grant
-    expect((await register()).res.status).toBe(201); // pruned the unused old ones
-    expect(await db().oAuthClient.findUnique({ where: { id: "old0" } })).toBeTruthy();
-    expect(await db().oAuthClient.findUnique({ where: { id: "old1" } })).toBeNull();
+    expect((await register(undefined, { "x-forwarded-for": "198.51.100.7" })).res.status).toBe(201); // another address is unaffected
+    await db().rateLimitState.upsert({ where: { key: "oauth:reg:all" }, create: { key: "oauth:reg:all", remaining: 0, limit: 60, resetAt: new Date(Date.now() + 60_000) }, update: { remaining: 0, resetAt: new Date(Date.now() + 60_000) } });
+    expect((await register(undefined, { "x-forwarded-for": "198.51.100.8" })).res.status).toBe(429); // the global limit, however many addresses
+    const { GLOBAL_REGISTRATIONS_PER_HOUR } = await import("@/app/api/oauth/register/route");
+    expect(GLOBAL_REGISTRATIONS_PER_HOUR).toBeLessThanOrEqual(MAX_CLIENTS / 10);
+  });
+
+  it("keeps the table from being held full: unused clients go after an hour once it is 80% full, clients with grants never", async () => {
+    const hours = (h: number) => new Date(Date.now() - h * 3_600_000);
+    const mk = (prefix: string, n: number, at: Date) => db().oAuthClient.createMany({ data: Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, name: prefix, redirectUris: [REDIRECT], createdAt: at })) });
+    await mk("stale", 700, hours(2));
+    await mk("fresh", 150, hours(0.5));
+    await db().oAuthGrant.create({ data: { workspaceId: a.workspaceId, userId: a.userId, clientId: "stale0", resource: MCP } });
+    expect((await register()).res.status).toBe(201); // 851 > 800: stale unused ones are forgotten
+    expect(await db().oAuthClient.count({ where: { name: "stale" } })).toBe(1);
+    expect(await db().oAuthClient.findUnique({ where: { id: "stale0" } })).toBeTruthy(); // has a grant
+    expect(await db().oAuthClient.count({ where: { name: "fresh" } })).toBe(150); // a person may still be consenting
+    await db().oAuthClient.deleteMany({});
+    await mk("under", 700, hours(2)); // under 80%: nothing is purged yet
+    expect((await register()).res.status).toBe(201);
+    expect(await db().oAuthClient.count({ where: { name: "under" } })).toBe(700);
+  });
+
+  it("answers 503 when the table is full of recent clients, and forgets day-old unused ones", async () => {
     await db().oAuthClient.createMany({ data: Array.from({ length: MAX_CLIENTS }, (_, i) => ({ id: `new${i}`, name: "new", redirectUris: [REDIRECT] })) });
-    await db().rateLimitState.deleteMany({});
-    const full = await register();
-    expect(full.res.status).toBe(503);
+    expect((await register()).res.status).toBe(503);
+    await db().oAuthClient.updateMany({ data: { createdAt: new Date(Date.now() - 3 * 86_400_000) } });
+    expect((await register()).res.status).toBe(201);
+  });
+
+  it("refuses a request that carries no client address instead of sharing one bucket, creating no counters", async () => {
+    for (const h of [{ "x-forwarded-for": "" }, { "x-forwarded-for": " , " }]) {
+      const r = await register(undefined, h);
+      expect(r.res.status).toBe(503);
+      expect(r.json).toMatchObject({ error: "temporarily_unavailable", error_description: "Client address unavailable." });
+      const t = await token({ grant_type: "refresh_token", refresh_token: "x", client_id: "x" }, h);
+      expect(t.res.status).toBe(503);
+      expect(t.json.error_description).toBe("Client address unavailable.");
+    }
+    expect(await db().oAuthClient.count()).toBe(0);
+    expect(await db().rateLimitState.count()).toBe(0);
+    vi.stubEnv("MERGEPORT_TRUST_PROXY", "false"); // not trusted: there is never an address
+    expect((await register()).res.status).toBe(503);
   });
 });
 
@@ -333,10 +365,12 @@ describe("the token endpoint", () => {
   });
 
   it("rejects malformed requests and unsupported grants", async () => {
-    expect((await token({ grant_type: "password", client_id: "x" })).json.error).toBe("unsupported_grant_type");
+    const { json: c } = await register();
+    expect((await token({ grant_type: "password", client_id: c.client_id })).json.error).toBe("unsupported_grant_type");
     expect((await token({ grant_type: "authorization_code" })).json.error).toBe("invalid_client");
-    expect((await token({ grant_type: "authorization_code", client_id: "x" })).json.error).toBe("invalid_request");
-    expect((await token({ grant_type: "refresh_token", client_id: "x" })).json.error).toBe("invalid_request");
+    expect((await token({ grant_type: "authorization_code", client_id: "x" })).json.error).toBe("invalid_client"); // unknown
+    expect((await token({ grant_type: "authorization_code", client_id: c.client_id })).json.error).toBe("invalid_request");
+    expect((await token({ grant_type: "refresh_token", client_id: c.client_id })).json.error).toBe("invalid_request");
     const { POST } = await import("@/app/api/oauth/token/route");
     expect((await POST(req("/api/oauth/token", { method: "POST", body: "{}", headers: { "content-type": "text/plain" } }))).status).toBe(400);
     expect((await POST(req("/api/oauth/token", { method: "POST", body: "x".repeat(20_000), headers: { "content-type": "application/x-www-form-urlencoded" } }))).status).toBe(400);
@@ -364,17 +398,26 @@ describe("the token endpoint", () => {
     expect((await token({ grant_type: "refresh_token", refresh_token: c.tokens.refresh_token, client_id: c.clientId })).json.error).toBe("invalid_grant");
   });
 
-  it("limits requests per address and per client", async () => {
+  it("limits requests per address and per client-and-address, and an unknown client creates no counter", async () => {
     const future = new Date(Date.now() + 60_000);
     const full = (key: string) => db().rateLimitState.upsert({ where: { key }, create: { key, remaining: 0, limit: 1, resetAt: future }, update: { remaining: 0, resetAt: future } });
-    await full("oauth:tok:c:clientx");
-    const r = await token({ grant_type: "refresh_token", refresh_token: "x", client_id: "clientx" });
+    const junk = await token({ grant_type: "refresh_token", refresh_token: "x", client_id: "does-not-exist" });
+    expect(junk.res.status).toBe(401);
+    expect(junk.json.error).toBe("invalid_client");
+    expect(await db().rateLimitState.count({ where: { key: { startsWith: "oauth:tok:c:" } } })).toBe(0); // only the address counter exists
+    const { json: c } = await register();
+    const { json: other } = await register({ client_name: "Other", redirect_uris: [REDIRECT] });
+    const { addressHash, addressBucket } = await import("@/lib/oauth-http");
+    const mineReq = req("/api/oauth/token");
+    await full(`oauth:tok:c:${c.client_id}:${addressHash(mineReq)}`);
+    const r = await token({ grant_type: "refresh_token", refresh_token: "x", client_id: c.client_id });
     expect(r.res.status).toBe(429);
     expect(r.res.headers.get("retry-after")).toBe("60");
-    expect((await token({ grant_type: "refresh_token", refresh_token: "x", client_id: "other" })).res.status).toBe(400); // another client is unaffected
-    const { addressBucket } = await import("@/lib/oauth-http");
-    await full(addressBucket("tok", req("/api/oauth/token")));
-    expect((await token({ grant_type: "refresh_token", refresh_token: "x", client_id: "other" })).res.status).toBe(429);
+    expect((await token({ grant_type: "refresh_token", refresh_token: "x", client_id: other.client_id })).res.status).toBe(400); // another client is unaffected
+    // a stranger elsewhere cannot drain this app's budget for its real users, and the real users' full bucket does not lock the stranger's address out
+    expect((await token({ grant_type: "refresh_token", refresh_token: "x", client_id: c.client_id }, { "x-forwarded-for": "198.51.100.77" })).res.status).toBe(400);
+    await full(addressBucket("tok", mineReq)!);
+    expect((await token({ grant_type: "refresh_token", refresh_token: "x", client_id: other.client_id })).res.status).toBe(429);
   });
 });
 

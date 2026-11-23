@@ -18,6 +18,8 @@ export const CODE_TTL_MS = 60_000;
 export const ACCESS_TTL_MS = 3_600_000;
 export const REFRESH_TTL_MS = 30 * 86_400_000;
 export const MAX_CLIENTS = 1000;
+/** Past this share of the cap, clients nobody ever authorized are forgotten after an hour (the 1-day purge still runs when full). Clients with a grant are never deleted. */
+const PURGE_AT = MAX_CLIENTS * 0.8;
 export const CLIENT_NAME_MAX = 80;
 export const MAX_REDIRECT_URIS = 5;
 const CODES_PER_HOUR = 20;
@@ -59,8 +61,13 @@ export async function registerClient(db: Db, input: { name: unknown; redirectUri
   if (!Array.isArray(uris) || uris.length === 0 || uris.length > MAX_REDIRECT_URIS) throw new OAuthError("invalid_redirect_uri", `redirect_uris must list 1 to ${MAX_REDIRECT_URIS} addresses`);
   if (!uris.every(validRedirectUri)) throw new OAuthError("invalid_redirect_uri", "Each redirect URI must be https, or http on localhost, 127.0.0.1 or [::1], with no fragment, credentials or wildcard");
   const redirectUris = [...new Set(uris as string[])];
-  if ((await db.oAuthClient.count()) >= MAX_CLIENTS) {
-    // Full: forget apps nobody ever authorized for a day, then look again.
+  let count = await db.oAuthClient.count();
+  if (count > PURGE_AT) {
+    // Filling up: forget apps nobody authorized within an hour (a person consents within minutes), so spam cannot keep the table full.
+    await db.oAuthClient.deleteMany({ where: { createdAt: { lt: new Date(now.getTime() - 3_600_000) }, grants: { none: {} } } });
+    count = await db.oAuthClient.count();
+  }
+  if (count >= MAX_CLIENTS) {
     await db.oAuthClient.deleteMany({ where: { createdAt: { lt: new Date(now.getTime() - 86_400_000) }, grants: { none: {} } } });
     if ((await db.oAuthClient.count()) >= MAX_CLIENTS) throw new OAuthError("temporarily_unavailable", "Too many registered apps right now. Try again later.", 503);
   }
