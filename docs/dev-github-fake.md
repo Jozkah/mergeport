@@ -96,6 +96,10 @@ Run each long-lived command in its own terminal, from the repository root.
   `http://localhost` address only outside a production build (`redirectOf` in `GithubConnectForms.tsx`); a production build opens https only.
 - Symptom of a missing `NODE_ENV=development` in the worker's environment: the job `github.access.refresh` fails with "GitHub did not renew the
   sign-in", no repository access rows are written, and "Also create a GitHub issue" is never offered. The worker prints a warning at start.
+- Same cause, second symptom: a worker that ran without `NODE_ENV=development` asked the REAL GitHub about the fake installation id, was told
+  it does not exist, and recorded the installation as removed (`GithubInstallation.deletedAt`). Removed installations are skipped by the access
+  refresh (no `/user/installations` call, zero `GithubRepoAccess` rows, the job still ends DONE). Fix: Settings, GitHub, "Check again" (it asks the
+  fake and clears the mark), then trigger the refresh again (link again, or wait for the next scheduled run).
 - State lives in the fake's memory: restarting it reseeds everything (installation and repository ids stay the same, so a bound workspace still
   works; issues you created are gone). Restart it freely.
 - The fake's `devuser` is the only person the authorize page approves. It is an organisation owner, which is what the connect proof needs.
