@@ -12,7 +12,7 @@ import { publicOrigin } from "@/lib/public-url";
 import { assertTokenMayWrite } from "@/lib/services/api-tokens";
 import { audit } from "@/lib/services/audit";
 import { asStrings } from "@/lib/services/queries";
-import { addComment, cleanLabels, cleanLogin, getTask, listTasks, loadTask, priorityName, updateTask, type TaskPatch } from "@/lib/services/tasks";
+import { addComment, cleanLabels, cleanLogin, getTask, listTasks, loadTask, loadTaskForWrite, priorityName, updateTask, type TaskPatch } from "@/lib/services/tasks";
 import type { Tool, ToolCtx, ToolResult } from "./tools";
 
 /**
@@ -34,6 +34,9 @@ const clean = (s: string) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.t
 const oneLine = (s: string) => clean(s) && !/[\r\n]/.test(s);
 const line = (max: number, what: string) => z.string().trim().min(1, `${what} is required`).max(max, `${what} can have at most ${max} characters`).refine(oneLine, `${what} has characters that are not allowed`);
 const text = (max: number, what: string) => z.string().trim().min(1, `${what} is required`).max(max, `${what} can have at most ${max} characters`).refine(clean, `${what} has characters that are not allowed`);
+
+/** Tokens and app connections made before editing existed stay at create and comment. */
+export const EDIT_NOT_ALLOWED = "This token or connection was made before editing was available, so it can read, create tasks and comment but not edit, move or complete them. Make a new token in Settings, Connect AI, or disconnect and reconnect the app, and choose Read and change tasks.";
 
 const PRIORITIES = ["none", "low", "medium", "high", "urgent"] as const;
 
@@ -102,7 +105,7 @@ const urlOf = (id: string) => {
 };
 
 /** Parses the arguments, runs the tool and turns the app's own errors into tool errors. Anything else is logged (without arguments) and answered generically by the protocol layer. */
-function tool<K extends keyof typeof schemas>(name: K, description: string, inputSchema: Tool["inputSchema"], opts: { write?: boolean }, run: (a: z.infer<(typeof schemas)[K]>, ctx: ToolCtx & { token: NonNullable<ToolCtx["token"]> }) => Promise<ToolResult>): Tool {
+function tool<K extends keyof typeof schemas>(name: K, description: string, inputSchema: Tool["inputSchema"], opts: { write?: boolean; edit?: boolean }, run: (a: z.infer<(typeof schemas)[K]>, ctx: ToolCtx & { token: NonNullable<ToolCtx["token"]> }) => Promise<ToolResult>): Tool {
   return {
     name,
     description,
@@ -115,6 +118,7 @@ function tool<K extends keyof typeof schemas>(name: K, description: string, inpu
       try {
         if (opts.write) {
           assertTokenMayWrite({ scope: c.token.scope, viewer: c.viewer });
+          if (opts.edit && !c.token.editAllowed) throw new ForbiddenError(EDIT_NOT_ALLOWED);
           if (!(await take(c.db, `mcp:w:${c.token.id}`, WRITES_PER_MINUTE, 60_000, c.now?.()))) return fail("Too many changes in a minute. Wait a little and try again.");
         }
         return await run(parsed.data as z.infer<(typeof schemas)[K]>, c);
@@ -133,7 +137,7 @@ type Run = { ok: boolean; body: { error?: string; candidates?: string[]; [k: str
 async function mp(argv: string[], ctx: ToolCtx): Promise<Run> {
   let out = "";
   let err = "";
-  const code = await runMp([...argv, "--json"], { db: ctx.db, viewer: ctx.viewer, now: ctx.now ?? (() => new Date()), via: "an AI app over MCP", out: { stdout: (s) => (out += s), stderr: (s) => (err += s) } });
+  const code = await runMp([...argv, "--json"], { db: ctx.db, viewer: ctx.viewer, now: ctx.now ?? (() => new Date()), via: "an AI app over MCP", exactAssignee: true, out: { stdout: (s) => (out += s), stderr: (s) => (err += s) } });
   let body: Run["body"];
   try {
     body = JSON.parse((code === 0 ? out : err || out).trim());
@@ -292,15 +296,15 @@ export const HOSTED_TOOLS: Tool[] = [
       required: ["task_id"],
       additionalProperties: false,
     },
-    { write: true },
+    { write: true, edit: true },
     async (a, ctx) => {
-      const t = await loadTask(ctx.db, ctx.viewer, a.task_id);
+      const t = await loadTaskForWrite(ctx.db, ctx.viewer, a.task_id);
       if (t.workItemId && (a.title !== undefined || a.assignee !== undefined || a.unassign || a.add_labels || a.remove_labels)) return fail("This card follows a GitHub item, so its title, labels and assignee belong to that item. Change description, priority or due date instead.");
       const patch: TaskPatch = {};
       if (a.title !== undefined) patch.title = a.title;
       if (a.description !== undefined) patch.description = a.description || null;
       if (a.unassign) patch.assigneeLogin = null;
-      if (a.assignee !== undefined) patch.assigneeLogin = await resolveAssignee(ctx.db, ctx.viewer, t.projectId, a.assignee, false);
+      if (a.assignee !== undefined) patch.assigneeLogin = await resolveAssignee(ctx.db, ctx.viewer, t.projectId, a.assignee, false, true);
       if (a.priority !== undefined) patch.priority = parsePriority(a.priority);
       if (a.clear_due) patch.dueDate = null;
       if (a.due !== undefined) {
@@ -320,9 +324,9 @@ export const HOSTED_TOOLS: Tool[] = [
     "move_task",
     "Move a task to another board column of its project, by column name or key (list_projects shows the columns). It goes to the end of that column. Needs a token with write access.",
     { type: "object", properties: { ...taskIdProp, column: { type: "string", description: "Column name or key, such as \"In progress\" or in-progress." } }, required: ["task_id", "column"], additionalProperties: false },
-    { write: true },
+    { write: true, edit: true },
     async (a, ctx) => {
-      const t = await loadTask(ctx.db, ctx.viewer, a.task_id);
+      const t = await loadTaskForWrite(ctx.db, ctx.viewer, a.task_id);
       const col = resolveColumn(await columnsOf(ctx, t.projectId), a.column);
       await assertMayMove(ctx, t);
       const r = await change(ctx, "mcp.task.move", t.id, { columnKey: col.key }, t, { from: t.column.key, to: col.key });
@@ -333,9 +337,9 @@ export const HOSTED_TOOLS: Tool[] = [
     "complete_task",
     "Mark a task done: it moves to the project's Done column, as choosing the Done status on the task page does. Needs a token with write access.",
     { type: "object", properties: { ...taskIdProp }, required: ["task_id"], additionalProperties: false },
-    { write: true },
+    { write: true, edit: true },
     async (a, ctx) => {
-      const t = await loadTask(ctx.db, ctx.viewer, a.task_id);
+      const t = await loadTaskForWrite(ctx.db, ctx.viewer, a.task_id);
       await assertMayMove(ctx, t);
       const r = await change(ctx, "mcp.task.complete", t.id, { columnKey: "done" }, t, { from: t.column.key });
       return ok({ completed: r.changed, task: r.task });
@@ -345,9 +349,9 @@ export const HOSTED_TOOLS: Tool[] = [
     "reopen_task",
     "Reopen a done task: it moves back to Backlog, or to the column you name. A task that is not done is left as it is. Needs a token with write access.",
     { type: "object", properties: { ...taskIdProp, column: { type: "string", description: "Column name or key to reopen into (not Done). Default Backlog." } }, required: ["task_id"], additionalProperties: false },
-    { write: true },
+    { write: true, edit: true },
     async (a, ctx) => {
-      const t = await loadTask(ctx.db, ctx.viewer, a.task_id);
+      const t = await loadTaskForWrite(ctx.db, ctx.viewer, a.task_id);
       const cols = await columnsOf(ctx, t.projectId);
       const col = a.column ? resolveColumn(cols, a.column) : (cols.find((c) => c.key === "backlog") ?? cols.find((c) => c.key !== "done"));
       if (!col || col.key === "done") throw new ValidationError("Pick a column other than Done to reopen into");
@@ -362,4 +366,4 @@ export const HOSTED_TOOLS: Tool[] = [
   ),
 ];
 
-export const hostedCtx = (db: Db, viewer: Viewer, token: { id: string; scope: "READ" | "WRITE" }, now?: () => Date): ToolCtx => ({ db, viewer, token, now, tools: HOSTED_TOOLS, instructions: HOSTED_INSTRUCTIONS, quietErrors: true });
+export const hostedCtx = (db: Db, viewer: Viewer, token: { id: string; scope: "READ" | "WRITE"; editAllowed?: boolean }, now?: () => Date): ToolCtx => ({ db, viewer, token, now, tools: HOSTED_TOOLS, instructions: HOSTED_INSTRUCTIONS, quietErrors: true });

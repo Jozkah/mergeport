@@ -31,7 +31,7 @@ function AppItem({ a, now }: { a: GrantRow; now: Date }) {
       <div className="min-w-0 flex-1 basis-56">
         <p className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="min-w-0 max-w-full truncate font-medium" translate="no" title={a.clientName}><bdi>{a.clientName}</bdi></span>
-          <SimplePill tone="unknown" icon={a.scope === "WRITE" ? Wand2 : KeyRound}>{a.scope === "WRITE" ? "Read and write" : "Read only"}</SimplePill>
+          <SimplePill tone="unknown" icon={a.scope === "WRITE" ? Wand2 : KeyRound}>{a.scope === "WRITE" ? (a.editAllowed ? "Read and change tasks" : "Read, create and comment") : "Read only"}</SimplePill>
         </p>
         <p className="mt-1 text-[12px] text-ink-3">
           connected <span className="tnum">{formatDateOnly(a.createdAt)}</span>
@@ -62,7 +62,7 @@ function TokenItem({ t, now }: { t: TokenRow; now: Date }) {
         <p className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="min-w-0 max-w-full truncate font-medium" translate="no" title={t.name}><bdi>{t.name}</bdi></span>
           <SimplePill tone={live ? "ok" : t.state === "expired" ? "waiting" : "blocked"} icon={live ? undefined : Ban}>{stateLabel[t.state]}</SimplePill>
-          <SimplePill tone="unknown" icon={t.scope === "WRITE" ? Wand2 : KeyRound}>{t.scope === "WRITE" ? "Read and write" : "Read only"}</SimplePill>
+          <SimplePill tone="unknown" icon={t.scope === "WRITE" ? Wand2 : KeyRound}>{t.scope === "WRITE" ? (t.editAllowed ? "Read and change tasks" : "Read, create and comment") : "Read only"}</SimplePill>
         </p>
         <p className="mt-1 text-[12px] text-ink-3">
           <span className="mono" translate="no">{t.prefix}…</span>

@@ -137,11 +137,11 @@ export async function issueCode(db: Db, userId: string, input: { workspaceId: st
 
 export type Issued = { access_token: string; token_type: "Bearer"; expires_in: number; refresh_token: string; scope: "read" | "write" };
 
-async function mint(db: Db, grant: { id: string; workspaceId: string; userId: string; resource: string }, clientName: string, scope: "READ" | "WRITE", now: Date): Promise<Issued> {
+async function mint(db: Db, grant: { id: string; workspaceId: string; userId: string; resource: string; editAllowed: boolean }, clientName: string, scope: "READ" | "WRITE", now: Date): Promise<Issued> {
   const access = ACCESS_PREFIX + randomToken(32);
   const refresh = REFRESH_PREFIX + randomToken(32);
   await db.apiToken.create({
-    data: { workspaceId: grant.workspaceId, userId: grant.userId, name: clientName.slice(0, 60), tokenHash: sha256(access), prefix: access.slice(0, ACCESS_PREFIX.length + 5), scope, kind: "OAUTH", grantId: grant.id, audience: grant.resource, expiresAt: new Date(now.getTime() + ACCESS_TTL_MS) },
+    data: { workspaceId: grant.workspaceId, userId: grant.userId, name: clientName.slice(0, 60), tokenHash: sha256(access), prefix: access.slice(0, ACCESS_PREFIX.length + 5), scope, editAllowed: scope === "WRITE" && grant.editAllowed, kind: "OAUTH", grantId: grant.id, audience: grant.resource, expiresAt: new Date(now.getTime() + ACCESS_TTL_MS) },
   });
   await db.oAuthRefresh.create({ data: { tokenHash: sha256(refresh), workspaceId: grant.workspaceId, grantId: grant.id, expiresAt: new Date(now.getTime() + REFRESH_TTL_MS) } });
   // Old rows nobody can use any more.
@@ -183,7 +183,7 @@ export async function exchangeCode(db: Db, p: { code: string; clientId: string; 
   const client = await db.oAuthClient.findUnique({ where: { id: row.clientId } });
   if (!client) throw invalidGrant();
   const scope = capScope(row.scope, v);
-  const grant = await db.oAuthGrant.create({ data: { workspaceId: row.workspaceId, userId: row.userId, clientId: row.clientId, scope, resource: row.resource } });
+  const grant = await db.oAuthGrant.create({ data: { workspaceId: row.workspaceId, userId: row.userId, clientId: row.clientId, scope, editAllowed: scope === "WRITE", resource: row.resource } });
   await db.oAuthCode.updateMany({ where: { id: row.id, workspaceId: row.workspaceId }, data: { grantId: grant.id } });
   return mint(db, grant, client.name, scope, now);
 }
@@ -214,7 +214,7 @@ export async function exchangeRefresh(db: Db, p: { refreshToken: string; clientI
 
 // ---------- connected apps ----------
 
-export type GrantRow = { id: string; clientName: string; scope: "READ" | "WRITE"; createdAt: Date; lastUsedAt: Date | null; owner: string; mine: boolean };
+export type GrantRow = { id: string; clientName: string; scope: "READ" | "WRITE"; editAllowed: boolean; createdAt: Date; lastUsedAt: Date | null; owner: string; mine: boolean };
 
 /** Your own connected apps; an administrator sees every app connected to the workspace. */
 export async function listGrants(db: Db, v: Viewer): Promise<GrantRow[]> {
@@ -224,7 +224,7 @@ export async function listGrants(db: Db, v: Viewer): Promise<GrantRow[]> {
     take: 200,
     include: { client: { select: { name: true } }, user: { select: { login: true, email: true } } },
   });
-  return rows.map((r) => ({ id: r.id, clientName: r.client.name, scope: r.scope, createdAt: r.createdAt, lastUsedAt: r.lastUsedAt, owner: r.user.email ?? `@${r.user.login}`, mine: r.userId === v.userId }));
+  return rows.map((r) => ({ id: r.id, clientName: r.client.name, scope: r.scope, editAllowed: r.editAllowed, createdAt: r.createdAt, lastUsedAt: r.lastUsedAt, owner: r.user.email ?? `@${r.user.login}`, mine: r.userId === v.userId }));
 }
 
 export async function revokeGrant(db: Db, v: Viewer, id: string, now = new Date()) {

@@ -22,7 +22,8 @@ export const TOKENS_PER_PERSON = 20;
 const TOUCH_EVERY_MS = 60_000;
 
 export type ApiScope = "READ" | "WRITE";
-export type TokenAuth = { tokenId: string; scope: ApiScope; viewer: Viewer };
+/** `editAllowed`: the token may also edit, move and complete tasks (WRITE alone is create and comment). */
+export type TokenAuth = { tokenId: string; scope: ApiScope; editAllowed: boolean; viewer: Viewer };
 
 const noControl = (s: string) => !/[\u0000-\u001f\u007f]/.test(s);
 
@@ -46,6 +47,7 @@ export async function createApiToken(db: Db, v: Viewer, input: { name: string; s
       tokenHash: sha256(secret),
       prefix: secret.slice(0, TOKEN_PREFIX.length + 5),
       scope: input.scope,
+      editAllowed: input.scope === "WRITE",
       expiresAt: days === null ? null : new Date(now.getTime() + days * 86_400_000),
     },
   });
@@ -53,7 +55,7 @@ export async function createApiToken(db: Db, v: Viewer, input: { name: string; s
   return { id: row.id, secret, prefix: row.prefix };
 }
 
-export type TokenRow = { id: string; name: string; prefix: string; scope: ApiScope; createdAt: Date; lastUsedAt: Date | null; expiresAt: Date | null; revokedAt: Date | null; owner: string; mine: boolean; state: "active" | "expired" | "revoked" };
+export type TokenRow = { id: string; name: string; prefix: string; scope: ApiScope; editAllowed: boolean; createdAt: Date; lastUsedAt: Date | null; expiresAt: Date | null; revokedAt: Date | null; owner: string; mine: boolean; state: "active" | "expired" | "revoked" };
 
 /** Your own tokens; an administrator sees every token of the workspace. Never the hash. */
 export async function listApiTokens(db: Db, v: Viewer, now = new Date()): Promise<TokenRow[]> {
@@ -68,6 +70,7 @@ export async function listApiTokens(db: Db, v: Viewer, now = new Date()): Promis
     name: r.name,
     prefix: r.prefix,
     scope: r.scope,
+    editAllowed: r.editAllowed,
     createdAt: r.createdAt,
     lastUsedAt: r.lastUsedAt,
     expiresAt: r.expiresAt,
@@ -103,12 +106,14 @@ export async function authenticateApiToken(db: Db, secret: string, now = new Dat
   const t = await db.apiToken.findUnique({ where: { tokenHash: hash } });
   if (!t || !safeEqual(t.tokenHash, hash)) return null;
   if (t.revokedAt || (t.expiresAt && t.expiresAt <= now)) return null;
+  let editAllowed = t.editAllowed;
   if (t.kind === "OAUTH") {
     // Issued to a connected app: only for this server's own /api/mcp address, and only while the person's consent stands.
     const own = mcpResourceUrl();
     if (!own || !t.audience || !safeEqual(t.audience, own) || !t.grantId) return null;
-    const grant = await db.oAuthGrant.findFirst({ where: { id: t.grantId, workspaceId: t.workspaceId, revokedAt: null }, select: { id: true } });
+    const grant = await db.oAuthGrant.findFirst({ where: { id: t.grantId, workspaceId: t.workspaceId, revokedAt: null }, select: { id: true, editAllowed: true } });
     if (!grant) return null;
+    editAllowed = grant.editAllowed; // an app token follows its grant, whatever its own row says
   }
   const viewer = await loadViewer(db, t.userId, t.workspaceId, { now });
   if (!viewer || viewer.workspaceId !== t.workspaceId) return null;
@@ -117,7 +122,7 @@ export async function authenticateApiToken(db: Db, secret: string, now = new Dat
     if (t.grantId) await db.oAuthGrant.updateMany({ where: { id: t.grantId, workspaceId: t.workspaceId }, data: { lastUsedAt: now } }).catch(() => {});
   }
   // A WRITE token held by someone who is now a READER stays a token that can read: tools check the role again on every write.
-  return { tokenId: t.id, scope: t.scope, viewer };
+  return { tokenId: t.id, scope: t.scope, editAllowed: t.scope === "WRITE" && editAllowed, viewer };
 }
 
 /** Both checks a write needs: the token says write AND the person's role allows it right now. */

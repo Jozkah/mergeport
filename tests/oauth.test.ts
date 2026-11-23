@@ -9,6 +9,7 @@ import { loadViewer, type Viewer } from "@/lib/authz/viewer";
 import { sha256 } from "@/lib/crypto";
 import { changeRole, removeMember } from "@/lib/services/members";
 import { createApiToken, listApiTokens } from "@/lib/services/api-tokens";
+import { createTask } from "@/lib/services/tasks";
 import { MAX_CLIENTS, issueCode, listGrants, parseAuthorize, revokeGrant, validRedirectUri } from "@/lib/services/oauth";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 
@@ -516,5 +517,35 @@ describe("connected apps", () => {
     expect(((await tool(c.tokens.access_token, "list_projects")) as { status: number }).status).toBe(401);
     asUser(b);
     expect((await revokeOAuthGrantAction(fd)).ok).toBe(false);
+  });
+});
+
+describe("editing power of an app", () => {
+  type R = { isError: boolean; data: { error: string } };
+  it("a new WRITE consent may edit; a grant made before editing existed may only create and comment, also after a refresh", async () => {
+    const task = await createTask(db(), a, { projectId: ids.projects.atlas.id, title: "App edits" });
+    const c = await connect(a, "WRITE");
+    const grant = await db().oAuthGrant.findFirstOrThrow({ where: { clientId: c.clientId } });
+    expect(grant.editAllowed).toBe(true);
+    expect((await db().apiToken.findFirstOrThrow({ where: { grantId: grant.id } })).editAllowed).toBe(true);
+    expect(((await tool(c.tokens.access_token, "move_task", { task_id: task.id, column: "ready" })) as R).isError).toBe(false);
+    // the grant is an old one: its tokens follow it, even a token row that says true
+    await db().oAuthGrant.update({ where: { id: grant.id }, data: { editAllowed: false } });
+    for (const [name, args] of [["update_task", { task_id: task.id, title: "x" }], ["move_task", { task_id: task.id, column: "done" }], ["complete_task", { task_id: task.id }], ["reopen_task", { task_id: task.id }]] as const) {
+      const r = (await tool(c.tokens.access_token, name, args)) as R;
+      expect(r.isError, name).toBe(true);
+      expect(r.data.error).toMatch(/reconnect the app/);
+    }
+    expect(((await tool(c.tokens.access_token, "add_comment", { task_id: task.id, body: "still fine" })) as R).isError).toBe(false);
+    expect(((await tool(c.tokens.access_token, "create_task", { project: "Atlas", title: "still fine too" })) as R).isError).toBe(false);
+    const r = await token({ grant_type: "refresh_token", refresh_token: c.tokens.refresh_token, client_id: c.clientId, resource: MCP });
+    expect((await db().apiToken.findFirstOrThrow({ where: { tokenHash: sha256(r.json.access_token) } })).editAllowed).toBe(false);
+    expect(((await tool(r.json.access_token, "complete_task", { task_id: task.id })) as R).isError).toBe(true);
+    expect((await db().planningItem.findUniqueOrThrow({ where: { id: task.id }, include: { column: true } })).column.key).toBe("ready");
+  });
+
+  it("a READ consent never gets edit power", async () => {
+    const c = await connect(a, "READ");
+    expect((await db().oAuthGrant.findFirstOrThrow({ where: { clientId: c.clientId } })).editAllowed).toBe(false);
   });
 });

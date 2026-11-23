@@ -35,7 +35,7 @@ you to Mergeport to sign in and allow it, and no token is pasted anywhere. Perso
 - **Codes** are single-use, 60 seconds, hashed, bound to client, redirect address, challenge, workspace and person. Using one again revokes the grant it bought.
 - **Access tokens** are `ApiToken` rows (`kind` OAUTH, `mp_oat_` and 43 characters, one hour, hashed) bound to the `/api/mcp` address as audience, so every check, limit and
   audit entry of a personal token applies: membership and role are loaded fresh on every call, a removed member's tokens stop, a READER or a demoted member cannot write.
-  A write still needs the WRITE scope and a writing role. The granted scope never exceeds the role: a refresh after a demotion comes back read-only.
+  A write still needs the WRITE scope and a writing role (the edit tools also `editAllowed` on the grant). The granted scope never exceeds the role: a refresh after a demotion comes back read-only.
 - **Refresh tokens** (`mp_ort_`, 30 days, hashed) rotate on every use. Using an old one again means two parties hold it: the whole grant (family) is revoked, access tokens included.
 - **Connected apps** are listed in Settings, Connect AI (yours; an owner or administrator sees every app in the workspace) with Disconnect, which ends the grant, its access tokens and its refresh tokens at once.
 - Audit entries: `oauth.authorize`, `oauth.revoke`, `oauth.code-replay`, `oauth.refresh-reuse`, and the usual `mcp.task.*` entries for writes (`create`, `comment`, `update`, `move`, `complete`, `reopen`), with the token id.
@@ -78,7 +78,7 @@ Reads go through the app's own services (`listTasks`, `getTask`, `planningWhere`
 private repositories are the app's rules. `create_task` runs the `mp task add` code (same validation, project and assignee resolution, history entry
 "added this from an AI app over MCP"); `add_comment` runs `addComment`. `update_task`, `move_task`, `complete_task` and `reopen_task` run `updateTask`, the
 service behind the task page's Save and Status controls (same validation, project write check, restricted spaces, history entries and plan events), resolving the
-assignee and column with the same helpers as `mp task update`, and add the history entry "changed this from an AI app over MCP". A card that follows a GitHub
+assignee (an EXACT known login, case-insensitive, or `me`: never a partial match, a miss lists the candidates) and column with the same helpers as `mp task update`, and add the history entry "changed this from an AI app over MCP". A card that follows a GitHub
 item keeps its title, assignee and labels from GitHub (refused), and moving or completing it needs the repository's manage-work grant, as dragging it on the board does.
 An id that is not in the token's workspace, or that the person cannot see, is "Not found, or you cannot see it" for every tool. Inputs are checked with zod (strict, size caps, no control characters). Answers are
 capped at 40,000 characters. Errors are tool errors without internals; an unexpected failure says "Something went wrong. Nothing was changed."
@@ -95,9 +95,12 @@ A write needs both: the token's scope is `WRITE`, AND the person's role writes r
 services). A READ token never writes. A READER never writes, even with a WRITE token (a token row forced to WRITE still fails). Each write is an audit entry
 (`mcp.task.create`, `mcp.task.comment`, `mcp.task.update`, `mcp.task.move`, `mcp.task.complete`, `mcp.task.reopen`) with the person as actor and the token id (never the secret) in `meta`.
 
-**Existing WRITE tokens and grants gain edit power.** WRITE used to mean "create and comment". It now also means edit, move, complete and reopen. A token or an
-OAuth grant made earlier with write access can do all of that from the moment this version runs, with no new consent. Read-only tokens and grants are unchanged. To
-keep an app to the old power, revoke its write token or disconnect it in Settings, Connect AI, and connect it again read only.
+**Editing is a separate consent (`editAllowed`).** WRITE used to mean "create and comment". The four edit tools (`update_task`, `move_task`, `complete_task`,
+`reopen_task`) need WRITE AND `editAllowed`, a boolean on `ApiToken` and `OAuthGrant` (migration `20261128100000_token_edit_allowed`, default false). Tokens and
+grants that existed before it stay false: they keep reading, creating tasks and commenting, and an edit tool answers that the token or connection predates editing
+and to make a new token (Settings, Connect AI) or disconnect and reconnect the app. A token created in Settings with write access, and an OAuth consent given with
+**Read and change tasks**, set it true. An OAuth access token follows its grant's value on every call (and carries it on refresh); a read-only one is never true.
+No existing token or grant gains edit power by upgrading.
 
 ## Limits
 
