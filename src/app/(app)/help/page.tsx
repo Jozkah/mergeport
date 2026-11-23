@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { isHosted } from "@/lib/public-url";
 import { requireViewer } from "@/lib/authz-page";
 import { ASK_ADMIN_TO_TRACK, canConnectRepos } from "@/components/repos/ConnectRepos";
 import { PageHeader, Panel } from "@/components/ui/primitives";
@@ -7,7 +6,7 @@ import { BellRing, CircleHelp, FolderGit2, GitFork, Kanban, ListChecks, Route, U
 
 export const metadata = { title: "Help" };
 
-const WORDS_LOCAL: { term: string; plain: string }[] = [
+const WORDS: { term: string; plain: string }[] = [
   { term: "Repository", plain: "A project's code folder on GitHub. “Tracking” one only means this app watches it; nothing changes on GitHub." },
   { term: "Project", plain: "A group of repositories you plan together, like “Website”. It has its own board and tasks." },
   { term: "Task", plain: "A thing to do. It has an owner, a status (Backlog, Ready, In progress, In review, Blocked, Done), a due date and a discussion." },
@@ -15,54 +14,27 @@ const WORDS_LOCAL: { term: string; plain: string }[] = [
   { term: "Waiting on others", plain: "Work that is stuck until someone else decides. It shows who and for how long." },
   { term: "Who reviews what", plain: "Rules that say which people must review which work, so “Needs my review” is right for everyone." },
   { term: "Fork and upstream", plain: "A fork is your copy of someone else's repository. The upstream is the original. Forks shows how far your copy is behind." },
-  { term: "Watchlist", plain: "A list of repositories to keep an eye on. Paste addresses and Mergeport sets up the comparisons." },
-  { term: "Team and space", plain: "A team shares projects and tasks through a private GitHub repository (a space). Only people you invite can see it." },
-  { term: "Sync", plain: "Your changes are saved on this computer first, then sent to your team. Sync status shows what has arrived." },
-];
-
-/** Hosted: written out in full (not derived from the local list), so a wording change on one side cannot leak into the other. */
-const WORDS_HOSTED: { term: string; plain: string }[] = [
-  { term: "Repository", plain: "A project's code folder on GitHub. “Tracking” one only means this app watches it; nothing changes on GitHub." },
-  { term: "Project", plain: "A group of repositories you plan together, like “Website”. It has its own board and tasks." },
-  { term: "Task", plain: "A thing to do. It has an owner, a status (Backlog, Ready, In progress, In review, Blocked, Done), a due date and a discussion." },
-  { term: "Needs my review", plain: "Pull requests where GitHub, or a rule you set, expects you to review." },
-  { term: "Waiting on others", plain: "Work that is stuck until someone else decides. It shows who and for how long." },
-  { term: "Who reviews what", plain: "Rules that say which people must review which work, so “Needs my review” is right for everyone." },
-  { term: "Fork and upstream", plain: "A fork is your copy of someone else's repository. The upstream is the original. Forks shows how far your copy is behind." },
-  { term: "Watchlist", plain: "A list of repositories to keep an eye on. Paste addresses and Mergeport sets up the comparisons." },
   { term: "Workspace and space", plain: "A workspace is your team's shared home. A space decides which people see which projects: everyone, or only the people listed in a restricted space." },
   { term: "Sync", plain: "Repository data is refreshed from GitHub in the background. Sync status shows what has arrived." },
 ];
 
-const STEPS_LOCAL = [
-  { icon: FolderGit2, title: "Connect your repositories", text: "Choose the repositories you work in.", href: "/repositories/connect", cta: "Choose repositories" },
-  { icon: Kanban, title: "Make a project", text: "Group repositories you plan together.", href: "/admin/projects", cta: "Projects" },
-  { icon: ListChecks, title: "Add tasks", text: "Create tasks, give them to people, and talk about them.", href: "/tasks", cta: "Tasks" },
-  { icon: BellRing, title: "Check My attention", text: "See what needs your review and what is waiting on others.", href: "/attention", cta: "My attention" },
-  { icon: Users, title: "Invite your team", text: "Optional. Share projects and tasks with teammates.", href: "/team", cta: "Team" },
-  { icon: Route, title: "Say who reviews what", text: "Optional. Make “Needs my review” accurate.", href: "/admin/rules", cta: "Who reviews what" },
-  { icon: GitFork, title: "Watch forks", text: "Optional. Paste repositories to see what upstream has that you lack.", href: "/forks", cta: "Forks" },
-];
-
-const STEPS_HOSTED = [
+const STEPS_ALL = [
   { icon: FolderGit2, title: "Connect your repositories", text: "Choose the repositories you work in.", href: "/repositories/connect", cta: "Choose repositories" },
   { icon: Kanban, title: "Make a project", text: "Group repositories you plan together.", href: "/admin/projects", cta: "Projects" },
   { icon: ListChecks, title: "Add tasks", text: "Create tasks, give them to people, and talk about them.", href: "/tasks", cta: "Tasks" },
   { icon: BellRing, title: "Check My attention", text: "See what needs your review and what is waiting on others.", href: "/attention", cta: "My attention" },
   { icon: Users, title: "Invite people", text: "Optional. Invite colleagues, set roles and restrict who sees which project.", href: "/settings/members", cta: "Members" },
   { icon: Route, title: "Say who reviews what", text: "Optional. Make “Needs my review” accurate.", href: "/admin/rules", cta: "Who reviews what" },
-  { icon: GitFork, title: "Watch forks", text: "Optional. Paste repositories to see what upstream has that you lack.", href: "/forks", cta: "Forks" },
+  { icon: GitFork, title: "Watch forks", text: "Optional. Map a fork to its upstream to see what upstream has that you lack.", href: "/forks", cta: "Forks" },
 ];
 
 export default async function Help() {
   const { viewer } = await requireViewer();
-  const hosted = isHosted();
-  const WORDS = hosted ? WORDS_HOSTED : WORDS_LOCAL;
-  // On a hosted workspace only an administrator tracks repositories: everyone else gets the explanation, not a link to a page they cannot use.
-  const STEPS = (hosted ? STEPS_HOSTED : STEPS_LOCAL).map((s) => s.href === "/repositories/connect" && !canConnectRepos(viewer) ? { ...s, text: ASK_ADMIN_TO_TRACK, href: "/repositories", cta: "Repositories" } : s);
+  // Only an administrator tracks repositories: everyone else gets the explanation, not a link to a page they cannot use.
+  const STEPS = STEPS_ALL.map((s) => s.href === "/repositories/connect" && !canConnectRepos(viewer) ? { ...s, text: ASK_ADMIN_TO_TRACK, href: "/repositories", cta: "Repositories" } : s);
   return (
     <>
-      <PageHeader title="Help" subtitle={hosted ? "Mergeport keeps your repositories, reviews, tasks and forks in one place for your workspace." : "Mergeport keeps your repositories, reviews, tasks and forks in one place. It runs on your computer and uses your own GitHub sign-in."} />
+      <PageHeader title="Help" subtitle="Mergeport keeps your repositories, reviews, tasks and forks in one place for your workspace." />
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Panel title="Your first minutes" icon={CircleHelp}>
           <ol className="divide-y divide-line">
@@ -94,10 +66,9 @@ export default async function Help() {
           <Panel title="Good to know" icon={CircleHelp}>
             <ul className="flex list-disc flex-col gap-2 p-4 pl-8 text-[13px] text-ink-2">
               <li><strong className="font-medium">Nothing is sent to GitHub unless you press a button</strong> that says so, and the button names what it will do.</li>
-              <li>{hosted ? "Changes you make are saved on the server as you make them, and everyone in the workspace with access sees them." : "Changes you make are saved on this computer first, so the app works while you are offline."}</li>
+              <li>Changes you make are saved on the server as you make them, and everyone in the workspace with access sees them.</li>
               <li>Right-click almost anything for useful actions. Hold Shift while right-clicking for the browser&apos;s own menu.</li>
               <li>Use <strong className="font-medium">Search anything</strong> (top left) to jump to a repository, pull request, issue or task.</li>
-              {!hosted && <li>If a page says you need to sign in, run <code>gh auth login</code> in a terminal, then reload.</li>}
               <li>Something looks out of date? Open <Link className="link" href="/sync">Sync status</Link> to see what has arrived and what is waiting.</li>
             </ul>
           </Panel>

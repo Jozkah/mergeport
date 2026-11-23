@@ -1,36 +1,19 @@
-import Link from "next/link";
-import { isHosted } from "@/lib/public-url";
 import { processStartedAt } from "@/lib/local/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { repoWhere } from "@/lib/authz/viewer";
 import { isDemo } from "@/lib/env";
-import { getEngine, getTeamService } from "@/lib/local/runtime";
-import { syncCenter } from "@/lib/services/sync-center";
-import { MAX_POLL_MS, expectedConsistencyDelaySeconds } from "@/lib/sync/engine";
 import { formatInstant } from "@/lib/format";
 import { deriveSourceStatus } from "@/lib/sync/source-status";
-import { ActionForm } from "@/components/forms/ActionForm";
 import { SyncBadge } from "@/components/sync/SyncBadge";
-import { Banner, EmptyState, Mono, PageHeader, Panel, Time } from "@/components/ui/primitives";
-import { FolderGit2, RefreshCw, ShieldCheck } from "@/components/ui/icons";
-import { refreshSyncAction, releaseQuarantineAction, resolveConflictAction } from "@/app/team-actions";
+import { Banner, EmptyState, Mono, PageHeader, Panel } from "@/components/ui/primitives";
+import { FolderGit2, RefreshCw } from "@/components/ui/icons";
 
 export const metadata = { title: "Sync" };
 export const dynamic = "force-dynamic";
 
-const val = (v: unknown) => (v === undefined || v === null ? "none" : typeof v === "string" ? v : JSON.stringify(v));
-
 export default async function SyncPage() {
   const { viewer } = await requireViewer();
-  const engine = await getEngine(viewer.workspaceId);
-  const cfg = await db.teamConfig.findUnique({ where: { workspaceId: viewer.workspaceId } });
-  const spaces = await db.space.findMany({ where: { workspaceId: viewer.workspaceId }, orderBy: { createdAt: "asc" } });
-  const conflicts = await db.syncConflict.findMany({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { createdAt: "asc" } });
-  const quarantined = await db.outboxOp.findMany({ where: { status: "QUARANTINED", space: { workspaceId: viewer.workspaceId } }, include: { space: true } });
-  const pendingOps = await db.outboxOp.findMany({ where: { status: { in: ["PENDING", "SENT", "FAILED"] }, space: { workspaceId: viewer.workspaceId } }, include: { space: true }, orderBy: { createdAt: "asc" }, take: 50 });
-  const poll = cfg?.pollSeconds ?? 30;
-  const delay = expectedConsistencyDelaySeconds(poll);
   // A job still marked RUNNING by a process that died is not work in progress; it is reclaimed on a timer.
   const bootAt = processStartedAt();
   const own = { isDemo: false, trackingStatus: { not: "REMOVED" as const } };
@@ -45,44 +28,12 @@ export default async function SyncPage() {
   });
   const sourceProblems = sourceRepos.filter((r) => r.trackingStatus === "DISCONNECTED" || r.rateLimited || r.syncError);
   const lastSource = sourceRepos.reduce<Date | null>((m, r) => (r.lastSyncedAt && (!m || r.lastSyncedAt > m) ? r.lastSyncedAt : m), null);
-  const center = await syncCenter(db, viewer.workspaceId, poll);
-  const teamSvc = await getTeamService(viewer.workspaceId);
-  const quota = teamSvc && !isDemo() ? await Promise.race([teamSvc.rateLimit(), new Promise<null>((r) => setTimeout(() => r(null), 3000))]) : null;
-  const states = engine ? await Promise.all(spaces.map(async (s) => [s, await engine.stateFor(s)] as const)) : [];
-
   return (
     <>
-      <PageHeader title="Sync" subtitle="Edits save here first. See what reached GitHub, what waits, and what needs a decision." actions={engine ? <ActionForm action={refreshSyncAction} submitLabel="Refresh now" submitClassName="btn" resetOnSuccess={false}>{null}</ActionForm> : undefined}
-        help={<>Mergeport polls GitHub; it is not real time. With the app open and visible it checks every {poll} seconds, so a teammate&apos;s change typically shows up within about {delay.typical} seconds. When nothing changes, checks back off to at most every {MAX_POLL_MS / 60_000} minutes; with no visible tab it checks about once a minute, and not at all while the app is closed. Background sync runs only while this app is running.</>}
+      <PageHeader title="Sync" subtitle="What was last refreshed from GitHub, and what needs attention."
+        help={<>Repository data is refreshed from GitHub in the background: on webhook deliveries and on a regular reconcile run. Use Refresh on a repository to ask for it sooner.</>}
       />
       {isDemo() && <div className="mb-4"><Banner title="Demo mode">Nothing syncs in demo mode.</Banner></div>}
-
-      {center.length > 0 && (
-        <div className="mb-5">
-          <Panel title="Where your changes are" icon={RefreshCw} id="where">
-            <div className="flex flex-col gap-3 p-4 text-[13px]">
-              {quota && <p className="text-[12.5px] text-ink-3">GitHub request budget for your account: <span className="tnum font-medium text-ink-2">{quota.remaining}</span> of {quota.limit} left{quota.remaining < quota.limit * 0.1 ? <span className="text-waiting"> (low: syncing may pause until {formatInstant(quota.resetsAt, viewer.timezone)})</span> : `, resets ${formatInstant(quota.resetsAt, viewer.timezone)}`}. Source repositories and shared planning use the same budget.</p>}
-              {center.map((c) => (
-                <section key={c.id} aria-label={c.fullName} className="rounded-[10px] border border-line p-3">
-                  <p className="font-medium"><Mono>{c.fullName}</Mono></p>
-                  <ol className="mt-2 flex flex-col gap-1.5">
-                    {c.facts.map((f) => (
-                      <li key={f.key} className="flex items-start gap-2">
-                        <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full ${f.tone === "ok" ? "bg-ok" : f.tone === "hold" ? "bg-blocked" : f.tone === "wait" ? "bg-waiting" : "bg-line-strong"}`} />
-                        <div><p className="font-medium">{f.label}</p><p className="text-[12.5px] text-ink-3">{f.detail}</p></div>
-                      </li>
-                    ))}
-                  </ol>
-                  <p className="mt-2 text-[12px] text-ink-3">{c.lastPolledAt ? `Last checked for teammates' changes ${formatInstant(c.lastPolledAt, viewer.timezone)}` : "Not checked yet"}{c.nextPollAt ? ` · next check ${formatInstant(c.nextPollAt, viewer.timezone)}` : ""}</p>
-                </section>
-              ))}
-              <p className="text-[12px] text-ink-3">Syncs only while open. Nothing here means &ldquo;delivered to a teammate&rdquo;.</p>
-            </div>
-          </Panel>
-        </div>
-      )}
-
-      <div className="mb-5"><Banner title={`Checks every ${poll} s while open; slower when idle.`} action={<Link href="/settings#polling-title" className="btn">Change interval</Link>} /></div>
 
       {source && (
         <div className="mb-5">
@@ -102,71 +53,7 @@ export default async function SyncPage() {
         </div>
       )}
 
-      {conflicts.length > 0 && (
-        <div className="mb-5">
-          <Panel title={`Needs your decision (${conflicts.length})`} icon={ShieldCheck} id="conflicts">
-            <ul>
-              {conflicts.map((c) => {
-                const fields = c.fields as string[];
-                const local = c.local as Record<string, unknown>;
-                const remote = c.remote as Record<string, unknown>;
-                const base = (c.base ?? {}) as Record<string, unknown>;
-                return (
-                  <li key={c.id} className="flex flex-col gap-3 border-b border-line p-4 last:border-b-0">
-                    <p className="text-[13px]"><span className="font-medium">{c.entityType}</span> in <Mono>{c.space.repoName}</Mono> was changed on this computer and by a teammate.</p>
-                    <div className="table-wrap" tabIndex={0} role="region" aria-label={`Differences for ${c.entityType} in ${c.space.repoName}`}><table className="data !text-[12.5px] [overflow-wrap:anywhere]"><thead><tr><th scope="col">Field</th><th scope="col">Before either change</th><th scope="col">Your version</th><th scope="col">Teammate&apos;s version</th></tr></thead>
-                      <tbody>{fields.map((f) => <tr key={f}><td className="mono">{f === "__deleted" ? "existence" : f}</td><td className="text-ink-3">{f === "__deleted" ? "existed" : val(base[f])}</td><td>{f === "__deleted" ? (Object.keys(local).length ? "kept / edited" : "deleted") : val(local[f])}</td><td>{f === "__deleted" ? (Object.keys(remote).length ? "kept / edited" : "deleted") : val(remote[f])}</td></tr>)}</tbody></table></div>
-                    <div className="flex flex-wrap gap-2">
-                      <ActionForm action={resolveConflictAction} submitLabel="Keep mine" submitAriaLabel={`Keep my version of ${c.entityType} in ${c.space.repoName}`} submitClassName="btn btn-primary" resetOnSuccess={false}><input type="hidden" name="id" value={c.id} /><input type="hidden" name="choice" value="mine" /></ActionForm>
-                      <ActionForm action={resolveConflictAction} submitLabel="Take theirs" submitAriaLabel={`Take the teammate\u2019s version of ${c.entityType} in ${c.space.repoName}`} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="id" value={c.id} /><input type="hidden" name="choice" value="theirs" /></ActionForm>
-                    </div>
-                    <p className="text-[12px] text-ink-3">Nothing is discarded until you choose.</p>
-                  </li>
-                );
-              })}
-            </ul>
-          </Panel>
-        </div>
-      )}
-
-      <Panel title="Spaces" icon={RefreshCw} id="spaces">
-        {states.length === 0 ? <EmptyState icon={RefreshCw} title="Nothing to sync yet" action={isHosted() ? undefined : <Link href="/team" className="btn btn-primary">Set up a team</Link>}>{isHosted() ? "Repository data is refreshed from GitHub in the background. Nothing else needs syncing." : "Everything stays on this computer. Create or join a team to share."}</EmptyState> : (
-          <ul>
-            {states.map(([s, st]) => (
-              <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 text-[13px] last:border-b-0">
-                <div className="min-w-0"><Mono>{s.repoOwner}/{s.repoName}</Mono><p className="text-[12px] text-ink-3">{s.lastPolledAt ? <>checked <Time value={s.lastPolledAt} formatted={formatInstant(s.lastPolledAt, viewer.timezone)} /></> : "not checked yet"}{s.nextPollAt && <> · next about <Time value={s.nextPollAt} formatted={formatInstant(s.nextPollAt, viewer.timezone)} /></>}{s.lastError && s.lastError !== "offline" ? ` · ${s.lastError}` : ""}</p></div>
-                <SyncBadge state={st.state} pending={st.pending} conflicts={st.conflicts} detail={st.detail} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
-
-      {pendingOps.length > 0 && (
-        <div className="mt-5"><Panel title={`Waiting to be sent (${pendingOps.length})`} icon={RefreshCw} id="outbox"><ul className="text-[12.5px]">{pendingOps.map((o) => <li key={o.id} className="flex items-center justify-between gap-3 border-b border-line px-4 py-2 last:border-b-0"><span><span className="font-medium">{o.kind === "DELETE" ? "Delete" : "Change"}</span> {o.entityType} in <Mono>{o.space.repoName}</Mono></span><span className="text-ink-3">{o.status.toLowerCase()}{o.error ? ` · ${o.error}` : ""}</span></li>)}</ul></Panel></div>
-      )}
-
-      {quarantined.length > 0 && (
-        <div className="mt-5">
-          <Panel title={`Edits set aside (${quarantined.length})`} icon={ShieldCheck} id="quarantine">
-            <div className="flex flex-col gap-3 p-4 text-[13px]">
-              <p className="text-ink-3">GitHub access to a space was removed, so these edits were not sent. Retry if access returns, or discard.</p>
-              {[...new Set(quarantined.map((q) => q.spaceId))].map((spaceId) => {
-                const sp = quarantined.find((q) => q.spaceId === spaceId)!.space;
-                return (
-                  <div key={spaceId} className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-line p-3">
-                    <span><Mono>{sp.repoName}</Mono> · {quarantined.filter((q) => q.spaceId === spaceId).length} edit(s)</span>
-                    <span className="flex gap-2">
-                      <ActionForm action={releaseQuarantineAction} submitLabel="Try sending again" submitAriaLabel={`Try sending the edits for ${sp.repoName} again`} submitClassName="btn" resetOnSuccess={false}><input type="hidden" name="spaceId" value={spaceId} /><input type="hidden" name="action" value="retry" /></ActionForm>
-                      <ActionForm action={releaseQuarantineAction} submitLabel="Discard" submitAriaLabel={`Discard the unsent edits for ${sp.repoName}`} submitClassName="btn text-blocked" resetOnSuccess={false}><input type="hidden" name="spaceId" value={spaceId} /><input type="hidden" name="action" value="discard" /></ActionForm>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </Panel>
-        </div>
-      )}
+      {!source && <Panel title="Tracked repositories" icon={RefreshCw} id="source"><EmptyState icon={RefreshCw} title="Nothing to sync yet">Repository data is refreshed from GitHub in the background. Nothing else needs syncing.</EmptyState></Panel>}
     </>
   );
 }

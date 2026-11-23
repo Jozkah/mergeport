@@ -9,10 +9,7 @@ import { STAGES, stageLabel } from "@/lib/domain/stages";
 import { sinceLastLooked } from "@/lib/services/seen";
 import { SinceYouLooked } from "@/components/review/SinceYouLooked";
 import { OwnersPanel } from "@/components/code/ReviewTools";
-import { isHosted } from "@/lib/public-url";
 import { GITHUB_WRITES_DISABLED } from "@/lib/github/hosted";
-import { WorktreePanel } from "@/components/work/WorktreePanel";
-import { linksForPull } from "@/lib/services/work-links";
 import { deriveReadiness } from "@/lib/domain/readiness";
 import { ReadinessPanel } from "@/components/review/ReadinessPanel";
 import { StageList } from "@/components/review/StageList";
@@ -22,7 +19,6 @@ import { renderMarkdown } from "@/lib/markdown";
 import { safeReturnTo } from "@/lib/http";
 import { formatDuration, formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
-import { checkProfile } from "@/lib/local/identity";
 import { AiTool } from "@/components/ai/AiTool";
 import { getAiView } from "@/lib/services/ai";
 import { isDemo } from "@/lib/env";
@@ -48,8 +44,6 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
     throw e;
   }
   const caps = await capabilitiesFor(db, viewer, item.repositoryId);
-  const profile = item.repository.isDemo ? null : await checkProfile();
-  const hasConnection = item.repository.isDemo || profile?.kind === "ok" || profile?.kind === "mismatch"; // writes always run as this profile's own account
   const labels = asLabels(item.labels);
   const d = derived.derivation;
   const isPr = item.type === "PULL_REQUEST";
@@ -57,8 +51,8 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   const backHref = from && safeReturnTo(from) !== "/" ? safeReturnTo(from) : isPr ? "/pull-requests" : "/issues";
   const manualOpen = derived.manualWaiting;
   const sinceLooked = await sinceLastLooked(db, viewer, item.id);
-  const localLinks = isPr ? await linksForPull(db, viewer, item.id) : null;
-  const writeBlocked = !hasConnection ? (isHosted() ? `${GITHUB_WRITES_DISABLED}.` : "Sign in with the GitHub CLI (gh auth login) to make changes on GitHub.") : undefined;
+  // Writes to GitHub are not enabled yet (the App holds read permissions); the demo store accepts them.
+  const writeBlocked = item.repository.isDemo ? undefined : `${GITHUB_WRITES_DISABLED}.`;
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
   const comments = item.comments;
@@ -169,7 +163,6 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
           <OwnersPanel itemId={item.id} />
         </Panel>
       )}
-      {isPr && localLinks && <WorktreePanel links={localLinks} tz={viewer.timezone} repositoryId={item.repositoryId} defaultOpen={false} />}
 
       <Panel title="Details" icon={User} id="details" defaultOpen={false} summary={detailsSummary}>
         <div className="flex flex-col gap-4 p-4">

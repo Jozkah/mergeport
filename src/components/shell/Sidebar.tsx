@@ -7,7 +7,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useId, useRef, useState, type ComponentType, type SVGProps } from "react";
 import * as D from "@radix-ui/react-dialog";
-import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, Globe, GitBranch, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, Newspaper, PanelLeft, RefreshCw, Route, Search, Settings, Sparkles, Users, X } from "@/components/ui/icons";
+import { Activity, BellRing, ChevronDown, CircleHelp, CircleDot, FolderGit2, Globe, GitFork, GitPullRequest, Inbox, Kanban, Tag, Layers, ListChecks, LayoutDashboard, Newspaper, PanelLeft, RefreshCw, Route, Search, Settings, Sparkles, X } from "@/components/ui/icons";
 import { Collapse } from "@/components/ui/Collapse";
 import { Metric } from "@/components/ui/Metric";
 
@@ -44,9 +44,8 @@ function buildNav(c: NavCounts, isAdmin: boolean) {
   const source: Item[] = [
     { href: "/repositories", label: "Repositories", icon: FolderGit2 },
     { href: "/forks", label: "Forks", icon: GitFork },
-    ...(c.hosted ? [] : [{ href: "/branches", label: "Branches", icon: GitBranch }]),
   ];
-  const team: Item[] = [...(c.hosted ? [] : [{ href: "/team", label: "Team", icon: Users }]), ...(c.linked ? [{ href: "/linked", label: "Linked instances", icon: Globe }] : [])];
+  const team: Item[] = [...(c.linked ? [{ href: "/linked", label: "Linked instances", icon: Globe }] : [])];
   // Used now and then: folded away until you are on one of them.
   const more: Item[] = [
     { href: "/capacity", label: "Review capacity", icon: Route },

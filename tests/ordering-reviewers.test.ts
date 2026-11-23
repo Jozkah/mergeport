@@ -36,21 +36,3 @@ describe("project required reviewers", () => {
     expect((await db.reviewRule.findFirstOrThrow({ where: { projectId: project } })).id).toBe(manual.id);
   });
 });
-
-describe("leaving a team locally", () => {
-  it("returns shared things to local and personal mode without losing boards or rules", async () => {
-    const { leaveTeamLocally } = await import("@/lib/team/leave");
-    const db = testDb();
-    await truncateAll(db);
-    const ws = (await db.workspace.create({ data: { name: "w" } })).id;
-    const space = await db.space.create({ data: { workspaceId: ws, remoteId: "s", teamRemoteId: "t", kind: "COMMON", name: "Team", repoOwner: "o", repoName: "r", repoGithubId: 1n, branch: "main" } as never });
-    await db.teamConfig.upsert({ where: { workspaceId: ws }, create: { workspaceId: ws, mode: "TEAM", teamRemoteId: "t", name: "Team", commonSpaceId: space.id }, update: { mode: "TEAM", teamRemoteId: "t", name: "Team", commonSpaceId: space.id } });
-    const project = await db.project.create({ data: { workspaceId: ws, name: "P", slug: "p", spaceId: space.id } });
-    await db.reviewRule.create({ data: { workspaceId: ws, scope: "PROJECT", projectId: project.id, labels: [], reviewers: [{ kind: "USER", ref: "x" }], reason: "r" } });
-    expect((await leaveTeamLocally(db, ws)).spaces).toBe(1);
-    expect(await db.space.count()).toBe(0);
-    expect((await db.project.findUniqueOrThrow({ where: { id: project.id } })).spaceId).toBeNull();
-    expect((await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: ws } })).mode).toBe("PERSONAL");
-    expect(await db.reviewRule.count()).toBe(1);
-  });
-});

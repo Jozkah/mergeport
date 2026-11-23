@@ -55,9 +55,9 @@ describe("the Get started card in a hosted workspace", () => {
     expect(s.rules.locked).toMatch(/owner or an administrator/);
   });
 
-  it("the local app keeps its own wording", async () => {
+  it("the demo run keeps the plain repositories step", async () => {
     const s = await steps(ids.users.admin.id);
     expect(s.repos.why).toMatch(/own GitHub sign-in/);
-    expect(s.team.href).toBe("/team");
+    expect(s.team.href).toBe("/settings/members");
   });
 });

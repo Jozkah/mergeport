@@ -1,12 +1,9 @@
-import { isHosted } from "@/lib/public-url";
 import { ForkMapFields } from "@/components/forms/ForkMapFields";
 import { ViewBar } from "@/components/views/ViewBar";
 import { listViews } from "@/lib/services/views";
-import { WatchlistForm } from "@/components/forms/WatchlistForm";
 import { UpstreamIssues } from "@/components/forks/UpstreamIssues";
 import { UpstreamPrs } from "@/components/forks/UpstreamPrs";
 import { MappingTools, SubscriptionsPanel } from "@/components/forks/UpstreamTools";
-import { UpstreamUpdate } from "@/components/forks/UpstreamUpdate";
 import { byOwnerFirst } from "@/lib/domain/ordering";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
@@ -17,7 +14,7 @@ import { formatInstant } from "@/lib/format";
 import { ActionForm } from "@/components/forms/ActionForm";
 import { Sheet } from "@/components/ui/dialog";
 import { Banner, EmptyState, Mono, PageHeader, Panel, SimplePill, Time } from "@/components/ui/primitives";
-import { ArrowRight, Eye, GitFork, GitCompare, RefreshCw } from "@/components/ui/icons";
+import { ArrowRight, GitFork, GitCompare, RefreshCw } from "@/components/ui/icons";
 import { mapForkAction, refreshForkAction, syncForkBranchAction } from "@/app/actions";
 
 export const metadata = { title: "Forks" };
@@ -112,7 +109,6 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
                     <h3 id={`is-${m.id}`} className="mb-1 text-[13px] font-medium">Upstream issues to triage</h3>
                     <UpstreamIssues canEdit={caps.manageWork} rows={issues.map((i) => ({ id: i.id, number: i.issueNumber, title: i.title, url: i.htmlUrl, status: i.status, note: i.note }))} />
                   </section>
-                  <UpstreamUpdate db={db} viewer={viewer} mappingId={m.id} forkBranch={m.forkBranch} forkName={m.fork.fullName} upstreamName={m.upstream.fullName} />
                   <MappingTools db={db} viewer={viewer} mappingId={m.id} forkBranch={m.forkBranch} upstreamName={m.upstream.fullName} adopt={sp.adopt === m.id && sp.items && sp.branch && sp.project ? { items: sp.items, branch: sp.branch, project: sp.project } : null} />
                 </div>
               </Panel>
@@ -123,12 +119,6 @@ export default async function Forks({ searchParams }: { searchParams: Promise<{ 
 
       {(mappings.length > 0 || viewer.isAdmin) && <h2 className="mt-8 mb-3 text-[13px] font-medium text-ink-2">Set up</h2>}
       {mappings.length > 0 && <div className="mb-4"><SubscriptionsPanel db={db} viewer={viewer} mappings={mappings.map((m) => ({ id: m.id, label: m.upstream.fullName }))} /></div>}
-
-      {viewer.isAdmin && !isHosted() && (
-        <div className="mb-4">
-          <Panel title="Watchlist" icon={Eye} id="watchlist" defaultOpen={mappings.length === 0}><WatchlistForm /></Panel>
-        </div>
-      )}
 
       {viewer.isAdmin && forkRepos.length > 1 && (
         <div className="mb-4">

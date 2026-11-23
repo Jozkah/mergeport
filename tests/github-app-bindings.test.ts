@@ -184,11 +184,6 @@ describe("static: who may write Repository.installationId and issue a BoundInsta
     expect(offenders).toEqual([]);
   });
 
-  it("the sync entity upserts never mention installationId", () => {
-    const src = fs.readFileSync(path.join(root, "src/lib/sync/entities.ts"), "utf8");
-    expect(src).not.toMatch(/installationId/);
-  });
-
   it("only binding.ts (and the bound-installation module itself) issues a BoundInstallation", () => {
     const offenders = files.filter((f) => f !== BINDING && f !== "src/lib/github/bound-installation.ts" && /makeBoundInstallation\(/.test(fs.readFileSync(path.join(root, f), "utf8")));
     expect(offenders).toEqual([]);

@@ -2,13 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@/lib/db";
 import { truncateAll } from "@/lib/demo/seed";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
-import { handlers, forEachWorkspace } from "@/lib/local/handlers";
-import { readCached, toJson } from "@/lib/local/discovery";
-import { firstWorkspace } from "@/lib/local/profile";
+import { forEachWorkspace } from "@/lib/local/handlers";
 import { exportBackup, parseBackup, restoreBackup } from "@/lib/services/backup";
 import { createColumnsForProject } from "@/lib/services/planning";
 import { createTask } from "@/lib/services/tasks";
-import { leaveTeamLocally } from "@/lib/team/leave";
 import { testDb } from "./helpers";
 
 const mocks = vi.hoisted(() => ({ viewer: null as null | Record<string, unknown> }));
@@ -24,7 +21,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ 
  * workspace's rows must be untouched, and paths that cannot be made per-workspace must fail closed.
  */
 
-type W = { ws: string; viewer: Viewer; admin: Viewer; userId: string; projectId: string; columnId: string; epicId: string; milestoneId: string; mappingId: string; spaceId: string; memberId: string };
+type W = { ws: string; viewer: Viewer; admin: Viewer; userId: string; projectId: string; columnId: string; epicId: string; milestoneId: string; mappingId: string; memberId: string };
 let db: Db;
 let A: W;
 let B: W;
@@ -44,13 +41,9 @@ async function world(name: string, githubId: bigint, role: "ADMIN" | "MEMBER" = 
   const column = await db.planningColumn.findFirstOrThrow({ where: { projectId: project.id, key: "ready" } });
   const epic = await db.epic.create({ data: { projectId: project.id, title: "Epic" } });
   const milestone = await db.dashboardMilestone.create({ data: { workspaceId: ws.id, name: "Beta" } });
-  const space = await db.space.create({ data: { workspaceId: ws.id, remoteId: `s-${name}`, teamRemoteId: "t", kind: "COMMON", name: "Team", repoOwner: "acme", repoName: `coord-${name}`, canWrite: true } });
-  await db.teamConfig.create({ data: { workspaceId: ws.id, mode: "TEAM", teamRemoteId: "t", name: "Team", commonSpaceId: space.id } });
-  await db.repository.update({ where: { id: fork.id }, data: { spaceId: space.id } });
-  await db.project.update({ where: { id: project.id }, data: { spaceId: space.id } });
   const viewer = (await loadViewer(db, user.id, ws.id))!;
   await createTask(db, viewer, { projectId: project.id, title: `task of ${name}` });
-  return { ws: ws.id, viewer, admin: viewer, userId: user.id, projectId: project.id, columnId: column.id, epicId: epic.id, milestoneId: milestone.id, mappingId: mapping.id, spaceId: space.id, memberId: member.id };
+  return { ws: ws.id, viewer, admin: viewer, userId: user.id, projectId: project.id, columnId: column.id, epicId: epic.id, milestoneId: milestone.id, mappingId: mapping.id, memberId: member.id };
 }
 
 beforeEach(async () => {
@@ -58,62 +51,6 @@ beforeEach(async () => {
   await truncateAll(db);
   A = await world("alpha", 1n);
   B = await world("beta", 2n);
-});
-
-const fd = (o: Record<string, string>) => {
-  const f = new FormData();
-  for (const [k, v] of Object.entries(o)) f.append(k, v);
-  return f;
-};
-
-describe("leaving a team", () => {
-  it("leaveTeamAction as an admin of the second workspace leaves the first workspace's team, spaces and roles alone", async () => {
-    await db.member.update({ where: { id: A.memberId }, data: { role: "MEMBER" } }); // the first workspace's person is a team MEMBER there
-    mocks.viewer = B.viewer as unknown as Record<string, unknown>;
-    const { leaveTeamAction } = await import("@/app/team-actions");
-    expect(await leaveTeamAction(fd({ confirm: "on" }))).toMatchObject({ ok: true });
-    expect(await db.space.count({ where: { workspaceId: B.ws } })).toBe(0);
-    expect((await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: B.ws } })).mode).toBe("PERSONAL");
-    expect(await db.space.count({ where: { workspaceId: A.ws } })).toBe(1);
-    const a = await db.teamConfig.findUniqueOrThrow({ where: { workspaceId: A.ws } });
-    expect(a).toMatchObject({ mode: "TEAM", commonSpaceId: A.spaceId });
-    expect((await db.member.findUniqueOrThrow({ where: { id: A.memberId } })).role).toBe("MEMBER");
-    expect((await db.project.findUniqueOrThrow({ where: { id: A.projectId } })).spaceId).toBe(A.spaceId);
-  });
-
-  it("a plain member of the second workspace cannot leave at all", async () => {
-    const m = await db.user.create({ data: { githubId: 77n, login: "plain" } });
-    await db.member.create({ data: { workspaceId: B.ws, userId: m.id, role: "MEMBER" } });
-    mocks.viewer = (await loadViewer(db, m.id, B.ws)) as unknown as Record<string, unknown>;
-    const { leaveTeamAction } = await import("@/app/team-actions");
-    expect(await leaveTeamAction(fd({ confirm: "on" }))).toMatchObject({ ok: false });
-    expect(await db.space.count()).toBe(2);
-  });
-
-  it("leaveTeamLocally needs a workspace", async () => {
-    expect(leaveTeamLocally.length).toBe(2);
-    await leaveTeamLocally(db, B.ws);
-    expect(await db.space.count({ where: { workspaceId: A.ws } })).toBe(1);
-  });
-});
-
-describe("discovery lists", () => {
-  it("the second workspace never reads (or imports) the first workspace's saved GitHub list", async () => {
-    const list = toJson({ repos: [{ githubId: 4242n, fullName: "acme/secret-private", name: "secret-private", owner: { githubId: 9000n, login: "acme", type: "ORGANIZATION" }, htmlUrl: "https://github.com/acme/secret-private", visibility: "PRIVATE", defaultBranch: "main", archived: false, isFork: false, description: null }], nextPage: null, notes: [] });
-    await db.discoveryCache.create({ data: { workspaceId: A.ws, key: "repos", payload: list, fetchedAt: new Date(), state: "FRESH" } });
-    expect((await readCached(db, "repos", new Date(), undefined, A.ws)).payload).not.toBeNull();
-    expect((await readCached(db, "repos", new Date(), undefined, B.ws)).payload).toBeNull();
-    mocks.viewer = B.viewer as unknown as Record<string, unknown>;
-    const { trackSelectedAction } = await import("@/app/actions");
-    const r = await trackSelectedAction(fd({ repo: "4242" }));
-    expect(r).toMatchObject({ ok: false });
-    expect(await db.repository.count({ where: { workspaceId: B.ws, githubId: 4242n } })).toBe(0);
-  });
-
-  it("a path with no workspace fails closed when there are several", async () => {
-    await expect(readCached(db, "repos")).rejects.toThrow(/one workspace per database/);
-    await expect(firstWorkspace(db)).rejects.toThrow(/Pass the workspace explicitly/);
-  });
 });
 
 describe("fan-out jobs", () => {
@@ -131,12 +68,6 @@ describe("fan-out jobs", () => {
     quiet.mockRestore();
   });
 
-  it("reconcile.all queues each workspace's repositories under its own workspace", async () => {
-    await handlers["reconcile.all"]({} as never, {} as never);
-    const jobs = await db.job.findMany({ where: { type: "sync.repository" } });
-    expect(jobs.length).toBe(4);
-    for (const w of [A, B]) expect(jobs.filter((j) => j.workspaceId === w.ws)).toHaveLength(2);
-  });
 });
 
 describe("restoring a backup whose rows point into another workspace", () => {

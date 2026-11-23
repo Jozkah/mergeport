@@ -19,7 +19,6 @@ export async function createWorkspaceFor(db: Db, userId: string, rawName: unknow
     const ws = await tx.workspace.create({ data: { name }, select: { id: true, name: true } });
     await tx.member.create({ data: { workspaceId: ws.id, userId, role: "OWNER", status: "ACTIVE" } });
     await ensureCommonSpace(tx, ws.id);
-    await tx.teamConfig.create({ data: { workspaceId: ws.id, mode: "PERSONAL" } });
     if (sessionId) await tx.session.updateMany({ where: { id: sessionId, userId }, data: { activeWorkspaceId: ws.id } });
     return ws;
   });

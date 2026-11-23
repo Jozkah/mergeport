@@ -188,19 +188,14 @@ export async function requireProject(db: Db, v: Viewer, projectId: string) {
 }
 
 /**
- * A project shared into a space publishes its edits there, so a person whose own access to that space is read-only must not
- * make them: the edit would stay on this computer, never reach the team, and later show up as a merge nobody can resolve.
- * Local-only projects (no space) are always writable.
+ * A project in a RESTRICTED access space is written only by the members of that space whose `canWrite` is set (docs/roles.md).
  */
 export async function assertProjectWritable(db: Db, v: Pick<Viewer, "workspaceId"> & Partial<Pick<Viewer, "memberId" | "role" | "isAdmin">>, projectId: string | null | undefined): Promise<void> {
   if (!projectId) return;
   // A caller that passes only a workspace (background code) has no person to check; everyone else is held to their role and their space ACL.
   if (v.role !== undefined || v.isAdmin !== undefined) requireWrite(v);
-  const p = await db.project.findUnique({ where: { id: projectId, workspaceId: v.workspaceId }, select: { spaceId: true, accessSpace: { select: { kind: true, members: { where: { memberId: v.memberId ?? "" }, select: { canWrite: true } } } } } });
+  const p = await db.project.findUnique({ where: { id: projectId, workspaceId: v.workspaceId }, select: { accessSpace: { select: { kind: true, members: { where: { memberId: v.memberId ?? "" }, select: { canWrite: true } } } } } });
   if (p?.accessSpace?.kind === "RESTRICTED" && v.memberId) requireWrite(v, p.accessSpace.members[0]?.canWrite === true);
-  if (!p?.spaceId) return;
-  const space = await db.space.findUnique({ where: { id: p.spaceId, workspaceId: v.workspaceId }, select: { canWrite: true } });
-  if (space && !space.canWrite) throw new ForbiddenError("This project is shared read-only with you");
 }
 
 /** requireProject plus the write check: visible first (hidden stays NotFound), then writable. */

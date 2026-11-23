@@ -214,13 +214,10 @@ describe("revocation takes effect immediately", () => {
     expect(m.progress.total).toBe(4); // web7 card disappeared from visible work
   });
 
-  it("untracking a repository revokes access at once and drops its local worktree data", async () => {
+  it("untracking a repository revokes access at once", async () => {
     const { db, admin, a, ids } = S;
-    const dev = await db.device.create({ data: { userId: ids.users.a.id, name: "This computer" } });
-    await db.worktreeSnapshot.create({ data: { deviceId: dev.id, repositoryId: ids.repos.web.id, capturedAt: new Date(), data: { worktrees: [] } } });
     await removeFromTracking(db, admin, ids.repos.web.id);
     await expect(requireRepo(db, a, ids.repos.web.id)).rejects.toBeInstanceOf(NotFoundError);
-    expect(await db.worktreeSnapshot.count({ where: { repositoryId: ids.repos.web.id } })).toBe(0);
     expect(await db.repositoryGrant.count({ where: { repositoryId: ids.repos.web.id, revokedAt: null } })).toBe(0);
     expect(await loadViewer(db, ids.users.a.id)).not.toBeNull(); // the person is still there; only the repository went
   });

@@ -10,7 +10,7 @@ export function sectionFor(path: string): Section {
   if (p.startsWith("/tasks")) return "tasks";
   if (p.startsWith("/pull-requests") || p.startsWith("/issues")) return "work";
   if (p.startsWith("/planning")) return "planning";
-  if (p.startsWith("/repositories") || p.startsWith("/forks") || p.startsWith("/branches")) return "source";
-  if (p.startsWith("/help") || p.startsWith("/team") || p.startsWith("/capacity") || p.startsWith("/sync") || p.startsWith("/admin") || p.startsWith("/settings") || p.startsWith("/join")) return "team";
+  if (p.startsWith("/repositories") || p.startsWith("/forks")) return "source";
+  if (p.startsWith("/help") || p.startsWith("/capacity") || p.startsWith("/sync") || p.startsWith("/admin") || p.startsWith("/settings")) return "team";
   return "overview";
 }

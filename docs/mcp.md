@@ -1,7 +1,7 @@
 # Remote MCP (hosted)
 
 A hosted Mergeport has an MCP server at `POST <MERGEPORT_PUBLIC_URL>/api/mcp`, so an AI app can read tasks, open a task and add a comment as you:
-"open a task on Mergeport to review the payments PR". (There is no local stdio server any more; it was removed with the local launcher.)
+"open a task on Mergeport to review the payments PR".
 
 Transport: MCP streamable HTTP, stateless. Each POST carries one JSON-RPC message (or a batch of up to 5) and is answered as `application/json`; a
 notification is answered `202`. There are no sessions and no event streams, so `GET` and `DELETE` are `405`. Methods: `initialize`, `ping`,

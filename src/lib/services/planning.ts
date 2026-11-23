@@ -47,7 +47,6 @@ export async function createCard(
     const wi = await requireWorkItem(db, v, input.workItemId, "manageWork");
     const inProject = await db.projectRepository.findFirst({ where: { projectId: project.id, repositoryId: wi.repositoryId } });
     if (!inProject) throw new ValidationError("That repository is not part of this project");
-    await assertSameAudience(db, v.workspaceId, project.spaceId, [wi.repositoryId]);
     title = wi.title;
   } else if (!v.isAdmin) {
     const m = await db.projectMember.findFirst({ where: { projectId: project.id, memberId: v.memberId } });
@@ -84,17 +83,6 @@ export async function createCard(
  * Move a card with optimistic concurrency. A stale `expectedVersion` returns ConflictError and
  * changes nothing. Dragging never touches GitHub state or labels.
  */
-/**
- * A project that is shared through a space writes its repository links, card titles and issue numbers into that space's
- * repository, so every repository it links must belong to the SAME audience. Otherwise a narrower space's data would be
- * published to a wider one.
- */
-export async function assertSameAudience(db: Db, workspaceId: string, projectSpaceId: string | null, repositoryIds: string[]) {
-  if (!projectSpaceId || repositoryIds.length === 0) return;
-  const mismatched = await db.repository.count({ where: { workspaceId, id: { in: repositoryIds }, OR: [{ spaceId: null }, { spaceId: { not: projectSpaceId } }] } });
-  if (mismatched) throw new ValidationError("A project shared through a space can only link repositories shared through that same space. Share the repository to the space first, so nobody sees more than their space allows.");
-}
-
 export async function moveCard(db: Db, v: Viewer, input: { itemId: string; toColumnKey: string; beforePosition?: number | null; afterPosition?: number | null; expectedVersion: number }) {
   const item = await requireItem(db, v, input.itemId);
   await assertProjectWritable(db, v, item.projectId);
@@ -127,10 +115,6 @@ export async function addDependency(db: Db, v: Viewer, blockerId: string, blocke
   await assertProjectWritable(db, v, b.projectId);
   await requireManage(db, v, b);
   if (a.id === b.id) throw new ValidationError("A card cannot be linked to itself");
-  if (a.projectId !== b.projectId) {
-    const [pa, pb] = await Promise.all([db.project.findUniqueOrThrow({ where: { id: a.projectId, workspaceId: v.workspaceId } }), db.project.findUniqueOrThrow({ where: { id: b.projectId, workspaceId: v.workspaceId } })]);
-    if ((pa.spaceId ?? null) !== (pb.spaceId ?? null)) throw new ValidationError("These projects are shared with different audiences, so their cards cannot be linked");
-  }
   if (kind === "blocks") {
     const edges = await db.planningLink.findMany({ where: { from: { project: { workspaceId: v.workspaceId } } }, select: { fromId: true, toId: true, kind: true } });
     if (blocksCycle(edges.map((e) => ({ from: e.fromId, to: e.toId, kind: isLinkKind(e.kind) ? e.kind : "blocks" })), a.id, b.id)) throw new ValidationError("That dependency would create a cycle");

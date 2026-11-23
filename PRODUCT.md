@@ -22,7 +22,7 @@ TypeScript, Next.js App Router, PostgreSQL through Prisma (pg adapter) with SQL 
 
 ## Product Purpose
 
-A shared control center for selected GitHub repositories: attention queues (needs my review vs waiting on others), planning across repos, fork/upstream intelligence, and read-only worktree visibility where a person runs it next to their clones. Success: nobody opens GitHub to find out what needs them, who they are waiting on, or what blocks whom.
+A shared control center for selected GitHub repositories: attention queues (needs my review vs waiting on others), planning across repos, and fork/upstream intelligence. Success: nobody opens GitHub to find out what needs them, who they are waiting on, or what blocks whom.
 
 ## Positioning
 
@@ -32,8 +32,6 @@ GitHub stays the source of truth for issues, pull requests, reviews and labels, 
 
 A hosted service for teams, many workspaces per deployment. Repository data is refreshed from GitHub in the background (webhooks and a worker), so pages render from stored data with its age and never wait on GitHub. Demo mode (synthetic data, no GitHub) is separate from connected mode and runs on the same Postgres (`npm run demo`).
 
-Code still present from the earlier local-first design, used only by a non-hosted run with the GitHub CLI signed in (development): `gh` sign-in, GitHub-repository team spaces with their sync engine, local worktree views and the upstream auto-updater. They are candidates for removal, not part of the hosted product.
-
 ## Capabilities and Constraints
 
 - Access model: every query is scoped to one workspace (`docs/tenancy.md`); visibility inside it follows the viewer's role and GitHub access, evaluated per request, never by hiding rows in the UI. Roles live in the database and are changed only by an admin.
@@ -41,7 +39,7 @@ Code still present from the earlier local-first design, used only by a non-hoste
 - Server-side authorization on every resource; scoped counts and search; non-leaking not-found.
 - No real GitHub mutations, repository creation or invitations to demonstrate features; live checks need an explicitly approved disposable target.
 - Do not infer account types (e.g. `northwind`) by name; fixtures with that owner are synthetic.
-- Out of scope: billing, chat, code editor, Projects v2 sync, worktree mutation, sharing worktree data, peer-to-peer sync, syncing database files.
+- Out of scope: billing, chat, code editor, Projects v2 sync, anything on a person's own computer (local clones, worktrees, the GitHub CLI), peer-to-peer sync, syncing database files.
 
 ## Evidence on Hand
 

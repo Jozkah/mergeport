@@ -60,12 +60,10 @@ describe("Banner with an action", () => {
 });
 
 describe("Connect repositories is admin-only on a hosted workspace", () => {
-  it("canConnectRepos: hosted admin yes, hosted member no, local always", () => {
+  it("canConnectRepos: administrator yes, member no", () => {
     m.hosted = true;
     expect(canConnectRepos({ isAdmin: true })).toBe(true);
     expect(canConnectRepos({ isAdmin: false })).toBe(false);
-    m.hosted = false;
-    expect(canConnectRepos({ isAdmin: false })).toBe(true);
   });
   it("the link renders for an administrator and not for anyone else", () => {
     render(<ConnectReposLink canConnect>Connect repositories</ConnectReposLink>);
@@ -89,11 +87,9 @@ describe("Connect repositories is admin-only on a hosted workspace", () => {
 describe("sentence case in the GitHub UI", () => {
   it("'Open repositories' and no Title Case button labels in the connect files", () => {
     const files = ["src/components/repos/HostedConnect.tsx", "src/app/(app)/repositories/connect/page.tsx"];
-    for (const f of files) {
-      const src = readFileSync(f, "utf8");
-      expect(src).toContain('label: "Open repositories"');
-      expect(src).not.toContain("Open Repositories");
-    }
+    const connect = readFileSync(files[0], "utf8");
+    expect(connect).toContain('label: "Open repositories"');
+    expect(connect).not.toContain("Open Repositories");
     for (const f of [...files, "src/components/settings/GithubPanels.tsx", "src/components/shell/GithubConnectionBanner.tsx", "src/app/(app)/settings/github/page.tsx"]) {
       const labels = [...readFileSync(f, "utf8").matchAll(/(?:submitLabel|label|title)[=:]\s*[{]?"([^"]+)"/g)].map((x) => x[1]);
       for (const l of labels) expect(l, `${f}: ${l}`).not.toMatch(/^[A-Z][a-z]+( [A-Z][a-z]+)+$/);

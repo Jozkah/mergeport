@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { RepoChecklist } from "@/components/forms/RepoChecklist";
-import { Select } from "@/components/ui/Select";
 import { db } from "@/lib/db";
 import { requireAdminViewer } from "@/lib/authz-page";
 import { projectWhere } from "@/lib/authz/viewer";
@@ -12,27 +11,22 @@ import { Disclosure } from "@/components/ui/Disclosure";
 import { createProjectAction, setProjectMembersAction, setProjectReposAction, setProjectReviewersAction } from "@/app/actions";
 import { byOwnerFirst, byPersonalFirst } from "@/lib/domain/ordering";
 import { projectReviewerRefs } from "@/lib/services/project-reviewers";
-import { setProjectSpaceAction } from "@/app/team-actions";
 import { setProjectSpaceAclAction } from "@/app/workspace-actions";
 import { ProjectAccessForm } from "@/components/members/ProjectAccessForm";
 import { listMySpaces } from "@/lib/services/access-spaces";
-import { isHosted } from "@/lib/public-url";
 
 export const metadata = { title: "Projects" };
 export const dynamic = "force-dynamic";
 
 export default async function Projects() {
   const { viewer } = await requireAdminViewer();
-  const hosted = isHosted();
-  // Hosted: the access spaces this person may use (the common one, and the restricted ones they are in). Names of other restricted spaces are never loaded here.
-  const mySpaces = hosted ? await listMySpaces(db, viewer) : [];
-  const spaces = hosted ? [] : await db.space.findMany({ where: { workspaceId: viewer.workspaceId, access: "OK", canWrite: true }, orderBy: [{ kind: "asc" }, { name: "asc" }] });
+  // The access spaces this person may use (the common one, and the restricted ones they are in). Names of other restricted spaces are never loaded here.
+  const mySpaces = await listMySpaces(db, viewer);
   const [projectsRaw, reposRaw, members] = await Promise.all([
     db.project.findMany({ where: projectWhere(viewer), include: { repositories: true, members: true, accessSpace: { select: { name: true, kind: true } } }, orderBy: { name: "asc" } }),
     db.repository.findMany({ where: { workspaceId: viewer.workspaceId, trackingStatus: { not: "REMOVED" } }, select: { id: true, fullName: true }, orderBy: { fullName: "asc" } }),
     db.member.findMany({ where: { workspaceId: viewer.workspaceId, status: "ACTIVE", role: { in: ["MEMBER", "READER"] } }, include: { user: true } }),
   ]);
-  const canShareWithTeam = !hosted && spaces.some((s) => s.kind === "COMMON");
   const me = viewer.login;
   const projects = [...projectsRaw].sort((x, y) => byPersonalFirst(me)(x.name, y.name));
   const repos = [...reposRaw].sort((x, y) => byOwnerFirst(me)(x.fullName, y.fullName));
@@ -42,7 +36,7 @@ export default async function Projects() {
     const all = (reviewerText.get(id) ?? "").split(", ").filter(Boolean);
     return all.length > 3 ? `${all.slice(0, 3).join(", ")} +${all.length - 3}` : all.join(", ");
   };
-  const lineOf = (p: (typeof projects)[number]) => `${p.repositories.length} repositories · ${p.members.length} people${reviewerShort(p.id) ? ` · reviewers: ${reviewerShort(p.id)}` : ""} · ${hosted ? (p.accessSpace?.kind === "RESTRICTED" ? `space: ${p.accessSpace.name}` : "Everyone in the workspace") : p.spaceId ? "shared" : "only on this computer"}`;
+  const lineOf = (p: (typeof projects)[number]) => `${p.repositories.length} repositories · ${p.members.length} people${reviewerShort(p.id) ? ` · reviewers: ${reviewerShort(p.id)}` : ""} · ${p.accessSpace?.kind === "RESTRICTED" ? `space: ${p.accessSpace.name}` : "Everyone in the workspace"}`;
   return (
     <>
       <PageHeader
@@ -52,7 +46,7 @@ export default async function Projects() {
         actions={
           <Sheet title="New project" trigger={<button className="btn btn-primary"><Plus size={14} aria-hidden /> New project</button>}>
             <ActionForm action={createProjectAction} submitLabel="Create project" closeOnSuccess>
-              <div className="flex flex-col gap-3"><div><label className="label" htmlFor="p-name">Name</label><input id="p-name" name="name" className="input" required /></div><div><label className="label" htmlFor="p-rev">Required reviewers (optional)</label><input id="p-rev" name="reviewers" className="input" placeholder="GitHubLogin, org/team-slug" /></div><div><label className="label" htmlFor="p-desc">Description</label><input id="p-desc" name="description" className="input" /></div>{canShareWithTeam && <fieldset><legend className="label">Sharing</legend><label className="check-row text-[13px]"><input type="checkbox" name="share" value="1" />Share with everyone in the team</label><p className="max-w-[60ch] text-pretty text-[12px] text-ink-3">Everyone on the team will see its cards and tasks. Leave off to keep it on this computer.</p></fieldset>}</div>
+              <div className="flex flex-col gap-3"><div><label className="label" htmlFor="p-name">Name</label><input id="p-name" name="name" className="input" required /></div><div><label className="label" htmlFor="p-rev">Required reviewers (optional)</label><input id="p-rev" name="reviewers" className="input" placeholder="GitHubLogin, org/team-slug" /></div><div><label className="label" htmlFor="p-desc">Description</label><input id="p-desc" name="description" className="input" /></div></div>
             </ActionForm>
           </Sheet>
         }
@@ -74,8 +68,8 @@ export default async function Projects() {
                     {members.length === 0 ? (
                       <div className="rounded-[8px] border border-dashed border-line-strong p-3 text-[12.5px] text-ink-2">
                         <p className="font-medium">Nobody to add yet.</p>
-                        <p className="mt-1 text-ink-3">{hosted ? "People appear once they join this workspace. Membership never grants repository access." : "People appear once they join your team. Invites grant the private coordination repository only, never source repositories."}</p>
-                        <Link href={hosted ? "/settings/members" : "/team"} className="btn mt-2 inline-flex">{hosted ? "Invite people in Members" : "Invite people on Team"}</Link>
+                        <p className="mt-1 text-ink-3">People appear once they join this workspace. Membership never grants repository access.</p>
+                        <Link href="/settings/members" className="btn mt-2 inline-flex">Invite people in Members</Link>
                       </div>
                     ) : (
                       <>
@@ -87,7 +81,7 @@ export default async function Projects() {
                           </fieldset>
                           <p className="mt-2 text-[12px] text-ink-3">Members see internal tasks. Repository content still needs a repository grant.</p>
                         </ActionForm>
-                        <p className="mt-2 text-[12px] text-ink-3">Need someone else? <Link className="underline" href={hosted ? "/settings/members" : "/team"}>{hosted ? "Invite people in Members" : "Invite people on Team"}</Link>.</p>
+                        <p className="mt-2 text-[12px] text-ink-3">Need someone else? <Link className="underline" href="/settings/members">Invite people in Members</Link>.</p>
                       </>
                     )}
                   </div>
@@ -100,25 +94,11 @@ export default async function Projects() {
                   <p className="mt-1 text-[12px] text-ink-3">Every open pull request here waits for these people. Authors cannot approve their own, so it stays unmet for them. Finer rules: Review routing.</p>
                 </ActionForm></div>
                 </Disclosure>
-                {hosted ? (
                 <Disclosure className="px-4" summary={<span className="font-medium">Access</span>} meta={<>({p.accessSpace?.kind === "RESTRICTED" ? p.accessSpace.name : "Everyone in the workspace"})</>}>
                   <div className="mt-3">
                     <ProjectAccessForm projectId={p.id} current={p.accessSpaceId ?? ""} spaces={mySpaces.filter((sp) => sp.kind === "RESTRICTED").map((sp) => ({ id: sp.id, name: sp.name }))} action={setProjectSpaceAclAction} />
                   </div>
                 </Disclosure>
-                ) : (
-                <Disclosure className="px-4" summary={<span className="font-medium">Sharing</span>} meta={<>({p.spaceId ? "shared through a team space" : "only on this computer"})</>}>
-                  <div className="mt-3"><ActionForm action={setProjectSpaceAction} submitLabel="Save sharing" resetOnSuccess={false} className="max-w-md">
-                  <input type="hidden" name="projectId" value={p.id} />
-                  <label className="label" htmlFor={`sp-${p.id}`}>Shared through</label>
-                  <Select id={`sp-${p.id}`} name="spaceId" defaultValue={p.spaceId ?? ""} className="select">
-                    <option value="">Only on this computer</option>
-                    {spaces.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}{sp.kind === "COMMON" ? " (everyone in the team)" : " (restricted)"}</option>)}
-                  </Select>
-                  <p className="mt-1 text-[12px] text-ink-3">The project, board and tasks go to that space&apos;s private repository; everyone who can read it sees them.</p>
-                </ActionForm></div>
-                </Disclosure>
-                )}
               </div>
             </Panel>
           ))}

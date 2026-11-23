@@ -1,13 +1,7 @@
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { ConflictError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import { moveCard, requestManualReview, resolveManualReview } from "@/lib/services/planning";
-import { mapLocalRoot, scanWorktrees, worktreesFor } from "@/lib/services/worktrees";
-import { removeFromTracking } from "@/lib/services/repositories";
-import { freshSeed, leaks } from "./helpers";
+import { freshSeed } from "./helpers";
 
 let S: Awaited<ReturnType<typeof freshSeed>>;
 beforeEach(async () => {
@@ -52,50 +46,5 @@ describe("manual waiting", () => {
   it("requires a reason", async () => {
     const { db, a, ids } = S;
     await expect(requestManualReview(db, a, { workItemId: ids.items.web10.id, reviewerKind: "USER", reviewerRef: "x", reason: "  " })).rejects.toThrow(/why/i);
-  });
-});
-
-describe("local worktree scan", () => {
-  let tmp: string;
-  let repoDir: string;
-  const git = (...args: string[]) => execFileSync("git", ["-C", repoDir, ...args], { stdio: "pipe", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" } });
-  beforeAll(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mp-wt-"));
-    repoDir = path.join(tmp, "work");
-    fs.mkdirSync(repoDir);
-    git("init", "-q", "-b", "main");
-    fs.writeFileSync(path.join(repoDir, "a.txt"), "one");
-    git("add", ".");
-    git("commit", "-q", "-m", "init");
-    fs.writeFileSync(path.join(repoDir, ".env"), "TOKEN=top-secret-value");
-  });
-  afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
-
-  it("keeps the snapshot on this computer, with counts only and no file contents", async () => {
-    const { db, a, ids } = S;
-    await mapLocalRoot(db, a, ids.repos.web.id, repoDir);
-    await scanWorktrees(db, a, ids.repos.web.id);
-    const view = await worktreesFor(db, a, ids.repos.web.id);
-    expect(view?.worktrees[0].branch).toBe("main");
-    expect(leaks(view, "top-secret-value")).toBe(false);
-    expect(leaks(await db.worktreeSnapshot.findMany(), "top-secret-value")).toBe(false);
-    // Nothing about a folder ever enters the outbox that is sent to a shared repository.
-    expect(await db.outboxOp.count()).toBe(0);
-  });
-
-  it("cannot map or scan a repository the person cannot see", async () => {
-    const { db, b, ids } = S;
-    await expect(mapLocalRoot(db, b, ids.repos.internal.id, repoDir)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(scanWorktrees(db, b, ids.repos.internal.id)).rejects.toBeInstanceOf(NotFoundError);
-  });
-
-  it("untracking a repository forgets its folder and snapshot", async () => {
-    const { db, admin, a, ids } = S;
-    await mapLocalRoot(db, a, ids.repos.web.id, repoDir);
-    await scanWorktrees(db, a, ids.repos.web.id);
-    expect(await db.worktreeSnapshot.count({ where: { repositoryId: ids.repos.web.id } })).toBe(1);
-    await removeFromTracking(db, admin, ids.repos.web.id);
-    expect(await db.worktreeSnapshot.count({ where: { repositoryId: ids.repos.web.id } })).toBe(0);
-    expect(await db.deviceRepoMapping.count({ where: { repositoryId: ids.repos.web.id } })).toBe(0);
   });
 });

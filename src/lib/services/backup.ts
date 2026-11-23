@@ -110,7 +110,8 @@ const Envelope = z.object({
   source: z.object({ workspaceId: z.string(), userLogin: z.string(), unsentEdits: z.number().int().nonnegative() }),
   repositories: z.array(z.object({ id: z.string(), githubId: z.string(), fullName: z.string() })).max(5000),
   tables: z.record(z.string(), z.array(z.record(z.string(), z.unknown())).max(500_000)),
-  outbox: z.array(z.record(z.string(), z.unknown())).max(100_000),
+  /** Unsent team-space edits of older backups. Team spaces no longer exist: the entries are read and ignored. */
+  outbox: z.array(z.record(z.string(), z.unknown())).max(100_000).default([]),
 });
 export type Backup = z.infer<typeof Envelope>;
 
@@ -140,18 +141,15 @@ export async function exportBackup(db: Db, v: Viewer, now = new Date()): Promise
   // Rows of other people's personal state never belong in this person's backup.
   tables.SavedFilter = (tables.SavedFilter ?? []).filter((r) => r.userId === v.userId);
   for (const t of ["NotificationPref", "InboxState", "SeenState", "ReviewDraft"]) tables[t] = (tables[t] ?? []).filter((r) => r.userId === v.userId);
-  const ops = await db.outboxOp.findMany({ where: { status: { in: ["PENDING", "FAILED", "SENT", "QUARANTINED"] }, space: { workspaceId: v.workspaceId } } });
-  const spaces = new Map((await db.space.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true, repoOwner: true, repoName: true, remoteId: true } })).map((s) => [s.id, s]));
-  const outbox = ops.map((o) => ({ id: o.id, entityType: o.entityType, entityId: o.entityId, kind: o.kind, data: o.data, baseVersion: o.baseVersion, status: o.status, space: spaces.get(o.spaceId)?.remoteId ?? null }));
   const bundle: Backup = {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
     exportedAt: now.toISOString(),
     app: { migration: latestMigration() },
-    source: { workspaceId: v.workspaceId, userLogin: v.login, unsentEdits: outbox.length },
+    source: { workspaceId: v.workspaceId, userLogin: v.login, unsentEdits: 0 },
     repositories: repos.map((r) => ({ id: r.id, githubId: r.githubId.toString(), fullName: r.fullName })),
     tables,
-    outbox,
+    outbox: [],
   };
   return JSON.stringify(bundle, tag);
 }
@@ -174,7 +172,7 @@ export function parseBackup(text: string): Backup {
 export type TablePreview = { table: string; create: number; update: number; same: number; skipped: number };
 export type RestorePreview = { exportedAt: string; from: string; unsentEdits: number; tables: TablePreview[]; skipped: { table: string; why: string; count: number }[]; outbox: { restorable: number; skipped: number }; notes: string[] };
 
-type Maps = { workspaceId: string; userId: string; memberId: string; repoById: Map<string, string>; spaceByRemote: Map<string, string>; spaces: Set<string>; accessSpaces: Set<string> };
+type Maps = { workspaceId: string; userId: string; memberId: string; repoById: Map<string, string>; accessSpaces: Set<string> };
 
 async function mapsFor(db: Db, v: Viewer, b: Backup): Promise<Maps> {
   const local = new Map((await db.repository.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true, githubId: true } })).map((r) => [r.githubId.toString(), r.id]));
@@ -183,10 +181,9 @@ async function mapsFor(db: Db, v: Viewer, b: Backup): Promise<Maps> {
     const id = local.get(r.githubId);
     if (id) repoById.set(r.id, id);
   }
-  const spaces = await db.space.findMany({ where: { workspaceId: v.workspaceId }, select: { id: true, remoteId: true } });
   // Access spaces this person may put a project in: this workspace's COMMON space and the restricted ones they belong to. Any other id is skipped.
   const access = await db.accessSpace.findMany({ where: { workspaceId: v.workspaceId, OR: [{ kind: "COMMON" }, { members: { some: { memberId: v.memberId } } }] }, select: { id: true } });
-  return { workspaceId: v.workspaceId, userId: v.userId, memberId: v.memberId, repoById, spaceByRemote: new Map(spaces.map((s) => [s.remoteId, s.id])), spaces: new Set(spaces.map((s) => s.id)), accessSpaces: new Set(access.map((s) => s.id)) };
+  return { workspaceId: v.workspaceId, userId: v.userId, memberId: v.memberId, repoById, accessSpaces: new Set(access.map((s) => s.id)) };
 }
 
 function remapRow(e: Entry, row: Record<string, unknown>, m: Maps): { row: Record<string, unknown> } | { skip: string } {
@@ -201,7 +198,7 @@ function remapRow(e: Entry, row: Record<string, unknown>, m: Maps): { row: Recor
       const to = m.repoById.get(String(val));
       if (!to) return { skip: "its repository is not tracked on this computer" };
       out[col] = to;
-    } else if (kind === "self-optional-space") out[col] = m.spaces.has(String(val)) ? val : null;
+    } else if (kind === "self-optional-space") out[col] = null; // team spaces no longer exist
     else if (kind === "access-space") {
       // Never null: dropping a restricted project into the common space would show it to everyone. Not one of this person's spaces: skip.
       if (!m.accessSpaces.has(String(val))) return { skip: "its space is not one you can use in this workspace" };
@@ -309,19 +306,9 @@ async function pass(db: Db, v: Viewer, b: Backup, write: boolean): Promise<Resto
     }
     tables.push(t);
   }
-  let restorable = 0;
-  let skippedOps = 0;
-  for (const o of b.outbox) {
-    const spaceId = typeof o.space === "string" ? m.spaceByRemote.get(o.space) : undefined;
-    if (!spaceId) {
-      skippedOps++;
-      continue;
-    }
-    restorable++;
-    if (write && !(await db.outboxOp.findUnique({ where: { id: String(o.id) } }))) {
-      await db.outboxOp.create({ data: { id: String(o.id), spaceId, entityType: String(o.entityType), entityId: String(o.entityId), kind: o.kind === "DELETE" ? "DELETE" : "UPSERT", data: (o.data ?? undefined) as never, baseVersion: Number(o.baseVersion ?? 0), status: "PENDING" } });
-    }
-  }
+  // Unsent edits of an old backup belonged to team spaces, which no longer exist: they are never restored.
+  const restorable = 0;
+  const skippedOps = b.outbox.length;
   return {
     exportedAt: b.exportedAt,
     from: `@${b.source.userLogin}`,
@@ -332,7 +319,7 @@ async function pass(db: Db, v: Viewer, b: Backup, write: boolean): Promise<Resto
     notes: [
       "Restoring adds missing records and updates ones that differ. It never deletes anything.",
       "Records are matched by id. A record you changed since the backup is overwritten by the backup's version, so preview first.",
-      ...(skippedOps > 0 ? [`${skippedOps} unsent edit${skippedOps === 1 ? "" : "s"} belong to a team space that is not set up on this computer, so they were not restored.`] : []),
+      ...(skippedOps > 0 ? [`${skippedOps} unsent edit${skippedOps === 1 ? "" : "s"} belong to a team space, which no longer exists, so they were not restored.`] : []),
       "Credentials, folder paths and anything GitHub owns are not in a backup and are not touched.",
     ],
   };

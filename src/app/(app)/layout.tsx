@@ -33,14 +33,10 @@ import { SpotlightProvider } from "@/components/ui/SpotlightProvider";
 import { SyncAnnouncer } from "@/components/sync/SyncAnnouncer";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { TooltipProvider } from "@/components/ui/Tooltip";
-import type { SyncStateName } from "@/components/sync/SyncBadge";
 import { THEME_COOKIE, parseTheme } from "@/lib/theme";
-import { checkProfile } from "@/lib/local/identity";
-import { getEngine } from "@/lib/local/runtime";
 import { deriveSourceStatus } from "@/lib/sync/source-status";
 import { isDemo } from "@/lib/env";
 import { federationState } from "@/lib/federation/config";
-import Link from "next/link";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -73,25 +69,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     tasks: await db.planningItem.count({ where: { AND: [await planningWhere(db, viewer), { assigneeLogin: viewer.login.toLowerCase(), column: { key: { not: "done" } } }] } }),
   };
   const last = lastSync._max.lastSyncedAt;
-  const profile = await checkProfile(); // last known answer; refreshed in the background, never waits on gh
-  const githubState = profile.kind === "hosted" ? await connectionState(db, viewer.workspaceId) : "ok";
+  const githubState = isHosted() ? await connectionState(db, viewer.workspaceId) : "ok";
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
-  const [spaceCount, openConflicts, quarantined, pendingOps, offlineSpaces] = await Promise.all([
-    db.space.count({ where: { workspaceId: viewer.workspaceId } }),
-    db.syncConflict.count({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } } }),
-    db.outboxOp.count({ where: { status: "QUARANTINED", space: { workspaceId: viewer.workspaceId } } }),
-    db.outboxOp.count({ where: { status: { in: ["PENDING", "SENT", "FAILED"] }, space: { workspaceId: viewer.workspaceId } } }),
-    db.space.count({ where: { workspaceId: viewer.workspaceId, lastError: "offline" } }),
-  ]);
-  // The single state shown in the top bar is the MOST SEVERE one across spaces (what needs a person comes first).
-  const SEVERITY: SyncStateName[] = ["conflict", "revoked", "signin", "schema", "rate-limited", "offline", "reconnecting", "syncing", "pending", "read-only", "synced"];
-  let aggregate: SyncStateName = openConflicts ? "conflict" : quarantined ? "revoked" : offlineSpaces ? "offline" : pendingOps ? "pending" : "synced";
-  const engine = await getEngine(viewer.workspaceId);
-  if (engine && spaceCount > 0) {
-    const states = await Promise.all((await db.space.findMany({ where: { workspaceId: viewer.workspaceId } })).map(async (s) => (await engine.stateFor(s)).state as SyncStateName));
-    aggregate = states.sort((x, y) => SEVERITY.indexOf(x) - SEVERITY.indexOf(y))[0] ?? aggregate;
-  }
-  // Refreshing tracked source repositories is real work too, and it exists with no team space at all.
+  // Refreshing tracked source repositories.
   // A job still marked RUNNING by a process that died is not work in progress; it is reclaimed on a timer.
   const bootAt = processStartedAt();
   const own = { isDemo: false, trackingStatus: { not: "REMOVED" as const } };
@@ -105,10 +85,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     db.repository.count({ where: { AND: [repoWhere(viewer), own], lastSyncedAt: null } }),
   ]);
   const source = deriveSourceStatus({ tracked, running, queued, refused, rateLimited, failed, neverSynced });
-  const candidates: { state: SyncStateName; pending: number; conflicts: number; detail?: string; scope?: "source" }[] = [];
-  if (spaceCount > 0) candidates.push({ state: aggregate, pending: pendingOps, conflicts: openConflicts });
-  if (source) candidates.push({ state: source.state, pending: 0, conflicts: 0, detail: source.detail, scope: "source" });
-  const sync = candidates.sort((x, y) => SEVERITY.indexOf(x.state) - SEVERITY.indexOf(y.state))[0] ?? null;
+  const sync = source ? { state: source.state, pending: 0, conflicts: 0, detail: source.detail, scope: "source" as const } : null;
   const hosted = isHosted();
   const mine = hosted ? await activeWorkspaces(db, user.id) : [];
   const accountSwitcher = mine.length > 1 ? { workspaces: mine, active: viewer.workspaceId } : null;
@@ -135,23 +112,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Suspense fallback={null}><TaskDrawer /><CommandPalette projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} /></Suspense>
           <Topbar aiQuick={aiQuick} accountSwitcher={hosted ? accountSwitcher : undefined} scopePicker={<ScopePicker value={scopeKey(scope)} projects={scopeProjects} repos={scopeRepos.map((r) => ({ id: r.id, name: r.fullName }))} />} unread={unread} theme={theme} sync={sync} hosted={hosted} menu={<MobileNav {...navProps} />} syncNote={last ? `Last refresh ${formatInstant(last, viewer.timezone)}` : "Not refreshed yet"} />
         </Suspense>
-        {profile.kind === "hosted" && githubState !== "ok" && (
+        {isHosted() && githubState !== "ok" && (
           // The Settings > GitHub page explains the state itself and has the actions, so the banner would only repeat it there.
           <HideOnPath path="/settings/github">
             <div className="px-4 pt-3 lg:px-6">
               <GithubConnectionBanner state={githubState} manage={can(viewer, "manageGithub")} />
             </div>
           </HideOnPath>
-        )}
-        {profile.kind === "mismatch" && (
-          <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">
-            The GitHub CLI has @{profile.ghLogin} selected. This profile keeps acting only as @{profile.profileLogin}, using that account&apos;s own sign-in; if it is not signed in, nothing is sent and you will be asked to reconnect. <Link className="underline" href="/account-changed">Details</Link>
-          </div>
-        )}
-        {profile.kind === "gh-unavailable" && (
-          <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">
-            GitHub is not available right now ({profile.gh.state === "missing-gh" ? "the GitHub CLI was not found" : profile.gh.state === "not-logged-in" ? "gh is not signed in" : "gh did not answer"}). Saved data is shown and edits are kept on this computer; nothing is sent until it is back.
-          </div>
         )}
         {demoRepos > 0 && (
           <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-ink-2 lg:px-6" role="note">

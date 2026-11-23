@@ -1,22 +1,18 @@
 import type { Db } from "@/lib/db";
-import { isDemo } from "@/lib/env";
-import { isHosted } from "@/lib/public-url";
 import { GithubAppError, InstallationGoneError, InstallationSuspendedError, RateLimitedError, githubApiBase, mintInstallationToken } from "./app-auth";
-import { listBoundInstallations, loadBoundInstallation, markInstallationState } from "./binding";
+import { loadBoundInstallation, markInstallationState } from "./binding";
 import type { BoundInstallation } from "./bound-installation";
 import { maybePruneHttpCache } from "./cache-prune";
 import { DemoPort } from "./demo";
-import { GithubNotConnectedError, GithubWritesDisabledError, assertGithubAvailable } from "./hosted";
-import { profileFetch } from "@/lib/local/profile-runner";
+import { GithubNotConnectedError, GithubWritesDisabledError } from "./hosted";
 import { OctokitPort, createOctokit, type CacheStore } from "./octokit";
-import { GithubError, type Discovery, type GithubPort, type RateInfo } from "./port";
+import { GithubError, type GithubPort, type RateInfo } from "./port";
 import { githubAppFetch } from "./transport";
 
 /**
  * ETag cache persisted in PublicCacheEntry (conditional requests answered 304 do not spend rate limit).
  *
- * `prefix` partitions the keys. The unprefixed keys are the shared, GLOBAL cache: only answers any caller may see (the public port,
- * and the local app's own single credential). Everything fetched with an installation token is kept under `installationCachePrefix`,
+ * `prefix` partitions the keys. The unprefixed keys are the shared, GLOBAL cache: only answers any caller may see (the public port). Everything fetched with an installation token is kept under `installationCachePrefix`,
  * so a private body can never be served to a request made with another credential.
  */
 export function dbCache(db: Db, prefix = ""): CacheStore {
@@ -37,15 +33,6 @@ export function dbCache(db: Db, prefix = ""): CacheStore {
 export const installationCachePrefix = (installationId: bigint | string | number) => `inst:${installationId}:`;
 /** Rate-limit budget key of one installation (GitHub's quota belongs to the installation token, shared by every workspace using it). */
 export const installationBudgetKey = (installationId: bigint | string | number) => `installation:${installationId}`;
-
-/**
- * The local person's own GitHub access, bound to this profile's account (see bound.ts). Used for sync, writes and
- * discovery. `signal` cancels every call made through the returned port.
- */
-export function ghPort(db: Db, o: { signal?: AbortSignal; timeoutMs?: number } = {}): GithubPort {
-  assertGithubAvailable(); // hosted: the server's gh login is nobody's workspace credential; hosted workspaces use their installation (below)
-  return new OctokitPort(createOctokit(undefined, profileFetch(db, o)), { cache: dbCache(db) });
-}
 
 /**
  * A short-lived installation token for a binding the workspace proved, with GitHub's failures turned into what callers handle:
@@ -87,58 +74,21 @@ async function boundFor(db: Db, repo: { workspaceId: string; installationId: big
   return bound;
 }
 
-/**
- * Source repositories: demo store in demo mode; hosted, the repository's installation (no binding: the typed not-connected error);
- * otherwise the person's gh credential.
- */
+/** Source repositories: demo store for demo repositories, otherwise the repository's installation (no binding: the typed not-connected error). */
 export async function portForSync(db: Db, repositoryId: string, o: { onRate?: (r: RateInfo) => void } = {}): Promise<GithubPort | null> {
   const repo = await db.repository.findUnique({ where: { id: repositoryId } });
   if (!repo) return null;
   if (repo.isDemo) return new DemoPort(db, "demo-sync");
-  if (isHosted()) return installationPort(db, await boundFor(db, repo), { onRate: o.onRate });
-  return ghPort(db);
+  return installationPort(db, await boundFor(db, repo), { onRate: o.onRate });
 }
 
-/**
- * Writes are always made as the acting person: there is exactly one identity on a local installation. Hosted workspaces only read
- * GitHub for now (the App holds read permissions), so a write says so instead of failing at GitHub.
- */
+/** Workspaces only read GitHub for now (the App holds read permissions), so a write to a real repository says so instead of failing at GitHub. */
 export async function portForWrite(db: Db, user: { id: string; login: string }, repo: { isDemo: boolean }): Promise<GithubPort> {
   if (repo.isDemo) return new DemoPort(db, user.login);
-  if (isHosted()) throw new GithubWritesDisabledError();
-  return ghPort(db);
-}
-
-/**
- * Discovery. Hosted: the workspace's first usable installation (`o.workspaceId` is required; no workspace or no binding is the typed
- * not-connected error). Its repository list is `listInstallationRepositories`, not this port's user-scoped one.
- */
-export async function portForDiscovery(db: Db, user: { id: string; login: string }, o: { signal?: AbortSignal; timeoutMs?: number; workspaceId?: string } = {}): Promise<GithubPort> {
-  if (isDemo()) return new DemoPort(db, user.login);
-  if (isHosted()) {
-    if (!o.workspaceId) throw new GithubNotConnectedError();
-    const [first] = await listBoundInstallations(db, o.workspaceId);
-    if (!first) throw new GithubNotConnectedError();
-    return installationPort(db, first);
-  }
-  return ghPort(db, o);
+  throw new GithubWritesDisabledError();
 }
 
 /** Public data without any credential: no private-repository consent involved, cached, rate-limit aware. */
 export function publicPort(db: Db): GithubPort {
   return new OctokitPort(createOctokit(undefined), { cache: dbCache(db) });
-}
-
-/** Lists every page of discovery (bounded). */
-export async function discoverAll(port: GithubPort, maxPages = 10): Promise<Discovery> {
-  const all: Discovery = { repos: [], nextPage: null, notes: [] };
-  for (let page = 1, i = 0; page && i < maxPages; i++) {
-    const d = await port.listAuthorizedRepositories(page);
-    all.repos.push(...d.repos);
-    all.notes.push(...d.notes);
-    page = d.nextPage ?? 0;
-  }
-  const seen = new Set<string>();
-  all.repos = all.repos.filter((r) => !seen.has(r.githubId.toString()) && !!seen.add(r.githubId.toString()));
-  return all;
 }

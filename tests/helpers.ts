@@ -1,10 +1,19 @@
 import { createPrisma, type Db } from "@/lib/db";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
-import { firstWorkspace } from "@/lib/local/profile";
+import { ensureCommonSpace } from "@/lib/services/access-spaces";
 import { seedDemo, truncateAll, type DemoIds } from "@/lib/demo/seed";
 
-/** The workspace of a test database (the profile's one), created when there is none yet. */
-export const wsId = async (db: Db) => (await firstWorkspace(db)).id;
+/** The (single) workspace of a test database. */
+export const wsId = async (db: Db) => (await db.workspace.findFirstOrThrow({ orderBy: { createdAt: "asc" } })).id;
+
+/** A fresh workspace with one administrator who has a GitHub identity: the smallest world a service test needs. */
+export async function makeProfile(db: Db, who: { id: bigint; login: string; name?: string | null }) {
+  const workspace = await db.workspace.create({ data: { name: "Test workspace" } });
+  const user = await db.user.upsert({ where: { githubId: who.id }, create: { githubId: who.id, login: who.login, name: who.name ?? null }, update: {} });
+  const member = await db.member.create({ data: { workspaceId: workspace.id, userId: user.id, role: "ADMIN" } });
+  await ensureCommonSpace(db, workspace.id);
+  return { workspace, user, member };
+}
 
 export const BASE = new Date("2026-10-28T12:00:00Z");
 
