@@ -1,7 +1,7 @@
 # Remote MCP (hosted)
 
-A hosted Mergeport has an MCP server at `POST <MERGEPORT_PUBLIC_URL>/api/mcp`, so an AI app can read tasks, open a task and add a comment as you:
-"open a task on Mergeport to review the payments PR".
+A hosted Mergeport has an MCP server at `POST <MERGEPORT_PUBLIC_URL>/api/mcp`, so an AI app can read tasks, open a task, comment, edit it, move it between board columns and mark it done as you:
+"open a task on Mergeport to review the payments PR", "move it to In progress", "finish it". It can never delete anything.
 
 Transport: MCP streamable HTTP, stateless. Each POST carries one JSON-RPC message (or a batch of up to 5) and is answered as `application/json`; a
 notification is answered `202`. There are no sessions and no event streams, so `GET` and `DELETE` are `405`. Methods: `initialize`, `ping`,
@@ -10,7 +10,7 @@ notification is answered `202`. There are no sessions and no event streams, so `
 
 ## Connect an app
 
-1. Settings, **Connect AI (MCP)**: name the token, choose **Read only** or **Read, open tasks and comment**, choose an expiry (30, 90, 365 days or never), **Create token**.
+1. Settings, **Connect AI (MCP)**: name the token, choose **Read only** or **Read and change tasks**, choose an expiry (30, 90, 365 days or never), **Create token**.
    The secret (`mp_pat_` and 43 characters) is shown once. Mergeport keeps only its sha256.
 2. In the app, add a remote MCP server with the connector address shown there and the header `Authorization: Bearer <token>`.
    Claude Code: `claude mcp add --transport http mergeport https://app.example.com/api/mcp --header "Authorization: Bearer <token>"`.
@@ -28,7 +28,7 @@ you to Mergeport to sign in and allow it, and no token is pasted anywhere. Perso
 | `GET /.well-known/oauth-protected-resource` (and `/api/mcp` form) | RFC 9728 metadata: the resource (`<origin>/api/mcp`) and its authorization server. A `401` from `/api/mcp` carries `WWW-Authenticate: Bearer realm="Mergeport", resource_metadata="<that address>"`. |
 | `GET /.well-known/oauth-authorization-server` | RFC 8414 metadata: endpoints, `S256` only, `none` client authentication, scopes `read` and `write`. |
 | `POST /api/oauth/register` | RFC 7591 dynamic registration. Public clients only. Redirect addresses: https, or http on `localhost`, `127.0.0.1` or `[::1]`; no fragment, credentials or wildcard; at most 5; matched exactly later. 10 registrations per address and hour, and 60 per hour across everyone. At most 1000 clients: past 800, clients nobody authorized within an hour are forgotten, and when full ones older than a day too; a client with a grant is never deleted, so spam cannot keep the table full. |
-| `GET /oauth/authorize` | An ordinary session page. Signed out goes to sign-in and back. Shows the app's name (NOT verified: anyone can register any name, so the address it returns to is shown too), a picker limited to YOUR active workspaces, and Read only (default) or Read, open tasks and comment (only where your role writes). Allow or Cancel. An unknown client or a redirect address that is not exactly a registered one is never redirected to; other errors go back to the registered address with `state`. |
+| `GET /oauth/authorize` | An ordinary session page. Signed out goes to sign-in and back. Shows the app's name (NOT verified: anyone can register any name, so the address it returns to is shown too), a picker limited to YOUR active workspaces, and Read only (default) or Read and change tasks (create, comment, edit, move, complete; only where your role writes). Allow or Cancel. An unknown client or a redirect address that is not exactly a registered one is never redirected to; other errors go back to the registered address with `state`. |
 | `POST /api/oauth/token` | `authorization_code` and `refresh_token` grants. 60 requests per address each minute, and 120 per client and address (the client is loaded first: an unknown `client_id` is `invalid_client` and creates no counter, and a stranger cannot drain the budget of an app's real users). |
 
 - **PKCE S256 is required.** The challenge is bound to the code; a wrong verifier fails and burns the code. `state` is echoed. `resource`, when sent, must be the `/api/mcp` address.
@@ -38,7 +38,7 @@ you to Mergeport to sign in and allow it, and no token is pasted anywhere. Perso
   A write still needs the WRITE scope and a writing role. The granted scope never exceeds the role: a refresh after a demotion comes back read-only.
 - **Refresh tokens** (`mp_ort_`, 30 days, hashed) rotate on every use. Using an old one again means two parties hold it: the whole grant (family) is revoked, access tokens included.
 - **Connected apps** are listed in Settings, Connect AI (yours; an owner or administrator sees every app in the workspace) with Disconnect, which ends the grant, its access tokens and its refresh tokens at once.
-- Audit entries: `oauth.authorize`, `oauth.revoke`, `oauth.code-replay`, `oauth.refresh-reuse`, and the usual `mcp.task.*` entries for writes, with the token id.
+- Audit entries: `oauth.authorize`, `oauth.revoke`, `oauth.code-replay`, `oauth.refresh-reuse`, and the usual `mcp.task.*` entries for writes (`create`, `comment`, `update`, `move`, `complete`, `reopen`), with the token id.
 - The consent action checks the session's CSRF token, re-validates every parameter the form carried, and `src/proxy.ts` still applies its Origin rule to it. The proxy exempts exactly `POST /api/oauth/register` and `POST /api/oauth/token`, and
   only for a request with no `Origin`, `Sec-Fetch-Site` or `Cookie` (the AI app's server calls them, not a browser). No CORS, so a browser-based client cannot use them. Hosted only: all of it is `404` otherwise.
 - Register and token need a client address (the trusted proxy's `X-Forwarded-For`; the server refuses to start hosted without `MERGEPORT_TRUST_PROXY=true`). A request that still arrives without one gets `503 Client address unavailable` instead of sharing a bucket everyone would fill. Expired counters (`oauth:*` keys included) are deleted by the daily housekeeping job that already prunes `RateLimitState`.
@@ -56,7 +56,7 @@ Not built: client secrets and confidential clients, client metadata documents, t
   administrator sees and revokes every token of the workspace. Creating and revoking are audit entries (`apitoken.create`, `apitoken.revoke`).
 - Bad, unknown, revoked and expired tokens, and a removed member's, all get the same `401` with `WWW-Authenticate: Bearer realm="Mergeport"` and the same body.
 
-## Tools (version 1)
+## Tools
 
 | Tool | Does | Needs |
 | --- | --- | --- |
@@ -66,26 +66,38 @@ Not built: client secrets and confidential clients, client metadata documents, t
 | `search` | Tasks by words in title or description, open and done | read |
 | `create_task` | A task in a project's backlog: title, description, assignee, priority, due date, labels | write |
 | `add_comment` | A comment on a task, as the token's person | write |
+| `update_task` | Change one task: `title`, `description` (empty clears), `assignee` (login or `me`) or `unassign`, `priority`, `due` or `clear_due`, `add_labels`, `remove_labels` | write |
+| `move_task` | Move a task to another column of its project, by column name or key (an unknown column is refused and the project's columns are listed) | write |
+| `complete_task` | Move a task to the Done column | write |
+| `reopen_task` | Move a done task back to Backlog, or to the `column` named | write |
 
-Not built: editing, moving, completing or deleting an existing card, editing or deleting comments, anything on GitHub (the stdio server's approval-queue
+Not built: deleting a card, bulk changes, editing or deleting comments, anything on GitHub (the stdio server's approval-queue
 tools are not offered here), OAuth, sessions and server-sent events.
 
 Reads go through the app's own services (`listTasks`, `getTask`, `planningWhere`, `projectWhere`, `repoWhere`), so workspace, restricted spaces and
 private repositories are the app's rules. `create_task` runs the `mp task add` code (same validation, project and assignee resolution, history entry
-"added this from an AI app over MCP"); `add_comment` runs `addComment`. Inputs are checked with zod (strict, size caps, no control characters). Answers are
+"added this from an AI app over MCP"); `add_comment` runs `addComment`. `update_task`, `move_task`, `complete_task` and `reopen_task` run `updateTask`, the
+service behind the task page's Save and Status controls (same validation, project write check, restricted spaces, history entries and plan events), resolving the
+assignee and column with the same helpers as `mp task update`, and add the history entry "changed this from an AI app over MCP". A card that follows a GitHub
+item keeps its title, assignee and labels from GitHub (refused), and moving or completing it needs the repository's manage-work grant, as dragging it on the board does.
+An id that is not in the token's workspace, or that the person cannot see, is "Not found, or you cannot see it" for every tool. Inputs are checked with zod (strict, size caps, no control characters). Answers are
 capped at 40,000 characters. Errors are tool errors without internals; an unexpected failure says "Something went wrong. Nothing was changed."
 
 ## Untrusted text
 
 Titles, descriptions and comments are written by other people, so an answer can carry a prompt injection. Every object answer has a `notice` saying so, `get_task`
 wraps the description, checklist text and comment bodies as `{"untrusted":true,"text":...}`, and the server instructions tell the model to treat them as data
-and never create or comment because they ask. This lowers the risk; it cannot remove it, which is why writes need an explicit WRITE token.
+and never create, change or comment because they ask. This lowers the risk; it cannot remove it, which is why writes need an explicit WRITE token.
 
 ## Writing
 
 A write needs both: the token's scope is `WRITE`, AND the person's role writes right now (`requireWrite`, project and space write checks inside the
 services). A READ token never writes. A READER never writes, even with a WRITE token (a token row forced to WRITE still fails). Each write is an audit entry
-(`mcp.task.create`, `mcp.task.comment`) with the person as actor and the token id (never the secret) in `meta`.
+(`mcp.task.create`, `mcp.task.comment`, `mcp.task.update`, `mcp.task.move`, `mcp.task.complete`, `mcp.task.reopen`) with the person as actor and the token id (never the secret) in `meta`.
+
+**Existing WRITE tokens and grants gain edit power.** WRITE used to mean "create and comment". It now also means edit, move, complete and reopen. A token or an
+OAuth grant made earlier with write access can do all of that from the moment this version runs, with no new consent. Read-only tokens and grants are unchanged. To
+keep an app to the old power, revoke its write token or disconnect it in Settings, Connect AI, and connect it again read only.
 
 ## Limits
 

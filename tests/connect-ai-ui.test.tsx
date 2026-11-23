@@ -27,7 +27,7 @@ describe("Settings > Connect AI (MCP)", () => {
     const c = show(view());
     expect((c.querySelector('input[readonly]') as HTMLInputElement).value).toBe("https://mp.example.com/api/mcp");
     expect(c.textContent).toContain('claude mcp add --transport http mergeport https://mp.example.com/api/mcp --header "Authorization: Bearer <your token>"');
-    expect(c.textContent).toMatch(/cannot edit, move or delete anything, and it never changes GitHub/);
+    expect(c.textContent).toMatch(/cannot delete anything, and it never changes GitHub/);
   });
 
   it("lists a token with its fingerprint, scope, last use and expiry, and never a secret", () => {

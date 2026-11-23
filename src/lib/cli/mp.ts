@@ -90,14 +90,14 @@ function resolveTarget(projects: ProjectRow[], repoQ: string | undefined, projec
   return { project: m.projects[0], repo: m.repo.fullName };
 }
 
-function resolveColumn(cols: { key: string; name: string }[], q: string) {
+export function resolveColumn(cols: { key: string; name: string }[], q: string) {
   const n = q.trim().toLowerCase();
   const c = cols.find((x) => x.key === n.replace(/\s+/g, "-") || x.name.toLowerCase() === n);
   if (!c) throw new CliError(`No column "${q}" in this project`, cols.map((x) => `${x.key} (${x.name})`));
   return c;
 }
 
-async function resolveAssignee(db: Db, v: Viewer, projectId: string, raw: string, anyLogin: boolean): Promise<string> {
+export async function resolveAssignee(db: Db, v: Viewer, projectId: string, raw: string, anyLogin: boolean): Promise<string> {
   const who = raw.trim().replace(/^@/, "");
   if (who.toLowerCase() === "me") return v.login.toLowerCase();
   const login = cleanLogin(who);
@@ -112,7 +112,7 @@ async function resolveAssignee(db: Db, v: Viewer, projectId: string, raw: string
   throw new CliError(`@${login} is not a known person in this project. Pick one of these, or pass --any-login to assign a login Mergeport has not seen.`, known.map((k) => `@${k}`));
 }
 
-function parsePriority(raw: string): number {
+export function parsePriority(raw: string): number {
   const k = raw.trim().toLowerCase();
   const op = /^[a-z0-9]{1,8}$/.test(k) ? parseQuickActions(`/priority ${k}`).ops[0] : undefined;
   if (!op || op.kind !== "priority") throw new UsageError(`Priority must be none, low, medium, high or urgent (got "${raw}")`);
