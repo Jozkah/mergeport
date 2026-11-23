@@ -17,7 +17,7 @@ type FakeRepo = {
   /** Releases as GitHub's REST lists them, newest first. */
   releases?: { id: number; tag_name: string; name: string | null; html_url: string; published_at: string | null; draft: boolean; prerelease: boolean; body: string | null }[];
   /** Issues and pull requests (see `addWork`); read with installation tokens. */
-  work?: { id: number; number: number; kind: "issue" | "pr"; title: string; author: string; state: "open" | "closed"; updatedAt: string; headSha: string; reviews?: { id: number; user: string; state: string }[]; requested?: string[]; comments?: { id: number; user: string; body: string }[] }[];
+  work?: { id: number; number: number; kind: "issue" | "pr"; title: string; body?: string; author: string; state: "open" | "closed"; updatedAt: string; headSha: string; reviews?: { id: number; user: string; state: string }[]; requested?: string[]; comments?: { id: number; user: string; body: string }[] }[];
 };
 
 export type FakeInstallation = { id: number; accountLogin: string; accountId: number; accountType: "User" | "Organization"; selection: "all" | "selected"; repos: Set<string>; suspended: boolean };
@@ -61,6 +61,10 @@ export class FakeGitHubServer {
   /** Whether GET /user/installations also lists suspended installations (live GitHub behaviour is unverified). */
   listSuspendedForUsers = false;
   offline = false;
+  /** Test helper: every write made with a user-to-server token (issue create, comment): who, the route, the token's first characters and the body. */
+  userWrites: { login: string; route: string; tokenPrefix: string; body: any }[] = [];
+  /** Simulates an App that was not granted Issues and Pull requests write permission: every user-token write answers 403, as GitHub does for a missing App permission. */
+  appLacksWritePermission = false;
   rateLimitedUntil: number | null = null;
   private nextId = 1000;
   private nextInv = 1;
@@ -473,7 +477,7 @@ export class FakeGitHubServer {
 
   private workJson(r: FakeRepo, w: NonNullable<FakeRepo["work"]>[number]) {
     const base = {
-      id: w.id, number: w.number, title: w.title, body: null, state: w.state, user: this.userJson(w.author), labels: [], assignees: [], milestone: null,
+      id: w.id, number: w.number, title: w.title, body: w.body ?? null, state: w.state, user: this.userJson(w.author), labels: [], assignees: [], milestone: null,
       html_url: `https://github.com/${r.owner}/${r.name}/${w.kind === "pr" ? "pull" : "issues"}/${w.number}`, created_at: w.updatedAt, updated_at: w.updatedAt, closed_at: w.state === "closed" ? w.updatedAt : null, draft: false,
     };
     return w.kind === "pr" ? { ...base, pull_request: { merged_at: null }, merged: false, merged_at: null, head: { sha: w.headSha, ref: `feature-${w.number}` }, base: { ref: r.defaultBranch }, mergeable: true, additions: 1, deletions: 0, changed_files: 1 } : base;
@@ -516,6 +520,39 @@ export class FakeGitHubServer {
     return json(404, { message: "Not Found" });
   }
 
+  /**
+   * Issues and comments written with a user-to-server token: the repository must be readable by that person (404 otherwise, as GitHub
+   * hides private repositories), the App must hold the permission (see `appLacksWritePermission`), and the author is the token's person.
+   * Reading with a user token is not simulated here (Mergeport reads with installation tokens).
+   */
+  private userRepoRoute(me: string, method: string, url: URL, b: any, bearer: string): Response {
+    const m = /^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/.exec(url.pathname);
+    const r = m ? this.repo(decodeURIComponent(m[1]), decodeURIComponent(m[2])) : undefined;
+    if (!m || !r || !this.canRead(r, me)) return json(404, { message: "Not Found" });
+    const sub = m[3] ?? "";
+    const isCreate = method === "POST" && sub === "/issues";
+    const cm = method === "POST" ? /^\/issues\/(\d+)\/comments$/.exec(sub) : null;
+    if (!isCreate && !cm) return json(403, { message: "Resource not accessible by personal access token" });
+    if (this.appLacksWritePermission) return json(403, { message: "Resource not accessible by integration" });
+    this.userWrites.push({ login: me, route: `${method} ${url.pathname}`, tokenPrefix: bearer.slice(0, 4), body: b });
+    const work = (r.work ??= []);
+    if (isCreate) {
+      const title = typeof b?.title === "string" ? b.title.trim() : "";
+      if (!title || title.length > 256 || (typeof b?.body === "string" && b.body.length > 65536)) return json(422, { message: "Validation Failed", errors: [{ resource: "Issue", code: "invalid" }] });
+      const number = work.reduce((x, w) => Math.max(x, w.number), 0) + 1;
+      const w = { id: this.nextId++, number, kind: "issue" as const, title, body: typeof b?.body === "string" ? b.body : undefined, author: me, state: "open" as const, updatedAt: new Date(this.clock()).toISOString(), headSha: sha1(`${r.name}#${number}`) };
+      work.push(w);
+      return json(201, this.workJson(r, w));
+    }
+    const w = work.find((x) => x.number === Number(cm![1]));
+    if (!w) return json(404, { message: "Not Found" });
+    if (typeof b?.body !== "string" || !b.body.trim()) return json(422, { message: "Validation Failed", errors: [{ resource: "IssueComment", code: "missing_field", field: "body" }] });
+    const c = { id: this.nextId++, user: me, body: b.body };
+    (w.comments ??= []).push(c);
+    const at = new Date(this.clock()).toISOString();
+    return json(201, { id: c.id, user: this.userJson(me), body: c.body, created_at: at, updated_at: at });
+  }
+
   private appRoute(method: string, url: URL, bearer: string | undefined, extra: { body?: any; basic?: string; headers?: Headers } = {}): Response {
     const path = url.pathname;
     let m: RegExpExecArray | null;
@@ -529,6 +566,7 @@ export class FakeGitHubServer {
       this.revokedUserTokens.push(t);
       return json(204, null);
     }
+    if (path.startsWith("/repos/") && this.liveUser(bearer)) return this.userRepoRoute(this.liveUser(bearer)!, method, url, extra.body, bearer!);
     if (path.startsWith("/repos/")) {
       const t = bearer ? this.instTokens.get(bearer) : undefined;
       if (!t || t.expiresAt <= this.clock()) return json(401, { message: "Bad credentials" });

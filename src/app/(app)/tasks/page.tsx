@@ -19,7 +19,6 @@ import { NewTask } from "@/components/tasks/NewTask";
 import { AiTasks } from "@/components/tasks/AiTasks";
 import { getAiView } from "@/lib/services/ai";
 import { isDemo } from "@/lib/env";
-import { isHosted } from "@/lib/public-url";
 import { issueDestinationsByProject } from "@/lib/services/task-promotion";
 
 export const metadata = { title: "Tasks" };
@@ -44,7 +43,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<Se
   const peopleByProject: Record<string, string[]> = {};
   for (const p of projects) peopleByProject[p.id] = await assigneeCandidates(db, viewer, p.id);
   // Creating the GitHub issue is a GitHub write: hosted workspaces are read-only for now, so the option is not offered there.
-  const issueRepos = isDemo() || isHosted() ? {} : await issueDestinationsByProject(db, viewer, projects.map((p) => p.id));
+  const issueRepos = isDemo() ? {} : await issueDestinationsByProject(db, viewer, projects.map((p) => p.id));
   const ai = isDemo() ? null : await getAiView(db, viewer.workspaceId);
   const pendingAi = ai?.saved ? await db.aiSuggestion.count({ where: { workspaceId: viewer.workspaceId, state: "NEW" } }) : 0;
   const today = todayIn(viewer.timezone);

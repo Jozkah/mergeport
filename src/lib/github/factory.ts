@@ -82,7 +82,11 @@ export async function portForSync(db: Db, repositoryId: string, o: { onRate?: (r
   return installationPort(db, await boundFor(db, repo), { onRate: o.onRate });
 }
 
-/** Workspaces only read GitHub for now (the App holds read permissions), so a write to a real repository says so instead of failing at GitHub. */
+/**
+ * A write to a real repository through the generic port is refused: the installation only reads. The two opt-in writes (an issue from a task, a
+ * comment) do not come through here; they go through src/lib/github/writes.ts, which uses the acting person's own user-to-server token behind the
+ * ceiling, the workspace switch and the other gates. Merge, close, labels, review and the rest stay refused.
+ */
 export async function portForWrite(db: Db, user: { id: string; login: string }, repo: { isDemo: boolean }): Promise<GithubPort> {
   if (repo.isDemo) return new DemoPort(db, user.login);
   throw new GithubWritesDisabledError();

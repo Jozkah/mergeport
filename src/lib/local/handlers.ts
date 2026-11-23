@@ -69,6 +69,7 @@ const rawHandlers: Record<string, Handler> = {
     if (port) {
       try {
         await syncItem(db, port, p.repositoryId, p.number);
+        await (await import("@/lib/services/task-promotion")).linkPendingTasks(db, p.repositoryId, p.number);
       } finally {
         await recordRate(port.lastRate(), budget);
       }

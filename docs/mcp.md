@@ -74,6 +74,8 @@ Not built: client secrets and confidential clients, client metadata documents, t
 Not built: deleting a card, bulk changes, editing or deleting comments, anything on GitHub (the stdio server's approval-queue
 tools are not offered here), OAuth, sessions and server-sent events.
 
+Follow-up, deliberately not done: the opt-in GitHub writes (create an issue from a task, comment; docs/github-app.md "Writing to GitHub as you") are NOT exposed over MCP. They are made with the person's own GitHub token after an on-screen confirmation of the exact text, and an AI app has no such confirmation. If they are ever offered here it needs its own consent step on the token, the same gates and budgets, and an approval in the app before anything reaches GitHub.
+
 Reads go through the app's own services (`listTasks`, `getTask`, `planningWhere`, `projectWhere`, `repoWhere`), so workspace, restricted spaces and
 private repositories are the app's rules. `create_task` runs the `mp task add` code (same validation, project and assignee resolution, history entry
 "added this from an AI app over MCP"); `add_comment` runs `addComment`. `update_task`, `move_task`, `complete_task` and `reopen_task` run `updateTask`, the

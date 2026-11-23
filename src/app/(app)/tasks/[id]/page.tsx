@@ -85,7 +85,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         </div>
 
         <aside className="flex min-w-0 flex-col gap-5 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-          <PromotePanel db={db} viewer={viewer} taskId={task.id} linked={!!task.workItemId} promoteTo={promote} />
+          <PromotePanel db={db} viewer={viewer} taskId={task.id} linked={!!task.workItemId || task.workNumber !== null} promoteTo={promote} />
           <Panel title="Details">
             <ActionForm action={updateTaskAction} submitLabel="Save changes" pendingLabel="Saving…" resetOnSuccess={false} className="p-4">
               <input type="hidden" name="id" value={task.id} />

@@ -19,13 +19,18 @@ became OWNER; a workspace with no ACTIVE ADMIN gives it to its oldest ACTIVE mem
 | touch the OWNER (remove, demote, change role) | no | no | no | no |
 | hand out OWNER (invite as OWNER, role change to OWNER) | no | no | no | no |
 | create and delete spaces, edit space membership, move projects between spaces | yes | yes | no | no |
-| connect and disconnect the GitHub App installation (`manageGithub`) | yes | yes | no | no |
+| connect and disconnect the GitHub App installation, and switch on "Write to GitHub as you" for the workspace (`manageGithub`) | yes | yes | no | no |
+| create an issue from a task or comment on GitHub as yourself (needs the server ceiling, the workspace switch, your own linked GitHub account and a grant with `manageWork`) | with grant rules below | with grant rules below | with a `manageWork` grant | no |
 | transfer ownership (to an ACTIVE ADMIN) | yes | no | no | no |
 | delete the workspace (policy only; no UI yet) | yes | no | no | no |
 | leave the workspace | no (transfer first) | yes | yes | yes |
 
 An ADMIN may demote or remove another ADMIN (the owner is the safety net); only the owner moves ownership. A REVOKED member, an unknown
 role string or an unknown action gets nothing.
+
+### Writing to GitHub as yourself
+
+Two opt-in writes exist, behind three switches (docs/github-app.md, "Writing to GitHub as you"): the deployment's `MERGEPORT_GITHUB_WRITES=on`, the workspace switch (OWNER and ADMIN) and the person's own linked GitHub account. Beyond them the usual rule applies unchanged: `requireRepo(..., "manageWork")`, so a READER never writes, and a member who can see a repository only because GitHub lists it for them (no grant) is refused with "no grant to change it". GitHub-verified visibility (`GithubRepoAccess`) is only the "may see this repository" gate for a write; it never grants the capability. The write itself is made with the person's own token, so GitHub decides what they may do there.
 
 ## Where it is enforced
 

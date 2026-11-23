@@ -36,7 +36,7 @@ export function NewTask({ projects, peopleByProject, me, defaultProjectId, defau
                   </optgroup>
                 ))}
               </Select>
-              <p className="mt-1 text-[12px] text-ink-3">Creates one issue on GitHub as you, in a repository of the task's project. The task stays on the board and follows the issue. Pick a repository of the project you chose above.</p>
+              <p className="mt-1 text-[12px] text-ink-3">Nothing is sent yet: after the task is created you see exactly what would go to GitHub and confirm it there. The issue is created as you, in a repository of the task&apos;s project, and the task follows it. Pick a repository of the project you chose above.</p>
             </div>
           )}
         </div>

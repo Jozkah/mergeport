@@ -3,6 +3,8 @@ import type { Db } from "@/lib/db";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { requireRepo, requireWorkItem, type Viewer } from "@/lib/authz/viewer";
 import { portForWrite } from "@/lib/github/factory";
+import { githubWrite, validateWriteText, withFooter } from "@/lib/github/writes";
+import { sha256 } from "@/lib/crypto";
 import type { GithubPort, MergeMethod } from "@/lib/github/port";
 import { syncItem } from "@/lib/sync/repository";
 import { derivedDetail } from "./queries";
@@ -31,7 +33,24 @@ async function refresh(ctx: Ctx, port: GithubPort, repositoryId: string, number:
 export async function addComment(ctx: Ctx, workItemId: string, body: string) {
   if (!body.trim()) throw new ValidationError("Write a comment first");
   if (body.length > 65_000) throw new ValidationError("That comment is too long");
-  const { item, repo, port, owner, name } = await load(ctx, workItemId, "manageWork");
+  const item = await requireWorkItem(ctx.db, ctx.v, workItemId, "manageWork");
+  const repo = await requireRepo(ctx.db, ctx.v, item.repositoryId, "manageWork");
+  if (!ctx.port && !repo.isDemo) {
+    // A real repository: opt-in, as the person, through the write gate (src/lib/github/writes.ts). Nothing here uses the installation.
+    const { body: text } = validateWriteText({ body });
+    const sent = withFooter(text);
+    await githubWrite(ctx, {
+      kind: "comment",
+      repo,
+      target: { type: "WorkItem", id: item.id },
+      dedupeKey: `ghwrite:comment:${ctx.v.userId}:${sha256(`${item.id}
+${sent}`)}`,
+      call: (port) => port.createComment(repo.owner.login, repo.name, item.number, sent),
+      numberOf: () => item.number,
+    });
+    return;
+  }
+  const { port, owner, name } = await load(ctx, workItemId, "manageWork");
   await port.createComment(owner, name, item.number, body);
   await refresh(ctx, port, repo.id, item.number);
   await audit(ctx.db, ctx.v, "github.comment", { type: "WorkItem", id: item.id });

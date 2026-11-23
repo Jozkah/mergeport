@@ -6,6 +6,7 @@ import { isDemo } from "@/lib/env";
 import { isHosted } from "@/lib/public-url";
 import { githubAppConfigured } from "@/lib/github/app-config";
 import { listWorkspaceInstallations } from "@/lib/github/binding";
+import { githubWritesView } from "@/lib/services/github-writes-setting";
 import { RESULT_MESSAGES, isConnectResult } from "@/lib/github/connect-messages";
 import { PageHeader } from "@/components/ui/primitives";
 import { GithubSettingsBody } from "@/components/settings/GithubPanels";
@@ -31,7 +32,7 @@ export default async function GithubSettings({ searchParams }: { searchParams: P
         help={<>Connecting lets Mergeport read repositories, issues and pull requests from a GitHub account through the Mergeport GitHub App, with read-only access. You prove on GitHub that you control the account; Mergeport does not keep your GitHub sign-in. Disconnecting never deletes tasks, projects or history.</>}
       />
       <GithubSettingsBody
-        view={{ configured: githubAppConfigured(), manage: can(viewer, "manageGithub"), installations: rows.map((r) => ({ ...r, installationId: String(r.installationId) })) }}
+        view={{ configured: githubAppConfigured(), manage: can(viewer, "manageGithub"), writes: await githubWritesView(db, viewer.workspaceId), installations: rows.map((r) => ({ ...r, installationId: String(r.installationId) })) }}
         result={isConnectResult(code) ? RESULT_MESSAGES[code] : null}
       />
     </>
