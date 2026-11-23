@@ -229,13 +229,16 @@ describe("hosted MCP edit tools", () => {
   it("refuses reopen and complete on a read-only space even when nothing would change, and audits nothing", async () => {
     const open = await mk(a, ids.projects.atlas.id, "Open card");
     const done = await mk(a, ids.projects.atlas.id, "Done card", { columnKey: "done" });
-    const space = await db().space.create({ data: { workspaceId: a.workspaceId, remoteId: "sp-ro", teamRemoteId: "t1", kind: "COMMON", name: "Team", repoOwner: "o", repoName: "r", backend: "GITHUB", canWrite: false, access: "OK" } });
-    await db().project.update({ where: { id: ids.projects.atlas.id }, data: { spaceId: space.id } });
+    const space = await createRestrictedSpace(db(), admin, "Read only for a");
+    await setSpaceMember(db(), admin, space.id, ids.members.a.id, false); // can see the project, cannot write to it
+    await setSpaceMember(db(), admin, space.id, ids.members.admin.id, true);
+    await setProjectAccessSpace(db(), admin, ids.projects.atlas.id, space.id);
+    await removeSpaceMember(db(), admin, space.id, ids.members.admin.id);
     const s = await mint(a);
     for (const [tool, id] of [["reopen_task", open.id], ["reopen_task", done.id], ["complete_task", done.id], ["complete_task", open.id], ["move_task", open.id], ["update_task", open.id]] as const) {
       const r = await call(s, tool, tool === "move_task" ? { task_id: id, column: "ready" } : tool === "update_task" ? { task_id: id, priority: "low" } : { task_id: id });
       expect(r.isError, `${tool} ${id}`).toBe(true);
-      expect(r.text).toMatch(/read-only/);
+      expect(r.text).toMatch(/read-only access to this space/);
     }
     expect(await db().auditLog.count({ where: { action: { startsWith: "mcp.task." } } })).toBe(0);
   });
