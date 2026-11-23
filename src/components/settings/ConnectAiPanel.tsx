@@ -31,7 +31,7 @@ function AppItem({ a, now }: { a: GrantRow; now: Date }) {
       <div className="min-w-0 flex-1 basis-56">
         <p className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="min-w-0 max-w-full truncate font-medium" translate="no" title={a.clientName}><bdi>{a.clientName}</bdi></span>
-          <SimplePill tone="unknown" icon={a.scope === "WRITE" ? Wand2 : KeyRound}>{a.scope === "WRITE" ? "Read and write" : "Read only"}</SimplePill>
+          <SimplePill tone="unknown" icon={a.scope === "WRITE" ? Wand2 : KeyRound}>{a.scope === "WRITE" ? (a.editAllowed ? "Read and change tasks" : "Read, create and comment") : "Read only"}</SimplePill>
         </p>
         <p className="mt-1 text-[12px] text-ink-3">
           connected <span className="tnum">{formatDateOnly(a.createdAt)}</span>
@@ -62,7 +62,7 @@ function TokenItem({ t, now }: { t: TokenRow; now: Date }) {
         <p className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="min-w-0 max-w-full truncate font-medium" translate="no" title={t.name}><bdi>{t.name}</bdi></span>
           <SimplePill tone={live ? "ok" : t.state === "expired" ? "waiting" : "blocked"} icon={live ? undefined : Ban}>{stateLabel[t.state]}</SimplePill>
-          <SimplePill tone="unknown" icon={t.scope === "WRITE" ? Wand2 : KeyRound}>{t.scope === "WRITE" ? "Read and write" : "Read only"}</SimplePill>
+          <SimplePill tone="unknown" icon={t.scope === "WRITE" ? Wand2 : KeyRound}>{t.scope === "WRITE" ? (t.editAllowed ? "Read and change tasks" : "Read, create and comment") : "Read only"}</SimplePill>
         </p>
         <p className="mt-1 text-[12px] text-ink-3">
           <span className="mono" translate="no">{t.prefix}…</span>
@@ -95,7 +95,7 @@ export function ConnectAiBody({ view, now }: { view: ConnectAiView; now: Date })
   return (
     <div className="flex max-w-2xl flex-col gap-5 p-4 text-[13px]">
       <p className="max-w-[70ch] text-pretty text-ink-2">
-        Let an AI app such as Claude look at your tasks, open new ones and add comments, as you. It sees only what you can see here. It cannot edit, move or delete anything, and it never changes GitHub.
+        Let an AI app such as Claude look at your tasks, open new ones, add comments, edit a task, move it between board columns and mark it done or reopen it, as you. It sees only what you can see here. It cannot delete anything, and it never changes GitHub.
       </p>
       <CopyField label="Connector address" value={connectorUrl} />
       <ActionForm action={createApiTokenAction} submitLabel="Create token" pendingLabel="Creating…" className="flex flex-col gap-3" success={{ copy: { field: "secret", label: "Your new token", hint: "Shown once. Paste it into the app now; Mergeport keeps only a fingerprint." } }}>
@@ -108,7 +108,7 @@ export function ConnectAiBody({ view, now }: { view: ConnectAiView; now: Date })
             <label className="label" htmlFor="mcp-scope">Access</label>
             <Select id="mcp-scope" name="scope" defaultValue="READ" className="select">
               <option value="READ">Read only</option>
-              {canWrite && <option value="WRITE">Read, open tasks and comment</option>}
+              {canWrite && <option value="WRITE">Read and change tasks</option>}
             </Select>
           </div>
           <div className="min-w-[min(160px,100%)] flex-1">

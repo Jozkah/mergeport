@@ -22,7 +22,7 @@ export type ToolCtx = {
   instructions?: string;
   /** Never put an error's text in an answer (hosted: it may name internals). */
   quietErrors?: boolean;
-  token?: { id: string; scope: "READ" | "WRITE" };
+  token?: { id: string; scope: "READ" | "WRITE"; editAllowed?: boolean };
 };
 export type ToolResult = { text: string; isError?: boolean };
 

@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   for (let i = 1; i < items.length; i++) {
     if (!(await take(db, `mcp:req:${auth.tokenId}`, REQUESTS_PER_MINUTE, 60_000))) return json(429, { error: "slow down" }, { "retry-after": "60" });
   }
-  const ctx = hostedCtx(db, auth.viewer, { id: auth.tokenId, scope: auth.scope });
+  const ctx = hostedCtx(db, auth.viewer, { id: auth.tokenId, scope: auth.scope, editAllowed: auth.editAllowed });
   const replies: Reply[] = [];
   for (const m of items) {
     if (typeof m !== "object" || m === null || Array.isArray(m)) {

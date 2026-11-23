@@ -55,7 +55,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
   return (
     <AuthShell title={<>Connect <bdi>{r.clientName}</bdi> to Mergeport?</>}>
       <p className="mt-2 text-[13px] text-ink-2 text-pretty">
-        It will act as you, <bdi className="break-all font-medium">{a.user.email ?? `@${a.user.login}`}</bdi>, in the workspace you choose. It can look at tasks, open new ones and add comments. It cannot edit, move or delete anything, and it never changes GitHub.
+        It will act as you, <bdi className="break-all font-medium">{a.user.email ?? `@${a.user.login}`}</bdi>, in the workspace you choose. It can look at tasks, open new ones, add comments, edit a task, move it between board columns and mark it done or reopen it. It cannot delete anything, and it never changes GitHub.
       </p>
       <p className="mt-2 text-[12px] text-ink-3 text-pretty">
         Anyone can register an app under any name, and Mergeport has not checked this one. After you allow it, you go to <span className="mono break-all" translate="no">{host}</span>. Only allow it if you started this connection.

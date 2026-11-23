@@ -18,7 +18,7 @@ afterEach(cleanup);
 Object.defineProperty(window, "matchMedia", { writable: true, value: (q: string) => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }) });
 
 const NOW = new Date("2026-11-22T12:00:00Z");
-const tok = (o: Partial<TokenRow> = {}): TokenRow => ({ id: "t1", name: "Claude laptop", prefix: "mp_pat_AbCdE", scope: "WRITE", createdAt: new Date("2026-11-20T10:00:00Z"), lastUsedAt: new Date("2026-11-22T11:00:00Z"), expiresAt: new Date("2027-02-20T00:00:00Z"), revokedAt: null, owner: "me@example.com", mine: true, state: "active", ...o });
+const tok = (o: Partial<TokenRow> = {}): TokenRow => ({ id: "t1", name: "Claude laptop", prefix: "mp_pat_AbCdE", scope: "WRITE", editAllowed: true, createdAt: new Date("2026-11-20T10:00:00Z"), lastUsedAt: new Date("2026-11-22T11:00:00Z"), expiresAt: new Date("2027-02-20T00:00:00Z"), revokedAt: null, owner: "me@example.com", mine: true, state: "active", ...o });
 const view = (o: Partial<ConnectAiView> = {}): ConnectAiView => ({ connectorUrl: "https://mp.example.com/api/mcp", canWrite: true, admin: false, tokens: [tok()], apps: [], ...o });
 const show = (v: ConnectAiView) => render(<ConnectAiBody view={v} now={NOW} />).container;
 
@@ -27,7 +27,7 @@ describe("Settings > Connect AI (MCP)", () => {
     const c = show(view());
     expect((c.querySelector('input[readonly]') as HTMLInputElement).value).toBe("https://mp.example.com/api/mcp");
     expect(c.textContent).toContain('claude mcp add --transport http mergeport https://mp.example.com/api/mcp --header "Authorization: Bearer <your token>"');
-    expect(c.textContent).toMatch(/cannot edit, move or delete anything, and it never changes GitHub/);
+    expect(c.textContent).toMatch(/cannot delete anything, and it never changes GitHub/);
   });
 
   it("lists a token with its fingerprint, scope, last use and expiry, and never a secret", () => {
@@ -35,7 +35,8 @@ describe("Settings > Connect AI (MCP)", () => {
     const row = c.querySelector('[data-token="t1"]')!;
     expect(row.textContent).toContain("Claude laptop");
     expect(row.textContent).toContain("mp_pat_AbCdE…");
-    expect(row.textContent).toContain("Read and write");
+    expect(row.textContent).toContain("Read and change tasks");
+    expect(show(view({ tokens: [tok({ editAllowed: false })] })).textContent).toContain("Read, create and comment");
     expect(row.textContent).toContain("used 1h ago");
     expect(row.textContent).toContain("expires Feb 20, 2027");
     expect(row.querySelector('button[aria-label="Revoke token Claude laptop"]')).toBeTruthy();

@@ -17,7 +17,7 @@ import { CliError } from "./errors";
  */
 export type MpOut = { stdout: (s: string) => void; stderr: (s: string) => void };
 /** `via` says where the change came from, for the history entry ("added this from ..."); default the command line. */
-export type MpEnv = { db: Db; viewer: Viewer; now: () => Date; out: MpOut; sleep?: (ms: number) => Promise<void>; via?: string };
+export type MpEnv = { db: Db; viewer: Viewer; now: () => Date; out: MpOut; sleep?: (ms: number) => Promise<void>; via?: string; /** Assignees must match a known login exactly (the hosted MCP server); otherwise a unique partial match is accepted. */ exactAssignee?: boolean };
 
 export const DESCRIPTION_MAX = 8000;
 const LIST_MAX = 500;
@@ -90,14 +90,14 @@ function resolveTarget(projects: ProjectRow[], repoQ: string | undefined, projec
   return { project: m.projects[0], repo: m.repo.fullName };
 }
 
-function resolveColumn(cols: { key: string; name: string }[], q: string) {
+export function resolveColumn(cols: { key: string; name: string }[], q: string) {
   const n = q.trim().toLowerCase();
   const c = cols.find((x) => x.key === n.replace(/\s+/g, "-") || x.name.toLowerCase() === n);
   if (!c) throw new CliError(`No column "${q}" in this project`, cols.map((x) => `${x.key} (${x.name})`));
   return c;
 }
 
-async function resolveAssignee(db: Db, v: Viewer, projectId: string, raw: string, anyLogin: boolean): Promise<string> {
+export async function resolveAssignee(db: Db, v: Viewer, projectId: string, raw: string, anyLogin: boolean, exactOnly = false): Promise<string> {
   const who = raw.trim().replace(/^@/, "");
   if (who.toLowerCase() === "me") return v.login.toLowerCase();
   const login = cleanLogin(who);
@@ -105,14 +105,14 @@ async function resolveAssignee(db: Db, v: Viewer, projectId: string, raw: string
   const known = await assigneeCandidates(db, v, projectId);
   const exact = known.find((k) => k.toLowerCase() === login);
   if (exact) return exact.toLowerCase();
-  const partial = known.filter((k) => k.toLowerCase().includes(login));
+  const partial = exactOnly ? [] : known.filter((k) => k.toLowerCase().includes(login));
   if (partial.length === 1) return partial[0].toLowerCase();
   if (partial.length > 1) throw new CliError(`"${raw}" matches several people. Pass the exact login.`, partial.map((p) => `@${p}`));
   if (anyLogin) return login;
   throw new CliError(`@${login} is not a known person in this project. Pick one of these, or pass --any-login to assign a login Mergeport has not seen.`, known.map((k) => `@${k}`));
 }
 
-function parsePriority(raw: string): number {
+export function parsePriority(raw: string): number {
   const k = raw.trim().toLowerCase();
   const op = /^[a-z0-9]{1,8}$/.test(k) ? parseQuickActions(`/priority ${k}`).ops[0] : undefined;
   if (!op || op.kind !== "priority") throw new UsageError(`Priority must be none, low, medium, high or urgent (got "${raw}")`);
@@ -214,7 +214,7 @@ async function taskAdd(env: MpEnv, args: string[], emit: Emit): Promise<number> 
   const projects = await withBusyRetry(() => visibleProjects(db, v), { sleep: env.sleep });
   const { project, repo } = resolveTarget(projects, flagStr(p, "repo"), flagStr(p, "project"));
   const column = resolveColumn(project.columns, flagStr(p, "column") ?? "backlog");
-  const assignee = flagStr(p, "assign") === undefined ? null : await withBusyRetry(() => resolveAssignee(db, v, project.id, flagStr(p, "assign")!, flagBool(p, "any-login")), { sleep: env.sleep });
+  const assignee = flagStr(p, "assign") === undefined ? null : await withBusyRetry(() => resolveAssignee(db, v, project.id, flagStr(p, "assign")!, flagBool(p, "any-login"), env.exactAssignee), { sleep: env.sleep });
 
   const preview = { title, project: { id: project.id, name: project.name }, repo, column: { key: column.key, name: column.name }, assignee, priority: priorityName(priority ?? 0).toLowerCase(), due: due ?? null, labels, description: description ?? null };
   const human = line({ title, project: project.name, repo, column: column.name, assignee, priority: preview.priority, due: preview.due, labels });
@@ -269,7 +269,7 @@ async function taskUpdate(env: MpEnv, args: string[], emit: Emit): Promise<numbe
   const patch: TaskPatch = {};
   if (p.flags.has("title")) patch.title = text(flagStr(p, "title")!, "title", 200);
   if (flagBool(p, "unassign")) patch.assigneeLogin = null;
-  if (flagStr(p, "assign") !== undefined) patch.assigneeLogin = await withBusyRetry(() => resolveAssignee(db, v, t.projectId, flagStr(p, "assign")!, flagBool(p, "any-login")), { sleep: env.sleep });
+  if (flagStr(p, "assign") !== undefined) patch.assigneeLogin = await withBusyRetry(() => resolveAssignee(db, v, t.projectId, flagStr(p, "assign")!, flagBool(p, "any-login"), env.exactAssignee), { sleep: env.sleep });
   if (flagStr(p, "priority") !== undefined) patch.priority = parsePriority(flagStr(p, "priority")!);
   if (flagStr(p, "due") !== undefined) {
     const d = parseDue(flagStr(p, "due")!, env.now(), v.timezone);
