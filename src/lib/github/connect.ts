@@ -8,7 +8,7 @@ import { GithubAppError } from "./app-auth";
 import type { GithubAppConfig } from "./app-config";
 import { claimAppState } from "./app-state";
 import { bindInstallation, markInstallationState, refreshInstallationFacts, unbindInstallation, type InstallationFacts, type InstallationStatus } from "./binding";
-import { exchangeCode, fetchInstallationFacts, getOrgMembership, getUser, listUserInstallations, revokeUserToken, GITHUB_WEB_BASE, type ConnectDeps, type GithubUser } from "./connect-api";
+import { exchangeCode, fetchInstallationFacts, getOrgMembership, getUser, listUserInstallations, revokeUserToken, githubWebBase, type ConnectDeps, type GithubUser } from "./connect-api";
 import type { ConnectResult } from "./connect-messages";
 
 /**
@@ -72,10 +72,10 @@ export async function startConnect(
 
   let url: string;
   if (input.mode === "install") {
-    url = `${GITHUB_WEB_BASE}/apps/${encodeURIComponent(config.slug)}/installations/new?state=${encodeURIComponent(state)}`;
+    url = `${githubWebBase()}/apps/${encodeURIComponent(config.slug)}/installations/new?state=${encodeURIComponent(state)}`;
   } else {
     const q = new URLSearchParams({ client_id: config.clientId, redirect_uri: input.redirectUri, state, code_challenge: challengeOf(nonce), code_challenge_method: "S256", allow_signup: "false" });
-    url = `${GITHUB_WEB_BASE}/login/oauth/authorize?${q.toString()}`;
+    url = `${githubWebBase()}/login/oauth/authorize?${q.toString()}`;
   }
   return { url, nonce, maxAgeSeconds: Math.floor(STATE_TTL_MS / 1000) };
 }

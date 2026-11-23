@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, generateKeyPairSync, randomBytes, verify } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, verify } from "node:crypto";
 
 /**
  * In-memory GitHub, enough REST surface to run team creation, invitations, discovery and the coordination
@@ -340,6 +340,10 @@ export class FakeGitHubServer {
     this.app = { appId, publicKeyPem: publicKey };
     return { appId, privateKeyPem: privateKey, publicKeyPem: publicKey };
   }
+  /** Registers the fake App with a private key the operator already configured Mergeport with (the standalone dev server, scripts/dev-github-fake.ts): only its public half is kept. */
+  registerAppWithKey(appId: string, privateKeyPem: string): void {
+    this.app = { appId, publicKeyPem: createPublicKey(createPrivateKey(privateKeyPem)).export({ type: "spki", format: "pem" }).toString() };
+  }
   /** Installs the App on a user or organisation; `repos` are full names that must already exist in `repos`. */
   addInstallation(accountLogin: string, o: { repos?: string[]; selection?: "all" | "selected"; suspended?: boolean } = {}): FakeInstallation {
     const acct = this.users.get(accountLogin) ?? this.orgs.get(accountLogin);
@@ -470,7 +474,7 @@ export class FakeGitHubServer {
 
   // ---------- issues and pull requests, as an installation sees them ----------
   /** Test helper: an issue or pull request in a fake repository (what `GET /repos/{o}/{r}/issues` lists). */
-  addWork(owner: string, name: string, w: { number: number; kind?: "issue" | "pr"; title: string; author?: string; state?: "open" | "closed"; updatedAt?: string; headSha?: string; reviews?: { id: number; user: string; state: string }[]; requested?: string[]; comments?: { id: number; user: string; body: string }[] }): void {
+  addWork(owner: string, name: string, w: { number: number; kind?: "issue" | "pr"; title: string; body?: string; author?: string; state?: "open" | "closed"; updatedAt?: string; headSha?: string; reviews?: { id: number; user: string; state: string }[]; requested?: string[]; comments?: { id: number; user: string; body: string }[] }): void {
     const r = this.repo(owner, name);
     if (!r) throw new Error(`unknown repository ${owner}/${name}`);
     (r.work ??= []).push({ ...w, kind: w.kind ?? "issue", author: w.author ?? owner, state: w.state ?? "open", updatedAt: w.updatedAt ?? new Date(this.clock()).toISOString(), id: this.nextId++, headSha: w.headSha ?? sha1(`${name}#${w.number}`) });

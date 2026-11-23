@@ -52,7 +52,7 @@ Rules that are easy to miss:
   server refuses a network-reachable `HOST` unless `MERGEPORT_PUBLIC_URL` is set: without it the app is the local app, which trusts any
   request that claims a loopback `Host`. In hosted mode only the public host is served; loopback names, `/api/local/*` and the demo are refused
   whatever address is bound. `MERGEPORT_PORT` (then `PORT`) sets the port, default 3000.
-- Do not set `DEMO_MODE=true`, `MERGEPORT_GITHUB_API_BASE` or `MERGEPORT_FEDERATION_ALLOW_INSECURE` on a deployment.
+- Do not set `DEMO_MODE=true`, `MERGEPORT_GITHUB_API_BASE`, `MERGEPORT_GITHUB_WEB_BASE` or `MERGEPORT_FEDERATION_ALLOW_INSECURE` on a deployment.
 - Env files read by Docker keep quotes literally. Write `KEY=value` without quotes there. A multi-line PEM goes in
   `MERGEPORT_GITHUB_APP_PRIVATE_KEY` with `\n` for newlines, or better mount a file and set `MERGEPORT_GITHUB_APP_PRIVATE_KEY_FILE`.
 
@@ -189,7 +189,7 @@ no down migrations: roll back by restoring the backup.
 - Secrets (`MERGEPORT_ENCRYPTION_KEY`, `MERGEPORT_AUTH_SECRET`, GitHub App secret and key, SMTP password, database password) are random, held
   in the platform's secret store, never in the repository or image. `.env.production` is git-ignored and excluded from the image.
 - Postgres is not published to the internet; its password is not the example one.
-- `DEMO_MODE` is not `true`; no `MERGEPORT_GITHUB_API_BASE`; no `MERGEPORT_FEDERATION_ALLOW_INSECURE`.
+- `DEMO_MODE` is not `true`; no `MERGEPORT_GITHUB_API_BASE` or `MERGEPORT_GITHUB_WEB_BASE`; no `MERGEPORT_FEDERATION_ALLOW_INSECURE`.
 - `MERGEPORT_FEDERATION` stays `off` unless you link instances; if on, prefer `allowlist`.
 - The GitHub App has only the permissions in `docs/github-app.md`; `MERGEPORT_GITHUB_WRITES` stays off unless you want writes.
 - Backups are tested and stored encrypted, separately from the key.

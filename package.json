@@ -17,7 +17,9 @@
     "db:migrate": "prisma migrate deploy",
     "db:dev": "node --import tsx scripts/dev-db.ts",
     "db:seed": "tsx prisma/seed.ts",
-    "worker": "node --import tsx scripts/worker.ts"
+    "worker": "node --import tsx scripts/worker.ts",
+    "dev:github-fake": "node --import tsx scripts/dev-github-fake.ts",
+    "dev:proxy": "node --import tsx scripts/dev-proxy.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
