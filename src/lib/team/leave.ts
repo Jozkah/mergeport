@@ -1,5 +1,7 @@
 import type { Db } from "@/lib/db";
-import { COVERAGE_KEY, HUB_COVERAGE_KEY, HUB_WEBHOOKS_KEY } from "@/lib/hub/webhook-panel";
+
+/** Cache rows an earlier version wrote for the hub relay; still removed on leave. */
+const LEGACY_HUB_KEYS = ["github-app-coverage", "github-app-hub-coverage", "github-app-hub-webhooks"];
 
 /**
  * Stops using the current team on THIS computer: spaces are forgotten, shared repositories and projects become local again,
@@ -18,7 +20,7 @@ export async function leaveTeamLocally(db: Db, workspaceId: string): Promise<{ s
     db.project.updateMany({ where: { workspaceId: ws, spaceId: { not: null } }, data: { spaceId: null } }),
     db.space.deleteMany({ where: { workspaceId: ws } }),
     db.teamConfig.upsert({ where: { workspaceId: ws }, create: { workspaceId: ws, mode: "PERSONAL" }, update: { mode: "PERSONAL", teamRemoteId: null, name: null, ownerLogin: null, commonSpaceId: null } }),
-    db.discoveryCache.deleteMany({ where: { workspaceId: ws, OR: [{ key: { startsWith: "inv-status:" } }, { key: { in: ["invitations", "candidates", COVERAGE_KEY, HUB_COVERAGE_KEY, HUB_WEBHOOKS_KEY] } }] } }),
+    db.discoveryCache.deleteMany({ where: { workspaceId: ws, OR: [{ key: { startsWith: "inv-status:" } }, { key: { in: ["invitations", "candidates", ...LEGACY_HUB_KEYS] } }] } }),
   ]);
   return { spaces };
 }

@@ -18,10 +18,8 @@
     "db:migrate": "prisma migrate deploy",
     "db:dev": "node --import tsx scripts/dev-db.ts",
     "db:seed": "tsx prisma/seed.ts",
-    "migrate:from-postgres": "tsx scripts/migrate-from-postgres.ts",
     "test:live": "vitest run tests/live",
     "worker": "node --import tsx scripts/worker.ts",
-    "hub": "node --import tsx hub/src/main.ts",
     "mp": "node --import tsx scripts/mp.ts",
     "mcp": "node --import tsx scripts/mcp.ts",
     "skill:install": "node --import tsx scripts/install-agent-skill.ts"
@@ -31,7 +29,6 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@fontsource-variable/inter": "^5.3.0",
     "@gsap/react": "^2.1.2",
-    "@prisma/adapter-better-sqlite3": "^7.10.1",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "7.10.1",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -52,7 +49,6 @@
     "sanitize-html": "^2.17.0",
     "shiki": "^4.5.0",
     "tailwind-merge": "^3.3.1",
-    "ws": "^8.22.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -66,7 +62,6 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@types/sanitize-html": "^2.16.0",
-    "@types/ws": "^8.18.2",
     "dotenv": "^17.2.3",
     "embedded-postgres": "^18.7.0-beta.19",
     "eslint": "^9.39.1",
@@ -77,11 +72,6 @@
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.0.8"
-  },
-  "overrides": {
-    "@prisma/adapter-better-sqlite3": {
-      "better-sqlite3": "$better-sqlite3"
-    }
   },
   "engines": {
     "node": ">=24.0.0 <25",

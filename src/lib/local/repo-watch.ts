@@ -4,20 +4,15 @@ import { db as appDb } from "@/lib/db";
 import { isDemo } from "@/lib/env";
 import { GithubError } from "@/lib/github/port";
 import { GitHubRest } from "@/lib/github/rest";
-import { readAllCoverage, readHubWebhooksEnabled } from "@/lib/hub/github-app-install";
-import { COVERAGE_KEY, HUB_COVERAGE_KEY } from "@/lib/hub/webhook-panel";
 import { pollMode } from "@/lib/local/activity";
-import { isHubBackend } from "@/lib/local/backends";
-import { fromJson } from "@/lib/local/discovery";
 import { profileFetch } from "@/lib/local/profile-runner";
 import { readWatchConfig, readWatchSettings, type WatchConfig } from "@/lib/local/watch-settings";
 import { WATCH_MAX_REPOS, effectiveWatchSeconds, watchSummary, type WatchSummary } from "@/lib/local/watch-format";
-import { currentBackend } from "@/lib/local/workspaces";
 import { requestRepositoryRefresh } from "@/lib/services/refresh";
 
 /**
  * Auto-sync watcher for repositories that can never send webhooks (public repositories the person does not own, anything the
- * hub's GitHub App does not cover). While a browser tab is open it probes each such repository with two conditional requests,
+ * GitHub App does not cover). While a browser tab is open it probes each such repository with two conditional requests,
  * the issues list sorted by last update (pull requests are issues too, and a review bumps their updated_at) and the latest
  * commit of the default branch, each with the ETag of the previous answer. A 304 costs no rate limit and does nothing; a
  * different ETag asks for an incremental refresh of that repository through the same job as the Refresh button. Releases, tags
@@ -50,27 +45,16 @@ export type RepoWatchDeps = {
   /** Is the refresh job of that repository still queued or running. */
   refreshPending: (repositoryId: string) => Promise<boolean>;
   settings: () => Promise<{ enabled: boolean; seconds: number; maxRepos?: number }>;
-  /** GitHub ids the hub's App covers while its webhooks are enabled; empty without a hub; null when it could not be read. */
+  /** GitHub ids that need no watching; null when it could not be read. */
   covered: () => Promise<Set<string> | null>;
 };
 
 /**
- * GitHub ids that get instant updates, so need no watching: covered by the hub's App AND the hub's webhooks are enabled
- * (as last seen in `me()`, stored locally; the watcher never asks the hub). Nothing is covered without a hub workspace.
- * Null when the database could not be read (callers skip the cycle or keep the last known set; never "nothing covered").
+ * GitHub ids that need no watching because instant webhook delivery covers them. No relay exists any more, so none are;
+ * kept as the watcher's injectable `covered` source.
  */
-export async function coveredIds(db: Db, backend?: string): Promise<Set<string> | null> {
-  try {
-    if (!isHubBackend(backend ?? (await currentBackend()))) return new Set();
-    if (!(await readHubWebhooksEnabled(db))) return new Set();
-    const workspaceId = (await firstWorkspace(db)).id;
-    const legacy = await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId, key: COVERAGE_KEY } } });
-    const slug = legacy?.payload ? (fromJson<{ appSlug?: string }>(legacy.payload)?.appSlug ?? null) : null;
-    await db.discoveryCache.findUnique({ where: { workspaceId_key: { workspaceId, key: HUB_COVERAGE_KEY } } }); // readAllCoverage swallows read errors; this one must not
-    return await readAllCoverage(db, slug);
-  } catch {
-    return null;
-  }
+export async function coveredIds(): Promise<Set<string> | null> {
+  return new Set();
 }
 
 /** Every active, real, uncovered repository, the least recently synced first. */
@@ -88,11 +72,10 @@ export async function watchTargets(db: Db, covered: Set<string>, max = WATCH_MAX
   return (await watchEligible(db, covered)).slice(0, max);
 }
 
-/** For the pages: which repositories the watcher covers (by GitHub id) and the numbers to show. `instant` ones are never watched. */
-export async function watchView(db: Db, instant: Set<string> = new Set()): Promise<{ ids: Set<string>; summary: WatchSummary; config: WatchConfig }> {
+/** For the pages: which repositories the watcher covers (by GitHub id) and the numbers to show. */
+export async function watchView(db: Db): Promise<{ ids: Set<string>; summary: WatchSummary; config: WatchConfig }> {
   const config = await readWatchConfig(db);
-  const covered = (await coveredIds(db)) ?? new Set<string>();
-  const targets = (await watchTargets(db, new Set([...covered, ...instant]), config.maxRepos)).filter((t) => !instant.has(t.githubId));
+  const targets = await watchTargets(db, (await coveredIds()) ?? new Set<string>(), config.maxRepos);
   return { ids: config.enabled ? new Set(targets.map((t) => t.githubId)) : new Set(), summary: watchSummary(config.enabled, config.seconds, targets.length, config.maxRepos), config };
 }
 
@@ -124,7 +107,7 @@ export function createRepoWatcher(over: Partial<RepoWatchDeps> & { db: Db }) {
       return job !== null;
     },
     settings: () => readWatchSettings(over.db),
-    covered: () => coveredIds(over.db),
+    covered: () => coveredIds(),
     ...over,
   };
   const states = new Map<string, RepoState>();

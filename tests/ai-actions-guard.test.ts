@@ -10,8 +10,7 @@ const h = vi.hoisted(() => ({
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/lib/db", () => ({ db: {}, resolveDbFile: () => "x" }));
 vi.mock("@/lib/env", async (orig) => ({ ...(await orig<typeof import("@/lib/env")>()), isDemo: () => false }));
-vi.mock("@/lib/hub/ports-impl", () => ({ keyFileFor: () => "k" }));
-vi.mock("@/lib/hub/session-vault", () => ({ openVault: () => ({}) }));
+vi.mock("@/lib/hub/session-vault", () => ({ keyFileFor: () => "k", openVault: () => ({}) }));
 vi.mock("@/lib/auth/current", () => ({
   requireWriter: async () => {
     if (h.role === "READER") {

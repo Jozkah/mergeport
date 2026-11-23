@@ -27,7 +27,7 @@ All screenshots use the built-in synthetic demo data (`npm run local:demo`): mad
 
 - **Node 24** (declared in `engines`: `>=24 <25`) and npm 10 or newer. The SQLite binding ships prebuilt inside the package (Windows, macOS and Linux; only Windows x64 was exercised) so nothing is compiled during install.
 - The [GitHub CLI](https://cli.github.com/) (`gh`), signed in: `gh auth login` (details and honest scope notes in `docs/github-cli-setup.md`). Mergeport never stores or logs your token and never sends it to the browser. It asks `gh` for the token of THIS profile's account at run time, keeps it in memory, and hands it to `gh` through the child process's environment (never an argument). See "Account binding" below.
-- Nothing else for the default GitHub-repository mode: no Docker, no Postgres, no VPS, no tunnel, no webhooks, no shared `.env`. Only if a team chooses to run the optional hub (see below) does a server exist, and then it is the hub's, not Mergeport's local app.
+- Nothing else for the default GitHub-repository mode: no Docker, no VPS, no tunnel, no webhooks, no shared `.env`. It needs a PostgreSQL database (`npm run db:dev` starts a native one).
 
 ## Quick start
 
@@ -47,8 +47,6 @@ Demo mode keeps its own database under `~/.mergeport/demo/`. Everything in it is
 - **Team**: you can additionally create or join a team. Mergeport-owned data (project configuration, board state, internal tasks, cross-repository milestones, routing, waiting annotations, triage decisions) is stored as small JSON files in **private GitHub repositories** and synced by every member's local copy. GitHub itself stays the source of truth for issues, pull requests, reviews and labels; each person fetches those with their own access and caches them locally.
 
 Create, invite and join are in the app (**Team**). Creating a team shows the exact repository name, owner, visibility and permissions first and does nothing until you confirm. See `docs/architecture.md`.
-
-Teams can alternatively run their own small **hub server** (one Node process and one SQLite file) instead of GitHub repositories for Mergeport-owned data; it adds live updates and, if its owner sets it up from the Team page, a GitHub App webhook relay for near-instant GitHub changes (the app still works without it). See `hub/README.md` to host one.
 
 ### Reviewing code
 
@@ -76,7 +74,7 @@ Repositories the team shares are matched to your own GitHub access; a repository
 
 ### Workspaces and connecting to a server
 
-The top bar has a workspace switcher. Each workspace (GitHub, or a team server) is a separate local profile, so data never mixes. To use a team server, choose **Connect to a server** on the sign-in card, enter its address and approve the GitHub code it shows. Mergeport must be signed in to `gh` as that same GitHub account. Switching restarts the app in place and shows a short "switching" overlay. See `docs/architecture.md`.
+The top bar has a workspace switcher. Each workspace is a separate local profile, so data never mixes. Switching restarts the app in place and shows a short "switching" overlay. See `docs/architecture.md`.
 
 ## Commands
 
@@ -86,9 +84,8 @@ The top bar has a workspace switcher. Each workspace (GitHub, or a team server) 
 | `npm run dev` | Next.js dev server on `127.0.0.1:3000` using `./.data/dev.db` (development only) |
 | `npm run build` / `npm start` | Production build (runs `prisma generate`) / serve it |
 | `npm run typecheck` / `npm run lint` | `tsc --noEmit` / ESLint |
-| `npm test` | Vitest. Each test uses its own SQLite files; no services needed |
+| `npm test` | Vitest. Tests use an embedded PostgreSQL on port 5434; no services needed |
 | `npm run db:seed` | Seed synthetic data into the dev database |
-| `npm run migrate:from-postgres -- --from <url> --login <you>` | Import a legacy Postgres install (`docs/migration.md`) |
 
 ## Agents and the command line
 
