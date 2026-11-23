@@ -142,7 +142,6 @@ export class TeamService {
 
   async createTeam(plan: TeamPlan, opts: { confirmed: boolean }): Promise<Space> {
     if (!opts.confirmed) throw new ValidationError("Confirm the repository, owner and permissions before anything is created");
-    this.engine?.assertBackend("GITHUB");
     const workspaceId = await this.ws();
     const existing = await this.db.teamConfig.findUnique({ where: { workspaceId } });
     if (existing?.mode === "TEAM") throw new ValidationError("This profile is already part of a team");
@@ -176,7 +175,6 @@ export class TeamService {
 
   /** A separate private repository whose collaborators are exactly the audience. Admin of the common space only (GitHub enforces repo creation rights). */
   async createRestrictedSpace(input: { name: string; owner?: string }): Promise<Space> {
-    this.engine?.assertBackend("GITHUB");
     const workspaceId = await this.ws();
     const team = await this.db.teamConfig.findUnique({ where: { workspaceId } });
     if (!team || team.mode !== "TEAM" || !team.teamRemoteId) throw new ValidationError("Create or join a team first");
@@ -361,7 +359,6 @@ export class TeamService {
    */
   async join(refInput: string, opts: { confirmed: boolean; expectedRepoId?: number }): Promise<Space> {
     if (!opts.confirmed) throw new ValidationError("Joining needs your explicit confirmation after reviewing what it downloads and publishes");
-    this.engine?.assertBackend("GITHUB");
     const c = await this.inspect(refInput);
     if (opts.expectedRepoId !== undefined && c.repoId !== 0 && c.repoId !== opts.expectedRepoId) throw new ValidationError("That repository changed since it was listed (its GitHub id is different). Review it again before joining.");
     if (c.status === "no-access") throw new ForbiddenError(c.reason ?? "No access");

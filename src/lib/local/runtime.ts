@@ -8,7 +8,6 @@ import { GitHubRest } from "@/lib/github/rest";
 import { SyncEngine } from "@/lib/sync/engine";
 import { CoordinationStore } from "@/lib/sync/store";
 import { TeamService } from "@/lib/team/service";
-import { GITHUB_BACKEND, isHubBackend, type Backend } from "@/lib/local/backends";
 import { firstWorkspace } from "@/lib/local/profile";
 
 /**
@@ -86,13 +85,10 @@ async function buildEngine(workspaceId: string): Promise<SyncEngine | null> {
     state.version++;
     state.bus.emit("change", { version: state.version, ...e });
   };
-  const launched = process.env.MERGEPORT_BACKEND;
-  const profileBackend = launched === GITHUB_BACKEND || (launched && isHubBackend(launched)) ? (launched as Backend) : GITHUB_BACKEND;
   const engine = new SyncEngine({
     workspaceId,
     db,
     actor,
-    profileBackend,
     store: (s: Space) => new CoordinationStore(new GitHubRest(f), s.repoOwner, s.repoName),
     onChange,
   });

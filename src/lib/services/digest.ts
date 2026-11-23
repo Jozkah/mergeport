@@ -200,9 +200,8 @@ async function mineEntries(ctx: DigestContext, q: AttentionQueues): Promise<Dige
   const unread = (await inbox(db, v, { now: ctx.now, queues: q })).unread;
   if (unread > 0) out.push(entry(ctx, { key: "inbox", title: `${unread} unread inbox item${unread === 1 ? "" : "s"}`, repo: null, href: "/inbox", reason: "New since you last looked" }));
 
-  const [conflicts, restores] = await Promise.all([db.syncConflict.count({ where: { status: "OPEN" } }), db.hubRestore.count({ where: { status: "OPEN" } })]);
+  const conflicts = await db.syncConflict.count({ where: { status: "OPEN" } });
   if (conflicts > 0) out.push(entry(ctx, { key: "sync-conflicts", title: `${conflicts} sync conflict${conflicts === 1 ? "" : "s"} to resolve`, repo: null, href: "/sync", reason: "Your edit and a teammate's disagree" }));
-  if (restores > 0) out.push(entry(ctx, { key: "hub-restores", title: `${restores} restored-server decision${restores === 1 ? "" : "s"}`, repo: null, href: "/sync", reason: "The team server was restored from a backup" }));
 
   const repos = await db.repository.findMany({ where: { AND: [repoWhere(v), { OR: [{ syncError: { not: null } }, { trackingStatus: "DISCONNECTED" }] }] }, orderBy: { fullName: "asc" } });
   for (const r of repos) out.push(entry(ctx, { key: `repo:${r.id}`, title: r.fullName, repo: r.fullName, href: "/repositories", reason: r.trackingStatus === "DISCONNECTED" ? `Disconnected${r.statusDetail ? `: ${r.statusDetail}` : ""}` : `Sync is failing: ${r.syncError}`, since: r.lastSyncedAt }));

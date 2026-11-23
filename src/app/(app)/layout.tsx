@@ -76,16 +76,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const profile = await checkProfile(); // last known answer; refreshed in the background, never waits on gh
   const githubState = profile.kind === "hosted" ? await connectionState(db, viewer.workspaceId) : "ok";
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
-  const [spaceCount, conflictRows, restoreRows, quarantined, pendingOps, offlineSpaces] = await Promise.all([
+  const [spaceCount, openConflicts, quarantined, pendingOps, offlineSpaces] = await Promise.all([
     db.space.count({ where: { workspaceId: viewer.workspaceId } }),
     db.syncConflict.count({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } } }),
-    // A restored server needs a decision (send my copies again, or keep the server's), like a conflict does.
-    db.hubRestore.count({ where: { status: "OPEN", space: { workspaceId: viewer.workspaceId } } }),
     db.outboxOp.count({ where: { status: "QUARANTINED", space: { workspaceId: viewer.workspaceId } } }),
     db.outboxOp.count({ where: { status: { in: ["PENDING", "SENT", "FAILED"] }, space: { workspaceId: viewer.workspaceId } } }),
     db.space.count({ where: { workspaceId: viewer.workspaceId, lastError: "offline" } }),
   ]);
-  const openConflicts = conflictRows + restoreRows;
   // The single state shown in the top bar is the MOST SEVERE one across spaces (what needs a person comes first).
   const SEVERITY: SyncStateName[] = ["conflict", "revoked", "signin", "schema", "rate-limited", "offline", "reconnecting", "syncing", "pending", "read-only", "synced"];
   let aggregate: SyncStateName = openConflicts ? "conflict" : quarantined ? "revoked" : offlineSpaces ? "offline" : pendingOps ? "pending" : "synced";
@@ -94,7 +91,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     const states = await Promise.all((await db.space.findMany({ where: { workspaceId: viewer.workspaceId } })).map(async (s) => (await engine.stateFor(s)).state as SyncStateName));
     aggregate = states.sort((x, y) => SEVERITY.indexOf(x) - SEVERITY.indexOf(y))[0] ?? aggregate;
   }
-  if (restoreRows) aggregate = "conflict";
   // Refreshing tracked source repositories is real work too, and it exists with no team space at all.
   // A job still marked RUNNING by a process that died is not work in progress; it is reclaimed on a timer.
   const bootAt = processStartedAt();
