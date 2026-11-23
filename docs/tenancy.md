@@ -5,11 +5,11 @@ that workspace, and every query on tenant data names the workspace.
 
 ## Model classification
 
-81 models: 1 tenant anchor, 31 ROOT, 38 CHILD, 11 GLOBAL.
+86 models: 1 tenant anchor, 35 ROOT, 38 CHILD, 12 GLOBAL.
 
 **Tenant anchor.** `Workspace` is the tenant itself.
 
-**ROOT (31).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
+**ROOT (35).** The model has a `workspaceId` column, a foreign key to `Workspace` with `ON DELETE CASCADE`, and an index that
 starts with it (a unique key that starts with it counts). Every query on a ROOT model must name the workspace.
 
 | Model | Notes |
@@ -26,6 +26,8 @@ starts with it (a unique key that starts with it counts). Every query on a ROOT 
 | GitCache, DiscoveryCache | Primary key is (workspaceId, key). The git cache holds private repository content, and discovery lists come from one person's credential, so neither may be shared across tenants. |
 | WorkspaceInstallation | Which GitHub App installations a workspace uses (docs/github-app.md). Unique on (workspaceId, installationId). This row is the tenant record: access to an installation, and so to its repositories, exists only through it. A row exists only once control was proved: `verifiedAt`, `verifiedGithubUserId` (the GitHub user whose token proved it) and `proofMethod` (for example `user-installations`) are NOT NULL, and `connectedByUserId` (SET NULL) records who in Mergeport connected it. `Repository.installationId` (nullable, indexed) names the installation that serves a repository; local `gh` and demo repositories stay null. It is tied to the bindings by a composite foreign key `Repository (workspaceId, installationId)` to `WorkspaceInstallation (workspaceId, installationId)` (MATCH SIMPLE, so null is unchecked; NO ACTION, checked at the end of the statement so deleting a workspace still cascades through both tables). A binding cannot be deleted while a repository uses it: `unbindInstallation` nulls the repositories first. Only `src/lib/github/binding.ts` writes the column and creates or removes bindings (`bindInstallation`, `unbindInstallation`; the connect flow in `src/lib/github/connect.ts` calls them after proof; `tests/github-app-bindings.test.ts` scans for the column writes), and the sync entity upserts never touch it. The same installation may be bound by several workspaces, each with its own proof row. |
 | GithubAppState | Short-lived, single-use install and OAuth state (hash only, user, kind, expiry, used time), issued to one user for one workspace: workspaceId with a cascading foreign key and an index that starts with it. The state value is `<workspaceId>.<random>`; the callback reads the workspace id from the front (untrusted), hashes the whole value and claims it with `claimAppState` (one conditional UPDATE on workspace, hash, `usedAt` null and `expiresAt` in the future, count must be 1), so concurrent callbacks have one winner and an expired or used state claims nothing. The connect flow issues kinds `connect` and `connect-existing[:account]`, bound to the starting person; the callback also requires the same signed-in person, the browser nonce cookie (`nonceHash`) and an ACTIVE membership with the `manageGithub` right in that workspace. |
+| ApiToken | Personal access token for the hosted MCP endpoint (docs/mcp.md): bound to one workspace and one user, only the sha256 of the secret stored (`tokenHash`, unique). Found by that hash (an allowlisted `findUnique`: the secret names the tenant); the row then supplies the workspace for `loadViewer` and everything after. |
+| OAuthGrant, OAuthCode, OAuthRefresh | OAuth for the hosted MCP endpoint (docs/mcp.md): a grant is one person's consent for one app in ONE workspace (the family its tokens hang off); a code is single-use, 60 seconds, bound to client, redirect address, PKCE challenge, workspace and person; a refresh token rotates on every use. Codes and refresh tokens are found by the sha256 of their secret (allowlisted `findUnique`); the row then supplies the workspace for every later query, including the single-use claim. `ApiToken` also carries `kind` (PAT or OAUTH), `grantId` and `audience`. |
 | Job | `workspaceId` is nullable, see below. |
 
 **CHILD (38).** Scoped through a foreign key to a ROOT parent; no column. Through Repository: ProjectRepository, RepositoryGrant,
@@ -36,8 +38,9 @@ PlanEvent. Through Space: SyncEntity, OutboxOp, SyncConflict, HubRestore. Person
 NotificationPref, InboxState, SeenState, ReviewDraft, ViewedFile): owned by a person, and the work item or file ids inside them are
 cuids that only exist in one workspace.
 
-**GLOBAL (11), shared on purpose.**
+**GLOBAL (12), shared on purpose.**
 
+- `OAuthClient`: an app that registered itself (RFC 7591, public client: name and exact redirect addresses, no secret). It names no workspace and holds nothing private; a person authorizes it for one workspace through an `OAuthGrant`. Capped (1000 rows, unused ones older than a day are forgotten when full).
 - `User`, `Session`, `Identity`, `MagicLink`: a person's account and how they sign in (see `docs/auth.md`). A user belongs to workspaces through `Member`. `Session.activeWorkspaceId` only chooses among the person's own memberships and is re-checked on every request.
 - `GithubOwner`: a public GitHub account (login, type, avatar) keyed by GitHub's immutable id. It holds nothing private and is the
   same for every tenant.

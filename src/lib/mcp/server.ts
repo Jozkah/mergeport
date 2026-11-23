@@ -19,22 +19,22 @@ export async function handle(msg: Msg, ctx: ToolCtx): Promise<Reply | null> {
   switch (method) {
     case "initialize": {
       const asked = typeof params?.protocolVersion === "string" ? params.protocolVersion : "";
-      return notification ? null : { jsonrpc: "2.0", id: id!, result: { protocolVersion: SUPPORTED.includes(asked) ? asked : SUPPORTED[0], capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: "Mergeport keeps tasks and pull request status on this computer. Use mergeport_projects when unsure where a task belongs; if a name is ambiguous, ask the person instead of guessing." } };
+      return notification ? null : { jsonrpc: "2.0", id: id!, result: { protocolVersion: SUPPORTED.includes(asked) ? asked : SUPPORTED[0], capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: ctx.instructions ?? "Mergeport keeps tasks and pull request status on this computer. Use mergeport_projects when unsure where a task belongs; if a name is ambiguous, ask the person instead of guessing." } };
     }
     case "ping":
       return notification ? null : { jsonrpc: "2.0", id: id!, result: {} };
     case "tools/list":
-      return notification ? null : { jsonrpc: "2.0", id: id!, result: { tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) } };
+      return notification ? null : { jsonrpc: "2.0", id: id!, result: { tools: (ctx.tools ?? TOOLS).map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) } };
     case "tools/call": {
       if (notification) return null;
-      const tool = TOOLS.find((t) => t.name === params?.name);
+      const tool = (ctx.tools ?? TOOLS).find((t) => t.name === params?.name);
       if (!tool) return err(id, -32602, `Unknown tool ${String(params?.name)}`);
       const args = params?.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments) ? (params.arguments as Record<string, unknown>) : {};
       try {
         const r = await tool.run(args, ctx);
         return { jsonrpc: "2.0", id: id!, result: { content: [{ type: "text", text: r.text }], ...(r.isError ? { isError: true } : {}) } };
       } catch (e) {
-        return { jsonrpc: "2.0", id: id!, result: { content: [{ type: "text", text: `Unexpected error: ${e instanceof Error ? e.message : String(e)}` }], isError: true } };
+        return { jsonrpc: "2.0", id: id!, result: { content: [{ type: "text", text: ctx.quietErrors ? "Something went wrong. Nothing was changed." : `Unexpected error: ${e instanceof Error ? e.message : String(e)}` }], isError: true } };
       }
     }
     default:

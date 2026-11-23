@@ -7,7 +7,7 @@ import { assigneeCandidates, cleanLabels, cleanLogin, createTask, listTasks, loa
 import { flagBool, flagList, flagStr, hasControlChars, parseArgs, UsageError, type FlagSpec, type Parsed } from "./argv";
 import { isBusy, withBusyRetry } from "./busy";
 import { parseDue } from "./dates";
-import { CliError } from "./locate";
+import { CliError } from "./errors";
 
 /**
  * `npm run mp -- <command>`: Mergeport's own task records from the command line, for people and for AI agents.
@@ -16,7 +16,8 @@ import { CliError } from "./locate";
  * Pure: `scripts/mp.ts` supplies the database, the viewer and the output streams.
  */
 export type MpOut = { stdout: (s: string) => void; stderr: (s: string) => void };
-export type MpEnv = { db: Db; viewer: Viewer; now: () => Date; out: MpOut; sleep?: (ms: number) => Promise<void> };
+/** `via` says where the change came from, for the history entry ("added this from ..."); default the command line. */
+export type MpEnv = { db: Db; viewer: Viewer; now: () => Date; out: MpOut; sleep?: (ms: number) => Promise<void>; via?: string };
 
 export const DESCRIPTION_MAX = 8000;
 const LIST_MAX = 500;
@@ -37,7 +38,7 @@ const B: FlagSpec = { kind: "bool" };
 
 type ProjectRow = Awaited<ReturnType<typeof visibleProjects>>[number];
 
-async function visibleProjects(db: Db, v: Viewer) {
+export async function visibleProjects(db: Db, v: Viewer) {
   return db.project.findMany({
     where: projectWhere(v),
     orderBy: { name: "asc" },
@@ -51,7 +52,7 @@ async function visibleProjects(db: Db, v: Viewer) {
 const projectLabel = (p: { name: string; id: string }) => `${p.name} (${p.id})`;
 const repoNames = (p: ProjectRow) => p.repositories.map((r) => r.repository.fullName).sort();
 
-function resolveProject(projects: ProjectRow[], q: string): ProjectRow {
+export function resolveProject(projects: ProjectRow[], q: string): ProjectRow {
   const n = q.trim().toLowerCase();
   const hit = (list: ProjectRow[]) => {
     if (list.length === 1) return list[0];
@@ -237,7 +238,7 @@ async function taskAdd(env: MpEnv, args: string[], emit: Emit): Promise<number> 
       await sleep(250 * attempt);
     }
   }
-  await cliNote(env, task.id, "added this from the command line");
+  await cliNote(env, task.id, `added this from ${env.via ?? "the command line"}`);
   emit({ ok: true, dryRun: false, task: { id: task.id, ...preview, link: `/tasks/${task.id}` } }, `Created task ${task.id}: ${human}. Open: /tasks/${task.id}`);
   return 0;
 }
@@ -251,7 +252,7 @@ const needId = (p: Parsed, what: string) => {
 async function changeTask(env: MpEnv, id: string, patch: TaskPatch, before: TaskRow): Promise<{ changed: boolean; task: ReturnType<typeof summary> }> {
   const after = await withBusyRetry(() => updateTask(env.db, env.viewer, id, patch), { sleep: env.sleep });
   const changed = after.version !== before.version;
-  if (changed) await cliNote(env, id, "changed this from the command line");
+  if (changed) await cliNote(env, id, `changed this from ${env.via ?? "the command line"}`);
   const fresh = await withBusyRetry(() => loadTask(env.db, env.viewer, id), { sleep: env.sleep });
   return { changed, task: summary(fresh) };
 }
