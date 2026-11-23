@@ -34,7 +34,7 @@ export async function PromotePanel({ db, viewer, taskId, linked, promoteTo }: { 
   const all = await promotionDestinations(db, viewer, taskId);
   if (all.length === 0) return null;
   // Offer only where every gate would pass; when none does, say why (nothing at all while the server has writes off).
-  const repos = await db.repository.findMany({ where: { id: { in: all.map((r) => r.id) } } });
+  const repos = await db.repository.findMany({ where: { id: { in: all.map((r) => r.id) }, workspaceId: viewer.workspaceId } });
   const refusals = new Map<string, RefusalReason | null>();
   for (const r of repos) refusals.set(r.id, await writeRefusal(db, viewer, r));
   const destinations = all.filter((r) => refusals.get(r.id) === null);

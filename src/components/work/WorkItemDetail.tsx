@@ -56,7 +56,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   // Writes to GitHub are not enabled yet (the App holds read permissions); the demo store accepts them.
   const writeBlocked = item.repository.isDemo ? undefined : `${GITHUB_WRITES_DISABLED}.`;
   // Commenting is the one write that can be opted into (src/lib/github/writes.ts): offered only when every gate would pass, with the reason otherwise.
-  const commentRefusal = item.repository.isDemo || !caps.manageWork ? null : await writeRefusal(db, viewer, await db.repository.findUniqueOrThrow({ where: { id: item.repositoryId } }));
+  const commentRefusal = item.repository.isDemo || !caps.manageWork ? null : await writeRefusal(db, viewer, await db.repository.findFirstOrThrow({ where: { id: item.repositoryId, workspaceId: viewer.workspaceId } }));
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
   const comments = item.comments;

@@ -68,7 +68,7 @@ export async function previewPromotion(db: Db, v: Viewer, taskId: string, reposi
   if (isLinked(t)) throw new ValidationError("This task already follows a GitHub item");
   const dest = (await promotionDestinations(db, v, taskId)).find((r) => r.id === repositoryId);
   if (!dest) throw new ValidationError("Choose one of this project's repositories that you can manage");
-  const repo = await db.repository.findUniqueOrThrow({ where: { id: repositoryId } });
+  const repo = await db.repository.findFirstOrThrow({ where: { id: repositoryId, workspaceId: v.workspaceId } });
   const checklist = await db.taskCheckItem.findMany({ where: { itemId: taskId }, orderBy: [{ position: "asc" }, { createdAt: "asc" }] });
   // Labels are never sent to a real repository: this change writes an issue and nothing else on GitHub.
   const labels = repo.isDemo && Array.isArray(t.labels) ? (t.labels as string[]) : [];
