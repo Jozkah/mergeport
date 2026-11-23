@@ -1,0 +1,57 @@
+# Mergeport: Postgres + web + worker from one image (docs/deploy.md).
+#
+#   cp .env.production.example .env.production      # then fill it in
+#   docker compose --env-file .env.production up -d --build
+#
+# `--env-file` feeds the ${...} substitutions below (build args, the Postgres password); `env_file:` hands the same file to the containers.
+# A reverse proxy with TLS terminates in front of `web` (published on 127.0.0.1 only). Do not publish Postgres.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mergeport
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: mergeport
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mergeport -d mergeport"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build:
+      context: .
+      args:
+        # Baked into the build: the public address (next.config.ts allows Server Actions from it). Changing it needs a rebuild.
+        MERGEPORT_PUBLIC_URL: ${MERGEPORT_PUBLIC_URL:?set MERGEPORT_PUBLIC_URL in .env.production}
+    image: mergeport:latest
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      # Wins over any DATABASE_URL in the env file: the database is the service above.
+      DATABASE_URL: postgresql://mergeport:${POSTGRES_PASSWORD}@postgres:5432/mergeport
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    # The image's default command applies migrations, then serves on 0.0.0.0:3000. Its HEALTHCHECK calls GET /api/health.
+
+  worker:
+    image: mergeport:latest
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgresql://mergeport:${POSTGRES_PASSWORD}@postgres:5432/mergeport
+      MERGEPORT_ROLE: worker # the worker has no HTTP port: the image health check passes
+    command: ["node", "--import", "tsx", "scripts/worker.ts"]
+    depends_on:
+      web:
+        condition: service_healthy # migrations are done once the web service answers
+
+volumes:
+  pgdata:

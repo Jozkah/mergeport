@@ -3,8 +3,8 @@
  * answers only on loopback names. Read from process.env on every call (not the cached env()) because proxy.ts and the tests
  * both need the current value.
  */
-export function publicOrigin(): URL | null {
-  const raw = process.env.MERGEPORT_PUBLIC_URL?.trim();
+export function publicOrigin(value: string | undefined = process.env.MERGEPORT_PUBLIC_URL): URL | null {
+  const raw = value?.trim();
   if (!raw) return null;
   try {
     const u = new URL(raw);

@@ -43,7 +43,7 @@ npm run demo                    # demo mode: synthetic data, no GitHub at all; o
 
 Optional GitHub writes (create an issue from a task, comment), made as each person with their own linked GitHub account: `MERGEPORT_GITHUB_WRITES=on` (default `off`) lets a workspace owner or administrator switch them on in Settings, GitHub; the App then also needs Issues and Pull requests write permission, which each installation owner must accept (`docs/github-app.md`, "Writing to GitHub as you").
 
-Real GitHub data needs a hosted setup: set `MERGEPORT_PUBLIC_URL` and the variables in `docs/auth.md` and `docs/github-app.md`, run `npm start` for the web app and `npm run worker` for the background jobs (sync, digests, webhook upkeep). There is no sign-in without it other than the demo's synthetic people.
+Real GitHub data needs a hosted setup: set `MERGEPORT_PUBLIC_URL` and the variables in `docs/auth.md` and `docs/github-app.md`, run `npm start` for the web app and `npm run worker` for the background jobs (sync, digests, webhook upkeep). Deploying it (Dockerfile, compose, Nixpacks, reverse proxy, health check, backups, upgrades) is in `docs/deploy.md`. There is no sign-in without it other than the demo's synthetic people.
 
 ### Reviewing code
 
@@ -69,7 +69,7 @@ A deployment holds many workspaces; the top bar has a workspace switcher for peo
 | `npm run dev` | Next.js dev server on `127.0.0.1:3000` against `DATABASE_URL` |
 | `npm run worker` | The background job loop (sync, digests, webhooks maintenance); several can share one database |
 | `npm run db:dev` | Native dev Postgres on port 5433, data in `.data/pg` |
-| `npm run build` / `npm start` | Production build (runs `prisma generate`) / apply migrations and serve it |
+| `npm run build` / `npm start` | Production build (runs `prisma generate`) / apply migrations and serve it on `HOST` (default `127.0.0.1`) and `MERGEPORT_PORT` or `PORT` (default 3000); see `docs/deploy.md` |
 | `npm run typecheck` / `npm run lint` | `tsc --noEmit` / ESLint |
 | `npm test` | Vitest. Tests use an embedded PostgreSQL on port 5434; no services needed |
 | `npm run db:seed` | Seed synthetic data (`DEMO_MODE=true`) into the database named by `DATABASE_URL` |

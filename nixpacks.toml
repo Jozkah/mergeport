@@ -1,0 +1,8 @@
+# Nixpacks / Railpack-style builds (docs/deploy.md). One build, two start commands: the web service uses `npm start`
+# (migrations, then the server); the worker service overrides the start command with `npm run worker` (see Procfile).
+[variables]
+# Listen on all interfaces inside the container. Refused unless MERGEPORT_PUBLIC_URL is set (src/lib/bind-address.ts).
+HOST = "0.0.0.0"
+
+[start]
+cmd = "npm start"
