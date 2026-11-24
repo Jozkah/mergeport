@@ -28,7 +28,7 @@ right to create tables in the database, not superuser rights.
 
 ## 2. Set the environment
 
-Copy `.env.production.example` and fill it in. The file lists every variable with a comment. The minimum for a working hosted server:
+Copy `.env.production.example` to `.env` and fill it in (compose and a deployer's dashboard both read `.env`; the compose file has no `${...}` substitution). The file lists every variable with a comment. The minimum for a working hosted server:
 
 | Variable | Why |
 | --- | --- |
@@ -61,8 +61,8 @@ Rules that are easy to miss:
 ### Dockerfile or compose
 
 ```sh
-cp .env.production.example .env.production      # fill it in; set POSTGRES_PASSWORD if you use the bundled Postgres
-docker compose --env-file .env.production up -d --build
+cp .env.production.example .env      # fill it in; with the bundled Postgres set POSTGRES_PASSWORD and the same password in DATABASE_URL
+docker compose up -d --build
 ```
 
 Compose starts `postgres` (named volume, health check), `web` (waits for a healthy database, applies migrations, serves on
@@ -187,7 +187,7 @@ no down migrations: roll back by restoring the backup.
 - `MERGEPORT_TRUST_PROXY=true` and `MERGEPORT_TRUSTED_PROXY_HOPS` equal to the proxies you really run; the proxy appends, never trusts, a client-sent `X-Forwarded-For`.
 - `MERGEPORT_PUBLIC_URL` is the one public https host; the proxy forwards that Host unchanged.
 - Secrets (`MERGEPORT_ENCRYPTION_KEY`, `MERGEPORT_AUTH_SECRET`, GitHub App secret and key, SMTP password, database password) are random, held
-  in the platform's secret store, never in the repository or image. `.env.production` is git-ignored and excluded from the image.
+  in the platform's secret store, never in the repository or image. `.env` is git-ignored and excluded from the image.
 - Postgres is not published to the internet; its password is not the example one.
 - `DEMO_MODE` is not `true`; no `MERGEPORT_GITHUB_API_BASE` or `MERGEPORT_GITHUB_WEB_BASE`; no `MERGEPORT_FEDERATION_ALLOW_INSECURE`.
 - `MERGEPORT_FEDERATION` stays `off` unless you link instances; if on, prefer `allowlist`.

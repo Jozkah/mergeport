@@ -1,18 +1,20 @@
 # Mergeport: Postgres + web + worker from one image (docs/deploy.md).
 #
-#   cp .env.production.example .env.production      # then fill it in
-#   docker compose --env-file .env.production up -d --build
+#   cp .env.production.example .env      # then fill it in
+#   docker compose up -d --build
 #
-# `--env-file` feeds the ${...} substitutions below (build args, the Postgres password); `env_file:` hands the same file to the containers.
+# Everything comes from the file `.env` next to this one (a deployer's dashboard writes exactly that file). There is no ${...}
+# substitution in this file, so a deployer that forbids it accepts it as is. Required in `.env`: MERGEPORT_PUBLIC_URL,
+# POSTGRES_PASSWORD, and DATABASE_URL = postgresql://mergeport:<POSTGRES_PASSWORD>@postgres:5432/mergeport
 # A reverse proxy with TLS terminates in front of `web` (published on 127.0.0.1 only). Do not publish Postgres.
 
 services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    env_file: .env # POSTGRES_PASSWORD
     environment:
       POSTGRES_USER: mergeport
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
       POSTGRES_DB: mergeport
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -27,13 +29,11 @@ services:
       context: .
       args:
         # Baked into the build: the public address (next.config.ts allows Server Actions from it). Changing it needs a rebuild.
-        MERGEPORT_PUBLIC_URL: ${MERGEPORT_PUBLIC_URL:?set MERGEPORT_PUBLIC_URL in .env.production}
+        # A bare name takes its value from `.env`.
+        - MERGEPORT_PUBLIC_URL
     image: mergeport:latest
     restart: unless-stopped
-    env_file: .env.production
-    environment:
-      # Wins over any DATABASE_URL in the env file: the database is the service above.
-      DATABASE_URL: postgresql://mergeport:${POSTGRES_PASSWORD}@postgres:5432/mergeport
+    env_file: .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,9 +44,8 @@ services:
   worker:
     image: mergeport:latest
     restart: unless-stopped
-    env_file: .env.production
+    env_file: .env
     environment:
-      DATABASE_URL: postgresql://mergeport:${POSTGRES_PASSWORD}@postgres:5432/mergeport
       MERGEPORT_ROLE: worker # the worker has no HTTP port: the image health check passes
     command: ["node", "--import", "tsx", "scripts/worker.ts"]
     depends_on:
