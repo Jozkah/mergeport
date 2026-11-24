@@ -7,7 +7,7 @@
  */
 import "dotenv/config";
 import { db } from "../src/lib/db";
-import { startLocalScheduler, stopLocalScheduler } from "../src/lib/local/scheduler";
+import { startLocalScheduler, stopLocalScheduler } from "../src/lib/worker/scheduler";
 import { HEARTBEAT_EVERY_MS, beat } from "../src/lib/worker-heartbeat";
 
 // The fake GitHub addresses (docs/dev-github-fake.md) are honoured only when NODE_ENV is development or test: without it this process quietly talks to the real github.com.

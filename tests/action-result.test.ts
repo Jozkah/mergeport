@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import { run } from "@/lib/action-result";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 
-vi.mock("@/lib/local/runtime", () => ({ syncSoon: () => {} }));
+vi.mock("@/lib/worker/runtime", () => ({ syncSoon: () => {} }));
 
 // The real next/navigation: redirect()/notFound() throw Next's own control-flow errors, which is what the wrapper must not swallow.
 describe("run: framework control flow", () => {

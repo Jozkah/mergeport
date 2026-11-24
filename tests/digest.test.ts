@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dayStart, digestDue, localHour, parseDigestSettings, reportedDay, shiftDay } from "@/lib/domain/digest";
 import { indexList } from "@/lib/domain/text-index";
-import { handlers } from "@/lib/local/handlers";
+import { handlers } from "@/lib/worker/handlers";
 import { enqueue, runOne } from "@/lib/jobs";
 import { buildDigest, generateDigest, getDigest, latestDigest, listDigestDays, markDigestRead, registerDigestSource, runDailyDigest, unreadDigestCount, type DigestEntry } from "@/lib/services/digest";
 import { getPrefs, setPrefs } from "@/lib/services/notification-prefs";

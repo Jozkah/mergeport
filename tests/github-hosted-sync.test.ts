@@ -57,7 +57,7 @@ async function workspace(name: string) {
 }
 const githubIdOf = (name: string) => String(gh.server.repo("acme", name)!.id);
 const drain = async () => {
-  const { handlers } = await import("@/lib/local/handlers");
+  const { handlers } = await import("@/lib/worker/handlers");
   const out: string[] = [];
   for (let i = 0; i < 30; i++) {
     const r = await runOne(db(), handlers);
@@ -111,7 +111,7 @@ describe("a bound workspace syncs through the installation", () => {
     const stray = await db().repository.create({ data: { workspaceId: unbound.ws.id, githubId: 9n, ownerId: owner.id, name: "stray", fullName: "x/stray", htmlUrl: "https://github.com/x/stray", visibility: "PUBLIC", defaultBranch: "main" } });
     const local = await db().repository.create({ data: { workspaceId: bound.ws.id, githubId: 10n, ownerId: owner.id, name: "imported", fullName: "x/imported", htmlUrl: "https://github.com/x/imported", visibility: "PUBLIC", defaultBranch: "main" } });
     await enqueue(db(), { type: "reconcile.all", payload: {}, workspaceId: null });
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     expect(await runOne(db(), handlers)).toBe("done");
     const queued = (await db().job.findMany({ where: { type: "sync.repository" } })).map((j) => (j.payload as { repositoryId: string }).repositoryId);
     expect(queued).toEqual([r.id]);
@@ -120,7 +120,7 @@ describe("a bound workspace syncs through the installation", () => {
   });
 
   it("the coordination lane paces reconcile.all every 15 minutes once any workspace is connected, and not before", async () => {
-    const { coordinate } = await import("@/lib/local/scheduler");
+    const { coordinate } = await import("@/lib/worker/scheduler");
     await coordinate(Date.now());
     expect(await db().job.count({ where: { type: "reconcile.all" } })).toBe(0);
     await workspace("epsilon");

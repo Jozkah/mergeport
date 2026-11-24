@@ -6,7 +6,7 @@ import { refreshRepositoryAndWait } from "@/lib/services/refresh";
 import { testDb } from "./helpers";
 
 const mocks = vi.hoisted(() => ({ notifyChange: vi.fn(), port: null as unknown }));
-vi.mock("@/lib/local/runtime", () => ({ notifyChange: mocks.notifyChange }));
+vi.mock("@/lib/worker/runtime", () => ({ notifyChange: mocks.notifyChange }));
 vi.mock("@/lib/github/factory", () => ({ portForSync: async () => mocks.port }));
 
 const db = testDb();
@@ -81,7 +81,7 @@ describe("refreshRepositoryAndWait", () => {
 
 describe("the sync.repository job", () => {
   it("tells the open pages the data changed when it finishes successfully, and not when it fails", async () => {
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     const fake = new FakeGithub();
     fake.repos.set("acme/tool", META);
     fake.branches.set("acme/tool", [{ name: "main", sha: "m1", isDefault: true }]);
@@ -97,7 +97,7 @@ describe("the sync.repository job", () => {
 
 describe("runJobsNow", () => {
   it("does nothing without a scheduler in this process and never runs beside a busy tick", async () => {
-    const { runJobsNow } = await import("@/lib/local/scheduler");
+    const { runJobsNow } = await import("@/lib/worker/scheduler");
     const g = globalThis as { __mpScheduler?: { busy: boolean; timer: unknown; lastTick: number } };
     const before = g.__mpScheduler;
     g.__mpScheduler = undefined;

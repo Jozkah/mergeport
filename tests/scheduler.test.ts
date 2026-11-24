@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GithubError } from "@/lib/github/port";
 import { enqueue, ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs";
 import { truncateAll } from "@/lib/demo/seed";
-import { drainJobs, paceReconcile, RECONCILE_IDLE_EVERY_MS, RECONCILE_START_DELAY_MS, runJobLane, step } from "@/lib/local/scheduler";
-import { RECONCILE_EVERY_MS } from "@/lib/local/handlers";
+import { drainJobs, paceReconcile, RECONCILE_IDLE_EVERY_MS, RECONCILE_START_DELAY_MS, runJobLane, step } from "@/lib/worker/scheduler";
+import { RECONCILE_EVERY_MS } from "@/lib/worker/handlers";
 import { testDb } from "./helpers";
 
 const db = testDb();

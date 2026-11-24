@@ -1,4 +1,4 @@
-import { processStartedAt } from "@/lib/local/boot";
+import { processStartedAt } from "@/lib/worker/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { repoWhere } from "@/lib/authz/viewer";

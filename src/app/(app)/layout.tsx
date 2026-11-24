@@ -1,4 +1,4 @@
-import { processStartedAt } from "@/lib/local/boot";
+import { processStartedAt } from "@/lib/worker/boot";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/auth/current";
 import { activeWorkspaces } from "@/lib/auth/workspaces";

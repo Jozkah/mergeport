@@ -441,7 +441,7 @@ describe("installation lifecycle (GitHub is asked, the event's action word is no
   let fi: ReturnType<typeof gh.server.addInstallation>;
   const lifeJobs = () => db().job.findMany({ where: { type: "github.installation.check" }, orderBy: { dedupeKey: "asc" } });
   const runCheck = async (id: bigint = LIVE) => {
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     await handlers["github.installation.check"]({ installationId: String(id) } as never, {} as never);
   };
   const life = (installation: bigint | number, action: string, event = "installation") => post({ action, installation: { id: Number(installation) } }, { event });
@@ -526,7 +526,7 @@ describe("installation lifecycle (GitHub is asked, the event's action word is no
   });
 
   it("a check for an installation we do not hold, or a job with a junk payload, writes nothing", async () => {
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     await handlers["github.installation.check"]({ installationId: "999999" } as never, {} as never);
     await handlers["github.installation.check"]({ installationId: "x; drop" } as never, {} as never);
     expect(await db().githubInstallation.count()).toBe(3);
@@ -556,7 +556,7 @@ describe("installation lifecycle (GitHub is asked, the event's action word is no
     const owner = await db().githubOwner.upsert({ where: { githubId: 9001n }, create: { githubId: 9001n, login: "acme", type: "ORGANIZATION" }, update: {} });
     const repo = await db().repository.create({ data: { workspaceId: A, githubId: BigInt(ghRepo.id), ownerId: owner.id, name: "pub", fullName: "acme/pub", htmlUrl: "https://github.com/acme/pub" } });
     await setRepositoryInstallation(db(), A, repo.id, LIVE);
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     const sync = async () => handlers["sync.repository"]({ repositoryId: repo.id } as never, { workspaceId: A } as never);
 
     await life(LIVE, "removed", "installation_repositories"); // junk action word: ignored, still just a check
@@ -579,7 +579,7 @@ describe("installation lifecycle (GitHub is asked, the event's action word is no
     await post({ action: "removed", installation: { id: fi.id }, repositories_removed: [{ id: ghRepo.id }] }, { event: "installation_repositories" });
     const queued = (await jobs()).find((j) => j.type === "sync.repository" && j.workspaceId === A);
     expect(queued).toBeTruthy();
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     await expect(handlers["sync.repository"](queued!.payload as never, queued as never)).rejects.toThrow();
     expect(await db().repository.findUniqueOrThrow({ where: { id: repo.id } })).toMatchObject({ trackingStatus: "DISCONNECTED" });
   });
@@ -641,11 +641,11 @@ describe("maintenance", () => {
   });
 
   it("the scheduler runs it daily as a system job, and the job handler prunes", async () => {
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     await db().githubDelivery.create({ data: { deliveryId: "ancient-delivery", event: "push", receivedAt: new Date("2020-01-01T00:00:00Z") } });
     await handlers["github.maintenance"](undefined as never, {} as never);
     expect(await db().githubDelivery.count()).toBe(0);
-    const { coordinate } = await import("@/lib/local/scheduler");
+    const { coordinate } = await import("@/lib/worker/scheduler");
     await coordinate();
     const j = await db().job.findUnique({ where: { dedupeKey: "github-maintenance" } });
     expect(j).toMatchObject({ type: "github.maintenance", intervalMs: 24 * 3_600_000, workspaceId: null });
