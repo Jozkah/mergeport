@@ -1,7 +1,7 @@
 "use server";
 
 import { setProjectReviewers } from "@/lib/services/project-reviewers";
-import { notifyChange } from "@/lib/local/runtime";
+import { notifyChange } from "@/lib/worker/runtime";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";

@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { SESSION_COOKIE, findSession } from "@/lib/auth/session";
-import { bus, dataVersion } from "@/lib/local/runtime";
+import { bus, dataVersion } from "@/lib/worker/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

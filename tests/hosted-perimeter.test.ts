@@ -125,7 +125,7 @@ describe("the scheduler on a hosted deployment", () => {
   it("GitHub-bound jobs finish as no-ops (DONE, not failed or retried) and touch neither gh nor the budget", async () => {
     const { ws, repo } = await seedRepo();
     const { enqueue, runOne } = await import("@/lib/jobs");
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     await enqueue(db(), { type: "sync.repository", payload: { repositoryId: repo.id }, workspaceId: ws.id });
     await enqueue(db(), { type: "sync.item", payload: { repositoryId: repo.id, number: 1 }, workspaceId: ws.id });
     for (let i = 0; i < 2; i++) expect(await runOne(db(), handlers)).toBe("done");
@@ -138,14 +138,14 @@ describe("the scheduler on a hosted deployment", () => {
   it("reconcile.all queues nothing for a workspace without a connection", async () => {
     await seedRepo();
     const { runOne, enqueue } = await import("@/lib/jobs");
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     await enqueue(db(), { type: "reconcile.all", payload: {}, workspaceId: null });
     expect(await runOne(db(), handlers)).toBe("done");
     expect(await db().job.count({ where: { type: "sync.repository" } })).toBe(0);
   });
 
   it("the coordination lane does no GitHub work and starts no process", async () => {
-    const { coordinate } = await import("@/lib/local/scheduler");
+    const { coordinate } = await import("@/lib/worker/scheduler");
     expect(await coordinate(Date.now())).toBe(0);
     expect(spies.spawn).not.toHaveBeenCalled();
     expect(await db().job.count({ where: { type: { in: ["digest.daily", "ai.autopilot"] } } })).toBe(2); // the recurring jobs that need no GitHub are still scheduled

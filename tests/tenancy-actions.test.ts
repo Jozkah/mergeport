@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@/lib/db";
 import { truncateAll } from "@/lib/demo/seed";
 import { loadViewer, type Viewer } from "@/lib/authz/viewer";
-import { forEachWorkspace } from "@/lib/local/handlers";
+import { forEachWorkspace } from "@/lib/worker/handlers";
 import { exportBackup, parseBackup, restoreBackup } from "@/lib/services/backup";
 import { createColumnsForProject } from "@/lib/services/planning";
 import { createTask } from "@/lib/services/tasks";

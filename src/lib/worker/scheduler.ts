@@ -2,8 +2,8 @@ import { db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
 import { ensureRecurring, reclaimStuck, runOne, type Handler } from "@/lib/jobs";
 import { MAINTENANCE_EVERY_MS } from "@/lib/github/webhook-maintenance";
-import { AI_AUTOPILOT_EVERY_MS, DIGEST_EVERY_MS, RECONCILE_EVERY_MS, handlers } from "@/lib/local/handlers";
-import { notifyChange } from "@/lib/local/runtime";
+import { AI_AUTOPILOT_EVERY_MS, DIGEST_EVERY_MS, RECONCILE_EVERY_MS, handlers } from "@/lib/worker/handlers";
+import { notifyChange } from "@/lib/worker/runtime";
 
 /**
  * Background work of the worker process (scripts/worker.ts). It runs while the process runs, and only then.

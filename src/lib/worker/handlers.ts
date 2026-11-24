@@ -57,7 +57,7 @@ const rawHandlers: Record<string, Handler> = {
       await recordRate(port.lastRate(), budget);
     }
     // The data of this repository changed: redraw the open pages (also right for the Refresh button).
-    (await import("@/lib/local/runtime")).notifyChange("pulled");
+    (await import("@/lib/worker/runtime")).notifyChange("pulled");
     const maps = await db.forkMapping.findMany({ where: { OR: [{ forkRepoId: p.repositoryId }, { upstreamRepoId: p.repositoryId }] }, select: { id: true } });
     const { enqueue } = await import("@/lib/jobs");
     for (const m of maps) await enqueue(db, { type: "sync.fork", payload: { mappingId: m.id }, dedupeKey: `fork:${m.id}`, workspaceId: job.workspaceId });
@@ -115,7 +115,7 @@ const rawHandlers: Record<string, Handler> = {
     const config = githubAppConfig();
     if (!config) return;
     const r = await refreshUserAccess(db, config, p.userId);
-    if (r === "ok" || r === "partial") (await import("@/lib/local/runtime")).notifyChange("state");
+    if (r === "ok" || r === "partial") (await import("@/lib/worker/runtime")).notifyChange("state");
   }) as Handler,
   // GitHub told us something happened to an installation (webhook); ask GitHub what is true now and record that. A system job per installation.
   "github.installation.check": (async (p: { installationId: string }) => {
@@ -130,14 +130,14 @@ const rawHandlers: Record<string, Handler> = {
   "digest.daily": (async () => {
     const { runDailyDigest } = await import("@/lib/services/digest");
     await forEachWorkspace(db, "digest.daily", async (workspaceId) => {
-      if ((await runDailyDigest(db, workspaceId)) === "generated") (await import("@/lib/local/runtime")).notifyChange("state");
+      if ((await runDailyDigest(db, workspaceId)) === "generated") (await import("@/lib/worker/runtime")).notifyChange("state");
     });
   }) as Handler,
   // Sends to the AI endpoint set in Settings, and only when the autopilot there is on. Writes local tasks and suggestions, never GitHub.
   "ai.autopilot": (async () => {
     const [{ runAutopilot }, { openVault, vaultKeyFile }] = await Promise.all([import("@/lib/services/ai-review"), import("@/lib/hub/session-vault")]);
     await forEachWorkspace(db, "ai.autopilot", async (workspaceId) => {
-      if ((await runAutopilot(db, workspaceId, openVault(vaultKeyFile()))) === "done") (await import("@/lib/local/runtime")).notifyChange("state");
+      if ((await runAutopilot(db, workspaceId, openVault(vaultKeyFile()))) === "done") (await import("@/lib/worker/runtime")).notifyChange("state");
     });
   }) as Handler,
 };

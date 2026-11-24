@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Viewer } from "@/lib/authz/viewer";
-import { isBusy, withBusyRetry } from "@/lib/cli/busy";
-import { parseDue } from "@/lib/cli/dates";
-import { runMp } from "@/lib/cli/mp";
+import { isBusy, withBusyRetry } from "@/lib/task-commands/busy";
+import { parseDue } from "@/lib/task-commands/dates";
+import { runMp } from "@/lib/task-commands/mp";
 import { getTask, updateTask } from "@/lib/services/tasks";
 import { freshSeed } from "./helpers";
 

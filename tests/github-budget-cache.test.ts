@@ -77,7 +77,7 @@ describe("the budget is per installation", () => {
   const SOON = () => new Date(Date.now() + 60 * 60_000);
 
   it("an exhausted installation holds back its own jobs and no other installation's, nor the local 'source' key", async () => {
-    const { guardSourceBudget } = await import("@/lib/local/handlers");
+    const { guardSourceBudget } = await import("@/lib/worker/handlers");
     await db().rateLimitState.create({ data: { key: installationBudgetKey(1), remaining: 0, limit: 5000, resetAt: SOON() } });
     await expect(guardSourceBudget(installationBudgetKey(1))).rejects.toBeInstanceOf(GithubError);
     await expect(guardSourceBudget(installationBudgetKey(2))).resolves.toBeUndefined(); // another installation: its own, untouched budget
@@ -85,7 +85,7 @@ describe("the budget is per installation", () => {
   });
 
   it("a hosted repository spends from its installation's key; a repository without one, and every local repository, from 'source'", async () => {
-    const { sourceBudgetKeyFor } = await import("@/lib/local/handlers");
+    const { sourceBudgetKeyFor } = await import("@/lib/worker/handlers");
     const w = await workspaceWithOwner(db(), "owner@acme.test", "Acme");
     const o = await db().githubOwner.create({ data: { githubId: 5n, login: "acme" } });
     await db().githubInstallation.create({ data: { installationId: 31n, accountGithubId: 5n, accountLogin: "acme", accountType: "ORGANIZATION" } });

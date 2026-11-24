@@ -499,7 +499,7 @@ describe("the refresh job", () => {
 
   it("runs as the queued job, and the scheduler's reconcile queues one for every linked person whose data is old", async () => {
     const x = await world();
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     await db().githubRepoAccess.deleteMany({ where: { userId: x.alice.user.id } });
     await handlers[ACCESS_JOB]({ userId: x.alice.user.id } as never, {} as never);
     expect(await db().githubRepoAccess.count({ where: { userId: x.alice.user.id } })).toBeGreaterThan(0);
@@ -732,7 +732,7 @@ describe("F3: only a dead token ends a link; rate limiting and outages never do"
     fake.rateLimitedUntil = Date.now() + 3600_000;
     await db().job.deleteMany({});
     await requestAccessRefresh(db(), x.alice.user.id);
-    const { handlers } = await import("@/lib/local/handlers");
+    const { handlers } = await import("@/lib/worker/handlers");
     expect(await runOne(db(), { [ACCESS_JOB]: handlers[ACCESS_JOB] }, new Date(Date.now() + 1000))).toBe("retry");
     fake.rateLimitedUntil = null;
     expect((await link(x.alice.user.id)).status).toBe("OK");

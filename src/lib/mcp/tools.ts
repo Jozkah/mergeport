@@ -1,6 +1,6 @@
 import type { Db } from "@/lib/db";
 import type { Viewer } from "@/lib/authz/viewer";
-import { runMp } from "@/lib/cli/mp";
+import { runMp } from "@/lib/task-commands/mp";
 import { gatherFacts } from "@/lib/services/ai-facts";
 import { propose, status } from "@/lib/services/ai-approvals";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";

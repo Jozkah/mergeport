@@ -40,9 +40,9 @@ A deployment holds many workspaces in one Postgres database; see `docs/tenancy.m
 
 ## Scheduler
 
-`src/lib/jobs.ts` is the job queue; `src/lib/local/scheduler.ts` runs it inside the worker process (`npm run worker`, `scripts/worker.ts`). The web process runs no jobs. A recurring job (`reconcile.all`) carries its own `intervalMs`; the runner re-queues it after each run. A trigger that arrives **while a run is in flight** sets `dirty`, and the run requeues immediately instead of the trigger being swallowed. This fixes the original defect, where a self-reschedule under the same dedupe key during `RUNNING` was dropped and the job was then marked `DONE`. After a restart a recurring job runs once and then waits a full interval.
+`src/lib/jobs.ts` is the job queue; `src/lib/worker/scheduler.ts` runs it inside the worker process (`npm run worker`, `scripts/worker.ts`). The web process runs no jobs. A recurring job (`reconcile.all`) carries its own `intervalMs`; the runner re-queues it after each run. A trigger that arrives **while a run is in flight** sets `dirty`, and the run requeues immediately instead of the trigger being swallowed. This fixes the original defect, where a self-reschedule under the same dedupe key during `RUNNING` was dropped and the job was then marked `DONE`. After a restart a recurring job runs once and then waits a full interval.
 
-Source sync is `sync.repository`, `sync.item` and `sync.fork` (`src/lib/local/handlers.ts` calling `src/lib/sync/repository.ts` through `portForSync`, so each repository is read with its own installation). `reconcile.all` fans out per workspace: a workspace with a usable connection gets `enqueueHostedReconcile` (hourly when its installation sends webhooks, every cycle otherwise), and the same job renews the cached GitHub access of linked people. Webhooks enqueue targeted refreshes. The old GitHub-repository team-space sync engine and the repository watcher were removed; nothing polls GitHub on a per-tab basis.
+Source sync is `sync.repository`, `sync.item` and `sync.fork` (`src/lib/worker/handlers.ts` calling `src/lib/sync/repository.ts` through `portForSync`, so each repository is read with its own installation). `reconcile.all` fans out per workspace: a workspace with a usable connection gets `enqueueHostedReconcile` (hourly when its installation sends webhooks, every cycle otherwise), and the same job renews the cached GitHub access of linked people. Webhooks enqueue targeted refreshes. The old GitHub-repository team-space sync engine and the repository watcher were removed; nothing polls GitHub on a per-tab basis.
 
 ## Daily digest
 
@@ -58,7 +58,7 @@ Each local day Mergeport writes the person a digest of the previous day: what wa
 
 ## Agents
 
-AI apps reach Mergeport through the hosted MCP endpoint (`src/lib/mcp`, `POST /api/mcp`, personal access tokens and OAuth; see `docs/mcp.md`). The task commands it runs live in `src/lib/cli/mp.ts`. The old `npm run mp` command line and the stdio MCP server read a local profile database, and were removed with the local launcher.
+AI apps reach Mergeport through the hosted MCP endpoint (`src/lib/mcp`, `POST /api/mcp`, personal access tokens and OAuth; see `docs/mcp.md`). The task commands it runs live in `src/lib/task-commands/mp.ts`. The old `npm run mp` command line and the stdio MCP server read a local profile database, and were removed with the local launcher.
 
 ## Review waiting
 
