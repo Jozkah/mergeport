@@ -189,6 +189,27 @@ describe("build server packages (.next/node_modules)", () => {
     expect(buildReason(root, { gitHead: () => "aaa" })).toMatch(/server packages/);
   });
 
+  it("does not record a link that is already broken, so it cannot force a rebuild on every start", () => {
+    const root = repo();
+    built(root);
+    withExternals(root);
+    const target = path.join(root, "gone-target");
+    fs.mkdirSync(target);
+    fs.symlinkSync(target, path.join(ext(root), "shiki-ghi"), "junction");
+    fs.rmSync(target, { recursive: true, force: true });
+    writeStamp(root, { gitHead: () => "aaa" });
+    expect(buildReason(root, { gitHead: () => "aaa" })).toBeNull();
+  });
+
+  it("a stray file named like a scope does not crash recording", () => {
+    const root = repo();
+    built(root);
+    withExternals(root);
+    fs.writeFileSync(path.join(ext(root), "@stray"), "");
+    expect(() => writeStamp(root, { gitHead: () => "aaa" })).not.toThrow();
+    expect(buildReason(root, { gitHead: () => "aaa" })).toBeNull();
+  });
+
   it("does not rebuild a build that never had the folder", () => {
     const root = repo();
     built(root);

@@ -20,11 +20,15 @@ const EXTERNALS = path.join(".next", "node_modules");
 /** What EXTERNALS held right after the build, so a later check knows what must still be there. */
 const EXTERNALS_RECORD = path.join(".next", "mergeport-externals.json");
 
-/** Entry names in EXTERNALS, scoped packages as "@scope/name". */
+/** Working entries in EXTERNALS, scoped packages as "@scope/name". A link already broken is left out, or it would force a rebuild on every start. */
 const listExternals = (root: string): string[] => {
   const dir = path.join(root, EXTERNALS);
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).flatMap((e) => (e.startsWith("@") ? fs.readdirSync(path.join(dir, e)).map((s) => `${e}/${s}`) : [e]));
+  const isDir = (p: string) => fs.statSync(p, { throwIfNoEntry: false })?.isDirectory() ?? false;
+  return fs
+    .readdirSync(dir)
+    .flatMap((e) => (e.startsWith("@") && isDir(path.join(dir, e)) ? fs.readdirSync(path.join(dir, e)).map((s) => `${e}/${s}`) : [e]))
+    .filter((n) => fs.existsSync(path.join(dir, n)));
 };
 
 /** True when a recorded server package link is gone (existsSync follows the link, so a dangling one counts as gone). */

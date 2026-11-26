@@ -413,4 +413,23 @@ describe("prepare before every boot", () => {
     await expect(s.switchTo({ backend: HUB })).rejects.toThrow("the previous one was restored");
     expect(f.spawned.map((x) => x.dbFile)).toEqual(["/db/a", "/db/a"]);
   });
+
+  it("stopping during prepare starts no child", async () => {
+    const f = makeDeps();
+    let release!: () => void;
+    const entered = new Promise<void>((r) => {
+      f.deps.prepare = () => {
+        r();
+        return new Promise<void>((done) => (release = done));
+      };
+    });
+    const s = sup(f.deps);
+    const started = s.start({ dbFile: "/db/a" });
+    await entered;
+    const stopped = s.stop();
+    release();
+    await expect(started).rejects.toThrow();
+    await stopped;
+    expect(f.spawned).toEqual([]);
+  });
 });

@@ -201,6 +201,8 @@ export class Supervisor {
   /** `quiet`: a switch is handling this boot, so a child dying before it is ready is not reported as "child-exit". */
   private async boot(spec: ChildSpec, quiet = false): Promise<Started> {
     await this.deps.prepare?.(spec);
+    // prepare can take minutes (a rebuild); if the launcher is stopping by then, start nothing.
+    if (this.stopping.signal.aborted) throw new Error("The launcher is stopping");
     const run: Running = { spec, handle: this.deps.spawnChild(spec), expectedExit: quiet, bootId: null };
     this.current = run;
     // Aborting on exit lets waitReady fail fast when the child dies while booting.
