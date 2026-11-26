@@ -19,6 +19,23 @@ import { todayIn } from "@/lib/domain/planning";
 import { GettingStarted } from "@/components/onboarding/GettingStarted";
 import { gettingStarted } from "@/lib/services/getting-started";
 import { latestDigest } from "@/lib/services/digest";
+import { listTasks } from "@/lib/services/tasks";
+import { ListChecks } from "@/components/ui/icons";
+
+const PRIORITY_WORD: Record<number, string> = { 4: "Urgent", 3: "High", 2: "Normal", 1: "Low" };
+
+/** The viewer's next written tasks: assigned to them, open, not blocked, not waiting on an unfinished task; urgent first, then each project's order. */
+async function nextTasks(viewer: Awaited<ReturnType<typeof requireViewer>>["viewer"]) {
+  const mine = (await listTasks(db, viewer, { scope: "mine", status: "open" })).filter((t) => {
+    const labels = Array.isArray(t.labels) ? (t.labels as string[]) : [];
+    return !t.workItemId && t.workRepoGithubId === null && t.column.key !== "blocked" && !labels.includes("reference") && !labels.includes("archived");
+  });
+  const waiting = new Set(
+    (await db.planningLink.findMany({ where: { kind: "blocks", toId: { in: mine.map((t) => t.id) }, from: { column: { key: { not: "done" } } } }, select: { toId: true } })).map((l) => l.toId),
+  );
+  const ready = mine.filter((t) => !waiting.has(t.id));
+  return { total: ready.length, urgent: ready.filter((t) => t.priority === 4).length, top: ready.slice(0, 8) };
+}
 
 export const metadata = { title: "Overview" };
 
@@ -48,6 +65,7 @@ export default async function Overview() {
   const none = o.openIssues + o.openPrs === 0 && q.needsMyReview.length === 0;
   const steps = await gettingStarted(db, viewer);
   const digest = await latestDigest(db, viewer, now);
+  const next = await nextTasks(viewer);
 
   return (
     <>
@@ -70,6 +88,24 @@ export default async function Overview() {
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1fr)_minmax(340px,28%)]">
         <div className="flex min-w-0 flex-col gap-5">
+          <Panel title="Your next tasks" icon={ListChecks} id="next-tasks" summary={`${next.total} ready${next.urgent ? `, ${next.urgent} urgent` : ""}`} actions={<Link href="/planning" className="btn">By project</Link>}>
+            {next.top.length === 0 ? (
+              <EmptyState icon={ListChecks} title="No tasks waiting for you">Tasks assigned to you that can start now show up here.</EmptyState>
+            ) : (
+              <>
+                <ol>
+                  {next.top.map((t) => (
+                    <li key={t.id} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-4 py-2.5 last:border-b-0">
+                      <div className="min-w-0"><Link href={`/tasks/${t.id}`} className="font-medium hover:underline [overflow-wrap:anywhere]">{t.title}</Link><p className="mt-0.5 text-[12px] text-ink-3">{t.project.name}</p></div>
+                      <span className={`text-[12px] ${t.priority === 4 ? "font-medium text-blocked" : "text-ink-3"}`}>{PRIORITY_WORD[t.priority] ?? ""}</span>
+                    </li>
+                  ))}
+                </ol>
+                <p className="border-t border-line px-4 py-2 text-[12.5px]"><Link href="/tasks" className="link">All {next.total} ready tasks</Link> · open a project under <Link href="/planning" className="link">Planning</Link> to work through it in order</p>
+              </>
+            )}
+          </Panel>
+
           <Panel title="Needs your attention" icon={BellRing} id="attn" actions={<Link href="/attention" className="btn">Open queue</Link>}>
             {o.attentionPreview.length === 0 ? (
               <EmptyState icon={BellRing} title={none ? "Nothing to review yet" : "You are clear"}>{repoCount === 0 ? "No repositories are connected yet." : "Nothing is waiting for your review right now."}</EmptyState>
