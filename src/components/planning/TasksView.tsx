@@ -31,13 +31,15 @@ export function TasksView({ cards, epics, boardHref, listHref, epicsHref }: { ca
   const goal = epics.find((e) => e !== start && e.status === "OPEN" && !/optional/i.test(e.title));
   const inGoal = goal ? cards.filter((c) => c.epicId === goal.id) : [];
 
-  const external = tasks.filter((c) => c.columnKey === "blocked");
-  const waiting = tasks.filter((c) => c.columnKey !== "blocked" && c.blockedBy > 0);
-  const optional = tasks.filter((c) => c.columnKey !== "blocked" && c.blockedBy === 0 && isOptional(c));
-  const now = tasks.filter((c) => c.columnKey !== "blocked" && c.blockedBy === 0 && !isOptional(c) && c.columnKey !== "backlog");
-  const next = tasks.filter((c) => c.columnKey === "backlog" && c.blockedBy === 0 && !isOptional(c));
+  // Optional work always comes last, even when it also waits on another task or on something external.
+  const optional = tasks.filter((c) => isOptional(c));
+  const essential = tasks.filter((c) => !isOptional(c));
+  const external = essential.filter((c) => c.columnKey === "blocked");
+  const waiting = essential.filter((c) => c.columnKey !== "blocked" && c.blockedBy > 0);
+  const now = essential.filter((c) => c.columnKey !== "blocked" && c.blockedBy === 0 && c.columnKey !== "backlog");
+  const next = essential.filter((c) => c.columnKey === "backlog" && c.blockedBy === 0);
   const groups = [
-    { key: "now", title: "Start here: ready now", hint: "In order. Urgent work first.", cards: now },
+    { key: "now", title: "Ready now", hint: "In order. Urgent work first.", cards: now },
     { key: "next", title: "Up next", hint: "Ready once you get to them.", cards: next },
     { key: "waiting", title: "Waiting on another task", hint: "Finish the task it depends on first.", cards: waiting },
     { key: "blocked", title: "Blocked by something outside the project", hint: "The task says what it is waiting for.", cards: external },
