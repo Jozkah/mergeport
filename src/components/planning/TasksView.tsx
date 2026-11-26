@@ -14,7 +14,7 @@ type Epic = { id: string; title: string; description: string | null; status: str
 const PRIORITY: Record<number, { label: string; cls: string }> = {
   4: { label: "Urgent", cls: "text-blocked font-medium" },
   3: { label: "High", cls: "text-ink" },
-  2: { label: "Normal", cls: "text-ink-3" },
+  2: { label: "Medium", cls: "text-ink-3" },
   1: { label: "Low", cls: "text-ink-3" },
 };
 const EFFORT: Record<string, string> = { "e-quick": "under 30 min", "e-small": "30 min – 2 h", "e-medium": "2 – 4 h", "e-focus": "4 – 8 h", "e-large": "several sessions" };

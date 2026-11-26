@@ -35,6 +35,7 @@ import { deriveSourceStatus } from "@/lib/sync/source-status";
 import { env, isDemo } from "@/lib/env";
 import { mergeportHome } from "@/lib/local/profile";
 import { listWorkspaces } from "@/lib/local/workspaces";
+import { isHubBackend } from "@/lib/local/backends";
 import Link from "next/link";
 import { cookies } from "next/headers";
 
@@ -110,7 +111,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const wsList = isDemo() ? null : listWorkspaces(mergeportHome(env().MERGEPORT_HOME), env().MERGEPORT_HOST, user.githubId.toString());
   const workspaces = wsList && { ...wsList, switchable };
   const aiQuick = isDemo() || !(await getAiView(db)).saved ? null : <AiQuick suggestions={aiSuggestions} requests={aiRequests} />;
-  const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: ws.name };
+  // Every profile's stored workspace is called "Personal workspace"; on a hub, name the team instead.
+  const hubLabel = wsList && isHubBackend(wsList.active) ? wsList.entries.find((e) => e.backend === wsList.active)?.label : undefined;
+  const navProps = { counts, isAdmin: viewer.isAdmin, user: { login: user.login, name: user.name, avatarUrl: user.avatarUrl }, workspace: hubLabel ?? ws.name };
   return (
     <TooltipProvider>
     <ToastProvider>
