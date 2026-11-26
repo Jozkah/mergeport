@@ -15,6 +15,7 @@ import { Sheet } from "@/components/ui/dialog";
 import { EmptyState, Mono, PageHeader, Panel, Segmented, LabelChip } from "@/components/ui/primitives";
 import { CalendarDays, Kanban, Milestone, Plus, ListChecks } from "@/components/ui/icons";
 import { Board } from "@/components/planning/Board";
+import { TasksView } from "@/components/planning/TasksView";
 import { BoardsManager, EpicsView, InsightsView, IterationsView, MapView, ReleaseView, SuggestionsPanel } from "@/components/planning/PlanningPanels";
 import { groupCards, type GroupBy } from "@/lib/domain/boards";
 import { boardColumns, listBoards } from "@/lib/services/planning-ext";
@@ -23,14 +24,14 @@ import { addDependencyAction, createCardAction, createMilestoneAction } from "@/
 export const metadata = { title: "Planning" };
 
 type Search = { project?: string; view?: string; board?: string };
-const VIEWS = ["board", "list", "roadmap", "epics", "iterations", "release", "map", "insights"] as const;
+const VIEWS = ["tasks", "board", "list", "roadmap", "epics", "iterations", "release", "map", "insights"] as const;
 type View = (typeof VIEWS)[number];
 
 export default async function Planning({ searchParams }: { searchParams: Promise<Search> }) {
   const { viewer } = await requireViewer();
   const sp = await searchParams;
   const projects = await listProjects(db, viewer);
-  const view: View = (VIEWS as readonly string[]).includes(sp.view ?? "") ? (sp.view as View) : "board";
+  const view: View = (VIEWS as readonly string[]).includes(sp.view ?? "") ? (sp.view as View) : "tasks";
   const scope = await readScope(db, viewer);
   const project = projects.find((p) => p.id === (sp.project || (scope.kind === "project" ? scope.id : ""))) ?? projects[0];
   const href = (over: Search) => {
@@ -110,6 +111,16 @@ export default async function Planning({ searchParams }: { searchParams: Promise
         <ViewBar scope="planning" views={await listViews(db, viewer, "planning")} />
       <div className="mb-4 flex flex-wrap items-center gap-3">{projects.length > 1 && projectsSeg}{viewSeg}</div>
 
+      {view === "tasks" && (
+        <TasksView
+          cards={cards}
+          epics={await db.epic.findMany({ where: { projectId: project.id }, select: { id: true, title: true, description: true, status: true }, orderBy: { createdAt: "asc" } })}
+          boardHref={href({ view: "board", board: "" })}
+          listHref={href({ view: "list", board: "" })}
+          epicsHref={href({ view: "epics", board: "" })}
+        />
+      )}
+
       {view === "board" && (
         <Panel title="Board" icon={Kanban} id="board" bodyClassName="p-3">
           {boards.length > 0 && (
@@ -143,9 +154,9 @@ export default async function Planning({ searchParams }: { searchParams: Promise
               <table className="data min-w-[760px]">
                 <thead><tr><th scope="col">Card</th><th scope="col">Column</th><th scope="col">Assignee</th><th scope="col">Priority</th><th scope="col">Milestone</th><th scope="col">Due</th></tr></thead>
                 <tbody>
-                  {cards.map((c) => (
+                  {[...cards].sort((a, b) => Number(a.columnKey === "done") - Number(b.columnKey === "done")).map((c) => (
                     <tr key={c.id}>
-                      <td><div className="font-medium [overflow-wrap:anywhere]">{c.href ? <Link href={c.href} className="hover:underline">{c.title}</Link> : c.title}</div><div className="mt-0.5 text-[12px] text-ink-3">{c.isDraft ? "Internal task" : <Mono>{c.repoFullName}#{c.number}</Mono>}{c.waitingOn ? ` · waiting on ${c.waitingOn}` : ""}{c.blockedBy ? ` · blocked by ${c.blockedBy}` : ""}</div>{c.labels.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{c.labels.map((l) => <LabelChip key={l.name} {...l} />)}</div>}</td>
+                      <td><div className="font-medium [overflow-wrap:anywhere]">{c.href ? <Link href={c.href} className="hover:underline">{c.title}</Link> : c.title}</div><div className="mt-0.5 text-[12px] text-ink-3">{c.isDraft ? "Internal task" : c.repoFullName ? <Mono>{c.repoFullName}#{c.number}</Mono> : `GitHub #${c.number}`}{c.waitingOn ? ` · waiting on ${c.waitingOn}` : ""}{c.blockedBy ? ` · blocked by ${c.blockedBy}` : ""}</div>{c.labels.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{c.labels.map((l) => <LabelChip key={l.name} {...l} />)}</div>}</td>
                       <td>{colName.get(c.columnKey)}</td><td>{c.assignee ? `@${c.assignee}` : "—"}</td><td className="tnum">{c.priority ? `P${c.priority}` : "—"}</td><td>{c.milestoneName ?? "—"}</td>
                       <td className={`tnum ${c.overdue ? "text-blocked" : ""}`}>{c.dueLabel ?? "—"}{c.overdue ? " (overdue)" : ""}</td>
                     </tr>

@@ -19,6 +19,8 @@ export type CardView = {
   workState: string | null;
   href: string | null;
   labels: { name: string; color: string }[];
+  /** The card's own Mergeport labels (GitHub labels are in `labels`). */
+  taskLabels: string[];
   priority: number;
   due: string | null; // YYYY-MM-DD date-only
   dueLabel: string | null;
@@ -60,6 +62,11 @@ export async function planningBoard(db: Db, v: Viewer, projectId: string, now = 
   const epicTitles = new Map((await db.epic.findMany({ where: { projectId }, select: { id: true, title: true } })).map((e) => [e.id, e.title]));
   const today = todayIn(v.timezone, now);
   const progress = await checklistProgress(db, items.map((i) => i.id));
+  // Cards that point at a GitHub issue or pull request whose work item is not synchronised here yet still name it.
+  const unresolved = [...new Set(items.filter((i) => !i.workItemId && i.workRepoGithubId !== null).map((i) => i.workRepoGithubId!))];
+  const repoByGid = new Map(
+    unresolved.length ? (await db.repository.findMany({ where: { githubId: { in: unresolved } }, select: { githubId: true, fullName: true } })).map((r) => [r.githubId.toString(), r.fullName]) : [],
+  );
 
   const cards: CardView[] = items.map((i) => {
     const unfinished = i.blockedBy.filter((l) => !blockerFinished({ columnKey: l.from.column.key, workType: l.from.workItem?.type ?? null, workState: l.from.workItem?.state ?? null }));
@@ -71,12 +78,13 @@ export async function planningBoard(db: Db, v: Viewer, projectId: string, now = 
       position: i.position,
       version: i.version,
       title: i.workItem?.title ?? i.title,
-      isDraft: !i.workItemId,
-      repoFullName: i.workItem?.repository.fullName ?? null,
-      number: i.workItem?.number ?? null,
+      isDraft: !i.workItemId && i.workRepoGithubId === null,
+      repoFullName: i.workItem?.repository.fullName ?? (i.workRepoGithubId !== null ? (repoByGid.get(i.workRepoGithubId.toString()) ?? null) : null),
+      number: i.workItem?.number ?? i.workNumber ?? null,
       workState: i.workItem?.state ?? null,
       href: i.workItem ? (i.workItem.type === "PULL_REQUEST" ? `/pull-requests/${i.workItem.id}` : `/issues/${i.workItem.id}`) : null,
       labels: i.workItem ? asLabels(i.workItem.labels) : [],
+      taskLabels: Array.isArray(i.labels) ? (i.labels as unknown[]).filter((x): x is string => typeof x === "string") : [],
       priority: i.priority,
       due: i.dueDate ? i.dueDate.toISOString().slice(0, 10) : null,
       dueLabel: i.dueDate ? formatDateOnly(i.dueDate) : null,
