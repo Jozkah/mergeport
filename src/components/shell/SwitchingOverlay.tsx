@@ -6,6 +6,7 @@ import { Logo } from "@/components/ui/Logo";
 import { Banner } from "@/components/ui/primitives";
 import { LoaderCircle } from "@/components/ui/icons";
 import { pollSwitch, validateSwitchTarget, type Ready } from "@/lib/local/switch-poll";
+import { beginSwitch } from "@/lib/local/switching";
 
 type Props = { launchUrl: string; previousBootId: string | null; expectedBackend: string };
 
@@ -22,6 +23,8 @@ export function SwitchingOverlay({ launchUrl, previousBootId, expectedBackend }:
   const dialog = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Every caller (workspace switcher, hub connect, hub sign-out) shows this overlay while the app restarts: no live refresh may reach the new process.
+    beginSwitch();
     let cancelled = false;
     const fetchReady = async (): Promise<Ready> => {
       const res = await fetch("/api/local/ready", { cache: "no-store", signal: AbortSignal.timeout(2000) });

@@ -6,6 +6,7 @@ import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/ToastProvider";
 import { SwitchingOverlay } from "@/components/shell/SwitchingOverlay";
 import type { WorkspaceEntry } from "@/lib/local/workspaces";
+import { beginSwitch, endSwitch } from "@/lib/local/switching";
 
 const CONNECT = "__connect__";
 type Switch = { launchUrl: string; previousBootId: string | null; expectedBackend: string };
@@ -24,16 +25,21 @@ export function WorkspaceSwitcher({ entries, active, switchable, className = "w-
     }
     if (value === active || busy) return;
     setBusy(true);
+    // Stop live refreshes first: once the launcher restarts the app, a refresh would reach the new process, which answers it with a
+    // redirect to /sign-in that the router follows, replacing the switching overlay before it can open the new sign-in link.
+    beginSwitch();
     try {
       const res = await fetch("/api/local/switch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ backend: value }) });
       const body = (await res.json().catch(() => ({}))) as Partial<Switch> & { error?: string };
       if (!res.ok || !body.launchUrl || !body.expectedBackend) {
+        endSwitch();
         toast.show("error", body.error ?? "Could not switch workspace.");
         setBusy(false);
         return;
       }
       setSw({ launchUrl: body.launchUrl, previousBootId: body.previousBootId ?? null, expectedBackend: body.expectedBackend });
     } catch {
+      endSwitch();
       toast.show("error", "Could not reach Mergeport to switch workspace.");
       setBusy(false);
     }
