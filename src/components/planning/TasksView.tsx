@@ -15,7 +15,7 @@ const PRIORITY: Record<number, { label: string; cls: string }> = {
   4: { label: "Urgent", cls: "text-blocked font-medium" },
   3: { label: "High", cls: "text-ink" },
   2: { label: "Normal", cls: "text-ink-3" },
-  1: { label: "Optional", cls: "text-ink-3" },
+  1: { label: "Low", cls: "text-ink-3" },
 };
 const EFFORT: Record<string, string> = { "e-quick": "under 30 min", "e-small": "30 min – 2 h", "e-medium": "2 – 4 h", "e-focus": "4 – 8 h", "e-large": "several sessions" };
 
@@ -36,7 +36,10 @@ export function TasksView({ cards, epics, boardHref, listHref, epicsHref }: { ca
   const essential = tasks.filter((c) => !isOptional(c));
   const external = essential.filter((c) => c.columnKey === "blocked");
   const waiting = essential.filter((c) => c.columnKey !== "blocked" && c.blockedBy > 0);
-  const now = essential.filter((c) => c.columnKey !== "blocked" && c.blockedBy === 0 && c.columnKey !== "backlog");
+  // Nothing here waits on another task, so urgent work can always go first; otherwise the project's own order holds.
+  const now = essential
+    .filter((c) => c.columnKey !== "blocked" && c.blockedBy === 0 && c.columnKey !== "backlog")
+    .sort((a, b) => Number(b.priority === 4) - Number(a.priority === 4) || a.position - b.position);
   const next = essential.filter((c) => c.columnKey === "backlog" && c.blockedBy === 0);
   const groups = [
     { key: "now", title: "Ready now", hint: "In order. Urgent work first.", cards: now },
@@ -71,7 +74,7 @@ export function TasksView({ cards, epics, boardHref, listHref, epicsHref }: { ca
                   {g.cards.map((c) => {
                     n += 1;
                     const p = PRIORITY[c.priority];
-                    const eff = c.taskLabels.find((l) => EFFORT[l]);
+                    const eff = c.taskLabels.find((l) => Object.hasOwn(EFFORT, l));
                     return (
                       <li key={c.id} className="flex gap-3 px-4 py-2.5 hover:bg-muted/50">
                         <span className="tnum w-6 shrink-0 pt-px text-right text-[12px] text-ink-3">{n}</span>
