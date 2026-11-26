@@ -220,3 +220,21 @@ describe("per-workspace singletons, caches and jobs", () => {
     expect(await db.planningItem.count({ where: { id: doomed.taskId } })).toBe(0);
   });
 });
+
+describe("cards that point at a GitHub item not synchronised yet", () => {
+  it("name the repository only from the viewer's own workspace", async () => {
+    const owner = await db.githubOwner.findUniqueOrThrow({ where: { githubId: 9000n } });
+    // A private repository that exists ONLY in workspace two.
+    await db.repository.create({ data: { workspaceId: w2.ws, githubId: 777n, ownerId: owner.id, name: "secret", fullName: "acme/secret", htmlUrl: "https://github.com/acme/secret", visibility: "PRIVATE", defaultBranch: "main" } });
+    const own = await createTask(db, w1.viewer, { projectId: w1.projectId, title: "Points at 777" });
+    await db.planningItem.update({ where: { id: own.id }, data: { workRepoGithubId: 777n, workNumber: 5 } });
+    const mine = await createTask(db, w1.viewer, { projectId: w1.projectId, title: "Points at 100" });
+    await db.planningItem.update({ where: { id: mine.id }, data: { workRepoGithubId: 100n, workNumber: 9 } });
+    const board = await planningBoard(db, w1.viewer, w1.projectId);
+    const card = (id: string) => board.cards.find((c) => c.id === id)!;
+    expect(card(own.id).repoFullName).toBeNull();
+    expect(card(own.id).isDraft).toBe(false);
+    expect(card(mine.id).repoFullName).toBe("acme/api");
+    expect(JSON.stringify(board)).not.toContain("acme/secret");
+  });
+});

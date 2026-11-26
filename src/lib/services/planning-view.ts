@@ -65,7 +65,7 @@ export async function planningBoard(db: Db, v: Viewer, projectId: string, now = 
   // Cards that point at a GitHub issue or pull request whose work item is not synchronised here yet still name it.
   const unresolved = [...new Set(items.filter((i) => !i.workItemId && i.workRepoGithubId !== null).map((i) => i.workRepoGithubId!))];
   const repoByGid = new Map(
-    unresolved.length ? (await db.repository.findMany({ where: { githubId: { in: unresolved } }, select: { githubId: true, fullName: true } })).map((r) => [r.githubId.toString(), r.fullName]) : [],
+    unresolved.length ? (await db.repository.findMany({ where: { AND: [repoWhere(v), { githubId: { in: unresolved } }] }, select: { githubId: true, fullName: true } })).map((r) => [r.githubId.toString(), r.fullName]) : [],
   );
 
   const cards: CardView[] = items.map((i) => {

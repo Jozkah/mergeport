@@ -24,7 +24,7 @@ import { latestDigest } from "@/lib/services/digest";
 import { listTasks } from "@/lib/services/tasks";
 import { ListChecks } from "@/components/ui/icons";
 
-const PRIORITY_WORD: Record<number, string> = { 4: "Urgent", 3: "High", 2: "Normal", 1: "Low" };
+const PRIORITY_WORD: Record<number, string> = { 4: "Urgent", 3: "High", 2: "Medium", 1: "Low" };
 
 /** The viewer's next written tasks: assigned to them, open, not blocked, not waiting on an unfinished task; urgent first, then each project's order. */
 async function nextTasks(viewer: Awaited<ReturnType<typeof requireViewer>>["viewer"]) {
