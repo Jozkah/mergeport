@@ -26,7 +26,7 @@ function CardBody({ c, move, handle, compact }: { c: CardView; move?: React.Reac
       {handle}
       <p className={`font-medium leading-[1.35] [overflow-wrap:anywhere] ${handle ? "pr-6" : ""}`}><OpenCardLink id={c.id} href={c.taskHref} className="hover:underline">{c.title}</OpenCardLink></p>
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-3">
-        {c.isDraft ? <span>Internal task</span> : <Mono title={c.repoFullName ?? ""}>{c.repoFullName}#{c.number}</Mono>}
+        {c.isDraft ? <span>Internal task</span> : c.repoFullName ? <Mono title={c.repoFullName}>{c.repoFullName}#{c.number}</Mono> : <span>GitHub #{c.number}</span>}
         {c.priority > 0 && <span className="tnum">P{c.priority}</span>}
         {c.milestoneName && <span className="truncate" title={c.milestoneName}>{c.milestoneName}</span>}
         {c.epicTitle && <span className="truncate" title={`Epic: ${c.epicTitle}`}>◆ {c.epicTitle}</span>}
