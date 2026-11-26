@@ -6,8 +6,17 @@ import { currentGhStatus } from "@/lib/local/identity";
 import { looksOffline } from "@/lib/local/saved-profiles";
 
 /** Mints the browser session for the local profile after confirming WHO gh is signed in as. */
+/** A freshly (re)started app, for example right after a workspace switch, can see one `gh api user` fail for no lasting reason; one retry after this pause covers it. */
+const GH_RETRY_DELAY_MS = 1_500;
+
 export async function startLocalSession(): Promise<{ ok: true } | { ok: false; error: string }> {
-  const gh = await currentGhStatus(true);
+  let gh = await currentGhStatus(true);
+  if (gh.state === "error" && !looksOffline(gh.message)) {
+    console.warn(`Sign-in: gh api user failed (${gh.message}); retrying once.`);
+    await new Promise((r) => setTimeout(r, GH_RETRY_DELAY_MS));
+    gh = await currentGhStatus(true);
+    if (gh.state === "error") console.warn(`Sign-in: gh api user failed again (${gh.message}).`);
+  }
   if (gh.state === "missing-gh") return { ok: false, error: "gh-missing" };
   if (gh.state === "not-logged-in") return { ok: false, error: "gh-login" };
   if (gh.state === "error") {
