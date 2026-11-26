@@ -82,23 +82,27 @@ async function main() {
   // Rebuild whenever the code changed since the last build (git pull), not only when there is none: an old build must not run
   // against a database this launcher just migrated for the new code.
   const root = process.cwd();
-  const reason = buildReason(root);
-  if (reason) {
-    console.log(`Building the app (${reason}; about half a minute)…`);
-    const buildEnv = { ...process.env, MERGEPORT_DB: dbFile, MERGEPORT_PORT: String(port), DEMO_MODE: demo ? "true" : "false", NODE_ENV: "production" } as unknown as NodeJS.ProcessEnv;
-    const run = () =>
-      new Promise<{ code: number | null; output: string }>((resolve) => {
-        let output = "";
-        const p = spawn(process.execPath, [next, "build"], { stdio: ["ignore", "pipe", "pipe"], env: buildEnv });
-        p.stdout.on("data", (d) => ((output += d), process.stdout.write(d)));
-        p.stderr.on("data", (d) => ((output += d), process.stderr.write(d)));
-        p.on("error", (e) => resolve({ code: null, output: output + e.message }));
-        p.on("exit", (code) => resolve({ code, output }));
-      });
-    const b = await buildWithRetry(root, run);
-    if (!b.ok) throw new Error(`Building Mergeport failed (next build exit code ${b.code}, ${b.attempts} attempt${b.attempts > 1 ? "s" : ""}). The build output is above; fix it and run this again.`);
-    writeStamp(root);
-  }
+  // Also run before every app start, switches included: a disk cleaner can delete the build's server packages while the app runs.
+  const ensureBuilt = async (forDb: string) => {
+    const reason = buildReason(root);
+    if (reason) {
+      console.log(`Building the app (${reason}; about half a minute)…`);
+      const buildEnv = { ...process.env, MERGEPORT_DB: forDb, MERGEPORT_PORT: String(port), DEMO_MODE: demo ? "true" : "false", NODE_ENV: "production" } as unknown as NodeJS.ProcessEnv;
+      const run = () =>
+        new Promise<{ code: number | null; output: string }>((resolve) => {
+          let output = "";
+          const p = spawn(process.execPath, [next, "build"], { stdio: ["ignore", "pipe", "pipe"], env: buildEnv });
+          p.stdout.on("data", (d) => ((output += d), process.stdout.write(d)));
+          p.stderr.on("data", (d) => ((output += d), process.stderr.write(d)));
+          p.on("error", (e) => resolve({ code: null, output: output + e.message }));
+          p.on("exit", (code) => resolve({ code, output }));
+        });
+      const b = await buildWithRetry(root, run);
+      if (!b.ok) throw new Error(`Building Mergeport failed (next build exit code ${b.code}, ${b.attempts} attempt${b.attempts > 1 ? "s" : ""}). The build output is above; fix it and run this again.`);
+      writeStamp(root);
+    }
+  };
+  await ensureBuilt(dbFile);
 
   // Team contexts: one profile can hold several databases. A child that exits with RESTART_EXIT_CODE asked to be reopened on the profile's (new) active one.
   const baseOf = (file: string) => {
@@ -122,6 +126,7 @@ async function main() {
   const controlSecret = randomBytes(24).toString("base64url");
   const supervisor = new Supervisor(
     {
+      prepare: (spec) => ensureBuilt(spec.dbFile),
       spawnChild: (spec) => spawnNext(spec, { MERGEPORT_CONTROL_URL: control.url, MERGEPORT_CONTROL_SECRET: controlSecret, MERGEPORT_LAUNCHER: "1", MERGEPORT_BASE_DB: ((lastBackend = spec.backend ?? lastBackend), (lastBase = baseOf(spec.dbFile))) }),
       waitReady: (p, signal) => waitForReady(p, signal),
       resolveTarget: async ({ backend }) => {

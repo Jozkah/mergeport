@@ -390,3 +390,27 @@ describe("a child that cannot be killed", () => {
     hung = false; // let afterEach stop() clean up
   });
 });
+
+describe("prepare before every boot", () => {
+  it("runs after the old child is killed and before each spawn: start, switch and restore", async () => {
+    const f = makeDeps({ failReadyFor: (spec) => spec.dbFile === `/db/${HUB}` });
+    f.deps.prepare = async (spec) => {
+      f.events.push(`prepare:${spec.dbFile}`);
+    };
+    const s = sup(f.deps);
+    await s.start({ dbFile: "/db/a" });
+    await expect(s.switchTo({ backend: HUB })).rejects.toThrow("the previous one was restored");
+    expect(f.events).toEqual(["prepare:/db/a", "spawn:/db/a", "kill:/db/a", `prepare:/db/${HUB}`, `spawn:/db/${HUB}`, `kill:/db/${HUB}`, "prepare:/db/a", "spawn:/db/a"]);
+  });
+
+  it("a failing prepare fails the switch and restores the previous child", async () => {
+    const f = makeDeps();
+    f.deps.prepare = async (spec) => {
+      if (spec.dbFile === `/db/${HUB}`) throw new Error("build failed");
+    };
+    const s = sup(f.deps);
+    await s.start({ dbFile: "/db/a" });
+    await expect(s.switchTo({ backend: HUB })).rejects.toThrow("the previous one was restored");
+    expect(f.spawned.map((x) => x.dbFile)).toEqual(["/db/a", "/db/a"]);
+  });
+});

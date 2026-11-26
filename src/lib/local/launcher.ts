@@ -15,6 +15,30 @@ import { RESTART_EXIT_CODE } from "./restart-code";
 export { RESTART_EXIT_CODE };
 export const STAMP_FILE = path.join(".next", "mergeport-built-for");
 const BUILD_ID = path.join(".next", "BUILD_ID");
+/** Turbopack's links to server packages (better-sqlite3, Prisma). `next start` cannot load the app without them, and disk cleaners delete them. */
+const EXTERNALS = path.join(".next", "node_modules");
+/** What EXTERNALS held right after the build, so a later check knows what must still be there. */
+const EXTERNALS_RECORD = path.join(".next", "mergeport-externals.json");
+
+/** Entry names in EXTERNALS, scoped packages as "@scope/name". */
+const listExternals = (root: string): string[] => {
+  const dir = path.join(root, EXTERNALS);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).flatMap((e) => (e.startsWith("@") ? fs.readdirSync(path.join(dir, e)).map((s) => `${e}/${s}`) : [e]));
+};
+
+/** True when a recorded server package link is gone (existsSync follows the link, so a dangling one counts as gone). */
+const externalsMissing = (root: string): boolean => {
+  const rec = path.join(root, EXTERNALS_RECORD);
+  if (!fs.existsSync(rec)) return false;
+  let names: unknown;
+  try {
+    names = JSON.parse(fs.readFileSync(rec, "utf8"));
+  } catch {
+    return false;
+  }
+  return Array.isArray(names) && names.some((n) => typeof n === "string" && !fs.existsSync(path.join(root, EXTERNALS, n)));
+};
 /** Files whose change needs a rebuild even without a commit (dependencies, database client). */
 const HASHED = ["package-lock.json", path.join("prisma", "schema.prisma")];
 
@@ -53,6 +77,7 @@ const newestMtime = (p: string): number => {
 export function buildReason(root: string, deps: StampDeps = {}): string | null {
   const buildId = path.join(root, BUILD_ID);
   if (!fs.existsSync(buildId)) return "no build yet";
+  if (externalsMissing(root)) return "the build's server packages were deleted";
   const stamp = currentStamp(root, deps);
   if (stamp) {
     const stampFile = path.join(root, STAMP_FILE);
@@ -64,8 +89,9 @@ export function buildReason(root: string, deps: StampDeps = {}): string | null {
   return src > builtAt ? "source files are newer than the last build" : null;
 }
 
-/** Records what the finished build was made from (no-op without git: the mtime fallback needs no stamp). */
+/** Records what the finished build was made from (no-op without git: the mtime fallback needs no stamp) and which server packages it linked. */
 export function writeStamp(root: string, deps: StampDeps = {}) {
+  fs.writeFileSync(path.join(root, EXTERNALS_RECORD), JSON.stringify(listExternals(root)));
   const stamp = currentStamp(root, deps);
   if (stamp) fs.writeFileSync(path.join(root, STAMP_FILE), stamp + "\n");
 }

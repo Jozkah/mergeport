@@ -6,6 +6,8 @@ export type ChildSpec = { dbFile: string; token: string; port: number; demo: boo
 export type ChildHandle = { kill(): Promise<void>; onExit(cb: (code: number | null) => void): void };
 export type SupervisorDeps = {
   spawnChild(spec: ChildSpec): ChildHandle;
+  /** Runs before every spawn (start, switch, restore), after any previous child stopped: the launcher rebuilds a damaged build here. */
+  prepare?(spec: ChildSpec): Promise<void>;
   /** Resolves the child's boot id once it answers; rejects when the signal aborts. */
   waitReady(port: number, signal: AbortSignal): Promise<string>;
   /** Throws when the workspace cannot be opened (not signed in, hub gone, ...). */
@@ -198,6 +200,7 @@ export class Supervisor {
 
   /** `quiet`: a switch is handling this boot, so a child dying before it is ready is not reported as "child-exit". */
   private async boot(spec: ChildSpec, quiet = false): Promise<Started> {
+    await this.deps.prepare?.(spec);
     const run: Running = { spec, handle: this.deps.spawnChild(spec), expectedExit: quiet, bootId: null };
     this.current = run;
     // Aborting on exit lets waitReady fail fast when the child dies while booting.

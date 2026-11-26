@@ -162,3 +162,37 @@ describe("GET /api/local/launch", () => {
     expect(await res.text()).toMatch(/Launch link expired/);
   });
 });
+
+describe("build server packages (.next/node_modules)", () => {
+  const ext = (root: string) => path.join(root, ".next", "node_modules");
+  const withExternals = (root: string) => {
+    fs.mkdirSync(path.join(ext(root), "@prisma", "client-abc"), { recursive: true });
+    fs.mkdirSync(path.join(ext(root), "better-sqlite3-def"), { recursive: true });
+  };
+
+  it("rebuilds when the folder the build created is gone", () => {
+    const root = repo();
+    built(root);
+    withExternals(root);
+    writeStamp(root, { gitHead: () => "aaa" });
+    expect(buildReason(root, { gitHead: () => "aaa" })).toBeNull();
+    fs.rmSync(ext(root), { recursive: true, force: true });
+    expect(buildReason(root, { gitHead: () => "aaa" })).toMatch(/server packages/);
+  });
+
+  it("rebuilds when one recorded package link is gone, scoped ones included", () => {
+    const root = repo();
+    built(root);
+    withExternals(root);
+    writeStamp(root, { gitHead: () => "aaa" });
+    fs.rmSync(path.join(ext(root), "@prisma", "client-abc"), { recursive: true, force: true });
+    expect(buildReason(root, { gitHead: () => "aaa" })).toMatch(/server packages/);
+  });
+
+  it("does not rebuild a build that never had the folder", () => {
+    const root = repo();
+    built(root);
+    writeStamp(root, { gitHead: () => "aaa" });
+    expect(buildReason(root, { gitHead: () => "aaa" })).toBeNull();
+  });
+});
