@@ -51,10 +51,15 @@ async function items(db: Db, repositoryId: string, q: string): Promise<ItemSugge
   let rows;
   if (/^\d{1,9}$/.test(q)) {
     // Numbers starting with the digits typed: 12 -> 12, 120-129, 1200-1299, ...
+    // The exact number is read on its own so it is never crowded out by longer numbers (1200-1299 for "12"). "0" has no prefix range.
     const n = Number(q);
-    const ranges = [0, 1, 2, 3, 4, 5].filter((k) => (n + 1) * 10 ** k <= 2 ** 31 - 1).map((k) => ({ number: { gte: n * 10 ** k, lt: (n + 1) * 10 ** k } }));
-    rows = await db.workItem.findMany({ where: { repositoryId, OR: [...ranges, { title: { contains: q, mode: "insensitive" } }] }, select, orderBy: { number: "desc" }, take: 50 });
-    rows.sort((a, b) => Number(b.number === n) - Number(a.number === n) || Number(String(b.number).startsWith(q)) - Number(String(a.number).startsWith(q)) || b.number - a.number);
+    const ranges = n === 0 ? [] : [1, 2, 3, 4, 5].filter((k) => (n + 1) * 10 ** k <= 2 ** 31 - 1).map((k) => ({ number: { gte: n * 10 ** k, lt: (n + 1) * 10 ** k } }));
+    const [exact, more] = await Promise.all([
+      db.workItem.findFirst({ where: { repositoryId, number: n }, select }),
+      db.workItem.findMany({ where: { repositoryId, number: { not: n }, OR: [...ranges, { title: { contains: q, mode: "insensitive" } }] }, select, orderBy: { number: "desc" }, take: 50 }),
+    ]);
+    more.sort((a, b) => Number(String(b.number).startsWith(q)) - Number(String(a.number).startsWith(q)) || b.number - a.number);
+    rows = exact ? [exact, ...more] : more;
   } else {
     rows = await db.workItem.findMany({ where: { repositoryId, ...(q ? { title: { contains: q, mode: "insensitive" } } : {}) }, select, orderBy: { updatedAtGh: "desc" }, take: MENTION_LIMIT });
   }

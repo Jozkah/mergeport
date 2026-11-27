@@ -84,6 +84,7 @@ export function MentionTextarea({ repositoryId, value, defaultValue, onValueChan
 
   const look = (el: HTMLTextAreaElement) => {
     const t = el.selectionStart === el.selectionEnd ? mentionTrigger(el.value, el.selectionStart) : null;
+    if (!t || t.start !== closedAt) setClosedAt(null); // Escape held only for the mention it was pressed in
     setTrigger((prev) => (prev && t && prev.kind === t.kind && prev.query === t.query && prev.start === t.start ? prev : t));
   };
 

@@ -73,6 +73,9 @@ describe("mention popup", () => {
     fireEvent.keyDown(box(), { key: "Escape" });
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(box().getAttribute("aria-activedescendant")).toBeNull();
+    type(box(), "");
+    type(box(), "@al"); // a new mention at the same place opens again
+    expect(await screen.findAllByRole("option")).toHaveLength(2);
     cleanup();
     render(<Box repo={null} />);
     type(box(), "@al");

@@ -119,6 +119,16 @@ describe("mention suggestions are scoped", () => {
     expect(leaks(await suggestMentions(db, admin, apiId, "item", "zeta"), "secret")).toBe(false);
   });
 
+  it("keeps the exact number first even when many longer numbers share its digits", async () => {
+    const { db, admin } = S;
+    const t = new Date();
+    await db.workItem.createMany({ data: Array.from({ length: 60 }, (_, i) => ({ repositoryId: apiId, githubId: BigInt(5000 + i), number: 1600 + i, type: "ISSUE" as const, title: `Bulk ${i}`, htmlUrl: "https://github.com/northwind/atlas-api/issues/x", createdAtGh: t, updatedAtGh: t })) });
+    const r = await suggestMentions(db, admin, apiId, "item", "16");
+    expect(r).toHaveLength(8);
+    expect(r[0]).toMatchObject({ number: 16 });
+    expect(r.slice(1).every((s) => s.kind === "item" && String(s.number).startsWith("16"))).toBe(true);
+  });
+
   it("resolves #123 links inside the repository only", async () => {
     const { db, admin } = S;
     const refs = await mentionRefs(db, admin, apiId, ["see #16 and #4242"]);
