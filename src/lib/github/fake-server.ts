@@ -546,14 +546,16 @@ export class FakeGitHubServer {
     const ce = method === "PATCH" ? /^\/issues\/comments\/(\d+)$/.exec(sub) : null;
     if (!isCreate && !cm && !ie && !ce) return json(403, { message: "Resource not accessible by personal access token" });
     if (this.appLacksWritePermission) return json(403, { message: "Resource not accessible by integration" });
-    this.userWrites.push({ login: me, route: `${method} ${url.pathname}`, tokenPrefix: bearer.slice(0, 4), body: b });
+    const record = () => this.userWrites.push({ login: me, route: `${method} ${url.pathname}`, tokenPrefix: bearer.slice(0, 4), body: b });
+    if (!ie && !ce) record();
     const work = (r.work ??= []);
-    // Edits, as GitHub decides them: the author, or someone with write access to the repository; anybody else is refused.
+    // Edits, as GitHub decides them: the author, or someone with write access to the repository; anybody else is refused (and not recorded).
     const mayEdit = (author: string) => author.toLowerCase() === me.toLowerCase() || this.perm(r, me) === "push" || this.perm(r, me) === "admin";
     if (ie) {
       const w = work.find((x) => x.number === Number(ie[1]));
       if (!w) return json(404, { message: "Not Found" });
       if (!mayEdit(w.author)) return json(403, { message: "You must have write access to edit this issue" });
+      record();
       if (typeof b?.body === "string") w.body = b.body;
       if (typeof b?.title === "string") w.title = b.title;
       w.updatedAt = new Date(this.clock()).toISOString();
@@ -564,6 +566,7 @@ export class FakeGitHubServer {
       const c = w?.comments?.find((x) => x.id === Number(ce[1]));
       if (!w || !c) return json(404, { message: "Not Found" });
       if (!mayEdit(c.user)) return json(403, { message: "You must have write access to edit this comment" });
+      record();
       if (typeof b?.body !== "string" || !b.body.trim()) return json(422, { message: "Validation Failed", errors: [{ resource: "IssueComment", code: "missing_field", field: "body" }] });
       c.body = b.body;
       w.updatedAt = new Date(this.clock()).toISOString();

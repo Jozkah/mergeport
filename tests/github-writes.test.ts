@@ -487,16 +487,24 @@ describe("edits", () => {
     await expect(editIssueBody({ db: db(), v: await a.viewer() }, wi.id, "hijack")).rejects.toThrow(/GitHub refused this edit/);
     expect(await db().auditLog.count({ where: { action: "github.write.issue.edit.failed" } })).toBe(1);
     expect((await db().workItem.findUniqueOrThrow({ where: { id: wi.id } })).body).toBeNull();
+    expect(server.userWrites).toEqual([]);
+    expect(server.repo("acme", "web")!.work!.find((x) => x.number === 5)!.body).toBeUndefined();
   });
 
-  it("a demo repository edits locally without the gate", async () => {
+  it("a demo repository edits locally without the gate: the description and the person's own comment", async () => {
     const W = await world();
-    const v = await (await W.member("alice")).viewer();
+    const a = await W.member("alice");
+    const v = await a.viewer();
     const wi = await W.item(5);
     await db().workspace.update({ where: { id: W.w.ws.id }, data: { githubWritesEnabled: false } });
     await db().repository.update({ where: { id: W.repo.id }, data: { isDemo: true } });
     await editIssueBody({ db: db(), v }, wi.id, "demo\ntext");
     expect((await db().workItem.findUniqueOrThrow({ where: { id: wi.id } })).body).toBe("demo\ntext");
+    await addComment({ db: db(), v }, wi.id, "demo comment");
+    const c = await db().workItemComment.findFirstOrThrow({ where: { workItemId: wi.id } });
+    await editComment({ db: db(), v }, wi.id, c.id, "demo comment\nedited");
+    expect((await db().workItemComment.findUniqueOrThrow({ where: { id: c.id } })).body).toBe("demo comment\nedited");
+    await expect(editComment({ db: db(), v: await (await W.member("bob")).viewer() }, wi.id, c.id, "not mine")).rejects.toBeInstanceOf(ForbiddenError);
     expect(server.userWrites).toEqual([]);
   });
 
@@ -504,7 +512,7 @@ describe("edits", () => {
     const c = { kind: "ISSUE_COMMENT", authorLogin: "alice", authorGithubId: null };
     expect(mayEditComment(c, { login: "alice", githubLogin: null, githubId: null }, false, false)).toBe(false);
     expect(mayEditComment(c, { login: "x", githubLogin: "alice", githubId: 5n }, false, false)).toBe(true);
-    expect(mayEditComment(c, { login: "alice", githubLogin: null, githubId: null }, true, false)).toBe(true);
+    expect(mayEditComment(c, { login: "alice", githubLogin: null, githubId: null }, true, false)).toBe(true); // a demo repository writes as the Mergeport login
     expect(mayEditComment({ ...c, kind: "REVIEW" }, { login: "x", githubLogin: "alice", githubId: 5n }, false, true)).toBe(false);
   });
 });

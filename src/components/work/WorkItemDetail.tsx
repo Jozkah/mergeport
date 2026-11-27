@@ -58,12 +58,12 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   // Writes to GitHub are not enabled yet (the App holds read permissions); the demo store accepts them.
   const writeBlocked = item.repository.isDemo ? undefined : `${GITHUB_WRITES_DISABLED}.`;
   // Commenting is the one write that can be opted into (src/lib/github/writes.ts): offered only when every gate would pass, with the reason otherwise.
-  const repoRow = await db.repository.findFirstOrThrow({ where: { id: item.repositoryId, workspaceId: viewer.workspaceId } });
-  const commentRefusal = item.repository.isDemo || !caps.manageWork ? null : await writeRefusal(db, viewer, repoRow);
+  const repoRow = item.repository.isDemo || !caps.manageWork ? null : await db.repository.findFirstOrThrow({ where: { id: item.repositoryId, workspaceId: viewer.workspaceId } });
+  const commentRefusal = repoRow ? await writeRefusal(db, viewer, repoRow) : null;
   // Editing passes the same gate as commenting. The description: offered to anyone who may write here (GitHub refuses if their account
   // may not). A comment: their own, or any when GitHub's cached answer says they maintain the repository. Text over the write cap stays on GitHub.
   const canEdit = caps.manageWork && !commentRefusal;
-  const maintainer = canEdit && (await repoMaintainer(db, viewer.userId, repoRow));
+  const maintainer = canEdit && repoRow ? await repoMaintainer(db, viewer.userId, repoRow) : false;
   const editable = (t: string | null) => (t ?? "").length <= BODY_MAX;
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";

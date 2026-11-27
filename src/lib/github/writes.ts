@@ -109,7 +109,7 @@ export function mayEditComment(c: { kind: string; authorLogin: string | null; au
   if (c.kind !== "ISSUE_COMMENT") return false;
   if (maintainer) return true;
   // A real repository: only the linked GitHub identity counts (never the Mergeport login). A demo repository writes as the Mergeport login.
-  return authoredBy(c, isDemo ? { login: v.githubLogin ?? v.login, id: v.githubId } : viewerWho(v));
+  return authoredBy(c, isDemo ? { login: v.login, id: null } : viewerWho(v));
 }
 
 /** The sentence for GitHub's own refusal. GitHub's raw message is not repeated: it is not ours to vouch for. */
