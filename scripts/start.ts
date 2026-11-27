@@ -23,13 +23,14 @@ try {
 
 // A database problem here must not keep the web server down: it is logged and the server starts without a setup link.
 if (isHosted() && !isDemo()) {
-  const setupDb = createPrisma(undefined, { max: 1 });
+  let setupDb: ReturnType<typeof createPrisma> | null = null;
   try {
+    setupDb = createPrisma(undefined, { max: 1 });
     await announceSetupLink(setupDb, publicOrigin()!.origin);
   } catch (e) {
     console.error(`Mergeport setup: could not create a setup link: ${e instanceof Error ? e.message : e}`);
   } finally {
-    await setupDb.$disconnect().catch(() => {});
+    await setupDb?.$disconnect().catch(() => {});
   }
 }
 

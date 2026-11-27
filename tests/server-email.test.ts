@@ -4,7 +4,7 @@ import { createTestPrisma } from "./pg";
 import { ORIGIN, formPost, pathOf, state } from "./auth-mocks";
 import { workspaceWithOwner } from "./roles-helpers";
 import { sha256 } from "@/lib/crypto";
-import { SESSION_COOKIE, findSession } from "@/lib/auth/session";
+import { SESSION_COOKIE, createSession, findSession } from "@/lib/auth/session";
 import { SETUP_TTL_MS, announceSetupLink, claimSetup, issueSetupToken, setupTokenValid } from "@/lib/auth/setup";
 import { MailNotConfiguredError, SmtpMailer, getMailer, invalidateMailerCache, setMailerForTests } from "@/lib/auth/mailer";
 import { getSmtpView, loadSmtpConfig, saveSmtpSettings } from "@/lib/services/smtp-settings";
@@ -102,6 +102,22 @@ describe("setup link", () => {
     const again = await (await claimRoute())(formPost("/setup/claim", { token: t, email: "x@example.com" }, { "x-forwarded-for": "198.51.100.9" }));
     expect(again.status).toBe(404);
     expect(state.jar.has(SESSION_COOKIE)).toBe(false);
+  });
+
+  it("mode=me makes the signed-in person administrator and keeps their session; without a session nothing is used up", async () => {
+    const t = (await issueSetupToken(db()))!;
+    const signedOut = await (await claimRoute())(formPost("/setup/claim", { token: t, mode: "me" }, { "x-forwarded-for": "198.51.100.11" }));
+    expect(pathOf(signedOut)).toBe(`/setup/${t}?error=signed-out`);
+    expect(await setupTokenValid(db(), t)).toBe(true);
+    const me = await db().user.create({ data: { login: "me", email: "me@example.com" } });
+    const s = await createSession(db(), me.id);
+    state.jar.set(SESSION_COOKIE, { value: s.token, options: {} });
+    const res = await (await claimRoute())(formPost("/setup/claim", { token: t, mode: "me", email: "someone@example.com" }, { "x-forwarded-for": "198.51.100.11" }));
+    expect(res.status).toBe(303);
+    expect((await db().user.findUniqueOrThrow({ where: { id: me.id } })).isServerAdmin).toBe(true);
+    expect(await db().user.findUnique({ where: { email: "someone@example.com" } })).toBeNull();
+    expect(state.jar.get(SESSION_COOKIE)?.value).toBe(s.token);
+    expect(await setupTokenValid(db(), t)).toBe(false);
   });
 
   it("the route is rate limited per client address", async () => {
