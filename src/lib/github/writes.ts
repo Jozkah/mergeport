@@ -2,6 +2,7 @@ import type { Db } from "@/lib/db";
 import type { Viewer } from "@/lib/authz/viewer";
 import { take, claimGap } from "@/lib/auth/rate-limit";
 import { ForbiddenError, ValidationError } from "@/lib/errors";
+import { authoredBy, viewerWho } from "@/lib/domain/identity";
 import { audit } from "@/lib/services/audit";
 import { enqueue } from "@/lib/jobs";
 import { GithubAppError, githubApiBase } from "./app-auth";
@@ -20,8 +21,8 @@ export { FOOTER, TITLE_MAX, BODY_MAX, validateWriteText, withFooter };
 
 /**
  * Opt-in GitHub writes made AS THE PERSON (docs/github-app.md, "Writing to GitHub as you"). Scope of this change, and no more:
- * create an issue (from a task or the new issue page), and comment on a tracked issue or pull request. Never merge, close, delete, push, label, assign, edit
- * somebody else's comment or submit a review.
+ * create an issue (from a task or the new issue page), comment on a tracked issue or pull request, and edit an issue's or pull request's
+ * description or one's own conversation comment. Never merge, close, delete, push, label, assign, or submit a review.
  *
  * Every write passes `githubWrite`, which in this order requires: the deployment ceiling (MERGEPORT_GITHUB_WRITES=on), the workspace switch,
  * a repository served by an installation this workspace proved it controls, the person's own working GitHub link, and a fresh cached
@@ -30,7 +31,7 @@ export { FOOTER, TITLE_MAX, BODY_MAX, validateWriteText, withFooter };
  * Callers have already required the Mergeport capability (requireRepo "manageWork"). Rate limits, audit rows and the typed refusals live here.
  */
 
-export type WriteKind = "issue.create" | "comment";
+export type WriteKind = "issue.create" | "comment" | "issue.edit" | "comment.edit";
 export type RefusalReason = "ceiling-off" | "workspace-off" | "not-connected" | "not-linked" | "relink" | "no-key" | "no-access" | "unavailable" | "rate-user" | "rate-workspace" | "duplicate";
 
 export const REFUSAL_MESSAGES: Record<RefusalReason, string> = {
@@ -93,6 +94,24 @@ export async function writeRefusal(db: Db, v: Pick<Viewer, "userId" | "workspace
   return grant ? null : "no-access";
 }
 
+/** Whether GitHub's cached answer gives this person admin or maintain on the repository (they may edit anybody's comment there). */
+export async function repoMaintainer(db: Db, userId: string, repo: Pick<Repo, "githubId" | "installationId">, now: Date = new Date()): Promise<boolean> {
+  if (repo.installationId === null) return false;
+  const cutoff = new Date(now.getTime() - VALID_FOR_MS);
+  return !!(await db.githubRepoAccess.findFirst({ where: { userId, repositoryGithubId: repo.githubId, installationId: repo.installationId, checkedAt: { gte: cutoff }, permission: { in: ["admin", "maintain"] } }, select: { id: true } }));
+}
+
+/**
+ * Whether Mergeport offers (and accepts) editing this comment: a conversation comment the person wrote on GitHub, or any conversation
+ * comment when they maintain the repository. GitHub still decides; this only keeps Mergeport from offering what GitHub would refuse.
+ */
+export function mayEditComment(c: { kind: string; authorLogin: string | null; authorGithubId?: bigint | null }, v: Pick<Viewer, "githubId" | "githubLogin" | "login">, isDemo: boolean, maintainer: boolean): boolean {
+  if (c.kind !== "ISSUE_COMMENT") return false;
+  if (maintainer) return true;
+  // A real repository: only the linked GitHub identity counts (never the Mergeport login). A demo repository writes as the Mergeport login.
+  return authoredBy(c, isDemo ? { login: v.githubLogin ?? v.login, id: v.githubId } : viewerWho(v));
+}
+
 /** The sentence for GitHub's own refusal. GitHub's raw message is not repeated: it is not ours to vouch for. */
 export function explain(e: GithubError, kind: WriteKind): string {
   switch (e.kind) {
@@ -103,6 +122,7 @@ export function explain(e: GithubError, kind: WriteKind): string {
     case "network":
       return "We could not confirm it was sent: the connection to GitHub failed. Check GitHub before retrying.";
     case "forbidden":
+      if (kind === "issue.edit" || kind === "comment.edit") return "GitHub refused this edit. Only the author, or someone with write access to the repository, can change it on GitHub; the conversation may also be locked. Nothing was changed.";
       return "GitHub refused this. Your GitHub account may not be allowed to write here, the conversation may be locked, or the Mergeport GitHub App has not been given permission to write issues and pull requests yet: an owner of the GitHub account has to accept the new permissions (see docs/github-app.md).";
     case "not-found":
       return "GitHub could not find this with your account. You may have lost access to the repository, or it was renamed or deleted.";

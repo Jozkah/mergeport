@@ -101,6 +101,18 @@ export async function commentAction(fd: FormData): Promise<ActionResult> {
   });
 }
 
+/** Edits an issue's or pull request's description (`commentId` absent) or one conversation comment. */
+export async function editTextAction(input: { id: string; commentId?: string; body: string }): Promise<ActionResult> {
+  return run(async () => {
+    const c = await writerCtx();
+    const body = String(input.body ?? "");
+    const r = input.commentId ? await work.editComment(c, input.id, input.commentId, body) : await work.editIssueBody(c, input.id, body);
+    revalidatePath("/pull-requests/" + input.id);
+    revalidatePath("/issues/" + input.id);
+    return { ok: true, message: r.changed ? "Saved on GitHub" : "Nothing changed" };
+  });
+}
+
 export async function inlineCommentAction(input: { id: string; path: string; line: number; side: "LEFT" | "RIGHT"; body: string }): Promise<ActionResult> {
   return run(async () => {
     await work.addReviewComment(await writerCtx(), input.id, { path: input.path, line: input.line, side: input.side === "LEFT" ? "LEFT" : "RIGHT", body: input.body });

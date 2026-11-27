@@ -301,7 +301,7 @@ Tests: `tests/github-signin.test.ts` against the fake GitHub (`FakeGitHubServer.
 
 ## Writing to GitHub as you
 
-Off by default, narrow on purpose, and made as the person. The scope of this change is exactly two writes: **create an issue from a Mergeport task** (the "Also create a GitHub issue" option in New task and "Turn into a GitHub issue" on a task) and **post a comment on a tracked issue or pull request**. Mergeport never merges, closes, deletes, pushes, edits somebody else's comment, changes labels, assignees or milestones on GitHub, requests reviewers or submits a review, and GitHub writes are not offered over MCP (docs/mcp.md).
+Off by default, narrow on purpose, and made as the person. The scope of this change is exactly two writes: **create an issue from a Mergeport task** (the "Also create a GitHub issue" option in New task and "Turn into a GitHub issue" on a task) and **post a comment on a tracked issue or pull request**, plus **edit an issue's or pull request's description, or a conversation comment** (Edit on the item page: offered on the description to anyone who may write there, on a comment only to its GitHub author or someone whose cached GitHub permission is admin or maintain; the text is sent exactly as typed, line endings normalised, no footer added; the same text again is a no-op; GitHub decides and its refusal is explained; audited as `github.write.issue.edit` and `github.write.comment.edit`). Mergeport never merges, closes, deletes, pushes, edits review or inline comments, changes labels, assignees or milestones on GitHub, requests reviewers or submits a review, and GitHub writes are not offered over MCP (docs/mcp.md).
 
 **Three switches, all must be on.**
 

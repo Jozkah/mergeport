@@ -61,7 +61,7 @@ export class FakeGitHubServer {
   /** Whether GET /user/installations also lists suspended installations (live GitHub behaviour is unverified). */
   listSuspendedForUsers = false;
   offline = false;
-  /** Test helper: every write made with a user-to-server token (issue create, comment): who, the route, the token's first characters and the body. */
+  /** Test helper: every write made with a user-to-server token (issue create and edit, comment and comment edit): who, the route, the token's first characters and the body. */
   userWrites: { login: string; route: string; tokenPrefix: string; body: any }[] = [];
   /** Simulates an App that was not granted Issues and Pull requests write permission: every user-token write answers 403, as GitHub does for a missing App permission. */
   appLacksWritePermission = false;
@@ -542,10 +542,34 @@ export class FakeGitHubServer {
     const sub = m[3] ?? "";
     const isCreate = method === "POST" && sub === "/issues";
     const cm = method === "POST" ? /^\/issues\/(\d+)\/comments$/.exec(sub) : null;
-    if (!isCreate && !cm) return json(403, { message: "Resource not accessible by personal access token" });
+    const ie = method === "PATCH" ? /^\/issues\/(\d+)$/.exec(sub) : null;
+    const ce = method === "PATCH" ? /^\/issues\/comments\/(\d+)$/.exec(sub) : null;
+    if (!isCreate && !cm && !ie && !ce) return json(403, { message: "Resource not accessible by personal access token" });
     if (this.appLacksWritePermission) return json(403, { message: "Resource not accessible by integration" });
     this.userWrites.push({ login: me, route: `${method} ${url.pathname}`, tokenPrefix: bearer.slice(0, 4), body: b });
     const work = (r.work ??= []);
+    // Edits, as GitHub decides them: the author, or someone with write access to the repository; anybody else is refused.
+    const mayEdit = (author: string) => author.toLowerCase() === me.toLowerCase() || this.perm(r, me) === "push" || this.perm(r, me) === "admin";
+    if (ie) {
+      const w = work.find((x) => x.number === Number(ie[1]));
+      if (!w) return json(404, { message: "Not Found" });
+      if (!mayEdit(w.author)) return json(403, { message: "You must have write access to edit this issue" });
+      if (typeof b?.body === "string") w.body = b.body;
+      if (typeof b?.title === "string") w.title = b.title;
+      w.updatedAt = new Date(this.clock()).toISOString();
+      return json(200, this.workJson(r, w));
+    }
+    if (ce) {
+      const w = work.find((x) => x.comments?.some((c) => c.id === Number(ce[1])));
+      const c = w?.comments?.find((x) => x.id === Number(ce[1]));
+      if (!w || !c) return json(404, { message: "Not Found" });
+      if (!mayEdit(c.user)) return json(403, { message: "You must have write access to edit this comment" });
+      if (typeof b?.body !== "string" || !b.body.trim()) return json(422, { message: "Validation Failed", errors: [{ resource: "IssueComment", code: "missing_field", field: "body" }] });
+      c.body = b.body;
+      w.updatedAt = new Date(this.clock()).toISOString();
+      const at = new Date(this.clock()).toISOString();
+      return json(200, { id: c.id, user: this.userJson(c.user), body: c.body, created_at: at, updated_at: at });
+    }
     if (isCreate) {
       const title = typeof b?.title === "string" ? b.title.trim() : "";
       if (!title || title.length > 256 || (typeof b?.body === "string" && b.body.length > 65536)) return json(422, { message: "Validation Failed", errors: [{ resource: "Issue", code: "invalid" }] });

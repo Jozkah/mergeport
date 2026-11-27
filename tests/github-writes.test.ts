@@ -17,7 +17,10 @@ import { createColumnsForProject } from "@/lib/services/planning";
 import { createTask } from "@/lib/services/tasks";
 import { githubWritesView, setWorkspaceGithubWrites } from "@/lib/services/github-writes-setting";
 import { issueDestinationsByProject, linkPendingTasks, previewPromotion, promoteTask } from "@/lib/services/task-promotion";
-import { addComment, createIssue } from "@/lib/services/work-actions";
+import { addComment, createIssue, editComment, editIssueBody } from "@/lib/services/work-actions";
+import { mayEditComment } from "@/lib/github/writes";
+import { portForSync } from "@/lib/github/factory";
+import { syncItem } from "@/lib/sync/repository";
 import { updateTask } from "@/lib/services/tasks";
 
 /**
@@ -385,6 +388,124 @@ describe("comments", () => {
     const wi = await W.item(5);
     await addComment({ db: db(), v }, wi.id, "line one\r\nline two\r\n\r\nnew paragraph");
     expect(server.userWrites[0].body.body).toBe("line one\nline two\n\nnew paragraph\n\n---\nCreated from Mergeport");
+  });
+});
+
+describe("edits", () => {
+  /** A conversation comment on GitHub and its mirror row, written by `login`. */
+  const comment = async (wi: { id: string; number: number }, login: string, body: string, kind: "ISSUE_COMMENT" | "REVIEW_COMMENT" = "ISSUE_COMMENT") => {
+    const w = server.repo("acme", "web")!.work!.find((x) => x.number === wi.number)!;
+    const id = 77_000 + (w.comments?.length ?? 0);
+    (w.comments ??= []).push({ id, user: login, body });
+    const u = await db().user.findFirst({ where: { githubLogin: login } });
+    return db().workItemComment.create({ data: { workItemId: wi.id, githubId: BigInt(id), kind, authorLogin: login, authorGithubId: u?.githubId ?? null, body, createdAtGh: new Date(), updatedAtGh: new Date() } });
+  };
+
+  it("description: as the person, the exact text (line breaks kept, no footer added), mirror updated at once, audited, and a sync keeps it", async () => {
+    const W = await world();
+    const a = await W.member("alice");
+    const v = await a.viewer();
+    const wi = await W.item(5);
+    expect(await editIssueBody({ db: db(), v }, wi.id, "first\r\nsecond\r\n\r\nnew paragraph")).toEqual({ changed: true });
+    expect(server.userWrites).toHaveLength(1);
+    expect(server.userWrites[0]).toMatchObject({ login: "alice", route: "PATCH /repos/acme/web/issues/5", tokenPrefix: "ghu_" });
+    expect(server.userWrites[0].body).toEqual({ body: "first\nsecond\n\nnew paragraph" });
+    onlyUserTokensWrote();
+    expect(server.repo("acme", "web")!.work!.find((x) => x.number === 5)!.body).toBe("first\nsecond\n\nnew paragraph");
+    expect((await db().workItem.findUniqueOrThrow({ where: { id: wi.id } })).body).toBe("first\nsecond\n\nnew paragraph");
+    expect(await db().auditLog.count({ where: { action: "github.write.issue.edit" } })).toBe(1);
+    expect(await db().job.count({ where: { type: "sync.item" } })).toBe(1);
+    // the mirror's next sync (installation token) reads the same text back
+    await syncItem(db(), (await portForSync(db(), W.repo.id))!, W.repo.id, 5);
+    expect((await db().workItem.findUniqueOrThrow({ where: { id: wi.id } })).body).toBe("first\nsecond\n\nnew paragraph");
+    // the same text again is a no-op: nothing sent, no budget spent
+    expect(await editIssueBody({ db: db(), v }, wi.id, "first\nsecond\n\nnew paragraph")).toEqual({ changed: false });
+    expect(server.userWrites).toHaveLength(1);
+  });
+
+  it("a footer already in the text stays exactly once; none is added to text without one", async () => {
+    const W = await world();
+    const v = await (await W.member("alice")).viewer();
+    const wi = await W.item(5);
+    await db().workItem.update({ where: { id: wi.id }, data: { body: "old\n\n---\nCreated from Mergeport" } });
+    await editIssueBody({ db: db(), v }, wi.id, "new\n\n---\nCreated from Mergeport");
+    expect(server.userWrites[0].body.body).toBe("new\n\n---\nCreated from Mergeport");
+    const c = await comment(wi, "alice", "mine");
+    await editComment({ db: db(), v }, wi.id, c.id, "still mine");
+    expect(server.userWrites[1].body.body).toBe("still mine");
+  });
+
+  it("comment: only the author (or a maintainer) may, only conversation comments, as the person", async () => {
+    const W = await world();
+    const a = await W.member("alice");
+    const b = await W.member("bob");
+    const va = await a.viewer();
+    const wi = await W.item(5);
+    const c = await comment(wi, "alice", "typo hree");
+    await expect(editComment({ db: db(), v: await b.viewer() }, wi.id, c.id, "bob was here")).rejects.toBeInstanceOf(ForbiddenError);
+    expect(server.userWrites).toEqual([]);
+    await expect(editComment({ db: db(), v: va }, wi.id, c.id, "   ")).rejects.toBeInstanceOf(ValidationError);
+    expect(await editComment({ db: db(), v: va }, wi.id, c.id, "typo here\r\nand more")).toEqual({ changed: true });
+    expect(server.userWrites[0]).toMatchObject({ login: "alice", route: `PATCH /repos/acme/web/issues/comments/${c.githubId}` });
+    expect(server.userWrites[0].body).toEqual({ body: "typo here\nand more" });
+    expect(server.repo("acme", "web")!.work!.find((x) => x.number === 5)!.comments![0].body).toBe("typo here\nand more");
+    expect((await db().workItemComment.findUniqueOrThrow({ where: { id: c.id } })).body).toBe("typo here\nand more");
+    expect(await db().auditLog.count({ where: { action: "github.write.comment.edit" } })).toBe(1);
+    // GitHub's cached answer "maintain" lets bob edit anybody's comment from here; GitHub agrees (bob has write access)
+    await db().githubRepoAccess.updateMany({ where: { userId: b.user.id }, data: { permission: "maintain" } });
+    await editComment({ db: db(), v: await b.viewer() }, wi.id, c.id, "fixed by a maintainer");
+    expect(server.userWrites[1]).toMatchObject({ login: "bob" });
+    // review and inline comments are not editable here
+    const rc = await comment(wi, "alice", "inline", "REVIEW_COMMENT");
+    await expect(editComment({ db: db(), v: va }, wi.id, rc.id, "x")).rejects.toThrow(/Only conversation comments/);
+    // a comment of another item is not found through this item
+    const other = await W.item(6);
+    await expect(editComment({ db: db(), v: va }, other.id, c.id, "x")).rejects.toBeInstanceOf(NotFoundError);
+    expect(server.userWrites).toHaveLength(2);
+  });
+
+  it("goes through the same gate: switch off, no link, no cached access are refused before GitHub", async () => {
+    const W = await world();
+    const wi = await W.item(5);
+    const nolink = await (await W.member("nolink", { link: false })).viewer();
+    await refused(editIssueBody({ db: db(), v: nolink }, wi.id, "x"), "not-linked");
+    const noaccess = await (await W.member("noaccess", { access: false })).viewer();
+    await refused(editIssueBody({ db: db(), v: noaccess }, wi.id, "x"), "no-access");
+    const a = await W.member("alice");
+    const c = await comment(wi, "alice", "mine");
+    await db().workspace.update({ where: { id: W.w.ws.id }, data: { githubWritesEnabled: false } });
+    await refused(editIssueBody({ db: db(), v: await a.viewer() }, wi.id, "x"), "workspace-off");
+    await refused(editComment({ db: db(), v: await a.viewer() }, wi.id, c.id, "x"), "workspace-off");
+    expect(server.userWrites).toEqual([]);
+  });
+
+  it("GitHub's refusal (no write access, not the author) is explained and audited; nothing changes locally", async () => {
+    const W = await world();
+    const a = await W.member("alice");
+    const wi = await W.item(5);
+    server.repo("acme", "web")!.collaborators.set("alice", "pull");
+    await expect(editIssueBody({ db: db(), v: await a.viewer() }, wi.id, "hijack")).rejects.toThrow(/GitHub refused this edit/);
+    expect(await db().auditLog.count({ where: { action: "github.write.issue.edit.failed" } })).toBe(1);
+    expect((await db().workItem.findUniqueOrThrow({ where: { id: wi.id } })).body).toBeNull();
+  });
+
+  it("a demo repository edits locally without the gate", async () => {
+    const W = await world();
+    const v = await (await W.member("alice")).viewer();
+    const wi = await W.item(5);
+    await db().workspace.update({ where: { id: W.w.ws.id }, data: { githubWritesEnabled: false } });
+    await db().repository.update({ where: { id: W.repo.id }, data: { isDemo: true } });
+    await editIssueBody({ db: db(), v }, wi.id, "demo\ntext");
+    expect((await db().workItem.findUniqueOrThrow({ where: { id: wi.id } })).body).toBe("demo\ntext");
+    expect(server.userWrites).toEqual([]);
+  });
+
+  it("mayEditComment: a real repository matches the linked GitHub identity, never the Mergeport login", () => {
+    const c = { kind: "ISSUE_COMMENT", authorLogin: "alice", authorGithubId: null };
+    expect(mayEditComment(c, { login: "alice", githubLogin: null, githubId: null }, false, false)).toBe(false);
+    expect(mayEditComment(c, { login: "x", githubLogin: "alice", githubId: 5n }, false, false)).toBe(true);
+    expect(mayEditComment(c, { login: "alice", githubLogin: null, githubId: null }, true, false)).toBe(true);
+    expect(mayEditComment({ ...c, kind: "REVIEW" }, { login: "x", githubLogin: "alice", githubId: 5n }, false, true)).toBe(false);
   });
 });
 

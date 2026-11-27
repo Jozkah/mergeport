@@ -25,7 +25,7 @@ export function GithubCommentBox({ id, repoName, number }: { id: string; repoNam
         open={open}
         onOpenChange={setOpen}
         title="Post this comment on GitHub?"
-        consequence={<>It will be posted on <bdi>{repoName}</bdi> #{number} under your own GitHub name, and it cannot be edited or removed from Mergeport.</>}
+        consequence={<>It will be posted on <bdi>{repoName}</bdi> #{number} under your own GitHub name. You can edit it from Mergeport later; it cannot be removed from here.</>}
         action={commentAction}
         submitLabel="Post comment"
         pendingLabel="Posting…"

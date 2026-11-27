@@ -10,8 +10,10 @@ import { sinceLastLooked } from "@/lib/services/seen";
 import { SinceYouLooked } from "@/components/review/SinceYouLooked";
 import { OwnersPanel } from "@/components/code/ReviewTools";
 import { GITHUB_WRITES_DISABLED } from "@/lib/github/hosted";
-import { REFUSAL_MESSAGES, writeRefusal } from "@/lib/github/writes";
+import { REFUSAL_MESSAGES, mayEditComment, repoMaintainer, writeRefusal } from "@/lib/github/writes";
+import { BODY_MAX } from "@/lib/github/write-text";
 import { GithubCommentBox } from "./GithubCommentBox";
+import { EditableText } from "./EditableText";
 import { deriveReadiness } from "@/lib/domain/readiness";
 import { ReadinessPanel } from "@/components/review/ReadinessPanel";
 import { StageList } from "@/components/review/StageList";
@@ -56,7 +58,13 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   // Writes to GitHub are not enabled yet (the App holds read permissions); the demo store accepts them.
   const writeBlocked = item.repository.isDemo ? undefined : `${GITHUB_WRITES_DISABLED}.`;
   // Commenting is the one write that can be opted into (src/lib/github/writes.ts): offered only when every gate would pass, with the reason otherwise.
-  const commentRefusal = item.repository.isDemo || !caps.manageWork ? null : await writeRefusal(db, viewer, await db.repository.findFirstOrThrow({ where: { id: item.repositoryId, workspaceId: viewer.workspaceId } }));
+  const repoRow = await db.repository.findFirstOrThrow({ where: { id: item.repositoryId, workspaceId: viewer.workspaceId } });
+  const commentRefusal = item.repository.isDemo || !caps.manageWork ? null : await writeRefusal(db, viewer, repoRow);
+  // Editing passes the same gate as commenting. The description: offered to anyone who may write here (GitHub refuses if their account
+  // may not). A comment: their own, or any when GitHub's cached answer says they maintain the repository. Text over the write cap stays on GitHub.
+  const canEdit = caps.manageWork && !commentRefusal;
+  const maintainer = canEdit && (await repoMaintainer(db, viewer.userId, repoRow));
+  const editable = (t: string | null) => (t ?? "").length <= BODY_MAX;
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
   const comments = item.comments;
@@ -70,7 +78,10 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   const conversation = (
     <>
               <Panel title="Description" icon={MessageSquare} id="desc">
-                <div className="p-4">{item.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.body, { breaks: true }) }} /> : <p className="text-[13px] text-ink-3">No description.</p>}</div>
+                <div className="p-4">{(() => {
+                  const shown = item.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.body, { breaks: true }) }} /> : <p className="text-[13px] text-ink-3">No description.</p>;
+                  return canEdit && editable(item.body) ? <EditableText id={item.id} markdown={item.body ?? ""} what="description">{shown}</EditableText> : shown;
+                })()}</div>
               </Panel>
               <Panel title={`Conversation (${comments.length})`} icon={MessageSquare} id="conv">
                 {comments.length === 0 && !discussionDownloaded(item.state, item.updatedAtGh, new Date()) ? (
@@ -89,7 +100,10 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
                           {c.kind === "ISSUE_COMMENT" && <span className="text-ink-3">commented</span>}
                           <Time value={c.createdAtGh} formatted={formatInstant(c.createdAtGh, viewer.timezone)} />
                         </div>
-                        {c.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(c.body, { breaks: true }) }} /> : <p className="text-[12.5px] text-ink-3">No text.</p>}
+                        {(() => {
+                          const shown = c.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(c.body, { breaks: true }) }} /> : <p className="text-[12.5px] text-ink-3">No text.</p>;
+                          return canEdit && editable(c.body) && mayEditComment(c, viewer, item.repository.isDemo, maintainer) ? <EditableText id={item.id} commentId={c.id} markdown={c.body ?? ""} what="comment">{shown}</EditableText> : shown;
+                        })()}
                       </li>
                     ))}
                   </ol>
