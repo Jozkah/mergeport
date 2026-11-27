@@ -8,6 +8,7 @@ import { Banner } from "@/components/ui/primitives";
 import { Check, ChevronDown } from "@/components/ui/icons";
 import { BODY_MAX, TITLE_MAX } from "@/lib/github/write-text";
 import { MentionTextarea } from "./MentionTextarea";
+import { IssueAiDraft, type IssueDraft } from "./IssueAiDraft";
 
 export type NewIssueRepo = { id: string; fullName: string; isDemo: boolean; /** Why an issue cannot be written there from here, or null. */ refusal: string | null };
 type Draft = { repoId: string; title: string; body: string; labels: string };
@@ -38,7 +39,7 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
  * The new issue page. A searchable repository picker (combobox + listbox), title, body with Write / Preview, labels for demo repositories.
  * While typing, the form is kept as a draft in this browser (per signed-in person); nothing reaches GitHub until Create issue.
  */
-export function NewIssueForm({ repos, preselect, draftKey }: { repos: NewIssueRepo[]; preselect: string | null; draftKey: string }) {
+export function NewIssueForm({ repos, preselect, draftKey, ai = { enabled: false, repos: [] } }: { repos: NewIssueRepo[]; preselect: string | null; draftKey: string; /** Draft with AI: whether it is set up, and the repositories research may read. */ ai?: { enabled: boolean; repos: { id: string; fullName: string }[] } }) {
   const router = useRouter();
   const uid = useId();
   const fallbackRepo = preselect ?? (repos.length === 1 ? repos[0].id : "");
@@ -138,6 +139,14 @@ export function NewIssueForm({ repos, preselect, draftKey }: { repos: NewIssueRe
     tabs.current[target]?.focus();
   };
 
+  // A draft from the AI only fills the form; Append keeps a title that is already there and adds the text below the description.
+  const fill = (d: IssueDraft, mode: "replace" | "append") => {
+    if (mode === "replace" || !title.trim()) setTitle(d.title);
+    setBody((b) => (mode === "append" && b.trim() ? `${b.trimEnd()}\n\n${d.body}` : d.body).slice(0, BODY_MAX));
+    setPreview(null);
+    setTab("write");
+  };
+
   const why = !repo ? "Choose a repository" : repo.refusal ? repo.refusal : !title.trim() ? "Give the issue a title" : undefined;
 
   return (
@@ -147,6 +156,7 @@ export function NewIssueForm({ repos, preselect, draftKey }: { repos: NewIssueRe
           <Banner tone="info" title="Draft restored">Your unsent issue from earlier is back. It is only in this browser; nothing was posted to GitHub.</Banner>
         </div>
       )}
+      <IssueAiDraft enabled={ai.enabled} repoId={repoId} repos={ai.repos} hasText={!!(title.trim() || body.trim())} onFill={fill} />
       <ActionForm
         action={createIssueAction}
         submitLabel="Create issue"
