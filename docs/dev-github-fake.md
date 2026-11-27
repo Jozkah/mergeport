@@ -10,7 +10,7 @@ What the fake serves:
 - A seeded world: organisation `fake-org` (owner `devuser`, member `teammate`), a **public** repository `public-repo` and a **private** one
   `private-repo` (both with a README, issues and pull requests), and the App installed on the organisation.
 - The REST surface the app calls: app JWT checks, installation tokens, `/user`, `/user/emails`, `/user/installations`, `/user/memberships/orgs/:org`,
-  installation and user repository lists, issues, pull requests, reviews, comments, issue create and comment, and the OAuth token exchange.
+  installation and user repository lists, issues, pull requests, reviews, comments, issue create and comment, issue and comment edits (author or write access), and the OAuth token exchange.
 - Browser pages that approve on the spot and send you back: `/login/oauth/authorize` (link and sign-in with GitHub, and "I already have the App
   installed") and `/apps/<slug>/installations/new` (connect). Each answers with a redirect carrying `code` and `state`.
 - `http://127.0.0.1:4010/__fake/state`: the installation id, the writes made so far and the last requests, for debugging.

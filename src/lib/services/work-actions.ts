@@ -3,9 +3,9 @@ import type { Db } from "@/lib/db";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { requireRepo, requireWorkItem, type Viewer } from "@/lib/authz/viewer";
 import { portForWrite } from "@/lib/github/factory";
-import { githubWrite, validateWriteText, withFooter } from "@/lib/github/writes";
+import { githubWrite, mayEditComment, repoMaintainer, validateWriteText, withFooter } from "@/lib/github/writes";
 import { sha256 } from "@/lib/crypto";
-import type { GithubPort, MergeMethod } from "@/lib/github/port";
+import type { GithubPort, MergeMethod, RemoteComment, RemoteWorkItem } from "@/lib/github/port";
 import { syncItem } from "@/lib/sync/repository";
 import { derivedDetail } from "./queries";
 import { audit } from "./audit";
@@ -54,6 +54,75 @@ ${sent}`)}`,
   await port.createComment(owner, name, item.number, body);
   await refresh(ctx, port, repo.id, item.number);
   await audit(ctx.db, ctx.v, "github.comment", { type: "WorkItem", id: item.id });
+}
+
+const lf = (t: string | null | undefined) => (t ?? "").replace(/\r\n?/g, "\n");
+/** The text of an edit as it goes to GitHub: line endings normalised (a form sends CRLF), nothing added. No footer: the text may be somebody else's. */
+const editText = (body: string) => validateWriteText({ body: lf(body) }).body;
+
+/**
+ * Replaces an issue's or pull request's description, as the person. The same text as stored is a no-op (nothing sent, no budget spent).
+ * The mirror row takes GitHub's answer at once so the page shows the new text; the follow-up sync is best effort.
+ */
+export async function editIssueBody(ctx: Ctx, workItemId: string, body: string): Promise<{ changed: boolean }> {
+  const item = await requireWorkItem(ctx.db, ctx.v, workItemId, "manageWork");
+  const repo = await requireRepo(ctx.db, ctx.v, item.repositoryId, "manageWork");
+  const text = editText(body);
+  if (text === lf(item.body)) return { changed: false };
+  const save = (r: RemoteWorkItem) => ctx.db.workItem.update({ where: { id: item.id }, data: { body: r.body ?? (text || null), updatedAtGh: r.updatedAt } });
+  if (!ctx.port && !repo.isDemo) {
+    await githubWrite(ctx, {
+      kind: "issue.edit",
+      repo,
+      target: { type: "WorkItem", id: item.id },
+      call: async (p) => {
+        const r = await p.updateIssueBody(repo.owner.login, repo.name, item.number, { body: text });
+        await save(r);
+        await syncItem(ctx.db, p, repo.id, item.number).catch(() => false); // best effort; sync.item follows from the queue
+        return r;
+      },
+      numberOf: () => item.number,
+    });
+    return { changed: true };
+  }
+  const { port, owner, name } = await load(ctx, workItemId, "manageWork");
+  await save(await port.updateIssueBody(owner, name, item.number, { body: text }));
+  await refresh(ctx, port, repo.id, item.number);
+  await audit(ctx.db, ctx.v, "github.edit-issue", { type: "WorkItem", id: item.id });
+  return { changed: true };
+}
+
+/** Replaces the text of one conversation comment, as the person: their own comment, or any one when they maintain the repository. */
+export async function editComment(ctx: Ctx, workItemId: string, commentId: string, body: string): Promise<{ changed: boolean }> {
+  const item = await requireWorkItem(ctx.db, ctx.v, workItemId, "manageWork");
+  const repo = await requireRepo(ctx.db, ctx.v, item.repositoryId, "manageWork");
+  const c = await ctx.db.workItemComment.findFirst({ where: { id: commentId, workItemId: item.id } });
+  if (!c) throw new NotFoundError();
+  if (c.kind !== "ISSUE_COMMENT") throw new ValidationError("Only conversation comments can be edited here. Edit reviews and inline comments on GitHub.");
+  if (!mayEditComment(c, ctx.v, repo.isDemo, await repoMaintainer(ctx.db, ctx.v.userId, repo))) throw new ForbiddenError("You can edit only your own comments here.");
+  const text = editText(body);
+  if (!text.trim()) throw new ValidationError("Write a comment first");
+  if (text === lf(c.body)) return { changed: false };
+  const save = (r: RemoteComment) => ctx.db.workItemComment.update({ where: { id: c.id }, data: { body: r.body ?? text, updatedAtGh: r.updatedAt } });
+  if (!ctx.port && !repo.isDemo) {
+    await githubWrite(ctx, {
+      kind: "comment.edit",
+      repo,
+      target: { type: "WorkItem", id: item.id },
+      call: async (p) => {
+        const r = await p.updateComment(repo.owner.login, repo.name, c.githubId, text);
+        await save(r);
+        return r;
+      },
+      numberOf: () => item.number,
+    });
+    return { changed: true };
+  }
+  const { port, owner, name } = await load(ctx, workItemId, "manageWork");
+  await save(await port.updateComment(owner, name, c.githubId, text));
+  await refresh(ctx, port, repo.id, item.number);
+  await audit(ctx.db, ctx.v, "github.edit-comment", { type: "WorkItem", id: item.id });
+  return { changed: true };
 }
 
 /** An inline comment on one line of a pull request's diff, posted as the acting person. */

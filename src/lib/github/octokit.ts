@@ -514,6 +514,14 @@ export class OctokitPort implements GithubPort {
     const c = await this.send<any>("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", { owner, repo, issue_number: number, body });
     return { githubId: BigInt(c.id), login: c.user?.login ?? null, userGithubId: ghId(c.user?.id), body: c.body, createdAt: new Date(c.created_at), updatedAt: new Date(c.updated_at) };
   }
+  async updateIssueBody(owner: string, repo: string, number: number, input: { body: string; title?: string }) {
+    const data = await this.send<any>("PATCH /repos/{owner}/{repo}/issues/{issue_number}", { owner, repo, issue_number: number, body: input.body, ...(input.title !== undefined ? { title: input.title } : {}) });
+    return OctokitPort.toWorkItem(data);
+  }
+  async updateComment(owner: string, repo: string, commentId: bigint, body: string): Promise<RemoteComment> {
+    const c = await this.send<any>("PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}", { owner, repo, comment_id: Number(commentId), body });
+    return { githubId: BigInt(c.id), login: c.user?.login ?? null, userGithubId: ghId(c.user?.id), body: c.body, createdAt: new Date(c.created_at), updatedAt: new Date(c.updated_at) };
+  }
   async setLabels(owner: string, repo: string, number: number, labels: string[]) {
     await this.send("PUT /repos/{owner}/{repo}/issues/{issue_number}/labels", { owner, repo, issue_number: number, labels });
   }

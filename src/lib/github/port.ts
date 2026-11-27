@@ -120,6 +120,10 @@ export interface GithubPort {
   // ---- writes: always with the ACTING USER's credential, never silently an administrator's ----
   createIssue(owner: string, repo: string, input: { title: string; body?: string; labels?: string[] }): Promise<RemoteWorkItem>;
   createComment(owner: string, repo: string, number: number, body: string): Promise<RemoteComment>;
+  /** Replaces an issue's or pull request's description (and title, when given). GitHub decides who may: the author or someone with write access. */
+  updateIssueBody(owner: string, repo: string, number: number, input: { body: string; title?: string }): Promise<RemoteWorkItem>;
+  /** Replaces the text of one issue or pull request conversation comment (not an inline review comment or a review). */
+  updateComment(owner: string, repo: string, commentId: bigint, body: string): Promise<RemoteComment>;
   setLabels(owner: string, repo: string, number: number, labels: string[]): Promise<void>;
   setAssignees(owner: string, repo: string, number: number, assignees: string[]): Promise<void>;
   setMilestone(owner: string, repo: string, number: number, milestoneNumber: number | null): Promise<void>;

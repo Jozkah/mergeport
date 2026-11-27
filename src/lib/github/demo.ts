@@ -186,6 +186,20 @@ export class DemoPort implements GithubPort {
     await this.touch(i.id);
     return { githubId: c.githubId, login: c.authorLogin, body: c.body, createdAt: now, updatedAt: now };
   }
+  async updateIssueBody(owner: string, name: string, number: number, input: { body: string; title?: string }) {
+    const { i } = await this.item(owner, name, number);
+    const u = await this.db.workItem.update({ where: { id: i.id }, data: { body: input.body, ...(input.title !== undefined ? { title: input.title } : {}), updatedAtGh: new Date() } });
+    return this.toRemote(u);
+  }
+  async updateComment(owner: string, name: string, commentId: bigint, body: string): Promise<RemoteComment> {
+    const r = await this.repo(owner, name);
+    const c = await this.db.workItemComment.findFirst({ where: { githubId: commentId, kind: "ISSUE_COMMENT", workItem: { repositoryId: r.id } } });
+    if (!c) throw new GithubError("not-found", "Not found");
+    const now = new Date();
+    const u = await this.db.workItemComment.update({ where: { id: c.id }, data: { body, updatedAtGh: now } });
+    await this.touch(c.workItemId);
+    return { githubId: u.githubId, login: u.authorLogin, body: u.body, createdAt: u.createdAtGh, updatedAt: now };
+  }
   async setLabels(owner: string, name: string, number: number, labels: string[]) {
     const { i } = await this.item(owner, name, number);
     await this.db.workItem.update({ where: { id: i.id }, data: { labels: labels.map((l) => ({ name: l, color: COLORS[l] ?? "ededed" })), labelNames: indexList(labels), updatedAtGh: new Date() } });

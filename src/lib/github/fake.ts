@@ -156,6 +156,14 @@ export class FakeGithub implements GithubPort {
     this.writes.push(`comment ${o}/${r}#${n}`);
     return { githubId: 2n, login: null, body, createdAt: new Date(), updatedAt: new Date() };
   }
+  async updateIssueBody(o: string, r: string, n: number, input: { body: string; title?: string }) {
+    this.writes.push(`edit ${o}/${r}#${n}`);
+    return { githubId: 1n, number: n, type: "ISSUE" as const, title: input.title ?? "", body: input.body, state: "OPEN" as const, draft: false, authorLogin: null, authorGithubId: null, authorAvatar: null, labels: [], assignees: [], milestoneNumber: null, milestoneTitle: null, htmlUrl: "", createdAt: new Date(), updatedAt: new Date(), closedAt: null, mergedAt: null };
+  }
+  async updateComment(o: string, r: string, id: bigint, body: string) {
+    this.writes.push(`edit-comment ${o}/${r} ${id}`);
+    return { githubId: id, login: null, body, createdAt: new Date(), updatedAt: new Date() };
+  }
   async setLabels(o: string, r: string, n: number, l: string[]) {
     this.writes.push(`labels ${o}/${r}#${n} ${l.join(",")}`);
   }
