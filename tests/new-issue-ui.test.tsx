@@ -10,7 +10,7 @@ const m = vi.hoisted(() => ({
   preview: vi.fn(async (body: string): Promise<ActionResult> => ({ ok: true, data: { html: `<p>${body.replace(/\n/g, "<br />")}</p>` } })),
   push: vi.fn(),
 }));
-vi.mock("@/app/actions", () => ({ createIssueAction: m.create, previewMarkdownAction: m.preview }));
+vi.mock("@/app/actions", () => ({ createIssueAction: m.create, previewMarkdownAction: m.preview, mentionSuggestionsAction: vi.fn(async () => ({ ok: true, data: { items: [] } })) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: m.push, refresh: vi.fn() }), usePathname: () => "/issues/new" }));
 
 import { NewIssueForm, type NewIssueRepo } from "@/components/work/NewIssueForm";
@@ -127,7 +127,7 @@ describe("new issue page", () => {
     fireEvent.change(document.querySelector("textarea")!, { target: { value: "line one\nline two" } });
     fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
     await waitFor(() => expect(screen.getByRole("tabpanel", { name: "Preview" }).innerHTML).toContain("line one<br>line two"));
-    expect(m.preview).toHaveBeenCalledWith("line one\nline two");
+    expect(m.preview).toHaveBeenCalledWith("line one\nline two", "r1");
     localStorage.setItem(KEY, JSON.stringify({ repoId: "r1", title: "Broken", body: "x", labels: "" }));
     fireEvent.click(submit());
     await waitFor(() => expect(m.create).toHaveBeenCalledTimes(1));

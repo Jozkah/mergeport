@@ -22,6 +22,7 @@ import { enqueue } from "@/lib/jobs";
 import { slugify } from "@/lib/slug";
 import { renderMarkdown } from "@/lib/markdown";
 import { BODY_MAX } from "@/lib/github/write-text";
+import { mentionRefs, suggestMentions } from "@/lib/services/mentions";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const strs = (fd: FormData, k: string) => fd.getAll(k).map(String).filter(Boolean);
@@ -176,11 +177,22 @@ export async function createIssueAction(fd: FormData): Promise<ActionResult> {
 }
 
 /** The new issue page's Preview tab: the same renderer (with GitHub's line breaks) the issue will be shown with. Writes nothing. */
-export async function previewMarkdownAction(body: string): Promise<ActionResult> {
+export async function previewMarkdownAction(body: string, repositoryId?: string): Promise<ActionResult> {
   return run(async () => {
-    await requireWriter();
+    const { viewer } = await requireWriter();
     const text = String(body ?? "").slice(0, BODY_MAX);
-    return { ok: true, data: { html: renderMarkdown(text, { breaks: true }) } };
+    const refs = repositoryId ? await mentionRefs(db, viewer, String(repositoryId), [text]) : undefined;
+    return { ok: true, data: { html: renderMarkdown(text, { breaks: true, refs }) } };
+  });
+}
+
+/** The mention popup of the GitHub text boxes: people or issues / pull requests of one repository the person may see. Writes nothing. */
+export async function mentionSuggestionsAction(input: { repositoryId: string; kind: "user" | "item"; query: string }): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireWriter();
+    const kind = input?.kind === "item" ? "item" : "user";
+    const items = await suggestMentions(db, viewer, String(input?.repositoryId ?? ""), kind, String(input?.query ?? ""));
+    return { ok: true, data: { items } };
   });
 }
 
