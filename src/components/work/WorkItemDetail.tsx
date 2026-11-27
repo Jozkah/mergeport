@@ -70,7 +70,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
   const conversation = (
     <>
               <Panel title="Description" icon={MessageSquare} id="desc">
-                <div className="p-4">{item.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.body) }} /> : <p className="text-[13px] text-ink-3">No description.</p>}</div>
+                <div className="p-4">{item.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.body, { breaks: true }) }} /> : <p className="text-[13px] text-ink-3">No description.</p>}</div>
               </Panel>
               <Panel title={`Conversation (${comments.length})`} icon={MessageSquare} id="conv">
                 {comments.length === 0 && !discussionDownloaded(item.state, item.updatedAtGh, new Date()) ? (
@@ -89,7 +89,7 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
                           {c.kind === "ISSUE_COMMENT" && <span className="text-ink-3">commented</span>}
                           <Time value={c.createdAtGh} formatted={formatInstant(c.createdAtGh, viewer.timezone)} />
                         </div>
-                        {c.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(c.body) }} /> : <p className="text-[12.5px] text-ink-3">No text.</p>}
+                        {c.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(c.body, { breaks: true }) }} /> : <p className="text-[12.5px] text-ink-3">No text.</p>}
                       </li>
                     ))}
                   </ol>

@@ -20,7 +20,7 @@ export { FOOTER, TITLE_MAX, BODY_MAX, validateWriteText, withFooter };
 
 /**
  * Opt-in GitHub writes made AS THE PERSON (docs/github-app.md, "Writing to GitHub as you"). Scope of this change, and no more:
- * create an issue from a task, and comment on a tracked issue or pull request. Never merge, close, delete, push, label, assign, edit
+ * create an issue (from a task or the new issue page), and comment on a tracked issue or pull request. Never merge, close, delete, push, label, assign, edit
  * somebody else's comment or submit a review.
  *
  * Every write passes `githubWrite`, which in this order requires: the deployment ceiling (MERGEPORT_GITHUB_WRITES=on), the workspace switch,

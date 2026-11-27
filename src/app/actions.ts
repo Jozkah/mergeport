@@ -20,6 +20,8 @@ import { publicPort } from "@/lib/github/factory";
 import { GithubError } from "@/lib/github/port";
 import { enqueue } from "@/lib/jobs";
 import { slugify } from "@/lib/slug";
+import { renderMarkdown } from "@/lib/markdown";
+import { BODY_MAX } from "@/lib/github/write-text";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const strs = (fd: FormData, k: string) => fd.getAll(k).map(String).filter(Boolean);
@@ -152,9 +154,21 @@ export async function submitReviewAction(fd: FormData): Promise<ActionResult> {
 export async function createIssueAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const c = await writerCtx();
-    const created = await work.createIssue(c, str(fd, "repositoryId"), { title: str(fd, "title"), body: String(fd.get("body") ?? ""), labels: csv(str(fd, "labels")) });
+    const repositoryId = str(fd, "repositoryId");
+    const created = await work.createIssue(c, repositoryId, { title: str(fd, "title"), body: String(fd.get("body") ?? ""), labels: csv(str(fd, "labels")) });
     revalidatePath("/issues");
-    return { ok: true, message: `Issue #${created.number} created on GitHub` };
+    // The new issue's page, or (while the mirror has not picked it up yet) the repository's issue list.
+    const href = created.workItemId ? `/issues/${created.workItemId}` : `/issues?repo=${encodeURIComponent(repositoryId)}`;
+    return { ok: true, message: `Issue #${created.number} created on GitHub`, data: { href } };
+  });
+}
+
+/** The new issue page's Preview tab: the same renderer (with GitHub's line breaks) the issue will be shown with. Writes nothing. */
+export async function previewMarkdownAction(body: string): Promise<ActionResult> {
+  return run(async () => {
+    await requireWriter();
+    const text = String(body ?? "").slice(0, BODY_MAX);
+    return { ok: true, data: { html: renderMarkdown(text, { breaks: true }) } };
   });
 }
 

@@ -17,7 +17,7 @@ import { createColumnsForProject } from "@/lib/services/planning";
 import { createTask } from "@/lib/services/tasks";
 import { githubWritesView, setWorkspaceGithubWrites } from "@/lib/services/github-writes-setting";
 import { issueDestinationsByProject, linkPendingTasks, previewPromotion, promoteTask } from "@/lib/services/task-promotion";
-import { addComment } from "@/lib/services/work-actions";
+import { addComment, createIssue } from "@/lib/services/work-actions";
 import { updateTask } from "@/lib/services/tasks";
 
 /**
@@ -377,6 +377,58 @@ describe("comments", () => {
     await refused(addComment({ db: db(), v: await b.viewer() }, wi.id, "workspace is full"), "rate-workspace");
     expect(server.userWrites).toHaveLength(2);
     expect(userWriteKey("x")).toMatch(/^ghwrite:user:/);
+  });
+
+  it("keeps the line breaks the person typed (a form posts CRLF)", async () => {
+    const W = await world();
+    const v = await (await W.member("alice")).viewer();
+    const wi = await W.item(5);
+    await addComment({ db: db(), v }, wi.id, "line one\r\nline two\r\n\r\nnew paragraph");
+    expect(server.userWrites[0].body.body).toBe("line one\nline two\n\nnew paragraph\n\n---\nCreated from Mergeport");
+  });
+});
+
+describe("create an issue from the new issue page", () => {
+  it("goes through the write gate: as the person, with the footer and line breaks, no labels, audited, linked to its work item; a twin is a duplicate", async () => {
+    const W = await world();
+    const alice = await W.member("alice");
+    const v = await alice.viewer();
+    const done = await createIssue({ db: db(), v }, W.repo.id, { title: "  Broken login  ", body: "steps:\r\n1. open\r\n2. fail", labels: ["bug"] });
+    expect(server.userWrites).toHaveLength(1);
+    expect(server.userWrites[0]).toMatchObject({ login: "alice", route: "POST /repos/acme/web/issues", tokenPrefix: "ghu_" });
+    expect(server.userWrites[0].body.title).toBe("Broken login");
+    expect(server.userWrites[0].body.body).toBe("steps:\n1. open\n2. fail\n\n---\nCreated from Mergeport");
+    expect(server.userWrites[0].body.labels).toBeUndefined();
+    onlyUserTokensWrote();
+    // The fake does not serve reads with a user token, so the immediate sync misses and the queued sync.item fills the mirror.
+    expect(done.workItemId).toBeNull();
+    expect((await db().job.findFirst({ where: { type: "sync.item" } }))?.payload).toEqual({ repositoryId: W.repo.id, number: done.number });
+    const audits = await db().auditLog.findMany({ where: { action: "github.write.issue.create" } });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ actorUserId: alice.user.id, targetType: "Repository", targetId: W.repo.id });
+    await refused(createIssue({ db: db(), v }, W.repo.id, { title: "Broken login", body: "steps:\n1. open\n2. fail" }), "duplicate");
+    expect(server.userWrites).toHaveLength(1);
+  });
+
+  it("is refused like any other write (workspace switch off) and validates the text before GitHub", async () => {
+    const W = await world();
+    const v = await (await W.member("alice")).viewer();
+    await expect(createIssue({ db: db(), v }, W.repo.id, { title: "   " })).rejects.toThrow(/title/);
+    await expect(createIssue({ db: db(), v }, W.repo.id, { title: "a\u0007b" })).rejects.toBeInstanceOf(ValidationError);
+    await db().workspace.update({ where: { id: W.w.ws.id }, data: { githubWritesEnabled: false } });
+    await refused(createIssue({ db: db(), v }, W.repo.id, { title: "Off" }), "workspace-off");
+    expect(server.userWrites).toEqual([]);
+  });
+
+  it("a demo repository still works without the gate, labels included", async () => {
+    const W = await world();
+    const v = await (await W.member("alice")).viewer();
+    await db().workspace.update({ where: { id: W.w.ws.id }, data: { githubWritesEnabled: false } });
+    await db().repository.update({ where: { id: W.repo.id }, data: { isDemo: true } });
+    const done = await createIssue({ db: db(), v }, W.repo.id, { title: "Demo", body: "a\nb", labels: ["bug"] });
+    const wi = await db().workItem.findUniqueOrThrow({ where: { id: done.workItemId! } });
+    expect(wi).toMatchObject({ number: done.number, title: "Demo", body: "a\nb", labelNames: expect.stringContaining("bug") });
+    expect(server.userWrites).toEqual([]);
   });
 });
 

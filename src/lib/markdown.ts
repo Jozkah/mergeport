@@ -41,10 +41,13 @@ function imageTag(_tag: string, attribs: sanitizeHtml.Attributes): sanitizeHtml.
   return { tagName: "span", text: alt ? `Image: ${alt}` : "Image", attribs: {} };
 }
 
-/** GitHub Markdown -> sanitized HTML. Raw HTML from the source is untrusted and filtered by allow-list. */
-export function renderMarkdown(src: string | null | undefined): string {
+/**
+ * GitHub Markdown -> sanitized HTML. Raw HTML from the source is untrusted and filtered by allow-list.
+ * `breaks`: a single newline is a line break, as GitHub shows issue, pull request and comment bodies. Files (README, .md) leave it off.
+ */
+export function renderMarkdown(src: string | null | undefined, o: { breaks?: boolean } = {}): string {
   if (!src) return "";
-  const html = marked.parse(src, { gfm: true, async: false }) as string;
+  const html = marked.parse(src, { gfm: true, breaks: o.breaks ?? false, async: false }) as string;
   return highlightFences(sanitizeHtml(html, {
     allowedTags: ["p", "br", "strong", "em", "del", "code", "pre", "blockquote", "ul", "ol", "li", "a", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "table", "thead", "tbody", "tr", "th", "td", "img", "details", "summary", "input", "span"],
     allowedAttributes: { a: ["href", "title"], img: ["src", "alt", "title"], input: ["type", "checked", "disabled"], th: ["align"], td: ["align"], code: ["class"] },
