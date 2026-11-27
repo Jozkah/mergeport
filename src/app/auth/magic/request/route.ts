@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   }
   let mailer;
   try {
-    mailer = getMailer();
+    mailer = await getMailer();
   } catch (e) {
     if (e instanceof MailNotConfiguredError) return redirectTo(req, "/sign-in?error=mail-unconfigured", 303);
     throw e;

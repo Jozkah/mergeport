@@ -10,7 +10,6 @@ provider). The only other way in is the demo (`npm run demo`), which signs in sy
 | `MERGEPORT_PUBLIC_URL` | `https://app.example.com`. Turns on hosted mode (below). To try it locally set `http://127.0.0.1:3000`. |
 | `MERGEPORT_TRUST_PROXY=true` | **Required when hosted.** You run behind a reverse proxy you control that appends the client address to `X-Forwarded-For`. Without it the server refuses to start and sign-in answers 503: there would be no client address to rate-limit on. |
 | `MERGEPORT_TRUSTED_PROXY_HOPS` | Number of proxies you operate in front of the app (default 1). The client address is the Nth entry from the **right** of `X-Forwarded-For`; entries to its left are what the client claimed and are ignored. Fewer entries than hops means no address and the request is refused. |
-| `SMTP_URL`, `MAIL_FROM` | Outgoing mail (nodemailer), e.g. `smtps://user:pass@smtp.example:465`. Both are needed. |
 | `OIDC_<NAME>_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET` | One provider per `<NAME>` (`GOOGLE`, `MICROSOFT`, ...). All three or the provider is ignored. Redirect URI to register: `<public url>/auth/oidc/<name>/callback`. |
 | `MERGEPORT_AUTH_SECRET` | 32+ random characters. Signs the short-lived OIDC flow cookie. Required when an OIDC provider is configured. |
 | `MERGEPORT_SESSION_DAYS` | Hosted idle session lifetime, 1 to 180 (default 30). |
@@ -29,9 +28,19 @@ Hosted mode means:
 Microsoft: use the tenant-specific issuer (`https://login.microsoftonline.com/<tenant-id>/v2.0`); the multi-tenant `common` issuer does
 not match the ID token's issuer. Microsoft ID tokens carry no `email_verified`, so Microsoft logins are never linked by email.
 
-Mail transport: with no `SMTP_URL`, development prints the message, link included, to the server console. The console transport is
+Mail transport: outgoing email is set in the app, **Settings > Email**, by a server administrator (`User.isServerAdmin`; a workspace
+owner or administrator is not one). Host, port (587 with STARTTLS by default), user name, password and sender are one server-wide row
+(`ServerSettings`); the password is encrypted with `MERGEPORT_ENCRYPTION_KEY`, never sent back to the browser, and cannot be saved
+without that key. The page can send a test message to the administrator's own address. The `SMTP_URL` / `MAIL_FROM` variables are no
+longer read. With nothing saved, development prints the message, link included, to the server console. The console transport is
 refused when `NODE_ENV=production` **and** whenever the public URL is https, so a hosted server never writes sign-in links to its log;
-without SMTP it says email sign-in is not set up and creates no link.
+without saved settings it says email sign-in is not set up and creates no link.
+
+First server administrator: while nobody holds `isServerAdmin`, every start of the web server (`npm start`) prints one line,
+`Mergeport setup: open <public url>/setup/<token> to create the server administrator.` The link works once and for 24 hours; only its
+SHA-256 is stored, and a restart replaces it. It asks for an email and name (that account is made, or reused, and this browser is
+signed in as it), or, when someone is already signed in, offers to make that person the administrator. Once an administrator exists
+no link is printed and any unused one answers 404. The form post is rate limited per client address.
 
 ## Data
 

@@ -1,7 +1,6 @@
 import { AuthShell, OrDivider } from "@/components/ui/AuthShell";
 import { Banner } from "@/components/ui/primitives";
 import { oidcProviders } from "@/lib/auth/oidc";
-import { mailConfigured } from "@/lib/auth/mailer";
 import { hostedConfigProblems } from "@/lib/auth/hosted-config";
 import { githubSignInEnabled, SIGNIN_START_PATH } from "@/lib/github/sign-in";
 import { safeReturnTo } from "@/lib/http";
@@ -33,11 +32,11 @@ const ERRORS: Record<string, string> = {
 /** Errors that are not a failure of the person's attempt but an instruction: they get their own title. */
 const TITLES: Record<string, string> = { "github-email-taken": "Sign in with your email first" };
 
-/** Sign-in for a hosted deployment: an email link and any configured OIDC providers. Plain forms and links. */
-export function AccountSignIn({ error, sent, next, email }: { error?: string; sent?: boolean; next?: string; email?: string }) {
+/** Sign-in for a hosted deployment: an email link and any configured OIDC providers. Plain forms and links. `mailReady` is `await mailConfigured()` (Settings > Email), read by the page. */
+export function AccountSignIn({ error, sent, next, email, mailReady = false }: { error?: string; sent?: boolean; next?: string; email?: string; mailReady?: boolean }) {
   const providers = oidcProviders();
   const misconfigured = hostedConfigProblems().length > 0; // the request route refuses too; say so here instead of failing after a click
-  const canMail = !misconfigured && mailConfigured();
+  const canMail = !misconfigured && mailReady;
   const github = !misconfigured && githubSignInEnabled(); // the deployment's own GitHub App; the button exists only when it is fully set up
   const nothing = !canMail && providers.length === 0 && !github;
   const dest = safeReturnTo(next);

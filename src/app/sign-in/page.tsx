@@ -2,6 +2,7 @@ import { AuthShell } from "@/components/ui/AuthShell";
 import { SubmitButton } from "@/components/forms/SubmitButton";
 import { AccountSignIn } from "@/components/forms/AccountSignIn";
 import { isHosted } from "@/lib/public-url";
+import { mailConfigured } from "@/lib/auth/mailer";
 import { isDemo } from "@/lib/env";
 import { Banner } from "@/components/ui/primitives";
 
@@ -15,7 +16,7 @@ const ERRORS: Record<string, string> = {
 export default async function SignIn({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string; next?: string; email?: string }> }) {
   const sp = await searchParams;
   // A hosted deployment (MERGEPORT_PUBLIC_URL) signs people in with email or OIDC. The only other way in is the demo's synthetic people.
-  if (isHosted()) return <AccountSignIn error={sp.error} sent={sp.sent === "1"} next={sp.next} email={sp.email} />;
+  if (isHosted()) return <AccountSignIn error={sp.error} sent={sp.sent === "1"} next={sp.next} email={sp.email} mailReady={await mailConfigured()} />;
   const demo = isDemo();
   return (
     <AuthShell

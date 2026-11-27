@@ -36,7 +36,7 @@ Copy `.env.production.example` to `.env` and fill it in (compose and a deployer'
 | `MERGEPORT_PUBLIC_URL` | `https://mergeport.example.com`. Turns hosted mode on. **Also a build argument** (see below). |
 | `MERGEPORT_TRUST_PROXY=true` | Required when hosted. The server refuses to start without it. |
 | `MERGEPORT_TRUSTED_PROXY_HOPS` | How many proxies you run in front (default 1). |
-| `SMTP_URL`, `MAIL_FROM` | Sign-in by email link. (Or an OIDC provider plus `MERGEPORT_AUTH_SECRET`.) |
+| `MERGEPORT_ENCRYPTION_KEY` | Encrypts the SMTP password saved in Settings > Email (and GitHub user and federation tokens). Outgoing email itself is set in the app, not here (step 3 of the checklist). |
 
 Then, for the real product: the seven `MERGEPORT_GITHUB_APP_*` values, `MERGEPORT_ENCRYPTION_KEY` (and `MERGEPORT_GITHUB_WRITES=on` if you
 want GitHub writes), and `MERGEPORT_FEDERATION*` only if you link instances.
@@ -140,12 +140,18 @@ The heartbeat is one row in `RateLimitState` (key `worker:heartbeat`) written ev
 
 1. Open the public URL: the sign-in page loads over https with no certificate warning.
 2. Check `https://<host>/api/health` returns `{"ok":true,"worker":"fresh"}` (after the worker's first 15 s).
-3. Sign in by email: enter your address, receive the link, open it. If no mail arrives check `SMTP_URL` and `MAIL_FROM` and the web log
-   (nothing is ever logged as a link in production: without SMTP the sign-in page says email sign-in is not set up).
-4. Create a workspace (onboarding). You are its owner.
+3. Create the server administrator: the web log has one line `Mergeport setup: open https://<host>/setup/<token> to create the server
+   administrator.` Open it (once, within 24 hours; a restart prints a new one), enter your email and name. You are signed in.
+4. Create a workspace (onboarding). You are its owner. Then Settings, Email (server): enter the SMTP host, port 587 with STARTTLS (the
+   production host only allows outbound TCP 587), user name, password and sender, save, and use "Send test email". A failure shows the
+   mail server's answer. Until this is saved nobody can sign in by email (nothing is ever logged as a link in production).
 5. Settings, GitHub: connect the GitHub App (needs the `MERGEPORT_GITHUB_APP_*` values; see `docs/github-app.md` for the App's settings, webhook URL
    `https://<host>/api/github/webhook`, and the live checks in `docs/live-github-runbook.md`).
 6. Track a repository from "Connect repositories", then watch the sync status page fill in. Webhook deliveries appear in the GitHub App's "Advanced" tab as 2xx.
+
+Upgrading a server that used `SMTP_URL` / `MAIL_FROM`: those variables are no longer read, so email sign-in stops until outgoing email
+is saved in Settings > Email. Existing sessions keep working: open the setup link from the web log while signed in and choose "Make me
+the administrator", then fill in Settings > Email. Remove the two variables from `.env` afterwards.
 
 ## 7. Backups
 

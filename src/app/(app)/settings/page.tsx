@@ -12,7 +12,7 @@ import { setTimezoneAction } from "@/app/actions";
 import { signOutEverywhereFormAction } from "@/app/account-actions";
 import { saveDigestSettingsAction } from "@/app/digest-actions";
 import { db } from "@/lib/db";
-import { Bell, Building2, Globe, Newspaper, Users, Wand2 } from "@/components/ui/icons";
+import { Bell, Building2, Globe, Mail, Newspaper, Users, Wand2 } from "@/components/ui/icons";
 import { listWorkspaceInstallations } from "@/lib/github/binding";
 import { isHosted, publicOrigin } from "@/lib/public-url";
 import { ConnectAiPanel, type ConnectAiView } from "@/components/settings/ConnectAiPanel";
@@ -88,6 +88,14 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <p>{ghInstalls.length === 0 ? "GitHub is not connected, so repository sync and GitHub actions are off." : <><span className="tnum">{ghActive}</span> of <span className="tnum">{ghInstalls.length}</span> connected GitHub account{ghInstalls.length === 1 ? " is" : "s are"} active.</>}</p>
               <p className="mt-2 text-ink-3">{viewer.isAdmin ? "Connect a GitHub account, or disconnect one. You prove on GitHub that you control it." : "Only the owner and administrators can connect or disconnect GitHub."}</p>
               <Link href="/settings/github" className="btn mt-3">{viewer.isAdmin ? "Open GitHub settings" : "See status"}</Link>
+            </div>
+          </Panel>
+        )}
+        {hosted && !isDemo() && user.isServerAdmin && (
+          <Panel title="Email (server)" icon={Mail} id="server-email">
+            <div className="p-4 text-[13px]">
+              <p>Outgoing email for this whole server: sign-in links and invitations. Only server administrators see this.</p>
+              <Link href="/settings/email" className="btn mt-3">Open email settings</Link>
             </div>
           </Panel>
         )}

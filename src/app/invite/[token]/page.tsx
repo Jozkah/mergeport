@@ -58,7 +58,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
     );
   }
 
-  const canMail = hostedConfigProblems().length === 0 && mailConfigured();
+  const canMail = hostedConfigProblems().length === 0 && (await mailConfigured());
   const providers = oidcProviders();
   const signInForm = canMail ? (
     <form action="/auth/magic/request" method="post" className="mt-4 flex flex-col gap-3">

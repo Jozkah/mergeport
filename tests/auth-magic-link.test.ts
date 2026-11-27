@@ -439,10 +439,9 @@ describe("mail transport", () => {
   it("development (not https) prints the message through the dev transport", async () => {
     setMailerForTests(null);
     vi.stubEnv("NODE_ENV", "development");
-    vi.stubEnv("SMTP_URL", "");
     vi.stubEnv("MERGEPORT_PUBLIC_URL", "http://127.0.0.1:3000");
     const lines: string[] = [];
-    expect(getMailer()).toBeInstanceOf(ConsoleMailer);
+    expect(await getMailer(db())).toBeInstanceOf(ConsoleMailer);
     await new ConsoleMailer((l) => lines.push(l)).send({ to: "a@b.com", subject: "s", text: "link" });
     expect(lines.join("\n")).toContain("link");
   });
@@ -450,8 +449,7 @@ describe("mail transport", () => {
   it("an https hosted deployment never uses the console transport, even outside production", async () => {
     setMailerForTests(null);
     vi.stubEnv("NODE_ENV", "development");
-    vi.stubEnv("SMTP_URL", "");
-    expect(() => getMailer()).toThrow(MailNotConfiguredError);
+    await expect(getMailer(db())).rejects.toThrow(MailNotConfiguredError);
     expect(() => new ConsoleMailer()).toThrow(MailNotConfiguredError);
     const log = vi.spyOn(console, "log");
     const res = await post("p@example.com");
@@ -460,21 +458,19 @@ describe("mail transport", () => {
     expect(log).not.toHaveBeenCalled();
   });
 
-  it("production without SMTP refuses on any address", async () => {
+  it("production without saved SMTP settings refuses on any address", async () => {
     setMailerForTests(null);
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("SMTP_URL", "");
     vi.stubEnv("MERGEPORT_PUBLIC_URL", "http://127.0.0.1:3000");
-    expect(() => getMailer()).toThrow(MailNotConfiguredError);
+    await expect(getMailer(db())).rejects.toThrow(MailNotConfiguredError);
     expect(() => new ConsoleMailer()).toThrow(MailNotConfiguredError);
   });
 
-  it("SMTP_URL without MAIL_FROM is also a configuration error", () => {
+  it("the SMTP_URL / MAIL_FROM environment variables are ignored: only Settings > Email configures mail", async () => {
     setMailerForTests(null);
+    vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("SMTP_URL", "smtp://user:pass@mail.example:587");
-    vi.stubEnv("MAIL_FROM", "");
-    expect(() => getMailer()).toThrow(/MAIL_FROM/);
     vi.stubEnv("MAIL_FROM", "Mergeport <no-reply@example.com>");
-    expect(() => getMailer()).not.toThrow();
+    await expect(getMailer(db())).rejects.toThrow(MailNotConfiguredError);
   });
 });

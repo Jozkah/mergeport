@@ -31,9 +31,9 @@ async function origin(): Promise<string> {
   return `http://${(await headers()).get("host") ?? "127.0.0.1"}`;
 }
 
-function mailer(): Mailer {
+async function mailer(): Promise<Mailer> {
   try {
-    return getMailer();
+    return await getMailer();
   } catch (e) {
     if (e instanceof MailNotConfiguredError) throw new ValidationError("Outgoing email is not set up on this server, so invitations cannot be sent. Ask its administrator to configure it.");
     throw e;
@@ -49,14 +49,14 @@ const mailResult = (r: { email: string; mail: "sent" | "pending" | "failed" }, a
 export async function inviteMemberAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireWriter();
-    return mailResult(await createInvitation(db, viewer, { email: str(fd, "email"), role: str(fd, "role"), mailer: mailer(), origin: await origin() }));
+    return mailResult(await createInvitation(db, viewer, { email: str(fd, "email"), role: str(fd, "role"), mailer: await mailer(), origin: await origin() }));
   });
 }
 
 export async function resendInvitationAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireWriter();
-    return mailResult(await resendInvitation(db, viewer, str(fd, "invitationId"), { mailer: mailer(), origin: await origin() }), true);
+    return mailResult(await resendInvitation(db, viewer, str(fd, "invitationId"), { mailer: await mailer(), origin: await origin() }), true);
   });
 }
 

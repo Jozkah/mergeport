@@ -199,6 +199,9 @@ model User {
   email           String?   @unique
   /// Set when the person proved they own `email` (magic link opened, or an OIDC provider asserted email_verified).
   emailVerifiedAt DateTime?
+  /// Administrator of this whole server (not of a workspace): may change server-wide settings such as outgoing email. Granted only by the
+  /// setup link printed at server start while nobody holds it (docs/deploy.md). Workspace roles never grant it.
+  isServerAdmin   Boolean   @default(false)
 
   identities    Identity[]
   members       Member[]
@@ -1910,4 +1913,28 @@ model OAuthRefresh {
   grant     OAuthGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, grantId])
+}
+
+/// Server-wide settings, one row (id "server"). Outgoing email (SMTP) is set here by a server administrator, not in the environment.
+model ServerSettings {
+  id              String   @id @default("server")
+  smtpHost        String?
+  smtpPort        Int      @default(587)
+  /// "starttls" | "tls" | "none"
+  smtpSecurity    String   @default("starttls")
+  smtpUsername    String?
+  /// AES-256-GCM with MERGEPORT_ENCRYPTION_KEY (encryptSecret, AAD "smtp:server"). Never sent to a browser.
+  smtpPasswordEnc String?
+  mailFrom        String?
+  updatedById     String?
+  updatedAt       DateTime @updatedAt
+}
+
+/// The single-use link that creates the first server administrator (scripts/start.ts prints it). Only the SHA-256 of the token is stored.
+model SetupToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
 }

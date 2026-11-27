@@ -635,7 +635,7 @@ describe("consumer: a link is only the linking person's", () => {
     };
     walk(path.resolve("src"));
     // Only federation's own code, its routes and pages, the sidebar/settings entry points, the policy-aware layout flag and the tenancy allowlist touch it.
-    const allowedPrefixes = ["src/lib/federation/", "src/app/federation", "src/app/.well-known/", "src/app/api/federation/", "src/app/(app)/linked/", "src/app/(app)/settings/", "src/app/(app)/layout.tsx", "src/components/federation/", "src/lib/services/members.ts", "src/lib/github/user-token.ts", "src/lib/github/user-link.ts", "src/lib/authz/tenancy-allowlist.ts", "src/generated/"];
+    const allowedPrefixes = ["src/lib/federation/", "src/app/federation", "src/app/.well-known/", "src/app/api/federation/", "src/app/(app)/linked/", "src/app/(app)/settings/", "src/app/(app)/layout.tsx", "src/components/federation/", "src/lib/services/members.ts", "src/lib/github/user-token.ts", "src/lib/services/smtp-settings.ts", "src/lib/github/user-link.ts", "src/lib/authz/tenancy-allowlist.ts", "src/generated/"];
     expect(hits.filter((h) => !allowedPrefixes.some((a) => h.startsWith(a)))).toEqual([]);
     for (const h of hits) expect(h).not.toMatch(/services\/(backup|search|digest|ai|queries)|lib\/mcp/);
   });
