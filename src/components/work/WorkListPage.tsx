@@ -4,12 +4,12 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { repoWhere } from "@/lib/authz/viewer";
-import { deriveForIds, listProjects, listWorkItems, writableRepos, type WorkItemListParams } from "@/lib/services/queries";
+import { deriveForIds, listProjects, listWorkItemAuthors, listWorkItems, writableRepos, REPO_KINDS, REPO_PERMISSION_LEVELS, type RepoKind, type RepoPermissionLevel, type WorkItemListParams } from "@/lib/services/queries";
 import { readScope, scopeRepositoryIds } from "@/lib/scope";
 import { ViewBar } from "@/components/views/ViewBar";
 import { listViews } from "@/lib/services/views";
 import { ScopeNote } from "@/components/shell/ScopeNote";
-import { PageHeader, Panel, EmptyState, Segmented, Banner } from "@/components/ui/primitives";
+import { PageHeader, Panel, EmptyState, Segmented, Banner, Avatar } from "@/components/ui/primitives";
 import { CircleDot, Filter, GitPullRequest, Plus, Search } from "@/components/ui/icons";
 import { WorkTable } from "./WorkTable";
 import { ActionForm } from "@/components/forms/ActionForm";
@@ -17,6 +17,31 @@ import { deleteFilterAction, saveFilterAction } from "@/app/actions";
 
 type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
+/** Every value of a repeatable parameter (multi-select filters submit `authors=a&authors=b`). */
+const many = (v: string | string[] | undefined) => (Array.isArray(v) ? v : v ? [v] : []).filter(Boolean);
+const pick = <T extends string>(allowed: readonly T[], v: string | string[] | undefined) => [...new Set(many(v))].filter((x): x is T => (allowed as readonly string[]).includes(x));
+const MULTI = new Set(["authors", "kind", "perm"]);
+const KIND_LABEL: Record<RepoKind, string> = { private: "Private", fork: "Forks", shared: "Shared" };
+const PERM_LABEL: Record<RepoPermissionLevel, string> = { read: "Read only", write: "Write", admin: "Admin" };
+
+/** A group of checkboxes inside the filter form: native inputs, so it works without JavaScript and by keyboard. */
+function CheckGroup({ legend, name, options, selected, scroll }: { legend: string; name: string; options: { value: string; label: string; avatar?: string | null }[]; selected: string[]; scroll?: boolean }) {
+  return (
+    <fieldset className="min-w-0">
+      <legend className="label">{legend}</legend>
+      <div className={scroll ? "flex max-h-56 w-full flex-col overflow-y-auto rounded-[8px] border border-line px-2 sm:w-[240px]" : "flex flex-wrap gap-x-3"}>
+        {options.map((o) => (
+          <label key={o.value} className="check-row text-[13px]">
+            <input type="checkbox" name={name} value={o.value} defaultChecked={selected.includes(o.value)} />
+            {o.avatar !== undefined && <Avatar login={o.label} url={o.avatar} size={18} />}
+            <span className="min-w-0 truncate">{o.label}</span>
+          </label>
+        ))}
+        {options.length === 0 && <span className="py-2 text-[12.5px] text-ink-3">No authors yet.</span>}
+      </div>
+    </fieldset>
+  );
+}
 
 export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PULL_REQUEST"; searchParams: SP }) {
   const { viewer, user } = await requireViewer();
@@ -24,13 +49,19 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
   const state = (["OPEN", "CLOSED", "MERGED", "ALL"].includes(one(searchParams.state).toUpperCase()) ? one(searchParams.state).toUpperCase() : "OPEN") as WorkItemListParams["state"];
   const scope = await readScope(db, viewer);
   const scopedRepos = !one(searchParams.repo) ? await scopeRepositoryIds(db, scope) : undefined;
+  const authors = [...new Set(many(searchParams.authors))].slice(0, 50);
+  const repoKinds = pick(REPO_KINDS, searchParams.kind);
+  const permissions = pick(REPO_PERMISSION_LEVELS, searchParams.perm);
   const params: WorkItemListParams = {
     type,
     state,
     repositoryIds: one(searchParams.repo) ? [one(searchParams.repo)] : scopedRepos,
     projectId: one(searchParams.project) || undefined,
     label: one(searchParams.label) || undefined,
-    author: one(searchParams.author) || undefined,
+    author: one(searchParams.author) || undefined, // older free-text links and saved filters; its box shows only while set
+    authors,
+    repoKinds,
+    permissions,
     assignee: one(searchParams.assignee) || undefined,
     q: one(searchParams.q) || undefined,
     sort: (["updated", "created", "number", "title"].includes(one(searchParams.sort)) ? one(searchParams.sort) : "updated") as WorkItemListParams["sort"],
@@ -38,25 +69,29 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
     page: Number(one(searchParams.page)) || 1,
     pageSize: 25,
   };
-  const [list, reposRaw, projects, saved, writable] = await Promise.all([
+  const [list, reposRaw, projects, saved, writable, authorRows] = await Promise.all([
     listWorkItems(db, viewer, params),
     db.repository.findMany({ where: repoWhere(viewer), select: { id: true, fullName: true, isDemo: true }, orderBy: { fullName: "asc" } }),
     listProjects(db, viewer),
     db.savedFilter.findMany({ where: { userId: user.id, scope: type } }),
     writableRepos(db, viewer),
+    listWorkItemAuthors(db, viewer, type),
   ]);
+  // A chosen author stays listed (and can be unticked) even when it falls outside the first page of names.
+  const authorOptions = [...authorRows, ...authors.filter((a) => !authorRows.some((r) => r.login.toLowerCase() === a.toLowerCase())).map((login) => ({ login, avatarUrl: null }))];
   const derived = type === "PULL_REQUEST" ? await deriveForIds(db, viewer, list.rows.map((r) => r.id), now, params.projectId) : undefined;
 
   const base = type === "PULL_REQUEST" ? "/pull-requests" : "/issues";
   const qs = (over: Record<string, string | undefined>) => {
     const u = new URLSearchParams();
-    for (const [k, v] of Object.entries({ ...Object.fromEntries(Object.entries(searchParams).map(([k, v]) => [k, one(v)])), ...over })) if (v) u.set(k, v);
+    for (const [k, v] of Object.entries(searchParams)) if (!(k in over)) for (const x of MULTI.has(k) ? many(v) : [one(v)]) if (x) u.append(k, x);
+    for (const [k, v] of Object.entries(over)) if (v) u.set(k, v);
     const s = u.toString();
     return s ? `?${s}` : "";
   };
   const repos = [...reposRaw].sort((a, b) => byOwnerFirst(viewer.login)(a.fullName, b.fullName));
   const currentQuery = qs({ page: undefined }).replace(/^\?/, "");
-  const moreActive = Boolean(params.projectId || params.label || params.author || one(searchParams.sort));
+  const moreActive = Boolean(params.projectId || params.label || params.author || authors.length || repoKinds.length || permissions.length || one(searchParams.sort));
   const from = list.total === 0 ? 0 : (list.page - 1) * list.pageSize + 1;
   const to = Math.min(list.total, list.page * list.pageSize);
   const Icon = type === "PULL_REQUEST" ? GitPullRequest : CircleDot;
@@ -106,8 +141,13 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
             <div className="mt-3 flex flex-wrap items-end gap-3">
               <div className="w-[150px]"><label className="label" htmlFor="f-project">Project</label><Select id="f-project" name="project" defaultValue={one(searchParams.project)} className="select"><option value="">All projects</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></div>
               <div className="w-[140px]"><label className="label" htmlFor="f-label">Label</label><input id="f-label" name="label" defaultValue={params.label} className="input" /></div>
-              <div className="w-[130px]"><label className="label" htmlFor="f-author">Author</label><input id="f-author" name="author" defaultValue={params.author} className="input" /></div>
+              {params.author && <div className="w-[130px]"><label className="label" htmlFor="f-author">Author contains</label><input id="f-author" name="author" defaultValue={params.author} className="input" /></div>}
               <div className="w-[140px]"><label className="label" htmlFor="f-sort">Sort</label><Select id="f-sort" name="sort" defaultValue={params.sort} className="select"><option value="updated">Recently updated</option><option value="created">Newest</option><option value="number">Number</option><option value="title">Title</option></Select></div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-start gap-x-6 gap-y-3">
+              <CheckGroup legend="Authors" name="authors" scroll selected={authors} options={authorOptions.map((a) => ({ value: a.login, label: a.login, avatar: a.avatarUrl }))} />
+              <CheckGroup legend="Repository kind" name="kind" selected={repoKinds} options={REPO_KINDS.map((k) => ({ value: k, label: KIND_LABEL[k] }))} />
+              <CheckGroup legend="Your permission" name="perm" selected={permissions} options={REPO_PERMISSION_LEVELS.map((k) => ({ value: k, label: PERM_LABEL[k] }))} />
             </div>
           </details>
         </form>
