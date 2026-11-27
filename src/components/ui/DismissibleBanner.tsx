@@ -2,6 +2,7 @@
 
 import { useCallback, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { X } from "@/components/ui/icons";
+import { useCspNonce } from "@/components/ui/CspNonce";
 
 const EVENT = "mp:banners";
 const storeKey = (key: string) => `mp.banner.${key}`;
@@ -38,6 +39,7 @@ export function DismissibleBanner({ storageKey, role, className, style, label, c
   const stored = useSyncExternalStore(sub, () => isDismissed(storageKey), () => false);
   const hydrating = useSyncExternalStore(noop, () => false, () => true);
   const [closed, setClosed] = useState(false);
+  const nonce = useCspNonce();
   if (closed || stored) return null;
   const dismiss = () => {
     setClosed(true);
@@ -52,7 +54,8 @@ export function DismissibleBanner({ storageKey, role, className, style, label, c
         </button>
       </div>
       {hydrating && storageKey && (
-        <script dangerouslySetInnerHTML={{ __html: `try{if(localStorage.getItem(${JSON.stringify(storeKey(storageKey)).replace(/</g, "\\u003c")})==="1")document.currentScript.previousElementSibling.hidden=true}catch(e){}` }} />
+        // The browser hides a script's nonce attribute once it runs, so hydration must not compare it.
+        <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: `try{if(localStorage.getItem(${JSON.stringify(storeKey(storageKey)).replace(/</g, "\\u003c")})==="1")document.currentScript.previousElementSibling.hidden=true}catch(e){}` }} />
       )}
     </>
   );

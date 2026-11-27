@@ -69,6 +69,12 @@ describe("Banner", () => {
     expect(run({ getItem: () => { throw new Error("blocked"); } })).toBe(false);
   });
 
+  it("stamps the pre-paint check with the page's CSP nonce, or the policy blocks it", async () => {
+    const { CspNonceProvider } = await import("@/components/ui/CspNonce");
+    const html = renderToStaticMarkup(h(CspNonceProvider, { nonce: "abc123", children: h(Banner, { title: "Stale", dismissible: true, storageKey: "stale" }) }));
+    expect(html).toMatch(/<script nonce="abc123">[^<]*mp\.banner\.stale/);
+  });
+
   it("remembers a dismissal per key and survives broken storage", () => {
     const data = new Map<string, string>();
     vi.stubGlobal("localStorage", { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) });
