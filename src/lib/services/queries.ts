@@ -328,6 +328,13 @@ function projectWhereForNames(v: Viewer): Prisma.ProjectWhereInput {
   return v.isAdmin ? base : { ...base, members: { some: { memberId: v.memberId } } };
 }
 
+/** Repositories the viewer may create issues in: every visible one for an admin, otherwise those their grant lets them manage work in. */
+export async function writableRepos(db: Db, v: Viewer) {
+  const grant = v.isAdmin ? {} : { grants: { some: { memberId: v.memberId, revokedAt: null, canManageWork: true } } };
+  const rows = await db.repository.findMany({ where: { ...repoWhere(v), ...grant }, select: { id: true, fullName: true } });
+  return rows.sort((a, b) => byOwnerFirst(v.login)(a.fullName, b.fullName));
+}
+
 export async function listProjects(db: Db, v: Viewer) {
   const projects = await db.project.findMany({ where: projectWhere(v), orderBy: { name: "asc" }, include: { repositories: { include: { repository: { select: { id: true, trackingStatus: true, workspaceId: true } } } } } });
   const visible = new Set((await db.repository.findMany({ where: repoWhere(v), select: { id: true } })).map((r) => r.id));

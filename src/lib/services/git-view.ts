@@ -93,7 +93,7 @@ export async function pullFilesView(db: Db, v: Viewer, id: string, canComment: b
   const inline: Record<string, InlineComment[]> = {};
   for (const c of item.comments) {
     if (!c.path || !c.line) continue;
-    (inline[c.path] ??= []).push({ id: c.id, author: c.authorLogin, html: renderMarkdown(c.body), createdAt: c.createdAtGh.toISOString(), line: c.line, commitSha: c.commitSha, resolved: c.threadResolved });
+    (inline[c.path] ??= []).push({ id: c.id, author: c.authorLogin, html: renderMarkdown(c.body, { breaks: true }), createdAt: c.createdAtGh.toISOString(), line: c.line, commitSha: c.commitSha, resolved: c.threadResolved });
   }
   // The person's GitHub reviews only: without a linked GitHub account there are none (an email user's name is not a GitHub login).
   const mine = !v.githubLogin ? null : await db.workItemComment.findFirst({ where: { workItemId: item.id, kind: "REVIEW", AND: [authoredWhere(viewerWho(v))], commitSha: { not: null } }, orderBy: { createdAtGh: "desc" }, select: { commitSha: true } });

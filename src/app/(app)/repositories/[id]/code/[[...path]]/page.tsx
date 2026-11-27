@@ -8,7 +8,8 @@ import { GithubError } from "@/lib/github/port";
 import { repoContentsView, type CodeView } from "@/lib/services/git-view";
 import { formatBytes } from "@/lib/format";
 import { Banner, PageHeader } from "@/components/ui/primitives";
-import { ExternalLink, FolderGit2 } from "@/components/ui/icons";
+import { ExternalLink, FolderGit2, Plus } from "@/components/ui/icons";
+import { writableRepos } from "@/lib/services/queries";
 import { Tokens } from "@/components/code/Code";
 import { RefPicker } from "@/components/code/RefPicker";
 
@@ -36,13 +37,14 @@ export default async function CodePage({ params, searchParams }: { params: Promi
     problem = e instanceof GithubError && e.kind === "not-found" ? "That folder or file does not exist on this branch." : e instanceof Error ? e.message : "GitHub could not be reached.";
   }
 
+  const canCreateIssue = (await writableRepos(db, viewer)).some((r) => r.id === repo.id);
   const crumbs = path ? path.split("/") : [];
   return (
     <>
       <PageHeader
         title={<span className="inline-flex items-center gap-2"><FolderGit2 size={20} aria-hidden /> {repo.fullName}</span>}
         subtitle="Browse the code and read it with the same colours as GitHub. Nothing here changes the repository."
-        actions={<a href={`${repo.htmlUrl}${path ? `/${view?.kind === "dir" ? "tree" : "blob"}/${encodeURIComponent(ref)}/${path}` : ""}`} target="_blank" rel="noopener noreferrer" className="btn"><ExternalLink size={14} aria-hidden /> Open on GitHub</a>}
+        actions={<>{canCreateIssue && <Link href={`/issues/new?repo=${encodeURIComponent(repo.id)}`} className="btn btn-primary"><Plus size={14} aria-hidden /> New issue</Link>}<a href={`${repo.htmlUrl}${path ? `/${view?.kind === "dir" ? "tree" : "blob"}/${encodeURIComponent(ref)}/${path}` : ""}`} target="_blank" rel="noopener noreferrer" className="btn"><ExternalLink size={14} aria-hidden /> Open on GitHub</a></>}
       />
       <div className="mb-3 flex flex-wrap items-center gap-3 text-[14px]">
         <RefPicker repoId={repo.id} path={path} current={ref} branches={repo.branches.map((b) => b.name)} />

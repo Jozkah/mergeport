@@ -4,7 +4,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireViewer } from "@/lib/authz-page";
 import { repoWhere } from "@/lib/authz/viewer";
-import { deriveForIds, listProjects, listWorkItems, type WorkItemListParams } from "@/lib/services/queries";
+import { deriveForIds, listProjects, listWorkItems, writableRepos, type WorkItemListParams } from "@/lib/services/queries";
 import { readScope, scopeRepositoryIds } from "@/lib/scope";
 import { ViewBar } from "@/components/views/ViewBar";
 import { listViews } from "@/lib/services/views";
@@ -13,8 +13,7 @@ import { PageHeader, Panel, EmptyState, Segmented, Banner } from "@/components/u
 import { CircleDot, Filter, GitPullRequest, Plus, Search } from "@/components/ui/icons";
 import { WorkTable } from "./WorkTable";
 import { ActionForm } from "@/components/forms/ActionForm";
-import { createIssueAction, deleteFilterAction, saveFilterAction } from "@/app/actions";
-import { Sheet } from "@/components/ui/dialog";
+import { deleteFilterAction, saveFilterAction } from "@/app/actions";
 
 type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
@@ -44,7 +43,7 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
     db.repository.findMany({ where: repoWhere(viewer), select: { id: true, fullName: true, isDemo: true }, orderBy: { fullName: "asc" } }),
     listProjects(db, viewer),
     db.savedFilter.findMany({ where: { userId: user.id, scope: type } }),
-    viewer.isAdmin ? db.repository.findMany({ where: repoWhere(viewer), select: { id: true, fullName: true } }) : db.repository.findMany({ where: { ...repoWhere(viewer), grants: { some: { memberId: viewer.memberId, revokedAt: null, canManageWork: true } } }, select: { id: true, fullName: true } }),
+    writableRepos(db, viewer),
   ]);
   const derived = type === "PULL_REQUEST" ? await deriveForIds(db, viewer, list.rows.map((r) => r.id), now, params.projectId) : undefined;
 
@@ -72,20 +71,7 @@ export async function WorkListPage({ type, searchParams }: { type: "ISSUE" | "PU
         subtitle={`Across ${repos.length} repositor${repos.length === 1 ? "y" : "ies"} you can see. Counts include only what you have access to.`}
         actions={
           type === "ISSUE" && writable.length > 0 ? (
-            <Sheet
-              title="New issue"
-              description="Created on GitHub under your own account."
-              trigger={<button className="btn btn-primary"><Plus size={14} aria-hidden /> New issue</button>}
-            >
-              <ActionForm action={createIssueAction} submitLabel="Create issue" pendingLabel="Creating…">
-                <div className="flex flex-col gap-3">
-                  <div><label className="label" htmlFor="ni-repo">Repository</label><Select id="ni-repo" name="repositoryId" className="select" required>{writable.map((r) => <option key={r.id} value={r.id}>{r.fullName}</option>)}</Select></div>
-                  <div><label className="label" htmlFor="ni-title">Title</label><input id="ni-title" name="title" className="input" required maxLength={256} /></div>
-                  <div><label className="label" htmlFor="ni-body">Description</label><textarea id="ni-body" name="body" className="textarea" /></div>
-                  <div><label className="label" htmlFor="ni-labels">Labels (comma separated)</label><input id="ni-labels" name="labels" className="input" /></div>
-                </div>
-              </ActionForm>
-            </Sheet>
+            <Link href="/issues/new" className="btn btn-primary"><Plus size={14} aria-hidden /> New issue</Link>
           ) : undefined
         }
       />

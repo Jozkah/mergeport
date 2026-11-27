@@ -114,15 +114,37 @@ export async function submitReview(ctx: Ctx, workItemId: string, event: "APPROVE
   await audit(ctx.db, ctx.v, "github.review", { type: "WorkItem", id: item.id }, { event });
 }
 
-export async function createIssue(ctx: Ctx, repositoryId: string, input: { title: string; body?: string; labels?: string[] }) {
+/** The new issue's number, and its work item once the mirror has it (null if the follow-up sync has not landed yet). */
+export async function createIssue(ctx: Ctx, repositoryId: string, input: { title: string; body?: string; labels?: string[] }): Promise<{ number: number; workItemId: string | null }> {
   const repo = await requireRepo(ctx.db, ctx.v, repositoryId, "manageWork");
   if (!input.title.trim()) throw new ValidationError("Give the issue a title");
+  const workItemId = async (number: number) => (await ctx.db.workItem.findUnique({ where: { repositoryId_number: { repositoryId: repo.id, number } }, select: { id: true } }))?.id ?? null;
+  if (!ctx.port && !repo.isDemo) {
+    // A real repository: as the person, through the write gate (src/lib/github/writes.ts). Labels are never sent: the gate writes the issue and nothing else.
+    const { title, body } = validateWriteText({ title: input.title, body: input.body ?? "" }, { titleRequired: true });
+    const sent = withFooter(body);
+    const created = await githubWrite(ctx, {
+      kind: "issue.create",
+      repo,
+      target: { type: "Repository", id: repo.id },
+      dedupeKey: `ghwrite:issue:new:${ctx.v.userId}:${sha256(`${repo.id}
+${title}
+${sent}`)}`,
+      call: async (p) => {
+        const c = await p.createIssue(repo.owner.login, repo.name, { title: title!, body: sent });
+        await syncItem(ctx.db, p, repo.id, c.number).catch(() => false); // best effort, as the person who just made it; sync.item follows from the queue
+        return c;
+      },
+      numberOf: (r) => r.number,
+    });
+    return { number: created.number, workItemId: await workItemId(created.number) };
+  }
   const user = await ctx.db.user.findUniqueOrThrow({ where: { id: ctx.v.userId } });
   const port = ctx.port ?? (await portForWrite(ctx.db, user, repo));
   const created = await port.createIssue(repo.owner.login, repo.name, { title: input.title.trim(), body: input.body, labels: input.labels });
   await refresh(ctx, port, repo.id, created.number);
   await audit(ctx.db, ctx.v, "github.create-issue", { type: "Repository", id: repo.id }, { number: created.number });
-  return created;
+  return { number: created.number, workItemId: await workItemId(created.number) };
 }
 
 // ---------- merge ----------

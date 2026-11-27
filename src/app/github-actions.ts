@@ -57,7 +57,7 @@ export async function disconnectGithubInstallationAction(fd: FormData): Promise<
   });
 }
 
-/** Owners and administrators: let people write to GitHub as themselves in this workspace (create an issue from a task, comment). Re-checked on the server; off by default. */
+/** Owners and administrators: let people write to GitHub as themselves in this workspace (create an issue, from a task or the new issue page; comment). Re-checked on the server; off by default. */
 export async function setGithubWritesAction(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const { viewer } = await requireWriter();
