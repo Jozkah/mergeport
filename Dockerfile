@@ -18,6 +18,8 @@ FROM base AS build
 # Manifests first so the dependency layer is cached. `postinstall` runs `prisma generate`, which needs the schema and prisma.config.ts.
 COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
+# prisma.config.ts imports this (the database URL built from POSTGRES_PASSWORD).
+COPY src/lib/database-url.ts ./src/lib/database-url.ts
 RUN npm ci
 COPY . .
 # The build never connects to the database; this value only has to be a well-formed URL.
