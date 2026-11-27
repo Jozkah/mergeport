@@ -1,13 +1,14 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
+import { resolveDatabaseUrl } from "@/lib/database-url";
 
 declare global {
   var __prisma: PrismaClient | undefined;
 }
 
 export function databaseUrl(): string {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL is not set. Point it at a Postgres database, e.g. postgresql://postgres:postgres@127.0.0.1:5433/mergeport (npm run db:dev starts one).");
+  const url = resolveDatabaseUrl();
+  if (!url) throw new Error("DATABASE_URL is not set (nor POSTGRES_PASSWORD for the bundled compose database). Point it at a Postgres database, e.g. postgresql://postgres:postgres@127.0.0.1:5433/mergeport (npm run db:dev starts one).");
   return url;
 }
 

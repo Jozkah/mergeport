@@ -4,8 +4,8 @@
 #   docker compose up -d --build
 #
 # Everything comes from the file `.env` next to this one (a deployer's dashboard writes exactly that file). There is no variable
-# substitution in this file, so a deployer that forbids it accepts it as is. Required in `.env`: MERGEPORT_PUBLIC_URL,
-# POSTGRES_PASSWORD, and DATABASE_URL = postgresql://mergeport:<POSTGRES_PASSWORD>@postgres:5432/mergeport
+# substitution in this file, so a deployer that forbids it accepts it as is. Required in `.env`: MERGEPORT_PUBLIC_URL and
+# POSTGRES_PASSWORD (the app builds its database URL from it; DATABASE_URL is only for a different database).
 # A reverse proxy with TLS terminates in front of `web` (published on 127.0.0.1 only). Do not publish Postgres.
 
 services:
