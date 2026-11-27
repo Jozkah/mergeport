@@ -32,7 +32,7 @@ Copy `.env.production.example` to `.env` and fill it in (compose and a deployer'
 
 | Variable | Why |
 | --- | --- |
-| `DATABASE_URL` | The database above. |
+| `POSTGRES_PASSWORD` or `DATABASE_URL` | With compose's bundled Postgres set only `POSTGRES_PASSWORD`: the app builds `postgresql://mergeport:<password>@postgres:5432/mergeport` itself. For any other database set `DATABASE_URL` (it wins when both are set). |
 | `MERGEPORT_PUBLIC_URL` | `https://mergeport.example.com`. Turns hosted mode on. **Also a build argument** (see below). |
 | `MERGEPORT_TRUST_PROXY=true` | Required when hosted. The server refuses to start without it. |
 | `MERGEPORT_TRUSTED_PROXY_HOPS` | How many proxies you run in front (default 1). |
@@ -46,7 +46,7 @@ Rules that are easy to miss:
 - **`MERGEPORT_PUBLIC_URL` is needed at build time and at run time.** `next.config.ts` reads it to allow Server Actions from the public host.
   In Docker pass it as a build arg (compose does this); on a Nixpacks-style builder make sure it is available to the build step. Change
   the address and you must rebuild.
-- **The web and worker services use the same variables.** Give the worker the same `DATABASE_URL`, `MERGEPORT_PUBLIC_URL`,
+- **The web and worker services use the same variables.** Give the worker the same `DATABASE_URL` (or `POSTGRES_PASSWORD`), `MERGEPORT_PUBLIC_URL`,
   `MERGEPORT_ENCRYPTION_KEY` and GitHub App values (it mints installation tokens and decrypts stored tokens).
 - **`HOST`.** Default `127.0.0.1` (local behaviour). Inside a container or when the proxy is on another machine set `HOST=0.0.0.0`. The
   server refuses a network-reachable `HOST` unless `MERGEPORT_PUBLIC_URL` is set: without it the app is the local app, which trusts any
@@ -61,7 +61,7 @@ Rules that are easy to miss:
 ### Dockerfile or compose
 
 ```sh
-cp .env.production.example .env      # fill it in; with the bundled Postgres set POSTGRES_PASSWORD and the same password in DATABASE_URL
+cp .env.production.example .env      # fill it in; with the bundled Postgres set POSTGRES_PASSWORD (DATABASE_URL is then built from it)
 docker compose up -d --build
 ```
 
