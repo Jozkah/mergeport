@@ -72,17 +72,30 @@ export function NewIssueForm({ repos, preselect, draftKey }: { repos: NewIssueRe
   }, [draftKey, preselect, repos]);
 
   const empty = !title.trim() && !body.trim() && !labels.trim();
+  const latest = useRef<Draft | null>(null); // what the pending save would write
   useEffect(() => {
     if (!loaded.current || stopped.current) return;
     if (timer.current) clearTimeout(timer.current);
+    latest.current = empty ? null : { repoId, title, body, labels };
     timer.current = setTimeout(() => {
       timer.current = null;
-      if (!stopped.current) writeDraft(draftKey, empty ? null : { repoId, title, body, labels });
+      if (!stopped.current) writeDraft(draftKey, latest.current);
     }, SAVE_MS);
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
   }, [draftKey, repoId, title, body, labels, empty]);
+  // Leaving the page (a link, closing the tab) right after typing must not lose the last keystrokes: a pending save is written now.
+  useEffect(() => {
+    const flush = () => {
+      if (!timer.current || stopped.current) return;
+      clearTimeout(timer.current);
+      timer.current = null;
+      writeDraft(draftKey, latest.current);
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [draftKey]);
 
   const dropDraft = () => {
     if (timer.current) clearTimeout(timer.current);

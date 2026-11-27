@@ -29,7 +29,7 @@ export default async function GithubSettings({ searchParams }: { searchParams: P
       <PageHeader
         title="GitHub"
         subtitle="The GitHub accounts this workspace reads from."
-        help={<>Connecting lets Mergeport read repositories, issues and pull requests from a GitHub account through the Mergeport GitHub App. Reading is the default; writing (a new issue from a task, a comment) happens only if an administrator turns it on below, and then only as the person doing it. You prove on GitHub that you control the account; Mergeport does not keep your GitHub sign-in. Disconnecting never deletes tasks, projects or history.</>}
+        help={<>Connecting lets Mergeport read repositories, issues and pull requests from a GitHub account through the Mergeport GitHub App. Reading is the default; writing (a new issue, from a task or the new issue page, and a comment) happens only if an administrator turns it on below, and then only as the person doing it. You prove on GitHub that you control the account; Mergeport does not keep your GitHub sign-in. Disconnecting never deletes tasks, projects or history.</>}
       />
       <GithubSettingsBody
         view={{ configured: githubAppConfigured(), manage: can(viewer, "manageGithub"), writes: await githubWritesView(db, viewer.workspaceId), installations: rows.map((r) => ({ ...r, installationId: String(r.installationId) })) }}

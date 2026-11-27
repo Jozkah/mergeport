@@ -95,6 +95,21 @@ describe("new issue page", () => {
     expect(stored()).toBeNull();
   });
 
+  it("leaving right after typing still keeps the draft (a pending save is written on leave)", () => {
+    vi.useFakeTimers();
+    const f = form("r1");
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Quick" } });
+    expect(stored()).toBeNull();
+    f.unmount();
+    expect(stored()).toEqual({ repoId: "r1", title: "Quick", body: "", labels: "" });
+    cleanup();
+    localStorage.clear();
+    form("r1");
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Tab closed" } });
+    window.dispatchEvent(new Event("pagehide"));
+    expect(stored()?.title).toBe("Tab closed");
+  });
+
   it("?repo wins over the draft's repository; a broken draft is ignored", () => {
     localStorage.setItem(KEY, JSON.stringify({ repoId: "r1", title: "T", body: "", labels: "" }));
     form("r3");

@@ -141,7 +141,7 @@ export function GithubSettingsBody({ view, result, now }: { view: GithubView; re
         <Panel title="Write to GitHub as you" icon={Pencil} id="gh-writes">
           <div className="flex flex-col gap-3 p-4 text-[13px]">
             <p className="flex flex-wrap items-center gap-2"><SimplePill tone={writes.enabled ? "ok" : "waiting"}>{writes.enabled ? "On" : "Off"}</SimplePill> <span className="text-ink-2">{writes.enabled ? "People here can create issues from tasks and comment on issues and pull requests." : "Nothing is written to GitHub from this workspace."}</span></p>
-            <p className="max-w-[70ch] text-[12.5px] text-ink-3 text-pretty">Each person writes as themselves, with their own linked GitHub account, so GitHub shows and checks who did it. Only two things can be written: a new issue from a task, and a comment. Mergeport never merges, closes, deletes, pushes, labels or reviews on GitHub. Each person must have linked GitHub and be allowed to manage work in the repository.</p>
+            <p className="max-w-[70ch] text-[12.5px] text-ink-3 text-pretty">Each person writes as themselves, with their own linked GitHub account, so GitHub shows and checks who did it. Only two things can be written: a new issue (from a task or the new issue page), and a comment. Mergeport never merges, closes, deletes, pushes, labels or reviews on GitHub. Each person must have linked GitHub and be allowed to manage work in the repository.</p>
             {manage ? (
               writes.enabled ? (
                 <ActionForm action={setGithubWritesAction} submitLabel="Turn off" pendingLabel="Turning off…" resetOnSuccess={false} layout="inline" submitClassName="btn">
@@ -150,7 +150,7 @@ export function GithubSettingsBody({ view, result, now }: { view: GithubView; re
               ) : (
                 <ConfirmSheet
                   title="Let people write to GitHub as themselves?"
-                  consequence={<>People in this workspace who linked their GitHub account will be able to create an issue from a task and comment on tracked issues and pull requests, each as themselves. GitHub must also have accepted the App&apos;s write permissions for the account. You can turn this off any time.</>}
+                  consequence={<>People in this workspace who linked their GitHub account will be able to create issues (from a task or the new issue page) and comment on tracked issues and pull requests, each as themselves. GitHub must also have accepted the App&apos;s write permissions for the account. You can turn this off any time.</>}
                   action={setGithubWritesAction}
                   submitLabel="Turn on"
                   pendingLabel="Turning on…"
