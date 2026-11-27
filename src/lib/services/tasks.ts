@@ -68,7 +68,8 @@ export async function listTasks(db: Db, v: Viewer, f: TaskFilter = {}) {
   const rows = await db.planningItem.findMany({
     where: { AND: and },
     include: { column: true, project: { select: { id: true, name: true, slug: true } }, workItem: { select: { number: true, type: true, repository: { select: { fullName: true } } } }, _count: { select: { comments: { where: { kind: "COMMENT" } } } } },
-    orderBy: [{ updatedAt: "desc" }],
+    // Most important first, then each project's own planned order; recency only breaks ties.
+    orderBy: [{ priority: "desc" }, { position: "asc" }, { updatedAt: "desc" }],
     take: 500,
   });
   const progress = await checklistProgress(db, rows.map((r) => r.id));
