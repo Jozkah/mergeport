@@ -10,6 +10,13 @@ describe("Content-Security-Policy", () => {
   const nonce = newNonce();
   const d = parse(buildCsp(nonce, false));
 
+  it("nonceFromCsp reads back the script nonce, and nothing from a missing or nonce-less policy", async () => {
+    const { nonceFromCsp } = await import("@/lib/csp");
+    expect(nonceFromCsp(buildCsp(nonce, false))).toBe(nonce);
+    expect(nonceFromCsp(null)).toBeUndefined();
+    expect(nonceFromCsp("default-src 'self'")).toBeUndefined();
+  });
+
   it("form-action allows only the manifest paths on github.com, never github.com as a whole", () => {
     const sources = d["form-action"];
     expect(sources).toEqual(["'self'", "https://github.com/settings/apps/new", "https://github.com/organizations/"]);

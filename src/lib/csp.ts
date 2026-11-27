@@ -27,6 +27,11 @@ export function buildCsp(nonce: string, dev: boolean): string {
   ].join("; ");
 }
 
+/** The script nonce in a policy built by buildCsp (proxy.ts puts it on the request), for the app's own inline scripts. */
+export function nonceFromCsp(csp: string | null | undefined): string | undefined {
+  return csp?.match(/'nonce-([^']+)'/)?.[1];
+}
+
 export function newNonce(): string {
   return btoa(crypto.randomUUID());
 }

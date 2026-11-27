@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import "./globals.css";
 import { THEME_COOKIE, parseTheme, themeAttribute } from "@/lib/theme";
+import { nonceFromCsp } from "@/lib/csp";
+import { CspNonceProvider } from "@/components/ui/CspNonce";
 
 export const metadata: Metadata = {
   title: { default: "Mergeport", template: "%s · Mergeport" },
@@ -23,9 +25,12 @@ export async function generateViewport(): Promise<Viewport> {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // The explicit choice is rendered into the first byte of HTML, so there is no flash and nothing for hydration to fix.
   const attr = themeAttribute(parseTheme((await cookies()).get(THEME_COOKIE)?.value));
+  const nonce = nonceFromCsp((await headers()).get("content-security-policy"));
   return (
     <html lang="en" data-theme={attr}>
-      <body>{children}</body>
+      <body>
+        <CspNonceProvider nonce={nonce}>{children}</CspNonceProvider>
+      </body>
     </html>
   );
 }
