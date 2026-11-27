@@ -7,6 +7,7 @@ import { ActionForm } from "@/components/forms/ActionForm";
 import { Banner } from "@/components/ui/primitives";
 import { Check, ChevronDown } from "@/components/ui/icons";
 import { BODY_MAX, TITLE_MAX } from "@/lib/github/write-text";
+import { MentionTextarea } from "./MentionTextarea";
 
 export type NewIssueRepo = { id: string; fullName: string; isDemo: boolean; /** Why an issue cannot be written there from here, or null. */ refusal: string | null };
 type Draft = { repoId: string; title: string; body: string; labels: string };
@@ -120,7 +121,7 @@ export function NewIssueForm({ repos, preselect, draftKey }: { repos: NewIssueRe
       setPreview(null);
       startPreview(async () => {
         try {
-          const r = await previewMarkdownAction(body);
+          const r = await previewMarkdownAction(body, repoId || undefined);
           setPreview(r.ok ? { html: String(r.data?.html ?? "") } : { error: r.error });
         } catch {
           setPreview({ error: "Could not reach the server to render the preview." });
@@ -188,7 +189,7 @@ export function NewIssueForm({ repos, preselect, draftKey }: { repos: NewIssueRe
             </div>
             {/* The textarea stays mounted (only hidden) in Preview, so submitting from there still posts the body. */}
             <div id={`${uid}-panel-write`} role="tabpanel" aria-labelledby={`${uid}-tab-write`} hidden={tab !== "write"}>
-              <textarea id={`${uid}-body`} name="body" aria-labelledby={`${uid}-body-label`} className="textarea min-h-56" maxLength={BODY_MAX} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Markdown. A single line break stays a line break, as on GitHub." />
+              <MentionTextarea repositoryId={repoId || null} id={`${uid}-body`} name="body" aria-labelledby={`${uid}-body-label`} className="textarea min-h-56" maxLength={BODY_MAX} value={body} onValueChange={setBody} placeholder="Markdown. A single line break stays a line break, as on GitHub. @ mentions a person, # an issue or pull request." />
             </div>
             <div id={`${uid}-panel-preview`} role="tabpanel" aria-labelledby={`${uid}-tab-preview`} hidden={tab !== "preview"} tabIndex={0} className="min-h-56 rounded-[10px] border border-line p-4" aria-busy={previewing}>
               {previewing || !preview ? (

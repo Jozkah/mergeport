@@ -14,6 +14,8 @@ import { REFUSAL_MESSAGES, mayEditComment, repoMaintainer, writeRefusal } from "
 import { BODY_MAX } from "@/lib/github/write-text";
 import { GithubCommentBox } from "./GithubCommentBox";
 import { EditableText } from "./EditableText";
+import { MentionTextarea } from "./MentionTextarea";
+import { mentionRefs } from "@/lib/services/mentions";
 import { deriveReadiness } from "@/lib/domain/readiness";
 import { ReadinessPanel } from "@/components/review/ReadinessPanel";
 import { StageList } from "@/components/review/StageList";
@@ -68,6 +70,8 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
 
   const ownerLabel = item.repository.owner.type === "ORGANIZATION" ? "Organization" : item.repository.owner.type === "USER" ? "Personal account" : "Account type unknown";
   const comments = item.comments;
+  // `#123` links: one query for every number written in the description and the comments.
+  const refs = await mentionRefs(db, viewer, item.repositoryId, [item.body, ...comments.map((c) => c.body)]);
   const assignees = asStrings(item.assignees);
   const detailsSummary = [`${labels.length} label${labels.length === 1 ? "" : "s"}`, assignees.length ? assignees.join(", ") : "no assignee", item.milestoneTitle ?? "no milestone"].join(" · ");
   const firstWait = manualOpen[0];
@@ -79,8 +83,8 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
     <>
               <Panel title="Description" icon={MessageSquare} id="desc">
                 <div className="p-4">{(() => {
-                  const shown = item.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.body, { breaks: true }) }} /> : <p className="text-[13px] text-ink-3">No description.</p>;
-                  return canEdit && editable(item.body) ? <EditableText id={item.id} markdown={item.body ?? ""} what="description">{shown}</EditableText> : shown;
+                  const shown = item.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.body, { breaks: true, refs }) }} /> : <p className="text-[13px] text-ink-3">No description.</p>;
+                  return canEdit && editable(item.body) ? <EditableText id={item.id} repositoryId={item.repositoryId} markdown={item.body ?? ""} what="description">{shown}</EditableText> : shown;
                 })()}</div>
               </Panel>
               <Panel title={`Conversation (${comments.length})`} icon={MessageSquare} id="conv">
@@ -101,8 +105,8 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
                           <Time value={c.createdAtGh} formatted={formatInstant(c.createdAtGh, viewer.timezone)} />
                         </div>
                         {(() => {
-                          const shown = c.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(c.body, { breaks: true }) }} /> : <p className="text-[12.5px] text-ink-3">No text.</p>;
-                          return canEdit && editable(c.body) && mayEditComment(c, viewer, item.repository.isDemo, maintainer) ? <EditableText id={item.id} commentId={c.id} markdown={c.body ?? ""} what="comment">{shown}</EditableText> : shown;
+                          const shown = c.body ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(c.body, { breaks: true, refs }) }} /> : <p className="text-[12.5px] text-ink-3">No text.</p>;
+                          return canEdit && editable(c.body) && mayEditComment(c, viewer, item.repository.isDemo, maintainer) ? <EditableText id={item.id} repositoryId={item.repositoryId} commentId={c.id} markdown={c.body ?? ""} what="comment">{shown}</EditableText> : shown;
                         })()}
                       </li>
                     ))}
@@ -114,10 +118,10 @@ export async function WorkItemDetail({ id, tab, from }: { id: string; tab: Tab; 
                       <ActionForm action={commentAction} submitLabel="Comment" pendingLabel="Posting…">
                         <input type="hidden" name="id" value={item.id} />
                         <label className="label" htmlFor="comment-body">Add a comment</label>
-                        <textarea id="comment-body" name="body" className="textarea" required />
+                        <MentionTextarea repositoryId={item.repositoryId} id="comment-body" name="body" className="textarea" required />
                       </ActionForm>
                     ) : (
-                      <GithubCommentBox id={item.id} repoName={item.repository.fullName} number={item.number} />
+                      <GithubCommentBox id={item.id} repositoryId={item.repositoryId} repoName={item.repository.fullName} number={item.number} />
                     )
                   ) : commentRefusal === "not-linked" || commentRefusal === "relink" ? (
                     <p className="text-[12.5px] text-ink-3">{REFUSAL_MESSAGES[commentRefusal]} <Link href="/settings/linked" className="link">Open linked accounts</Link></p>
