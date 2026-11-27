@@ -56,6 +56,8 @@ const ALLOW: Allow[] = [
   { file: "src/app/federation-actions.ts", fn: "unlinkAction", reason: "Your own link (any role, even after a downgrade to READER); unlink() lets only an administrator end someone else's." },
   { file: "src/app/federation-actions.ts", fn: "approveFederationAction", reason: "The person's own consent to share what they themselves can see, read-only; any role may. Session CSRF token and policy are re-checked in the action and service." },
   { file: "src/app/federation-actions.ts", fn: "denyFederationAction", reason: "Declining a link request; changes nothing but the redirect. Session CSRF token checked." },
+  { file: "src/app/server-email-actions.ts", fn: "saveSmtpSettingsAction", reason: "Server-wide, not a workspace: guarded by the SERVER administrator flag (serverAdmin(), and saveSmtpSettings re-reads User.isServerAdmin). A workspace role must not grant it." },
+  { file: "src/app/server-email-actions.ts", fn: "sendTestEmailAction", reason: "Server administrators only (serverAdmin()); sends one message to the caller's own address and writes nothing." },
   { file: "src/app/federation-actions.ts", fn: "revokeGrantAction", reason: "Your own grant (any role) or, for an administrator, any grant of the workspace; revokeGrant() decides and answers NotFound otherwise." },
 ];
 
@@ -135,6 +137,7 @@ const ROUTE_ALLOW: { file: string; reason: string }[] = [
   { file: "src/app/api/backup/preview/route.ts", reason: "Read-only preview; previewRestore refuses non-administrators and writes nothing." },
   { file: "src/app/api/backup/restore/route.ts", reason: "restoreBackup refuses non-administrators (an administrator always writes), and applies the space ACL." },
   { file: "src/app/auth/magic/request/route.ts", reason: "Sign-in: asks for a link before any session exists." },
+  { file: "src/app/setup/claim/route.ts", reason: "First server administrator: the single-use setup link printed at server start is the credential (claimSetup uses it once, only while nobody is server administrator). Rate limited per address; 404 unless hosted." },
   { file: "src/app/api/federation/v1/token/route.ts", reason: "Server to server: a one-time PKCE code is the credential; there is no session or viewer. 404 unless federation is on." },
   { file: "src/app/api/github/webhook/route.ts", reason: "Server to server: GitHub signs the body with the App's webhook secret (HMAC checked before anything else); there is no session or viewer. 404 unless hosted and the App is configured. It only queues refreshes and records installation state of installations we already hold." },
   { file: "src/app/api/mcp/route.ts", reason: "Server to client AI apps: a personal access token (Bearer) is the credential, bound to one workspace and person; the viewer is loaded fresh per call and every write tool checks the token scope AND requireWrite (tests/mcp-hosted.test.ts). 404 unless hosted." },
