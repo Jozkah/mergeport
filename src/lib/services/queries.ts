@@ -12,6 +12,7 @@ import { viewerWho } from "@/lib/domain/identity";
 import { deriveStages, type StageEntry } from "@/lib/domain/stages";
 import { blockerFinished } from "@/lib/domain/deps";
 import { labelFilter } from "./label-taxonomy";
+import { VALID_FOR_MS } from "@/lib/github/access-cache";
 
 /**
  * Every query here starts from the viewer's repository filter. Counts, charts, search and
@@ -239,6 +240,12 @@ export type WorkItemListParams = {
   label?: string;
   assignee?: string;
   author?: string;
+  /** Exact author logins (case-insensitive); an item matches any of them. */
+  authors?: string[];
+  /** Repository kinds; an item matches any of them. */
+  repoKinds?: RepoKind[];
+  /** The viewer's own GitHub permission on the repository; an item matches any of them. */
+  permissions?: RepoPermissionLevel[];
   q?: string;
   sort?: "updated" | "created" | "number" | "title";
   dir?: "asc" | "desc";
@@ -246,7 +253,65 @@ export type WorkItemListParams = {
   pageSize?: number;
 };
 
-export async function listWorkItems(db: Db, v: Viewer, p: WorkItemListParams) {
+export const REPO_KINDS = ["private", "fork", "shared"] as const;
+export type RepoKind = (typeof REPO_KINDS)[number];
+export const REPO_PERMISSION_LEVELS = ["read", "write", "admin"] as const;
+export type RepoPermissionLevel = (typeof REPO_PERMISSION_LEVELS)[number];
+
+/**
+ * One repository-kind choice as a filter. Private follows the Repositories page (anything not PUBLIC: private, internal, or not yet
+ * known). Shared means the repository belongs to another GitHub account than the viewer's own (an organization or another person
+ * shared it with them); without a linked GitHub account nothing is the viewer's own. Repository.spaceId would be the natural column,
+ * but nothing writes it, so a filter on it would always be empty.
+ */
+function repoKindWhere(v: Viewer, k: RepoKind): Prisma.RepositoryWhereInput {
+  if (k === "private") return { visibility: { not: "PUBLIC" } };
+  if (k === "fork") return { isFork: true };
+  return v.githubId === null ? {} : { owner: { githubId: { not: v.githubId } } };
+}
+
+/**
+ * The viewer's permission on each repository comes from GithubRepoAccess (their own GitHub account, written by the access refresh
+ * job), resolved like validRepoGithubIds: same workspace, same installation, row still fresh. pull/triage = read, push/maintain =
+ * write, admin = admin. A visible repository without a fresh row (local `gh` repositories, demo data, granted access, no linked
+ * GitHub account) counts as Read only: the viewer can at least read it, and Write/Admin are only claimed when GitHub said so.
+ * This only narrows a list that viaRepo already scoped; it never grants anything.
+ */
+async function permissionWhere(db: Db, v: Viewer, levels: RepoPermissionLevel[], now: Date): Promise<Prisma.WorkItemWhereInput> {
+  const rows = await db.githubRepoAccess.findMany({
+    where: { userId: v.userId, permission: { in: ["push", "maintain", "admin"] }, checkedAt: { gte: new Date(now.getTime() - VALID_FOR_MS) } },
+    select: { repositoryGithubId: true, installationId: true, permission: true },
+  });
+  const repos = rows.length === 0 ? [] : await db.repository.findMany({ where: { AND: [repoWhere(v), { githubId: { in: rows.map((r) => r.repositoryGithubId) }, installationId: { not: null } }] }, select: { id: true, githubId: true, installationId: true } });
+  const byKey = new Map(rows.map((r) => [`${r.repositoryGithubId}:${r.installationId}`, r.permission === "admin" ? "admin" : "write"]));
+  const write: string[] = [];
+  const admin: string[] = [];
+  for (const r of repos) {
+    const level = byKey.get(`${r.githubId}:${r.installationId}`);
+    if (level === "admin") admin.push(r.id);
+    else if (level === "write") write.push(r.id);
+  }
+  const or: Prisma.WorkItemWhereInput[] = [];
+  if (levels.includes("read")) or.push({ repositoryId: { notIn: [...write, ...admin] } });
+  if (levels.includes("write")) or.push({ repositoryId: { in: write } });
+  if (levels.includes("admin")) or.push({ repositoryId: { in: admin } });
+  return { OR: or };
+}
+
+/** Distinct authors of the viewer's visible work items of one type, for the author filter. Never names anyone outside viaRepo. */
+export async function listWorkItemAuthors(db: Db, v: Viewer, type?: "ISSUE" | "PULL_REQUEST", take = 200) {
+  // groupBy runs as GROUP BY in Postgres (findMany's `distinct` would load every visible item and dedupe in memory).
+  const rows = await db.workItem.groupBy({
+    by: ["authorLogin"],
+    where: { AND: [viaRepo(v), ...(type ? [{ type }] : []), { authorLogin: { not: null } }] },
+    _max: { authorAvatar: true },
+    orderBy: { authorLogin: "asc" },
+    take,
+  });
+  return rows.map((r) => ({ login: r.authorLogin as string, avatarUrl: r._max.authorAvatar }));
+}
+
+export async function listWorkItems(db: Db, v: Viewer, p: WorkItemListParams, now = new Date()) {
   const and: Prisma.WorkItemWhereInput[] = [viaRepo(v)];
   if (p.type) and.push({ type: p.type });
   const state = p.state ?? "OPEN";
@@ -256,6 +321,10 @@ export async function listWorkItems(db: Db, v: Viewer, p: WorkItemListParams) {
   if (p.label) and.push(await labelFilter(db, v, p.label));
   if (p.assignee) and.push({ assigneeLogins: { contains: indexNeedle(p.assignee) } });
   if (p.author) and.push({ authorLogin: { contains: p.author, mode: "insensitive" } }); // case-insensitive substring (SQLite LIKE was; Postgres needs mode)
+  // Each group below is OR within itself and AND with everything else (all inside the viaRepo scope above).
+  if (p.authors?.length) and.push({ OR: p.authors.map((a) => ({ authorLogin: { equals: a, mode: "insensitive" as const } })) });
+  if (p.repoKinds?.length) and.push({ repository: { OR: p.repoKinds.map((k) => repoKindWhere(v, k)) } });
+  if (p.permissions?.length) and.push(await permissionWhere(db, v, p.permissions, now));
   if (p.q) and.push({ OR: [{ title: { contains: p.q, mode: "insensitive" } }, ...(Number.isInteger(Number(p.q)) ? [{ number: Number(p.q) }] : [])] });
   const where: Prisma.WorkItemWhereInput = { AND: and };
 
