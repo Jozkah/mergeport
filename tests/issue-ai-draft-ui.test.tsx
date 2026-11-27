@@ -73,6 +73,19 @@ describe("Draft with AI on the new issue page", () => {
     expect(body().value).toBe("## Steps\n1. Sign in");
   });
 
+  it("text typed while the model works is not overwritten without asking", async () => {
+    let resolve!: (v: { ok: true; data: unknown }) => void;
+    m.run.mockImplementationOnce(() => new Promise((r) => (resolve = r)));
+    form();
+    openPanel();
+    fireEvent.change(screen.getByLabelText("What should the issue be about?"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    fireEvent.change(title(), { target: { value: "Typed meanwhile" } });
+    resolve({ ok: true, data: { title: "Login loops", body: "B", sources: [] } });
+    await waitFor(() => screen.getByRole("button", { name: "Append" }));
+    expect(title().value).toBe("Typed meanwhile");
+  });
+
   it("shows the error and leaves the form as it was", async () => {
     m.run.mockResolvedValueOnce({ ok: false, error: "Set up the AI endpoint in Settings first." });
     form();

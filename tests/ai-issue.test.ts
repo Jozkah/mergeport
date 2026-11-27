@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { repoWhere } from "@/lib/authz/viewer";
 import type { Vault } from "@/lib/hub/session-vault";
-import { capContext, gatherIssueContext, parseIssueDraft, promptWords, runIssueDraft, DRAFTS_PER_WINDOW, type ReadmeLoader } from "@/lib/services/ai-issue";
+import { capContext, defaultReadme, gatherIssueContext, parseIssueDraft, promptWords, runIssueDraft, DRAFTS_PER_WINDOW, type ReadmeLoader } from "@/lib/services/ai-issue";
 import { freshSeed, makeProfile } from "./helpers";
 
 let S: Awaited<ReturnType<typeof freshSeed>>;
@@ -92,6 +92,15 @@ describe("research context scoping", () => {
   });
 });
 
+describe("README from the code view cache", () => {
+  it("reads the cached root folder's README of this workspace as text", async () => {
+    const { db, admin } = S;
+    const repo = (await db.repository.findMany({ where: repoWhere(admin), orderBy: { fullName: "asc" } }))[0];
+    await db.gitCache.create({ data: { workspaceId: admin.workspaceId, key: `code:1:${repo.id}:${"a".repeat(40)}:`, bytes: 10, payload: { kind: "dir", entries: [], readme: { path: "README.md", html: "<h1>Atlas</h1><p>Runs &amp; scales.</p>" } } } });
+    expect(await defaultReadme(db, admin)({ id: repo.id, fullName: repo.fullName, description: null, defaultBranch: null }, false)).toBe("Atlas\nRuns & scales.");
+  });
+});
+
 describe("context size", () => {
   it("is capped, cut the same way every time, and marked", () => {
     const parts = ["a".repeat(10_000), "b".repeat(10_000), "c".repeat(10_000), "d".repeat(10)];
@@ -124,6 +133,12 @@ describe("reading the answer", () => {
     expect(parseIssueDraft("Title: Slow page\nIt is slow")).toEqual({ title: "Slow page", body: "It is slow" });
     expect(parseIssueDraft(JSON.stringify({ title: "t".repeat(400), body: "b" })).title.length).toBe(256);
     expect(() => parseIssueDraft("   ")).toThrow();
+  });
+
+  it("repairs raw line breaks inside the JSON strings; an object with neither field is refused", () => {
+    expect(parseIssueDraft('{"title": "Fix login", "body": "## Steps\n1. Sign in {x}\n2. Loop"}')).toEqual({ title: "Fix login", body: "## Steps\n1. Sign in {x}\n2. Loop" });
+    expect(() => parseIssueDraft("{}")).toThrow(/nothing I could use/);
+    expect(() => parseIssueDraft('{"summary":"x"}')).toThrow(/nothing I could use/);
   });
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Progress, useAiJob } from "@/components/ai/progress";
 import { ChevronDown } from "@/components/ui/icons";
 
@@ -24,13 +24,17 @@ export function IssueAiDraft({ enabled, repoId, repos, hasText, onFill }: { enab
   const [pending, setPending] = useState<IssueDraft | null>(null); // waiting for Replace / Append
   const job = useAiJob();
   const others = repos.filter((r) => r.id !== repoId);
+  const textNow = useRef(hasText);
+  useEffect(() => {
+    textNow.current = hasText;
+  }, [hasText]);
 
   const generate = async () => {
     setError(null);
     setPending(null);
     const r = await job.run<IssueDraft>("/api/ai/issue-draft", { repositoryId: repoId, prompt, research: research ? scope : "none", otherRepoIds: research && scope === "others" ? picked.filter((id) => id !== repoId) : [] });
     if (!r.ok) return setError(r.error);
-    if (hasText) setPending(r.data);
+    if (textNow.current) setPending(r.data); // what the form holds now: typing while the model worked counts
     else onFill(r.data, "replace");
   };
   const apply = (mode: "replace" | "append") => {
