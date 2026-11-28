@@ -9,7 +9,7 @@ import { ValidationError } from "@/lib/errors";
 import { githubAppConfig } from "@/lib/github/app-config";
 import { CONNECT_COOKIE, CONNECT_COOKIE_PATH, CALLBACK_PATH, checkInstallation, disconnectInstallation, startConnect, type StartMode } from "@/lib/github/connect";
 import { cookiesSecure, isHosted, publicOrigin } from "@/lib/public-url";
-import { setWorkspaceGithubWrites } from "@/lib/services/github-writes-setting";
+import { setWorkspaceGithubOrgJoin, setWorkspaceGithubWrites } from "@/lib/services/github-writes-setting";
 
 /**
  * GitHub connection actions (docs/github-app.md). Server actions get Next's same-origin check and proxy.ts's Origin rules. Each one
@@ -66,6 +66,17 @@ export async function setGithubWritesAction(fd: FormData): Promise<ActionResult>
     revalidatePath("/settings/github");
     revalidatePath("/", "layout");
     return { ok: true, message: enabled ? "People in this workspace can now write to GitHub as themselves, once they have linked their account." : "Writing to GitHub is off for this workspace." };
+  });
+}
+
+/** Owners and administrators: let members of the connected GitHub organizations join this workspace when they sign in with GitHub. On by default. */
+export async function setGithubOrgJoinAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const { viewer } = await requireWriter();
+    const enabled = str(fd, "enabled") === "on";
+    await setWorkspaceGithubOrgJoin(db, viewer, enabled);
+    revalidatePath("/settings/github");
+    return { ok: true, message: enabled ? "Members of the connected GitHub organizations now join this workspace when they sign in with GitHub." : "People now need an invitation to join this workspace." };
   });
 }
 

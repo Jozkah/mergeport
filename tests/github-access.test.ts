@@ -277,6 +277,8 @@ describe("repoWhere: GitHub-verified access and explicit grants, additive", () =
   it("two workspaces sharing one installation each expose only what THEY track; membership in one grants nothing in the other", async () => {
     const x = await world();
     const w2 = await workspaceWithOwner(db(), "owner2@other.test", "Other");
+    // Isolation of access rows, not joining: organization members would otherwise join both workspaces (tests/github-org-join.test.ts).
+    await db().workspace.updateMany({ data: { githubOrgAutoJoin: false } });
     await bind(db(), w2.ws.id, x.inst).catch(() => {}); // already bound once: bind() re-creates the installation row, only the binding is needed
     await db().workspaceInstallation.upsert({ where: { workspaceId_installationId: { workspaceId: w2.ws.id, installationId: BigInt(x.inst.id) } }, create: { workspaceId: w2.ws.id, installationId: BigInt(x.inst.id), verifiedAt: new Date(), verifiedGithubUserId: 78n, proofMethod: "user-installations" }, update: {} });
     const o2 = await db().githubOwner.findFirstOrThrow({ where: { githubId: 500n } });

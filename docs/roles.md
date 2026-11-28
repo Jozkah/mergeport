@@ -32,6 +32,22 @@ role string or an unknown action gets nothing.
 
 Two opt-in writes exist, behind three switches (docs/github-app.md, "Writing to GitHub as you"): the deployment's `MERGEPORT_GITHUB_WRITES=on`, the workspace switch (OWNER and ADMIN) and the person's own linked GitHub account. Beyond them the usual rule applies unchanged: `requireRepo(..., "manageWork")`, so a READER never writes, and a member who can see a repository only because GitHub lists it for them (no grant) is refused with "no grant to change it". GitHub-verified visibility (`GithubRepoAccess`) is only the "may see this repository" gate for a write; it never grants the capability. The write itself is made with the person's own token, so GitHub decides what they may do there.
 
+## Joining through GitHub
+
+A person who signs in with GitHub (or has linked GitHub) and is an **active member of the GitHub organization** behind an installation
+connected to a workspace joins that workspace as **MEMBER**, without an invitation (`src/lib/github/org-join.ts`). Rules:
+
+- The workspace switch `githubOrgAutoJoin` must be on. It is on by default; owners and administrators turn it off in Settings › GitHub
+  ("Join through GitHub", audited `github.org_join.enable` / `.disable`).
+- Evidence comes only from the person's own token: the installation must appear in their `GET /user/installations` with the same account
+  id Mergeport stored, and `GET /user/memberships/orgs/:org` must answer `state: active`. A pending organization invitation, an outside
+  collaborator, or an installation on a personal account admits nobody.
+- Only a person with **no Member row at all** in that workspace joins. Someone removed or who left keeps a REVOKED row and is never added
+  back; an existing role is never changed. The role is always MEMBER (never OWNER or ADMIN), and a MEMBER still sees only the repositories
+  GitHub lets them open or that they hold a grant for. Each join writes `member.joined_via_github_org`.
+- When it runs: at once after "Sign in with GitHub" and on `/onboarding` for someone in no workspace yet (at most once a minute per person),
+  so an organization member lands in the workspace instead of "Create your workspace"; and on every access refresh for everyone else.
+
 ## Where it is enforced
 
 - `Viewer.role` is read from the `Member` row on every request (`loadViewer`); `isAdmin` is OWNER or ADMIN, kept for existing checks.

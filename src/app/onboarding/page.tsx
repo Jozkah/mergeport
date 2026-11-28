@@ -7,6 +7,7 @@ import { SubmitButton } from "@/components/forms/SubmitButton";
 import { getAuth } from "@/lib/auth/current";
 import { acceptPendingInviteAction } from "@/app/invite/actions";
 import { db } from "@/lib/db";
+import { joinThroughGithubNow } from "@/lib/github/user-access";
 import { pendingInvitationsFor } from "@/lib/services/invitations";
 
 export const metadata = { title: "Create a workspace" };
@@ -17,6 +18,8 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
   const a = await getAuth();
   if (!a) redirect("/sign-in");
   if (a.viewer) redirect("/");
+  // A member of a GitHub organization whose workspace admits it joins here instead of being asked to create a workspace.
+  if (await joinThroughGithubNow(db, a.user.id)) redirect("/");
   const sp = await searchParams;
   const invites = await pendingInvitationsFor(db, { id: a.user.id, email: a.user.email, emailVerifiedAt: a.user.emailVerifiedAt });
   const hasInvites = invites.length > 0;

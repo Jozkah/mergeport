@@ -145,6 +145,8 @@ model Workspace {
   createdAt DateTime @default(now())
   /// Owners and administrators let people write to GitHub as themselves (create an issue from a task, comment). Off by default; only has effect while the deployment allows it (MERGEPORT_GITHUB_WRITES=on).
   githubWritesEnabled Boolean @default(false)
+  /// Members of the GitHub organization behind a connected installation join as MEMBER the first time they sign in with GitHub (docs/roles.md, "Joining through GitHub"). On by default; owners and administrators can switch it off.
+  githubOrgAutoJoin Boolean @default(true)
 
   sessions      Session[] @relation("SessionActiveWorkspace")
   members       Member[]

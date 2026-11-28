@@ -1,8 +1,9 @@
 import type { Db } from "@/lib/db";
-import { take } from "@/lib/auth/rate-limit";
+import { claimGap, take } from "@/lib/auth/rate-limit";
 import { purgeDigests } from "@/lib/services/digest-purge";
 import { GithubAppError } from "./app-auth";
-import type { GithubAppConfig } from "./app-config";
+import { githubAppConfig, type GithubAppConfig } from "./app-config";
+import { joinWorkspacesThroughGithubOrgs } from "./org-join";
 import { listUserInstallationRepositories, listUserInstallations, getUser, type ConnectDeps, type GithubUser, type UserInstallationRepo } from "./connect-api";
 import { connectOverrides } from "./connect";
 import { MAX_VIEWER_REPO_IDS } from "./access-cache";
@@ -56,6 +57,8 @@ export async function refreshUserAccess(db: Db, config: Pick<GithubAppConfig, "c
   const gh: GithubUser = me;
   if (gh.login !== user.githubLogin) await db.user.updateMany({ where: { id: userId, githubId: gh.id }, data: { githubLogin: gh.login } });
 
+  // Organization members join the workspaces that admit them first, so this same run already caches their access there (org-join.ts).
+  await joinWorkspacesThroughGithubOrgs(db, { userId, github: gh, token, deps });
   const memberships = await db.member.findMany({ where: { userId, status: "ACTIVE" }, select: { workspaceId: true } });
   const wsIds = memberships.map((m) => m.workspaceId);
   const boundRows = wsIds.length === 0 ? [] : await db.workspaceInstallation.findMany({ where: { workspaceId: { in: wsIds }, installation: { deletedAt: null, suspendedAt: null } }, select: { installationId: true } });
@@ -112,4 +115,26 @@ export async function refreshUserAccess(db: Db, config: Pick<GithubAppConfig, "c
   // A stored digest is a snapshot of titles taken while the person could see a repository: when GitHub stops showing it, the snapshot goes.
   if (outcome.lost > 0) for (const ws of wsIds) await purgeDigests(db, ws, [userId]);
   return failed ? "partial" : "ok";
+}
+
+/**
+ * A person with a working GitHub link who belongs to no workspace yet (right after "Sign in with GitHub", or on /onboarding): run the
+ * refresh NOW instead of queueing it, so an organization member lands in their workspace instead of being asked to create one. At most
+ * once a minute per person; any failure just means "not yet" (the queued refresh tries again). True when they now belong somewhere.
+ */
+export async function joinThroughGithubNow(db: Db, userId: string, opts: { config?: Pick<GithubAppConfig, "clientId" | "clientSecret">; deps?: ConnectDeps; now?: Date } = {}): Promise<boolean> {
+  const now = opts.now ?? new Date();
+  const config = opts.config ?? githubAppConfig();
+  if (!config) return false;
+  const link = await db.githubUserToken.findUnique({ where: { userId }, select: { status: true } });
+  if (link?.status !== "OK") return false;
+  if (await db.member.findFirst({ where: { userId, status: "ACTIVE" }, select: { id: true } })) return true;
+  if (!(await claimGap(db, `ghjoin:${userId}`, 60_000, now))) return false;
+  try {
+    await refreshUserAccess(db, config, userId, { deps: opts.deps, now });
+  } catch (e) {
+    console.warn("github join check failed", e instanceof Error ? e.name : "unknown");
+    return false;
+  }
+  return !!(await db.member.findFirst({ where: { userId, status: "ACTIVE" }, select: { id: true } }));
 }

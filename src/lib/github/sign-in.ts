@@ -12,6 +12,7 @@ import { githubAppConfig, type GithubAppConfig } from "./app-config";
 import { STATE_SHAPE, STATE_TTL_MS, connectOverrides, nonceHashOf } from "./connect";
 import { exchangeCodeForTokens, getUser, getVerifiedPrimaryEmail, oauthAuthorizeUrl, revokeUserToken, type ConnectDeps, type GithubUser, type UserTokens } from "./connect-api";
 import { storeUserTokens, userTokenKey } from "./user-token";
+import { joinThroughGithubNow } from "./user-access";
 
 /**
  * "Sign in with GitHub" for a hosted deployment (docs/github-app.md, "Signing in with GitHub"). It uses the deployment's own GitHub App
@@ -174,7 +175,10 @@ export async function completeSignIn(db: Db, input: SigninCallbackInput): Promis
         return { ok: false, reason: "email-taken" };
       }
       kept = true;
-      await requestAccessRefresh(db, r.userId).catch(() => {}); // the first check of what they can open; never blocks sign-in
+      // Someone in no workspace yet is checked at once (an organization member then skips /onboarding); everyone else is queued.
+      // Neither ever blocks sign-in.
+      const joined = await joinThroughGithubNow(db, r.userId, { config: input.config, deps, now }).catch(() => false);
+      if (!joined) await requestAccessRefresh(db, r.userId).catch(() => {});
       return { ok: true, userId: r.userId, next: safeReturnTo(row.next), created: r.created };
     } finally {
       if (!kept) await revokeUserToken(input.config, deps, tokens.accessToken); // a refused sign-in keeps no token anywhere, GitHub's side included

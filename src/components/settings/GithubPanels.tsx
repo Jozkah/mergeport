@@ -2,8 +2,8 @@ import { ActionForm } from "@/components/forms/ActionForm";
 import { ConfirmSheet } from "@/components/forms/ConfirmSheet";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { Banner, EmptyState, Panel, SimplePill } from "@/components/ui/primitives";
-import { Building2, Layers, ListChecks, Pencil, Unplug, User } from "@/components/ui/icons";
-import { checkGithubInstallationAction, disconnectGithubInstallationAction, setGithubWritesAction } from "@/app/github-actions";
+import { Building2, Layers, ListChecks, Pencil, Unplug, User, Users } from "@/components/ui/icons";
+import { checkGithubInstallationAction, disconnectGithubInstallationAction, setGithubOrgJoinAction, setGithubWritesAction } from "@/app/github-actions";
 import { formatDateOnly, relativeTime } from "@/lib/format";
 import type { InstallationStatus } from "@/lib/github/binding";
 import type { ResultMessage } from "@/lib/github/connect-messages";
@@ -28,6 +28,8 @@ export type GithubView = {
   installations: InstallationRow[];
   /** Writing to GitHub as the person: whether the server allows it (the ceiling) and this workspace's own choice. Absent: nothing is shown. */
   writes?: { ceiling: boolean; enabled: boolean };
+  /** Members of the connected organizations join on GitHub sign-in. */
+  orgJoin?: boolean;
 };
 
 /** What the person who runs the server has to set, in plain words. Names only: no value is ever shown. */
@@ -103,7 +105,7 @@ export function liveUpdatesText(configured: boolean, installations: Installation
 
 /** The whole Settings > GitHub page body for one viewer. Pure data in, so it renders the same in tests. */
 export function GithubSettingsBody({ view, result, now }: { view: GithubView; result: ResultMessage | null; now?: Date }) {
-  const { configured, manage, installations, writes } = view;
+  const { configured, manage, installations, writes, orgJoin } = view;
   return (
     <div className="flex flex-col gap-5">
       {result && <Banner tone={result.tone} title={result.title}>{result.body}</Banner>}
@@ -134,6 +136,22 @@ export function GithubSettingsBody({ view, result, now }: { view: GithubView; re
           </ul>
           <p className="border-t border-line p-4 text-[12.5px] text-ink-2" id="gh-live"><span className="font-medium">Live updates:</span> {liveUpdatesText(configured, installations, now ?? new Date())}</p>
           {!manage && <p className="border-t border-line p-4 text-[12.5px] text-ink-3">Only the owner and administrators can connect or disconnect GitHub.</p>}
+        </Panel>
+      )}
+
+      {orgJoin !== undefined && installations.some((i) => i.accountType === "ORGANIZATION") && (
+        <Panel title="Join through GitHub" icon={Users} id="gh-org-join">
+          <div className="flex flex-col gap-3 p-4 text-[13px]">
+            <p className="flex flex-wrap items-center gap-2"><SimplePill tone={orgJoin ? "ok" : "waiting"}>{orgJoin ? "On" : "Off"}</SimplePill> <span className="text-ink-2">{orgJoin ? "Members of the connected GitHub organizations join as Member when they sign in with GitHub." : "People need an invitation to join."}</span></p>
+            <p className="max-w-[70ch] text-[12.5px] text-ink-3 text-pretty">GitHub must show them as an active member of the organization; a pending invitation there does not count. They join as Member and see only the repositories GitHub lets them open. Someone you removed, or who left, is never added back.</p>
+            {manage ? (
+              <ActionForm action={setGithubOrgJoinAction} submitLabel={orgJoin ? "Turn off" : "Turn on"} pendingLabel={orgJoin ? "Turning off…" : "Turning on…"} resetOnSuccess={false} layout="inline" submitClassName="btn">
+                <input type="hidden" name="enabled" value={orgJoin ? "off" : "on"} />
+              </ActionForm>
+            ) : (
+              <p className="text-[12.5px] text-ink-3">Only the owner and administrators can change this.</p>
+            )}
+          </div>
         </Panel>
       )}
 
