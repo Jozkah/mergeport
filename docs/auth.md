@@ -42,6 +42,12 @@ SHA-256 is stored, and a restart replaces it. It asks for an email and name (tha
 signed in as it), or, when someone is already signed in, offers to make that person the administrator. Once an administrator exists
 no link is printed and any unused one answers 404. The form post is rate limited per client address.
 
+Locked out of email: when an administrator exists but outgoing email does not work (Settings › Email never saved, or the saved password
+cannot be decrypted because `MERGEPORT_ENCRYPTION_KEY` changed), every start prints instead
+`Mergeport admin sign-in: email is not working, ... Open <public url>/setup/<token> to sign in as the server administrator ...`. The
+link works once and for 24 hours (hash only, replaced by the next start) and signs the browser in as the server administrator, so they
+can fix Settings › Email. It can never name a new administrator, and no such line is printed while email works.
+
 ## Data
 
 - `User.githubId` is nullable (still unique when present). `email` is unique, always lowercase (a CHECK enforces it), `emailVerifiedAt`

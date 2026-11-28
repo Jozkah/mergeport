@@ -5,7 +5,7 @@ import { SubmitButton } from "@/components/forms/SubmitButton";
 import { db } from "@/lib/db";
 import { isDemo } from "@/lib/env";
 import { getAuth } from "@/lib/auth/current";
-import { setupTokenValid } from "@/lib/auth/setup";
+import { setupLinkKind } from "@/lib/auth/setup";
 import { isHosted } from "@/lib/public-url";
 
 // The token is in the address: it must not travel to another site in Referer.
@@ -25,8 +25,22 @@ const ERRORS: Record<string, string> = {
 export default async function Setup({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string }> }) {
   if (!isHosted() || isDemo()) notFound();
   const { token } = await params;
-  if (!(await setupTokenValid(db, token))) notFound();
+  const kind = await setupLinkKind(db, token);
+  if (!kind) notFound();
   const error = (await searchParams).error;
+  if (kind === "recovery") {
+    return (
+      <AuthShell title="Sign in as the administrator">
+        <p className="mt-2 text-[13px] text-ink-3">Outgoing email does not work on this server, so nobody can sign in by email. This link signs this browser in as the server administrator, so you can fix Settings &gt; Email. It works once.</p>
+        {error && ERRORS[error] && <div className="mt-4"><Banner tone="error" title="Could not sign in">{ERRORS[error]}</Banner></div>}
+        <form action="/setup/claim" method="post" className="mt-4">
+          <input type="hidden" name="token" value={token} />
+          <input type="hidden" name="mode" value="recover" />
+          <SubmitButton className="btn btn-primary btn-lg w-full" pendingLabel="Signing in…">Sign in as the server administrator</SubmitButton>
+        </form>
+      </AuthShell>
+    );
+  }
   const auth = await getAuth();
   const form = (
     <form action="/setup/claim" method="post" className="mt-4 flex flex-col gap-3">
