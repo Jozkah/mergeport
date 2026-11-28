@@ -5,7 +5,7 @@ import { ORIGIN, formPost, pathOf, state } from "./auth-mocks";
 import { workspaceWithOwner } from "./roles-helpers";
 import { sha256 } from "@/lib/crypto";
 import { SESSION_COOKIE, createSession, findSession } from "@/lib/auth/session";
-import { SETUP_TTL_MS, announceSetupLink, claimSetup, issueSetupToken, setupTokenValid } from "@/lib/auth/setup";
+import { SETUP_TTL_MS, announceSetupLink, claimRecovery, claimSetup, issueRecoveryToken, issueSetupToken, setupLinkKind, setupTokenValid } from "@/lib/auth/setup";
 import { MailNotConfiguredError, SmtpMailer, getMailer, invalidateMailerCache, setMailerForTests } from "@/lib/auth/mailer";
 import { getSmtpView, loadSmtpConfig, saveSmtpSettings } from "@/lib/services/smtp-settings";
 import { ForbiddenError, ValidationError } from "@/lib/errors";
@@ -83,6 +83,7 @@ describe("setup link", () => {
     expect(await setupTokenValid(db(), t)).toBe(false);
     expect(await claimSetup(db(), { token: t, email: "intruder@example.com" })).toEqual({ ok: false, reason: "invalid" });
     expect(await db().user.findUnique({ where: { email: "intruder@example.com" } })).toBeNull();
+    await saveSmtpSettings(db(), (await db().user.findFirstOrThrow({ where: { isServerAdmin: true } })).id, smtp); // email works: no recovery link either
     const lines: string[] = [];
     expect(await announceSetupLink(db(), ORIGIN, (l) => lines.push(l))).toBeNull();
     expect(lines).toEqual([]);
@@ -125,6 +126,58 @@ describe("setup link", () => {
     for (let i = 0; i < 11; i++) statuses.push(pathOf(await (await claimRoute())(formPost("/setup/claim", { token: "x".repeat(43), email: "nope" }, { "x-forwarded-for": "198.51.100.10" }))));
     expect(statuses.slice(0, 10).every((p) => p.endsWith("error=email-invalid"))).toBe(true);
     expect(statuses[10]).toMatch(/error=rate-limited$/);
+  });
+});
+
+describe("recovery link (an administrator exists but email does not work)", () => {
+  it("is printed at start while email is not set up, and not once it works", async () => {
+    const root = await admin();
+    const lines: string[] = [];
+    const t = await announceSetupLink(db(), ORIGIN, (l) => lines.push(l));
+    expect(t).not.toBeNull();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`${ORIGIN}/setup/${t}`);
+    expect(lines[0]).toMatch(/^Mergeport admin sign-in: /);
+    expect(await setupLinkKind(db(), t)).toBe("recovery");
+    expect(await setupTokenValid(db(), t)).toBe(false); // it can never name an administrator
+    await saveSmtpSettings(db(), root.id, smtp);
+    const later: string[] = [];
+    expect(await announceSetupLink(db(), ORIGIN, (l) => later.push(l))).toBeNull();
+    expect(later).toEqual([]);
+    expect(await setupLinkKind(db(), t)).toBeNull(); // the next start removed it
+  });
+
+  it("is printed when the saved password cannot be decrypted with the current key", async () => {
+    const root = await admin();
+    await saveSmtpSettings(db(), root.id, smtp);
+    vi.stubEnv("MERGEPORT_ENCRYPTION_KEY", "z".repeat(40));
+    const lines: string[] = [];
+    expect(await announceSetupLink(db(), ORIGIN, (l) => lines.push(l))).not.toBeNull();
+    expect(lines[0]).toMatch(/^Mergeport admin sign-in: /);
+  });
+
+  it("cannot be used as a setup link, works once, and only while an administrator exists", async () => {
+    expect(await issueRecoveryToken(db())).toBeNull(); // nobody to recover
+    const root = await admin();
+    const t = (await issueRecoveryToken(db()))!;
+    expect(await claimSetup(db(), { token: t, email: "intruder@example.com" })).toEqual({ ok: false, reason: "invalid" });
+    expect(await claimRecovery(db(), t)).toBe(root.id);
+    expect(await claimRecovery(db(), t)).toBeNull();
+    const s = (await issueSetupToken(db())); // an administrator exists: no setup token is made
+    expect(s).toBeNull();
+  });
+
+  it("the route signs the browser in as the administrator; a setup link cannot be used with mode=recover", async () => {
+    const setup = (await issueSetupToken(db()))!;
+    const bad = await (await claimRoute())(formPost("/setup/claim", { token: setup, mode: "recover" }, { "x-forwarded-for": "198.51.100.21" }));
+    expect(bad.status).toBe(404);
+    expect(state.jar.has(SESSION_COOKIE)).toBe(false);
+    const root = await admin();
+    const t = (await issueRecoveryToken(db()))!;
+    const res = await (await claimRoute())(formPost("/setup/claim", { token: t, mode: "recover" }, { "x-forwarded-for": "198.51.100.21" }));
+    expect(res.status).toBe(303);
+    expect(pathOf(res)).toBe("/onboarding"); // no workspace yet; with one it is Settings > Email
+    expect((await findSession(db(), state.jar.get(SESSION_COOKIE)?.value))?.userId).toBe(root.id);
   });
 });
 

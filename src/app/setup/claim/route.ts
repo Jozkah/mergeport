@@ -7,7 +7,7 @@ import { clientIp, hostedConfigProblems } from "@/lib/auth/hosted-config";
 import { landingPath, startHostedSession } from "@/lib/auth/login";
 import { take } from "@/lib/auth/rate-limit";
 import { SESSION_COOKIE, findSession } from "@/lib/auth/session";
-import { SETUP_PATH, claimSetup } from "@/lib/auth/setup";
+import { SETUP_PATH, claimRecovery, claimSetup } from "@/lib/auth/setup";
 import { redirectTo, sameOrigin } from "@/lib/http";
 import { isHosted } from "@/lib/public-url";
 
@@ -38,6 +38,14 @@ export async function POST(req: Request) {
   const back = (error: string) => redirectTo(req, `${SETUP_PATH}/${encodeURIComponent(token)}?error=${error}`, 303);
   if (!(await take(db, `auth:setup:${sha256(ip)}`, RATE_MAX, RATE_WINDOW_MS))) return back("rate-limited");
 
+  if (form?.get("mode") === "recover") {
+    const adminId = await claimRecovery(db, token);
+    if (!adminId) return notFound();
+    await startHostedSession(adminId);
+    const res = redirectTo(req, await landingPath(adminId, "/settings/email"), 303);
+    res.headers.set("referrer-policy", "no-referrer");
+    return res;
+  }
   const jar = await cookies();
   const me = form?.get("mode") === "me" ? await findSession(db, jar.get(SESSION_COOKIE)?.value) : null;
   if (form?.get("mode") === "me" && !me) return back("signed-out");

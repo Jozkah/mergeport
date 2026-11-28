@@ -1936,6 +1936,8 @@ model ServerSettings {
 model SetupToken {
   id        String    @id @default(cuid())
   tokenHash String    @unique
+  /// "setup": names the first server administrator. "recovery": signs the existing server administrator in while outgoing email does not work (docs/deploy.md).
+  purpose   String    @default("setup")
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())

@@ -145,6 +145,8 @@ The heartbeat is one row in `RateLimitState` (key `worker:heartbeat`) written ev
 4. Create a workspace (onboarding). You are its owner. Then Settings, Email (server): enter the SMTP host, port 587 with STARTTLS (the
    production host only allows outbound TCP 587), user name, password and sender, save, and use "Send test email". A failure shows the
    mail server's answer. Until this is saved nobody can sign in by email (nothing is ever logged as a link in production).
+   Signed out before email works? Restart the web container: its log then has a line `Mergeport admin sign-in: ... open
+   https://<host>/setup/<token> ...` that signs you back in as the administrator (once, within 24 hours).
 5. Settings, GitHub: connect the GitHub App (needs the `MERGEPORT_GITHUB_APP_*` values; see `docs/github-app.md` for the App's settings, webhook URL
    `https://<host>/api/github/webhook`, and the live checks in `docs/live-github-runbook.md`).
 6. Track a repository from "Connect repositories", then watch the sync status page fill in. Webhook deliveries appear in the GitHub App's "Advanced" tab as 2xx.
