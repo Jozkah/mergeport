@@ -21,3 +21,18 @@ export async function githubWritesView(db: Db, workspaceId: string): Promise<{ c
   const ws = await db.workspace.findUnique({ where: { id: workspaceId }, select: { githubWritesEnabled: true } });
   return { ceiling: githubWritesCeiling(), enabled: ws?.githubWritesEnabled === true };
 }
+
+/** The workspace switch for joining through a GitHub organization (docs/roles.md, "Joining through GitHub"). Owners and administrators; audited. */
+export async function setWorkspaceGithubOrgJoin(db: Db, v: Viewer, enabled: boolean): Promise<boolean> {
+  if (!can(subjectOf(v), "manageGithub")) throw new ForbiddenError("Only the owner and administrators can change this");
+  const before = await db.workspace.findUniqueOrThrow({ where: { id: v.workspaceId }, select: { githubOrgAutoJoin: true } });
+  if (before.githubOrgAutoJoin === enabled) return false;
+  await db.workspace.update({ where: { id: v.workspaceId }, data: { githubOrgAutoJoin: enabled } });
+  await audit(db, v, enabled ? "github.org_join.enable" : "github.org_join.disable", { type: "Workspace", id: v.workspaceId });
+  return true;
+}
+
+export async function githubOrgJoinView(db: Db, workspaceId: string): Promise<boolean> {
+  const ws = await db.workspace.findUnique({ where: { id: workspaceId }, select: { githubOrgAutoJoin: true } });
+  return ws?.githubOrgAutoJoin === true;
+}
